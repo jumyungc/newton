@@ -272,10 +272,13 @@ class Model:
         """Joint position limit stiffness (used by :class:`~newton.solvers.SolverSemiImplicit` and :class:`~newton.solvers.SolverFeatherstone`), shape [joint_dof_count], float."""
         self.joint_limit_kd = None
         """Joint position limit damping (used by :class:`~newton.solvers.SolverSemiImplicit` and :class:`~newton.solvers.SolverFeatherstone`), shape [joint_dof_count], float."""
+        self.joint_bend_stiffness = None
+        """Bending stiffness for cable joints, shape [joint_count], float."""
         self.joint_twist_lower = None
         """Joint lower twist limit, shape [joint_count], float."""
         self.joint_twist_upper = None
         """Joint upper twist limit, shape [joint_count], float."""
+        self.joint_twist_stiffness = None
         self.joint_q_start = None
         """Start index of the first position coordinate per joint (note the last value is an additional sentinel entry to allow for querying the q dimensionality of joint i via ``joint_q_start[i+1] - joint_q_start[i]``), shape [joint_count + 1], int."""
         self.joint_qd_start = None
@@ -400,6 +403,7 @@ class Model:
         self.attribute_frequency["joint_enabled"] = "joint"
         self.attribute_frequency["joint_twist_lower"] = "joint"
         self.attribute_frequency["joint_twist_upper"] = "joint"
+        self.attribute_frequency["joint_twist_stiffness"] = "joint"
 
         # attributes per joint coord
         self.attribute_frequency["joint_q"] = "joint_coord"
@@ -417,6 +421,7 @@ class Model:
         self.attribute_frequency["joint_limit_upper"] = "joint_dof"
         self.attribute_frequency["joint_limit_ke"] = "joint_dof"
         self.attribute_frequency["joint_limit_kd"] = "joint_dof"
+        self.attribute_frequency["joint_bend_stiffness"] = "joint"
         self.attribute_frequency["joint_effort_limit"] = "joint_dof"
         self.attribute_frequency["joint_friction"] = "joint_dof"
         self.attribute_frequency["joint_velocity_limit"] = "joint_dof"

@@ -28,6 +28,7 @@ from .kernels import (
     bending_constraint,
     solve_body_contact_positions,
     solve_body_joints,
+    solve_cable_joints,
     solve_particle_particle_contacts,
     solve_particle_shape_contacts,
     # solve_simple_body_joints,
@@ -419,75 +420,44 @@ class SolverXPBD(SolverBase):
                     # ----------------------------
 
                     if model.joint_count:
-                        # wp.launch(
-                        #     kernel=solve_simple_body_joints,
-                        #     dim=model.joint_count,
-                        #     inputs=[
-                        #         body_q,
-                        #         body_qd,
-                        #         model.body_com,
-                        #         model.body_inv_mass,
-                        #         model.body_inv_inertia,
-                        #         model.joint_type,
-                        #         model.joint_enabled,
-                        #         model.joint_parent,
-                        #         model.joint_child,
-                        #         model.joint_X_p,
-                        #         model.joint_X_c,
-                        #         model.joint_limit_lower,
-                        #         model.joint_limit_upper,
-                        #         model.joint_qd_start,
-                        #         model.joint_dof_dim,
-                        #         model.joint_dof_mode,
-                        #         model.joint_axis,
-                        #         control.joint_target,
-                        #         model.joint_target_ke,
-                        #         model.joint_target_kd,
-                        #         self.joint_linear_compliance,
-                        #         self.joint_angular_compliance,
-                        #         self.joint_angular_relaxation,
-                        #         self.joint_linear_relaxation,
-                        #         dt,
-                        #     ],
-                        #     outputs=[body_deltas],
-                        #     device=model.device,
-                        # )
-
-                        wp.launch(
-                            kernel=solve_body_joints,
-                            dim=model.joint_count,
-                            inputs=[
-                                body_q,
-                                body_qd,
-                                model.body_com,
-                                model.body_inv_mass,
-                                model.body_inv_inertia,
-                                model.joint_type,
-                                model.joint_enabled,
-                                model.joint_parent,
-                                model.joint_child,
-                                model.joint_X_p,
-                                model.joint_X_c,
-                                model.joint_limit_lower,
-                                model.joint_limit_upper,
-                                model.joint_qd_start,
-                                model.joint_dof_dim,
-                                model.joint_dof_mode,
-                                model.joint_axis,
-                                control.joint_target,
-                                model.joint_target_ke,
-                                model.joint_target_kd,
-                                self.joint_linear_compliance,
-                                self.joint_angular_compliance,
-                                self.joint_angular_relaxation,
-                                self.joint_linear_relaxation,
-                                dt,
-                            ],
-                            outputs=[body_deltas],
-                            device=model.device,
-                        )
-
-                        body_q, body_qd = self.apply_body_deltas(model, state_in, state_out, body_deltas, dt)
+                        # Solve general joints using single partition (skip cable joints)
+                        general_joint_count = model.joint_count - model.cable_joint_count
+                        if general_joint_count > 0:
+                            body_deltas.zero_()
+                            wp.launch(
+                                kernel=solve_body_joints,
+                                dim=general_joint_count,
+                                inputs=[
+                                    body_q,
+                                    body_qd,
+                                    model.body_com,
+                                    model.body_inv_mass,
+                                    model.body_inv_inertia,
+                                    model.joint_type,
+                                    model.joint_enabled,
+                                    model.joint_parent,
+                                    model.joint_child,
+                                    model.joint_X_p,
+                                    model.joint_X_c,
+                                    model.joint_limit_lower,
+                                    model.joint_limit_upper,
+                                    model.joint_qd_start,
+                                    model.joint_dof_dim,
+                                    model.joint_dof_mode,
+                                    model.joint_axis,
+                                    control.joint_target,
+                                    model.joint_target_ke,
+                                    model.joint_target_kd,
+                                    self.joint_linear_compliance,
+                                    self.joint_angular_compliance,
+                                    self.joint_angular_relaxation,
+                                    self.joint_linear_relaxation,
+                                    dt,
+                                ],
+                                outputs=[body_deltas],
+                                device=model.device,
+                            )
+                            body_q, body_qd = self.apply_body_deltas(model, state_in, state_out, body_deltas, dt)
 
                     # Solve rigid contact constraints
                     if model.body_count and contacts is not None:
@@ -546,6 +516,75 @@ class SolverXPBD(SolverBase):
 
                         body_q, body_qd = self.apply_body_deltas(
                             model, state_in, state_out, body_deltas, dt, rigid_contact_inv_weight
+                        )
+
+                    # Solve cable joints using odd/even sets (after all other constraints)
+                    if model.cable_joint_count > 0:
+                        general_joint_count = model.joint_count - model.cable_joint_count
+                        cable_joint_start = general_joint_count  # Where cable joints start in the arrays
+
+                        # First pass: even cable joints
+                        wp.launch(
+                            kernel=solve_cable_joints,
+                            dim=model.cable_joint_count // 2 + model.cable_joint_count % 2,
+                            inputs=[
+                                body_q,
+                                body_qd,
+                                model.body_com,
+                                model.body_inv_mass,
+                                model.body_inv_inertia,
+                                model.body_inertia,
+                                model.joint_type,
+                                model.joint_enabled,
+                                model.joint_parent,
+                                model.joint_child,
+                                model.joint_X_p,
+                                model.joint_X_c,
+                                model.body_q,  # Pass initial body poses
+                                self.joint_linear_compliance,
+                                model.joint_bend_stiffness,
+                                model.joint_twist_stiffness,
+                                self.joint_angular_relaxation,
+                                self.joint_linear_relaxation,
+                                dt,
+                                cable_joint_start,
+                                model.cable_joint_count,
+                                0,
+                                2,
+                            ],
+                            device=model.device,
+                        )
+
+                        # Second pass: odd cable joints
+                        wp.launch(
+                            kernel=solve_cable_joints,
+                            dim=model.cable_joint_count // 2,
+                            inputs=[
+                                body_q,
+                                body_qd,
+                                model.body_com,
+                                model.body_inv_mass,
+                                model.body_inv_inertia,
+                                model.body_inertia,
+                                model.joint_type,
+                                model.joint_enabled,
+                                model.joint_parent,
+                                model.joint_child,
+                                model.joint_X_p,
+                                model.joint_X_c,
+                                model.body_q,  # Pass initial body poses
+                                self.joint_linear_compliance,
+                                model.joint_bend_stiffness,
+                                model.joint_twist_stiffness,
+                                self.joint_angular_relaxation,
+                                self.joint_linear_relaxation,
+                                dt,
+                                cable_joint_start,
+                                model.cable_joint_count,
+                                1,
+                                2,
+                            ],
+                            device=model.device,
                         )
 
             if model.particle_count:
@@ -655,5 +694,13 @@ class SolverXPBD(SolverBase):
                         outputs=[state_out.body_qd],
                         device=model.device,
                     )
+
+            if model.body_count:
+                if state_in.requires_grad or self._body_delta_counter == 1:
+                    # Copy data to state_out when:
+                    # - Grad mode: body_q/body_qd are clones, always need copy
+                    # - Normal mode: odd number of apply_body_deltas calls (data in state_in)
+                    state_out.body_q.assign(body_q)
+                    state_out.body_qd.assign(body_qd)
 
             return state_out

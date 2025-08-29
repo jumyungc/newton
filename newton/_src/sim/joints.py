@@ -25,6 +25,7 @@ class JointType(IntEnum):
     FREE = 4
     DISTANCE = 5
     D6 = 6
+    CABLE = 7
 
 
 def get_joint_dof_count(joint_type: int, num_axes: int) -> tuple[int, int]:
@@ -37,7 +38,7 @@ def get_joint_dof_count(joint_type: int, num_axes: int) -> tuple[int, int]:
     elif joint_type == JointType.FREE or joint_type == JointType.DISTANCE:
         dof_count = 6
         coord_count = 7
-    elif joint_type == JointType.FIXED:
+    elif joint_type == JointType.FIXED or joint_type == JointType.CABLE:
         dof_count = 0
         coord_count = 0
     return dof_count, coord_count

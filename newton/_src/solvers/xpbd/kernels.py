@@ -903,7 +903,7 @@ def apply_joint_forces(
 ):
     tid = wp.tid()
     type = joint_type[tid]
-    if type == JointType.FIXED:
+    if type == JointType.FIXED or type == JointType.CABLE:
         return
 
     # rigid body indices of the child and parent
@@ -1170,6 +1170,8 @@ def solve_simple_body_joints(
     if type == JointType.DISTANCE:
         return
     if type == JointType.D6:
+        return
+    if type == JointType.CABLE:
         return
 
     # rigid body indices of the child and parent
@@ -1483,7 +1485,7 @@ def solve_body_joints(
 
     if joint_enabled[tid] == 0:
         return
-    if type == JointType.FREE:
+    if type == JointType.FREE or type == JointType.CABLE:
         return
     # if type == JointType.FIXED:
     #     return
@@ -1933,6 +1935,510 @@ def solve_body_joints(
         wp.atomic_add(deltas, id_p, wp.spatial_vector(ang_delta_p, lin_delta_p))
     if id_c >= 0:
         wp.atomic_add(deltas, id_c, wp.spatial_vector(ang_delta_c, lin_delta_c))
+
+
+@wp.func
+def sigma_capsule(u_world: wp.vec3, q_body: wp.quat, invIa: float, invIb: float, CABLE_AXIS: wp.vec3) -> float:
+    d3 = wp.normalize(wp.quat_rotate(q_body, CABLE_AXIS))  # body z in world
+    beta = wp.dot(u_world, d3)
+    return invIa + (invIb - invIa) * (beta * beta)
+
+
+@wp.func
+def _update_body_from_deltas(
+    body_id: int,
+    body_q: wp.array(dtype=wp.transform),
+    body_qd: wp.array(dtype=wp.spatial_vector),
+    body_com: wp.array(dtype=wp.vec3),
+    body_I: wp.array(dtype=wp.mat33),
+    body_inv_m: wp.array(dtype=float),
+    body_inv_I: wp.array(dtype=wp.mat33),
+    delta: wp.spatial_vector,
+    dt: float,
+):
+    """Update body pose and velocity from deltas (extracted from apply_body_deltas)"""
+    inv_m = body_inv_m[body_id]
+    if inv_m == 0.0:
+        return  # Static body
+
+    inv_I = body_inv_I[body_id]
+    tf = body_q[body_id]
+    qd = body_qd[body_id]
+
+    p0 = wp.transform_get_translation(tf)
+    q0 = wp.transform_get_rotation(tf)
+
+    dp = wp.spatial_bottom(delta) * inv_m
+    dq = wp.spatial_top(delta)
+    dq = wp.quat_rotate(q0, inv_I * wp.quat_rotate_inv(q0, dq))
+
+    # Update orientation
+    q1 = q0 + 0.5 * wp.quat(dq * dt, 0.0) * q0
+    q1 = wp.normalize(q1)
+
+    # Update position
+    com = body_com[body_id]
+    x_com = p0 + wp.quat_rotate(q0, com)
+    p1 = x_com + dp * dt
+    p1 -= wp.quat_rotate(q1, com)
+
+    body_q[body_id] = wp.transform(p1, q1)
+
+    # Update velocities
+    v0 = wp.spatial_bottom(qd)
+    w0 = wp.spatial_top(qd)
+
+    v1 = v0 + dp
+    wb = wp.quat_rotate_inv(q0, w0 + dq)
+    tb = -wp.cross(wb, body_I[body_id] * wb)  # coriolis forces
+    w1 = wp.quat_rotate(q0, wb + inv_I * tb * dt)
+
+    # w1 = w0 + dq
+
+    body_qd[body_id] = wp.spatial_vector(w1, v1)
+
+
+@wp.func
+def quat_shortest(q: wp.quat) -> wp.quat:
+    # Flip to shortest-arc representation to avoid |theta| > pi
+    return q if q[3] >= 0.0 else wp.quat(-q[0], -q[1], -q[2], -q[3])
+
+
+@wp.func
+def sigma_world(u_world: wp.vec3, q_body: wp.quat, invI_body: wp.mat33) -> float:
+    # sigma = u^T (R invI R^T) u  = dot(u, R * (invI * (R^T u)))
+    # Warp: mat33 * vec3 is the intended mat-vec
+    u_body = wp.quat_rotate_inv(q_body, u_world)
+    v_body = invI_body * u_body
+    w_world = wp.quat_rotate(q_body, v_body)
+    return wp.dot(u_world, w_world)
+
+
+@wp.func
+def quat_rotate_unit_z(q: wp.quat) -> wp.vec3:
+    """Fast rotation of unit vector (0,0,1) by quaternion q.
+
+    Optimized version of wp.quat_rotate(q, wp.vec3(0,0,1)) that avoids
+    general quaternion rotation by using the specific structure of (0,0,1).
+    """
+    return wp.vec3(
+        2.0 * (q[0] * q[2] + q[3] * q[1]),  # 2*(x*z + w*y)
+        2.0 * (q[1] * q[2] - q[3] * q[0]),  # 2*(y*z - w*x)
+        q[3] * q[3] - q[0] * q[0] - q[1] * q[1] + q[2] * q[2],  # w^2 - x^2 - y^2 + z^2
+    )
+
+
+@wp.kernel
+def solve_cable_joints(
+    body_q: wp.array(dtype=wp.transform),
+    body_qd: wp.array(dtype=wp.spatial_vector),
+    body_com: wp.array(dtype=wp.vec3),
+    body_inv_m: wp.array(dtype=float),
+    body_inv_I: wp.array(dtype=wp.mat33),
+    body_I: wp.array(dtype=wp.mat33),
+    joint_type: wp.array(dtype=int),
+    joint_enabled: wp.array(dtype=int),
+    joint_parent: wp.array(dtype=int),
+    joint_child: wp.array(dtype=int),
+    joint_X_p: wp.array(dtype=wp.transform),
+    joint_X_c: wp.array(dtype=wp.transform),
+    body_q_initial: wp.array(dtype=wp.transform),
+    joint_linear_compliance: float,
+    joint_bend_stiffness: wp.array(dtype=float),
+    joint_twist_stiffness: wp.array(dtype=float),
+    angular_relaxation: float,
+    linear_relaxation: float,
+    dt: float,
+    cable_joint_start: int,
+    cable_joint_count: int,
+    offset: int,
+    stride: int,
+):
+    # IMPORTANT: Capsule axis is assumed to be (0, 0, 1) throughout this function.
+    # If CABLE_AXIS changes, all optimized quaternion rotations and dot products must be updated.
+
+    thread_id = wp.tid()
+    tid = cable_joint_start + offset + thread_id * stride
+
+    if tid >= cable_joint_start + cable_joint_count:
+        return
+
+    if joint_type[tid] != JointType.CABLE or joint_enabled[tid] == 0:
+        return
+
+    # Rigid body indices of the child and parent
+    id_c = joint_child[tid]
+    id_p = joint_parent[tid]
+
+    # Require a real parent for simplicity
+    if id_p < 0:
+        return
+
+    # Parent transform and moment arm
+    pose_p = body_q[id_p]
+    com_p = body_com[id_p]
+    world_com_p = wp.transform_point(pose_p, com_p)
+
+    m_inv_p = body_inv_m[id_p]
+    I_inv_p = body_inv_I[id_p]
+
+    # Child transform and moment arm
+    pose_c = body_q[id_c]
+    com_c = body_com[id_c]
+    world_com_c = wp.transform_point(pose_c, com_c)
+
+    m_inv_c = body_inv_m[id_c]
+    I_inv_c = body_inv_I[id_c]
+
+    # Connection between two immovable bodies
+    if m_inv_p == 0.0 and m_inv_c == 0.0:
+        return
+
+    # Constraint deltas
+    lin_delta_p = wp.vec3(0.0)
+    ang_delta_p = wp.vec3(0.0)
+    lin_delta_c = wp.vec3(0.0)
+    ang_delta_c = wp.vec3(0.0)
+
+    # ===== Stretch/Shear constraint =====
+
+    # Parent attachment point (end of parent capsule)
+    pose_p_trans = wp.transform_get_translation(body_q[id_p])
+    pose_p_rot = wp.transform_get_rotation(body_q[id_p])
+    # capsule_dir_p = wp.quat_rotate(pose_p_rot, CABLE_AXIS)
+    # Optimized rotation of (0,0,1) by quaternion: avoids general quat_rotate
+    capsule_dir_p = wp.normalize(quat_rotate_unit_z(pose_p_rot))
+
+    joint_offset_p = joint_X_p[tid].p  # (0, 0, 2*half_height) - on capsule axis
+    x_p = pose_p_trans + capsule_dir_p * joint_offset_p.z
+
+    # Child attachment point (start of child capsule)
+    x_c = wp.transform_get_translation(body_q[id_c])
+
+    # Stretch/Shear constraint: x_c should equal x_p (pin attachment points together)
+    stretch_error = x_c - x_p
+
+    C_ss = wp.length(stretch_error)
+
+    if C_ss > 1e-9:
+        stretch_dir = wp.normalize(stretch_error)
+        r_p = x_p - world_com_p
+        r_c = x_c - world_com_c
+        compliance = joint_linear_compliance
+        damping = 0.0
+        pose_p_actual = body_q[id_p]
+        pose_c_actual = body_q[id_c]
+        lambda_in = 0.0
+        lambda_n = compute_positional_correction(
+            C_ss,
+            0.0,
+            pose_p_actual,
+            pose_c_actual,
+            m_inv_p,
+            m_inv_c,
+            I_inv_p,
+            I_inv_c,
+            -stretch_dir,
+            stretch_dir,
+            -wp.cross(r_p, stretch_dir),
+            wp.cross(r_c, stretch_dir),
+            lambda_in,
+            compliance,
+            damping,
+            dt,
+        )
+        linear_lambda = lambda_n * linear_relaxation
+        lin_delta_p = -stretch_dir * linear_lambda
+        lin_delta_c = stretch_dir * linear_lambda
+
+        angular_lambda = lambda_n * angular_relaxation
+        ang_delta_p = -wp.cross(r_p, stretch_dir) * angular_lambda
+        ang_delta_c = wp.cross(r_c, stretch_dir) * angular_lambda
+
+    # Update body poses and velocities directly (no atomic needed due to odd/even partitioning)
+    _update_body_from_deltas(
+        id_p, body_q, body_qd, body_com, body_I, body_inv_m, body_inv_I, wp.spatial_vector(ang_delta_p, lin_delta_p), dt
+    )
+    _update_body_from_deltas(
+        id_c, body_q, body_qd, body_com, body_I, body_inv_m, body_inv_I, wp.spatial_vector(ang_delta_c, lin_delta_c), dt
+    )
+
+    # Current and rest orientations
+    pose_p = body_q[id_p]
+    pose_c = body_q[id_c]
+    q_p = wp.transform_get_rotation(pose_p)
+    q_c = wp.transform_get_rotation(pose_c)
+
+    pose_p0 = body_q_initial[id_p]
+    pose_c0 = body_q_initial[id_c]
+    q_p0 = wp.transform_get_rotation(pose_p0)
+    q_c0 = wp.transform_get_rotation(pose_c0)
+
+    # Segment rest length
+    p0_initial = wp.transform_get_translation(pose_p0)
+    c0_initial = wp.transform_get_translation(pose_c0)
+    rest_length = wp.length(c0_initial - p0_initial)
+    if rest_length < 1.0e-9:
+        return
+
+    # # ===== Bend constraint =====
+    # k_bend = joint_bend_stiffness[tid]
+    # if k_bend > 0.0:
+    #     # e3 = CABLE_AXIS
+    #     # t_p  = wp.normalize(wp.quat_rotate(q_p,  e3))
+    #     # t_c  = wp.normalize(wp.quat_rotate(q_c,  e3))
+    #     # t_p0 = wp.normalize(wp.quat_rotate(q_p0, e3))
+    #     # t_c0 = wp.normalize(wp.quat_rotate(q_c0, e3))
+    #     # Optimized rotations of (0,0,1) by quaternions: avoids general quat_rotate
+    #     t_p  = wp.normalize(quat_rotate_unit_z(q_p))
+    #     t_c  = wp.normalize(quat_rotate_unit_z(q_c))
+    #     t_p0 = wp.normalize(quat_rotate_unit_z(q_p0))
+    #     t_c0 = wp.normalize(quat_rotate_unit_z(q_c0))
+
+    #     # Current minimal rotation from t_p to t_c
+    #     v = wp.cross(t_p, t_c);
+    #     s = wp.length(v)
+    #     d = wp.clamp(wp.dot(t_p, t_c), -1.0, 1.0)
+    #     alpha = wp.atan2(s, d)
+    #     if s > 1.0e-12:
+    #         k = v / s
+    #     else:
+    #         ref = wp.vec3(1.0, 0.0, 0.0) if wp.abs(t_p[2]) > 0.9 else wp.vec3(0.0, 0.0, 1.0)
+    #         k = wp.normalize(wp.cross(ref, t_p))
+
+    #     # Rest minimal rotation from t_p0 to t_c0
+    #     v0 = wp.cross(t_p0, t_c0)
+    #     s0 = wp.length(v0)
+    #     d0 = wp.clamp(wp.dot(t_p0, t_c0), -1.0, 1.0)
+    #     alpha0 = wp.atan2(s0, d0)
+
+    #     if s0 > 1.0e-12:
+    #         k0 = v0 / s0
+    #     else:
+    #         ref0 = wp.vec3(1.0, 0.0, 0.0) if wp.abs(t_p0[2]) > 0.9 else wp.vec3(0.0, 0.0, 1.0)
+    #         k0 = wp.normalize(wp.cross(ref0, t_p0))
+
+    #     bend_error_vec = k * alpha - k0 * alpha0
+
+    #     C_bend = wp.length(bend_error_vec)
+    #     if C_bend > 1.0e-9:
+    #         u_world = bend_error_vec / C_bend
+
+    #         u_p = wp.quat_rotate_inv(q_p, u_world)
+    #         u_c = wp.quat_rotate_inv(q_c, u_world)
+
+    #         # sigma_p = wp.dot(u_p, wp.mul(I_inv_p, u_p))
+    #         # sigma_c = wp.dot(u_c, wp.mul(I_inv_c, u_c))
+
+    #         # Optimized sigma using diagonal inverse inertia (component-wise)
+    #         sigma_p = I_inv_p[0, 0] * u_p[0] * u_p[0] + \
+    #                     I_inv_p[1, 1] * u_p[1] * u_p[1] + \
+    #                     I_inv_p[2, 2] * u_p[2] * u_p[2]
+    #         sigma_c = I_inv_c[0, 0] * u_c[0] * u_c[0] + \
+    #                     I_inv_c[1, 1] * u_c[1] * u_c[1] + \
+    #                     I_inv_c[2, 2] * u_c[2] * u_c[2]
+
+    #         alpha_c = rest_length / k_bend
+    #         denom = sigma_p + sigma_c + alpha_c / (dt * dt)
+
+    #         if denom > 1.0e-12:
+    #             delta_lambda = (-C_bend / denom) * angular_relaxation
+    #             angular_impulse_mag = delta_lambda / dt
+    #             ang_delta_p = -u_world * angular_impulse_mag
+    #             ang_delta_c = u_world * angular_impulse_mag
+    #             _update_body_from_deltas(id_p, body_q, body_qd, body_com, body_I, body_inv_m, body_inv_I,
+    #                                         wp.spatial_vector(ang_delta_p, wp.vec3(0.0)), dt)
+    #             _update_body_from_deltas(id_c, body_q, body_qd, body_com, body_I, body_inv_m, body_inv_I,
+    #                                        wp.spatial_vector(ang_delta_c, wp.vec3(0.0)), dt)
+
+    # # ===== Twist constraint =====
+    # k_twist = joint_twist_stiffness[tid]   # [N*m^2]
+    # if k_twist > 0.0:
+    #     # Refresh current orientations after bend update so twist sees the latest poses
+    #     pose_p = body_q[id_p]
+    #     pose_c = body_q[id_c]
+    #     q_p = wp.transform_get_rotation(pose_p)
+    #     q_c = wp.transform_get_rotation(pose_c)
+
+    #     # Relative current vs. rest (in parent frame)
+    #     r  = wp.mul(wp.quat_inverse(q_p),  q_c)
+    #     r0 = wp.mul(wp.quat_inverse(q_p0), q_c0)
+
+    #     # Signed twist angle for r around CABLE_AXIS
+    #     vq = wp.vec3(r[0], r[1], r[2])
+    #     wq = r[3]
+
+    #     # a_par = wp.dot(vq, CABLE_AXIS)
+    #     a_par = vq[2]
+    #     if wq < 0.0:
+    #         wq = -wq
+    #         a_par = -a_par
+
+    #     theta  = 2.0 * wp.atan2(wp.abs(a_par), wq)
+    #     if a_par < 0.0:
+    #         theta = -theta
+
+    #     # Signed rest twist for r0 around CABLE_AXIS
+    #     v0q = wp.vec3(r0[0], r0[1], r0[2])
+    #     w0q = r0[3]
+
+    #     # a0_par = wp.dot(v0q, CABLE_AXIS)
+    #     a0_par = v0q[2]
+    #     if w0q < 0.0:
+    #         w0q = -w0q
+    #         a0_par = -a0_par
+
+    #     theta0 = 2.0 * wp.atan2(wp.abs(a0_par), w0q)
+    #     if a0_par < 0.0:
+    #         theta0 = -theta0
+
+    #     # Shortest signed delta in (-pi, pi]
+    #     dtheta = theta - theta0
+    #     if dtheta > wp.pi:
+    #         dtheta -= 2.0 * wp.pi
+    #     elif dtheta <= -wp.pi:
+    #         dtheta += 2.0 * wp.pi
+
+    #     if wp.abs(dtheta) > 1.0e-9:
+    #         # World twist axis is the parent's local d3 rotated to world
+    #         # u_world = wp.quat_rotate(q_p, CABLE_AXIS)
+    #         # Optimized rotation of (0,0,1) by quaternion: avoids general quat_rotate
+    #         u_world = wp.normalize(quat_rotate_unit_z(q_p))
+
+    #         # Optimized sigma using diagonal inverse inertia (component-wise)
+    #         # Parent: since u_world = R_p * CABLE_AXIS => u_p = R_p^T * u_world = CABLE_AXIS exactly
+    #         # u_p = CABLE_AXIS
+    #         # sigma_p = I_inv_p[0, 0] * u_p[0] * u_p[0] + \
+    #         #           I_inv_p[1, 1] * u_p[1] * u_p[1] + \
+    #         #           I_inv_p[2, 2] * u_p[2] * u_p[2]
+    #         sigma_p = I_inv_p[2, 2] # Directly use invI_zz as u_p is (0,0,1)
+
+    #         # Child: u_c = R_c^T * u_world
+    #         u_c = wp.quat_rotate_inv(q_c, u_world)
+    #         sigma_c = I_inv_c[0, 0] * u_c[0] * u_c[0] + \
+    #                     I_inv_c[1, 1] * u_c[1] * u_c[1] + \
+    #                     I_inv_c[2, 2] * u_c[2] * u_c[2]
+
+    #         # XPBD denominator: Sigma + alpha/dt^2 with alpha = L / GJ
+    #         alpha_c = rest_length / k_twist
+    #         denom = sigma_p + sigma_c + alpha_c / (dt * dt)
+
+    #         if denom > 1.0e-12:
+    #             # Delta_lambda = -(C)/denom, here C = dtheta (signed)
+    #             delta_lambda = (-dtheta / denom) * angular_relaxation
+
+    #             # Your updater expects per-step angular impulses L = +/- u * (Delta_lambda/dt)
+    #             angular_impulse_mag = delta_lambda / dt
+    #             angular_impulse_p = -u_world * angular_impulse_mag
+    #             angular_impulse_c = u_world * angular_impulse_mag
+
+    #             _update_body_from_deltas(
+    #                 id_p, body_q, body_qd, body_com, body_I, body_inv_m, body_inv_I,
+    #                 wp.spatial_vector(angular_impulse_p, wp.vec3(0.0)), dt
+    #             )
+    #             _update_body_from_deltas(
+    #                 id_c, body_q, body_qd, body_com, body_I, body_inv_m, body_inv_I,
+    #                 wp.spatial_vector(angular_impulse_c, wp.vec3(0.0)), dt
+    #             )
+
+    # --- Combined bend+twist (Cosserat) -------------------------------------
+    # A combined bend and twist constraint based on the axis-angle representation of the relative rotation between the parent and child.
+
+    bend_rigidity = joint_bend_stiffness[tid]
+    twist_rigidity = joint_twist_stiffness[tid]
+
+    # Exit if both bend and twist are disabled
+    if bend_rigidity <= 0.0 and twist_rigidity <= 0.0:
+        return
+
+    # Relative rotation from rest to current state
+    r = wp.mul(wp.quat_inverse(q_p), q_c)
+    r0 = wp.mul(wp.quat_inverse(q_p0), q_c0)
+    dr = wp.mul(r, wp.quat_inverse(r0))
+
+    # Use the shortest path representation to ensure the angle is in [0, pi]
+    if dr[3] < 0.0:
+        dr = wp.quat(-dr[0], -dr[1], -dr[2], -dr[3])
+    dr = wp.normalize(dr)
+
+    # Convert the relative rotation to an axis-angle representation.
+    vq = wp.vec3(dr[0], dr[1], dr[2])
+    wq = dr[3]
+    vn = wp.length(vq)
+
+    # Exit if there is no rotational error to correct
+    if vn <= 1.0e-12:
+        return
+
+    # Angle of rotation (constraint violation magnitude C)
+    C_angle = 2.0 * wp.atan2(vn, wq)
+
+    # Exit if the angular error is negligible
+    if C_angle < 1.0e-9:
+        return
+
+    # Axis of rotation in the parent's local frame
+    bend_twist_axis_local = vq / vn
+
+    # World-space direction of the corrective torque
+    bend_twist_axis_world = wp.normalize(wp.quat_rotate(q_p, bend_twist_axis_local))
+
+    # Directional inverse angular inertias: sigma = u^T R I^-1 R^T u
+    w_p = wp.quat_rotate_inv(q_p, bend_twist_axis_world)
+    w_c = wp.quat_rotate_inv(q_c, bend_twist_axis_world)
+
+    sigma_p = I_inv_p[0, 0] * w_p[0] * w_p[0] + I_inv_p[1, 1] * w_p[1] * w_p[1] + I_inv_p[2, 2] * w_p[2] * w_p[2]
+    sigma_c = I_inv_c[0, 0] * w_c[0] * w_c[0] + I_inv_c[1, 1] * w_c[1] * w_c[1] + I_inv_c[2, 2] * w_c[2] * w_c[2]
+    sigma_sum = sigma_p + sigma_c
+
+    # Exit if bodies have infinite inertia in the constraint direction
+    if sigma_sum <= 1.0e-18:
+        return
+
+    # Effective rigidity is a blend of bend and twist stiffness
+    # based on the alignment of the rotation axis with the capsule's Z-axis.
+    ax = bend_twist_axis_local[0]
+    ay = bend_twist_axis_local[1]
+    az = bend_twist_axis_local[2]
+    effective_rigidity = bend_rigidity * (ax * ax + ay * ay) + twist_rigidity * (az * az)
+    # effective_rigidity = bend_rigidity
+
+    alpha_c = rest_length / effective_rigidity
+
+    # delta_lambda = -C / (sigma_sum + alpha/dt^2)
+    denom = sigma_sum + alpha_c / (dt * dt)
+    if denom <= 1.0e-12:
+        return
+
+    angular_lambda = (-C_angle / denom) * angular_relaxation
+
+    # Convert lambda correction to an angular impulse
+    angular_impulse_mag = angular_lambda / dt
+    angular_impulse_p = -bend_twist_axis_world * angular_impulse_mag
+    angular_impulse_c = bend_twist_axis_world * angular_impulse_mag
+
+    _update_body_from_deltas(
+        id_p,
+        body_q,
+        body_qd,
+        body_com,
+        body_I,
+        body_inv_m,
+        body_inv_I,
+        wp.spatial_vector(angular_impulse_p, wp.vec3(0.0)),
+        dt,
+    )
+    _update_body_from_deltas(
+        id_c,
+        body_q,
+        body_qd,
+        body_com,
+        body_I,
+        body_inv_m,
+        body_inv_I,
+        wp.spatial_vector(angular_impulse_c, wp.vec3(0.0)),
+        dt,
+    )
 
 
 @wp.func

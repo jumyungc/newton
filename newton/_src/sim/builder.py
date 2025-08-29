@@ -431,6 +431,8 @@ class ModelBuilder:
 
         self.joint_twist_lower = []
         self.joint_twist_upper = []
+        self.joint_bend_stiffness = []
+        self.joint_twist_stiffness = []
 
         self.joint_enabled = []
 
@@ -445,6 +447,10 @@ class ModelBuilder:
 
         self.joint_dof_count = 0
         self.joint_coord_count = 0
+
+        # list of body indices that make up rods
+        self.rod_body_indices = []
+        self.cable_joint_count = 0  # count of cable joints
 
         # current environment group index for entities being added directly to this builder.
         # set to -1 to create global entities shared across all environments.
@@ -960,6 +966,8 @@ class ModelBuilder:
         self.joint_dof_dim.append((len(linear_axes), len(angular_axes)))
         self.joint_enabled.append(enabled)
         self.joint_group.append(self.current_env_group)
+        self.joint_bend_stiffness.append(0.0)  # Default value, only used by cable joints
+        self.joint_twist_stiffness.append(0.0)
 
         def add_axis_dim(dim: ModelBuilder.JointDofConfig):
             self.joint_axis.append(dim.axis)
@@ -1558,6 +1566,50 @@ class ModelBuilder:
             enabled=enabled,
         )
 
+    def add_joint_cable(
+        self,
+        parent: int,
+        child: int,
+        parent_xform: Transform | None = None,
+        child_xform: Transform | None = None,
+        key: str | None = None,
+        collision_filter_parent: bool = True,
+        enabled: bool = True,
+        bend_stiffness: float = 1.0e3,
+        twist_stiffness: float = 1.0e3,
+    ) -> int:
+        """Adds a cable joint to the model.
+
+        Args:
+            parent: The index of the parent body.
+            child: The index of the child body.
+            parent_xform (Transform): The transform of the joint in the parent body's local frame.
+            child_xform (Transform): The transform of the joint in the child body's local frame.
+            key: The key of the joint.
+            collision_filter_parent: Whether to filter collisions between shapes of the parent and child bodies.
+            enabled: Whether the joint is enabled.
+            bend_stiffness: The bending stiffness of the cable joint.
+            twist_stiffness: The twisting stiffness of the cable joint.
+
+        Returns:
+            The index of the added joint.
+
+        """
+        joint_id = self.add_joint(
+            joint_type=JointType.CABLE,
+            parent=parent,
+            child=child,
+            parent_xform=parent_xform,
+            child_xform=child_xform,
+            key=key,
+            collision_filter_parent=collision_filter_parent,
+            enabled=enabled,
+        )
+        self.joint_bend_stiffness[joint_id] = bend_stiffness
+        self.joint_twist_stiffness[joint_id] = twist_stiffness
+        self.cable_joint_count += 1
+        return joint_id
+
     # endregion
 
     def plot_articulation(
@@ -1600,6 +1652,8 @@ class ModelBuilder:
                 return "fixed"
             elif type == JointType.DISTANCE:
                 return "distance"
+            elif type == JointType.CABLE:
+                return "cable"
             return "unknown"
 
         def shape_type_str(type):
@@ -2656,6 +2710,151 @@ class ModelBuilder:
                 remeshed_shapes.add(shape)
 
         return remeshed_shapes
+
+    def add_rod_mesh(
+        self,
+        positions: list[Vec3],
+        quaternions: list[Quat],
+        radius: float = 0.1,
+        cfg: ShapeConfig | None = None,
+        connect_joints: bool = True,
+        bend_stiffness: float = 1.0e3,
+        twist_stiffness: float = 1.0e3,
+        use_center_based: bool = False,  # Switch between approaches
+    ) -> tuple[list[int], list[int]]:
+        """
+        Creates a rod composed of multiple capsule bodies connected by joints.
+
+        Args:
+            positions: A list of world-space positions defining the rod's centerline points.
+            quaternions: A list of world-space quaternions defining the orientation of each rod segment.
+            radius: The radius of the capsule shapes.
+            cfg: The shape configuration for the capsules.
+            connect_joints: Whether to connect the bodies with joints.
+            bend_stiffness: The stiffness for the position-based constraints of the rod joints.
+            twist_stiffness: The stiffness for the twist-based constraints of the rod joints.
+            rod_pos_ke: The stiffness for the position-based constraints of the rod joints.
+            rod_pos_kd: The damping for the position-based constraints of the rod joints.
+            use_center_based: If False (default), use start-based approach (body at segment start).
+                            If True, use center-based approach (body at segment center).
+                            Center-based has more symmetric constraint coupling but more complex jacobian.
+
+
+        Returns:
+            A tuple containing two lists: the indices of the created bodies and the indices of the created joints.
+        """
+        if cfg is None:
+            cfg = self.default_shape_cfg
+
+        link_bodies = []
+        link_joints = []
+        num_segments = len(quaternions)
+
+        for i in range(num_segments):
+            p0 = positions[i]
+            p1 = positions[i + 1]
+            q = quaternions[i]
+
+            # center = (p0 + p1) * 0.5
+            segment_length = wp.length(p1 - p0)
+            half_height = segment_length / 2.0
+
+            if use_center_based:
+                # ============ CENTER-BASED APPROACH ============
+                # Position body at segment center (midpoint)
+                center_point = wp.vec3((p0.x + p1.x) * 0.5, (p0.y + p1.y) * 0.5, (p0.z + p1.z) * 0.5)
+                body_q = wp.transform(center_point, q)
+                # COM already at body center (no offset needed)
+                com_offset = wp.vec3(0.0, 0.0, 0.0)
+                c_body = self.add_body(body_q, com=com_offset, key=f"rod_{self.body_count}_{i}")
+
+                # Capsule centered on body (no transform offset)
+                capsule_xform = wp.transform((0.0, 0.0, 0.0), wp.quat_identity())
+                self.add_shape_capsule(
+                    c_body,
+                    xform=capsule_xform,
+                    radius=radius,
+                    half_height=half_height,
+                    cfg=cfg,
+                    key=f"rod_shape_{self.body_count}_{i}",
+                )
+                link_bodies.append(c_body)
+
+                # Connect bodies: both use offset from center
+                if i > 0 and connect_joints:
+                    p_body = link_bodies[i - 1]
+
+                    # Parent end: +half_height from parent center
+                    parent_xform = wp.transform_identity()
+                    parent_xform.p = wp.vec3(0.0, 0.0, half_height)
+
+                    # Child start: -half_height from child center
+                    child_xform = wp.transform_identity()
+                    child_xform.p = wp.vec3(0.0, 0.0, -half_height)
+
+                    # joint = self.add_joint_ball(
+                    joint = self.add_joint_cable(
+                        parent=p_body,
+                        child=c_body,
+                        parent_xform=parent_xform,
+                        child_xform=child_xform,
+                        key=f"rod_{self.body_count}_{i}_center",
+                        collision_filter_parent=True,
+                        enabled=True,
+                        bend_stiffness=bend_stiffness,
+                        twist_stiffness=twist_stiffness,
+                    )
+                    link_joints.append(joint)
+
+            else:
+                # ============ START-BASED APPROACH (CURRENT) ============
+                # Position body at start point, with COM offset to segment center
+                body_q = wp.transform(p0, q)
+                # COM offset in local coordinates: from start point to center
+                com_offset = wp.vec3(0.0, 0.0, half_height)
+                c_body = self.add_body(body_q, com=com_offset, key=f"rod_{self.body_count}_{i}")
+
+                # Offset capsule shape so it extends from body origin (start) to end point
+                capsule_xform = wp.transform((0.0, 0.0, half_height), wp.quat_identity())
+                self.add_shape_capsule(
+                    c_body,
+                    xform=capsule_xform,
+                    radius=radius,
+                    half_height=half_height,
+                    cfg=cfg,
+                    key=f"rod_shape_{self.body_count}_{i}",
+                )
+                link_bodies.append(c_body)
+
+                # Connect bodies: asymmetric (only parent has offset)
+                if i > 0 and connect_joints:
+                    p_body = link_bodies[i - 1]
+
+                    # Parent end: full capsule length from parent start point
+                    parent_xform = wp.transform_identity()
+                    parent_xform.p = wp.vec3(0.0, 0.0, 2.0 * half_height)
+
+                    # Child start: at child start point (body position)
+                    child_xform = wp.transform_identity()
+                    child_xform.p = wp.vec3(0.0, 0.0, 0.0)
+
+                    # joint = self.add_joint_ball(
+                    joint = self.add_joint_cable(
+                        parent=p_body,
+                        child=c_body,
+                        parent_xform=parent_xform,
+                        child_xform=child_xform,
+                        key=f"rod_{self.body_count}_{i}_start",
+                        collision_filter_parent=True,
+                        enabled=True,
+                        bend_stiffness=bend_stiffness,
+                        twist_stiffness=twist_stiffness,
+                    )
+                    link_joints.append(joint)
+
+        self.rod_body_indices.append(link_bodies)
+
+        return link_bodies, link_joints
 
     # endregion
 
@@ -3935,6 +4134,8 @@ class ModelBuilder:
             m.body_key = self.body_key
             m.body_group = wp.array(self.body_group, dtype=wp.int32) if self.body_count > 0 else None
 
+            m.rod_body_indices = wp.array(self.rod_body_indices, dtype=wp.int32)
+
             # joints
             m.joint_type = wp.array(self.joint_type, dtype=wp.int32)
             m.joint_parent = wp.array(self.joint_parent, dtype=wp.int32)
@@ -3972,6 +4173,8 @@ class ModelBuilder:
             m.joint_limit_ke = wp.array(self.joint_limit_ke, dtype=wp.float32, requires_grad=requires_grad)
             m.joint_limit_kd = wp.array(self.joint_limit_kd, dtype=wp.float32, requires_grad=requires_grad)
             m.joint_enabled = wp.array(self.joint_enabled, dtype=wp.int32)
+            m.joint_bend_stiffness = wp.array(self.joint_bend_stiffness, dtype=float, device=m.device)
+            m.joint_twist_stiffness = wp.array(self.joint_twist_stiffness, dtype=float, device=m.device)
 
             # 'close' the start index arrays with a sentinel value
             joint_q_start = copy.copy(self.joint_q_start)
@@ -4008,6 +4211,7 @@ class ModelBuilder:
             m.joint_count = self.joint_count
             m.joint_dof_count = self.joint_dof_count
             m.joint_coord_count = self.joint_coord_count
+            m.cable_joint_count = self.cable_joint_count
             m.particle_count = len(self.particle_q)
             m.body_count = len(self.body_q)
             m.shape_count = len(self.shape_type)

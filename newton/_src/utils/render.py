@@ -174,6 +174,9 @@ def CreateSimRenderer(renderer):
             up_axis: AxisType | None = None,
             show_joints: bool = False,
             show_particles: bool = True,
+            show_body_frames: bool = False,
+            body_frame_axis_length: float = 0.5,
+            capsule_radius_scale: float = 1.0,
             pick_stiffness: float = 20000.0,
             pick_damping: float = 2000.0,
             **render_kwargs,
@@ -203,6 +206,9 @@ def CreateSimRenderer(renderer):
             self.cam_axis = up_axis.value
             self.show_joints = show_joints
             self.show_particles = show_particles
+            self.show_body_frames = show_body_frames
+            self.body_frame_axis_length = body_frame_axis_length
+            self.capsule_radius_scale = capsule_radius_scale
             self._instance_key_count = {}
             if model:
                 self.populate(model)
@@ -432,7 +438,14 @@ def CreateSimRenderer(renderer):
 
                     elif geo_type == GeoType.CAPSULE:
                         shape = self.render_capsule(
-                            name, p, q, geo_scale[0], geo_scale[1], parent_body=body, is_template=True, color=color
+                            name,
+                            p,
+                            q,
+                            geo_scale[0] * self.capsule_radius_scale,
+                            geo_scale[1],
+                            parent_body=body,
+                            is_template=True,
+                            color=color,
                         )
 
                     elif geo_type == GeoType.CYLINDER:
@@ -574,6 +587,56 @@ def CreateSimRenderer(renderer):
                     instance_count += 1
             return instance_count
 
+        def render_body_frames(self, state: newton.State, axis_length: float = 0.02):
+            """Renders the center of mass and local coordinate frames for each rigid body."""
+            body_q = state.body_q.numpy()
+            body_com = self.model.body_com.numpy()  # Get the COM offsets
+            # com_points = [] # No longer drawing COM points
+            axis_lines = []
+            axis_indices = []
+
+            e1 = wp.vec3(1.0, 0.0, 0.0)
+            e2 = wp.vec3(0.0, 1.0, 0.0)
+            # e3 = wp.vec3(0.0, 0.0, 1.0)
+
+            for i in range(self.model.body_count):
+                transform = body_q[i]
+                pos = wp.vec3(transform[0], transform[1], transform[2])
+                rot = wp.quat(transform[3], transform[4], transform[5], transform[6])
+
+                # Calculate the true world-space center of mass
+                local_com = body_com[i]
+                world_com = pos + wp.quat_rotate(rot, wp.vec3(local_com[0], local_com[1], local_com[2]))
+
+                # com_points.append(list(world_com)) # No longer drawing COM points
+
+                world_d1 = wp.quat_rotate(rot, e1)
+                world_d2 = wp.quat_rotate(rot, e2)
+                # world_e3 = wp.quat_rotate(rot, e3)
+
+                start_index = len(axis_lines)
+                axis_lines.append(list(world_com))
+                axis_lines.append(list(world_com + world_d1 * axis_length))
+                axis_lines.append(list(world_com + world_d2 * axis_length))
+                # axis_lines.append(list(world_com + world_e3 * axis_length))
+
+                axis_indices.extend([start_index, start_index + 1])
+                axis_indices.extend([start_index, start_index + 2])
+                # axis_indices.extend([start_index, start_index + 3])
+
+            # self.render_points("coms", np.array(com_points), radius=0.05 * self.scaling, colors=(1.0, 1.0, 0.0)) # No longer drawing COM points
+
+            np_axis_lines = np.array(axis_lines)
+            np_axis_indices = np.array(axis_indices).reshape(-1, 2)
+
+            self.render_line_list(
+                "axes_x", np_axis_lines, np_axis_indices[::2].flatten(), color=(1.0, 0.5, 0.0), radius=0.02
+            )
+            self.render_line_list(
+                "axes_y", np_axis_lines, np_axis_indices[1::2].flatten(), color=(0.5, 1.0, 0.0), radius=0.02
+            )
+            # self.render_line_list("axes_z", np_axis_lines, np_axis_indices[2::3].flatten(), color=(1.0, 1.0, 0.0), radius=0.02)
+
         def get_new_color(self, instance_count: int) -> tuple:
             """Gets a new color from a predefined color map.
             This method provides a new color based on the current instance count,
@@ -635,6 +698,9 @@ def CreateSimRenderer(renderer):
             # update bodies
             if self.model.body_count:
                 self.update_body_transforms(state.body_q)
+
+            if self.show_body_frames:
+                self.render_body_frames(state, axis_length=self.body_frame_axis_length)
 
             self.state = state
 
