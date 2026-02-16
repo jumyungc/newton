@@ -36,6 +36,7 @@
 #
 ###########################################################################
 
+import os
 import struct
 from enum import Enum, IntEnum
 from numbers import Integral
@@ -106,7 +107,11 @@ NUM_ARMS = 2
 
 
 # Examples assets live in `newton/examples/assets/`.
-ASSETS_ROOT = Path(__file__).resolve().parents[1] / "assets"
+def _default_assets_root() -> Path:
+    return Path(__file__).resolve().parents[1] / "assets"
+
+
+ASSETS_ROOT = Path(os.environ.get("NEWTON_EXAMPLES_ASSETS_PATH", os.fspath(_default_assets_root()))).resolve()
 HOSE_CONNECTOR_PATH = ASSETS_ROOT / "rby1_hose_connectorv3.stl"
 
 
@@ -197,12 +202,6 @@ def sync_vbd_solver_prev_poses_from_velocity_kernel(
 ):
     """Update SolverVBD.body_q_prev for teleported proxy bodies using their velocities.
 
-    Why:
-    - Setting body_q_prev := body_q eliminates finite-difference spikes, but also makes the solver
-      observe ~zero relative slip velocity at proxy contacts -> friction becomes ineffective.
-    - This kernel sets body_q_prev consistent with the current (teleported) pose and velocity so the
-      solver can compute tangential slip and generate friction while staying stable.
-
     Notes:
     - Rotation integration is first-order using an axis-angle delta in world space.
     """
@@ -269,20 +268,14 @@ def write_proxy_prev_poses_to_solver_prev_kernel(
 def subtract_proxy_forces_kernel(
     dt: float,
     vbd_body_q: wp.array(dtype=wp.transform),
-    vbd_body_qd: wp.array(dtype=wp.spatial_vector),
     proxy_forces: wp.array(dtype=wp.spatial_vector),
     proxy_mj_body_ids: wp.array(dtype=int),
     proxy_vbd_body_ids: wp.array(dtype=int),
     vbd_body_inv_mass: wp.array(dtype=float),
     vbd_body_inv_inertia: wp.array(dtype=wp.mat33),
-    vbd_body_qd_out: wp.array(dtype=wp.spatial_vector),
+    vbd_body_qd: wp.array(dtype=wp.spatial_vector),
 ):
-    """Subtract previously applied forces from VBD proxy velocities.
-
-    IMPORTANT: Uses VBD proxy mass/inertia (not MuJoCo) to correctly account for
-    proxy_mass_scale. The force was applied to MuJoCo, but we need to subtract
-    the equivalent velocity change that would occur in VBD given the scaled proxy mass.
-    """
+    """Subtract previously applied forces from VBD proxy velocities."""
     proxy_idx = wp.tid()
 
     if proxy_idx >= proxy_mj_body_ids.shape[0]:
@@ -301,195 +294,7 @@ def subtract_proxy_forces_kernel(
     delta_w = dt * wp.quat_rotate(r, vbd_body_inv_inertia[vbd_body_id] * wp.quat_rotate_inv(r, wp.spatial_bottom(f)))
 
     # Subtract from VBD proxy velocity
-    vbd_body_qd_out[vbd_body_id] = vbd_body_qd[vbd_body_id] - wp.spatial_vector(delta_v, delta_w)
-
-
-@wp.kernel
-def harvest_proxy_wrenches_from_contacts_kernel(
-    dt: float,
-    # Contact data
-    rigid_contact_count: wp.array(dtype=int),
-    rigid_contact_shape0: wp.array(dtype=int),
-    rigid_contact_shape1: wp.array(dtype=int),
-    rigid_contact_point0: wp.array(dtype=wp.vec3),
-    rigid_contact_point1: wp.array(dtype=wp.vec3),
-    rigid_contact_normal: wp.array(dtype=wp.vec3),
-    rigid_contact_thickness0: wp.array(dtype=float),
-    rigid_contact_thickness1: wp.array(dtype=float),
-    # VBD model data
-    shape_body: wp.array(dtype=int),
-    body_q: wp.array(dtype=wp.transform),
-    body_q_prev: wp.array(dtype=wp.transform),
-    body_com: wp.array(dtype=wp.vec3),
-    body_inv_mass: wp.array(dtype=float),
-    # Contact material properties (from SolverVBD)
-    body_body_contact_penalty_k: wp.array(dtype=float),
-    body_body_contact_material_kd: wp.array(dtype=float),
-    body_body_contact_material_mu: wp.array(dtype=float),
-    friction_epsilon: float,
-    # Proxy mapping
-    proxy_vbd_body_ids: wp.array(dtype=int),
-    proxy_mj_body_ids: wp.array(dtype=int),
-    # MuJoCo model data
-    mj_body_com: wp.array(dtype=wp.vec3),
-    mj_body_q: wp.array(dtype=wp.transform),
-    # Output
-    out_mj_body_f: wp.array(dtype=wp.spatial_vector),
-):
-    """Harvest coupling wrenches from VBD contacts, filtering for proxy<->VBD dynamic body contacts.
-
-    Coupling flow:
-    1. Iterate over all active contacts in the VBD solver
-    2. Filter for contacts involving a Proxy Body AND a dynamic VBD body (capsule, cable, etc.)
-    3. Compute Wrench from contact forces using VBD's contact model
-    4. Map to MuJoCo body wrench buffer
-
-    Filtering logic:
-    - Include: proxy<->dynamic VBD body (capsule, cable particles, etc.) - inv_mass > 0
-    - Exclude: proxy<->static/kinematic (table, ground) - inv_mass == 0
-    - Exclude: proxy<->proxy (inter-finger collisions)
-
-    Per-contact forces are collected and mapped to the MuJoCo wrench buffer.
-    """
-    contact_id = wp.tid()
-
-    rc = rigid_contact_count[0]
-    if contact_id >= rc:
-        return
-
-    # Get shapes and bodies
-    shape0 = rigid_contact_shape0[contact_id]
-    shape1 = rigid_contact_shape1[contact_id]
-
-    if shape0 < 0 or shape1 < 0:
-        return
-
-    body0 = shape_body[shape0] if shape0 >= 0 else -1
-    body1 = shape_body[shape1] if shape1 >= 0 else -1
-
-    if body0 < 0 or body1 < 0:
-        return
-
-    # Check if one body is a proxy (Warp codegen: use dynamic ints, avoid mutating Python bools in loops)
-    is_proxy0 = int(0)
-    is_proxy1 = int(0)
-    proxy_mj_id = int(-1)
-
-    for i in range(proxy_vbd_body_ids.shape[0]):
-        pid = proxy_vbd_body_ids[i]
-        if pid == body0:
-            is_proxy0 = int(1)
-            proxy_mj_id = proxy_mj_body_ids[i]
-        if pid == body1:
-            is_proxy1 = int(1)
-            proxy_mj_id = proxy_mj_body_ids[i]
-
-    # Must have exactly one proxy (exclude proxy<->proxy and non-proxy contacts)
-    if (is_proxy0 + is_proxy1) != 1:
-        return
-
-    if proxy_mj_id < 0:
-        return
-
-    # Determine which body is proxy and which is the VBD body
-    proxy_body_id = body0 if is_proxy0 == 1 else body1
-    vbd_body_id = body1 if is_proxy0 == 1 else body0
-
-    # Filter: other body must be dynamic (inv_mass > 0) to exclude static/kinematic (table, ground)
-    # This includes capsules, cable particles, and any other dynamic VBD bodies
-    if vbd_body_id < 0 or vbd_body_id >= body_inv_mass.shape[0] or body_inv_mass[vbd_body_id] <= 0.0:
-        return
-
-    # Get contact data (normal points from body0 to body1)
-    p0_local = rigid_contact_point0[contact_id]
-    p1_local = rigid_contact_point1[contact_id]
-    n_raw = rigid_contact_normal[contact_id]
-    th0 = rigid_contact_thickness0[contact_id]
-    th1 = rigid_contact_thickness1[contact_id]
-
-    # Normalize contact normal
-    n = -n_raw  # VBD convention: contact_normal = -rigid_contact_normal
-    n_len = wp.length(n)
-    if n_len < 1.0e-6:
-        return
-    n = n / n_len
-
-    # Transform contact points to world space
-    X0 = body_q[body0]
-    X1 = body_q[body1]
-    p0_world = wp.transform_point(X0, p0_local)
-    p1_world = wp.transform_point(X1, p1_local)
-
-    # Compute penetration
-    thickness = th0 + th1
-    dist = wp.dot(n, p1_world - p0_world)
-    penetration = thickness - dist
-
-    if penetration <= 0.0:
-        return  # No contact
-
-    # Get contact material properties
-    # Use contact_id to index into per-contact arrays (if available)
-    contact_ke = body_body_contact_penalty_k[contact_id] if contact_id < body_body_contact_penalty_k.shape[0] else 0.0
-    contact_kd = (
-        body_body_contact_material_kd[contact_id] if contact_id < body_body_contact_material_kd.shape[0] else 0.0
-    )
-    contact_mu = (
-        body_body_contact_material_mu[contact_id] if contact_id < body_body_contact_material_mu.shape[0] else 0.0
-    )
-
-    if contact_ke <= 0.0:
-        return
-
-    # Compute contact force using same model as evaluate_rigid_contact_from_collision
-    # Normal force (elastic)
-    f_normal = contact_ke * penetration * n
-
-    # Damping force (only when compressing)
-    X0_prev = body_q_prev[body0]
-    X1_prev = body_q_prev[body1]
-    p0_prev = wp.transform_point(X0_prev, p0_local)
-    p1_prev = wp.transform_point(X1_prev, p1_local)
-    dx_rel = (p1_world - p0_world) - (p1_prev - p0_prev)
-    v_rel = dx_rel / dt
-    v_dot_n = wp.dot(n, v_rel)
-
-    f_damping = wp.vec3(0.0, 0.0, 0.0)
-    if contact_kd > 0.0 and v_dot_n < 0.0:
-        damping_coeff = contact_kd * contact_ke
-        f_damping = -damping_coeff * v_dot_n * n
-
-    # Friction force
-    f_friction = wp.vec3(0.0, 0.0, 0.0)
-    normal_load = contact_ke * penetration
-    if contact_mu > 0.0 and normal_load > 0.0:
-        v_n = n * v_dot_n
-        v_t = v_rel - v_n
-        u = v_t * dt
-        u_norm = wp.length(u)
-        eps_u = friction_epsilon * dt
-
-        if u_norm > eps_u:
-            # Kinetic friction (saturated)
-            f_friction = -contact_mu * normal_load * (u / u_norm)
-        elif u_norm > 1.0e-12:
-            # Static friction (regularized)
-            f_friction = -contact_mu * normal_load * (u / eps_u) * (2.0 - u_norm / eps_u)
-
-    # Total contact force on VBD body (body1 if proxy is body0, body0 if proxy is body1)
-    f_total = f_normal + f_damping + f_friction
-
-    # Reaction force on proxy (Newton's 3rd law)
-    f_proxy = -f_total
-
-    # Compute torque on proxy about its COM
-    com_proxy_world = wp.transform_point(body_q[proxy_body_id], body_com[proxy_body_id])
-    contact_point_proxy = p0_world if is_proxy0 == 1 else p1_world
-    r = contact_point_proxy - com_proxy_world
-    tau_proxy = wp.cross(r, f_proxy)
-
-    # Map to MuJoCo body and accumulate
-    wp.atomic_add(out_mj_body_f, proxy_mj_id, wp.spatial_vector(f_proxy, tau_proxy))
+    vbd_body_qd[vbd_body_id] = vbd_body_qd[vbd_body_id] - wp.spatial_vector(delta_v, delta_w)
 
 
 @wp.kernel
@@ -520,7 +325,7 @@ def harvest_proxy_wrenches_from_contact_forces_kernel(
     Filtering:
       - Include contacts where exactly one body is a proxy
       - Exclude proxy<->proxy
-      - Exclude proxy<->static/kinematic env (other body inv_mass <= 0)
+      - Exclude proxy<->static/kinematic env (other body inv_mass <= 0), temporarily
 
     Force convention:
       - `contact_force_on_body1` is force applied to body1 at `contact_point1_world`
@@ -531,52 +336,58 @@ def harvest_proxy_wrenches_from_contact_forces_kernel(
     if contact_id >= rc:
         return
 
-    b0 = int(contact_body0[contact_id])
-    b1 = int(contact_body1[contact_id])
-    if b0 < 0 or b1 < 0:
+    body0 = int(contact_body0[contact_id])
+    body1 = int(contact_body1[contact_id])
+    if body0 < 0 or body1 < 0:
         return
 
-    # Determine if b0/b1 are proxies (Warp: dynamic ints, avoid Python bool mutation)
+    # Determine if body0/body1 are proxies.
     is_proxy0 = int(0)
     is_proxy1 = int(0)
-    mj_id0 = int(-1)
-    mj_id1 = int(-1)
+    mj_body_id0 = int(-1)
+    mj_body_id1 = int(-1)
     for i in range(proxy_vbd_body_ids.shape[0]):
-        pid = int(proxy_vbd_body_ids[i])
-        if pid == b0:
+        proxy_body_id = int(proxy_vbd_body_ids[i])
+        if proxy_body_id == body0:
             is_proxy0 = int(1)
-            mj_id0 = int(proxy_mj_body_ids[i])
-        if pid == b1:
+            mj_body_id0 = int(proxy_mj_body_ids[i])
+        if proxy_body_id == body1:
             is_proxy1 = int(1)
-            mj_id1 = int(proxy_mj_body_ids[i])
+            mj_body_id1 = int(proxy_mj_body_ids[i])
 
     if (is_proxy0 + is_proxy1) != 1:
         return
 
     # Filter out env: require the non-proxy body to be dynamic (inv_mass > 0)
-    other = b1 if is_proxy0 == 1 else b0
-    if other < 0 or other >= int(vbd_body_inv_mass.shape[0]) or vbd_body_inv_mass[other] <= 0.0:
+    other_body_id = body1 if is_proxy0 == 1 else body0
+    if other_body_id < 0 or other_body_id >= int(vbd_body_inv_mass.shape[0]) or vbd_body_inv_mass[other_body_id] <= 0.0:
         return
 
-    # Select proxy body, mj_id, contact point, and force on proxy
-    f_b1 = contact_force_on_body1[contact_id]
+    # Select MuJoCo body id, a point of application in world, and the force on the proxy in world.
+    force_on_body1_world = contact_force_on_body1[contact_id]
     if is_proxy1 == 1:
-        mj_id = mj_id1
-        p = contact_point1_world[contact_id]
-        f_proxy = f_b1
+        mj_body_id = mj_body_id1
+        contact_point_world = contact_point1_world[contact_id]
+        force_on_proxy_world = force_on_body1_world
     else:
-        mj_id = mj_id0
-        p = contact_point0_world[contact_id]
-        f_proxy = -f_b1
+        mj_body_id = mj_body_id0
+        contact_point_world = contact_point0_world[contact_id]
+        force_on_proxy_world = -force_on_body1_world
 
-    if mj_id < 0:
+    if mj_body_id < 0:
+        return
+    if (
+        mj_body_id >= int(out_mj_body_f.shape[0])
+        or mj_body_id >= int(mj_body_q.shape[0])
+        or mj_body_id >= int(mj_body_com.shape[0])
+    ):
         return
 
-    X_wb = mj_body_q[mj_id]
-    com_world = wp.transform_point(X_wb, mj_body_com[mj_id])
-    r = p - com_world
-    tau = wp.cross(r, f_proxy)
-    wp.atomic_add(out_mj_body_f, mj_id, wp.spatial_vector(f_proxy, tau))
+    mj_body_tf_world = mj_body_q[mj_body_id]
+    com_world = wp.transform_point(mj_body_tf_world, mj_body_com[mj_body_id])
+    r_world = contact_point_world - com_world
+    torque_world = wp.cross(r_world, force_on_proxy_world)
+    wp.atomic_add(out_mj_body_f, mj_body_id, wp.spatial_vector(force_on_proxy_world, torque_world))
 
 
 @wp.kernel(enable_backward=False)
@@ -818,8 +629,7 @@ def advance_task_kernel(
         task_capsule_body_q_prev[arm_idx] = capsule_body_q[capsule_body_indices[arm_idx]]
 
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-ROBOT_PATH = REPO_ROOT / "rby1df" / "urdf"
+ROBOT_PATH = ASSETS_ROOT / "rby1df" / "urdf"
 
 
 class Example:
@@ -877,8 +687,8 @@ class Example:
 
         # Gripper joint drive tuning.
         self.gripper_joint_target_ke = 50.0
-        self.gripper_joint_target_kd = 100.0
-        self.gripper_joint_effort_limit = 150.0
+        self.gripper_joint_target_kd = 80.0
+        self.gripper_joint_effort_limit = 500.0
 
         # MuJoCo scene defaults derived from collision mode.
         self.mujoco_default_shape_cfg = self._create_shape_config(self.mujoco_collision_mode)
@@ -894,8 +704,10 @@ class Example:
         # ----------------------------------------------------------------
         # Approach/grasp alignment.
         # APPROACH aims near capsule COM with +/-Y offset to avoid early collisions.
-        self.sm_approach_offset_y = 0.03
-        self.sm_approach_offset_z = 0.01
+        # self.sm_approach_offset_y = 0.03
+        # self.sm_approach_offset_z = 0.01
+        self.sm_approach_offset_y = 0.0
+        self.sm_approach_offset_z = 0.0
 
         # Grasp point along capsule local axis (0.5 == COM).
         self.sm_grasp_axis_fraction = 2.0 / 3.0
@@ -904,7 +716,7 @@ class Example:
         self.sm_time_approach = 1.0
         self.sm_time_engage = 1.0
         self.sm_time_grasp = 3.0
-        self.sm_time_hold_grasp = 1.0
+        self.sm_time_hold_grasp = 3.0
         self.sm_time_extract = 3.0
 
         # Extraction helper offsets (currently not applied by set_target_pose_kernel,
@@ -1133,7 +945,7 @@ class Example:
         mujoco_substep_count = max(int(self.mujoco_substeps), 1)
         vbd_substep_count = max(int(self.vbd_substeps), 1)
         vbd_collide_substeps = max(int(self.vbd_collide_substeps), 1)
-        vbd_collide_substeps_independent = 1
+        vbd_collide_substeps_independent = vbd_collide_substeps
 
         # Local aliases keep solver ownership explicit in this long routine.
         mujoco_state_0 = self.mujoco_state_0
@@ -1253,13 +1065,12 @@ class Example:
                         inputs=[
                             shared_substep_dt,
                             vbd_state_0.body_q,
-                            vbd_state_0.body_qd,
                             self.proxy_forces_prev,
                             self.proxy_mj_body_ids_array,
                             self.proxy_vbd_body_ids_array,
-                            self.vbd_model.body_inv_mass,  # Use VBD mass (accounts for proxy_mass_scale)
-                            self.vbd_model.body_inv_inertia,  # Use VBD inertia (accounts for proxy_mass_scale)
-                            vbd_state_0.body_qd,  # output
+                            self.vbd_model.body_inv_mass,
+                            self.vbd_model.body_inv_inertia,
+                            vbd_state_0.body_qd,  # input/output
                         ],
                     )
 
@@ -1290,10 +1101,8 @@ class Example:
                         and hasattr(self.vbd_solver, "collect_rigid_contact_forces")
                     ):
                         c_b0, c_b1, c_p0w, c_p1w, c_f_b1, c_count = self.vbd_solver.collect_rigid_contact_forces(
-                            vbd_state_0, self.vbd_contacts, float(shared_substep_dt)
+                            vbd_state_1, self.vbd_contacts, float(shared_substep_dt)
                         )
-                        # GPU-only path: launch over fixed contact-buffer capacity and early-out in kernel
-                        # using c_count[0]. This avoids device->host readback here.
                         wp.launch(
                             harvest_proxy_wrenches_from_contact_forces_kernel,
                             dim=c_b0.shape[0],
@@ -1415,13 +1224,12 @@ class Example:
                     inputs=[
                         self.frame_dt,
                         vbd_state_0.body_q,
-                        vbd_state_0.body_qd,
                         self.proxy_forces_prev,
                         self.proxy_mj_body_ids_array,
                         self.proxy_vbd_body_ids_array,
                         self.vbd_model.body_inv_mass,  # Use VBD mass (accounts for proxy_mass_scale)
                         self.vbd_model.body_inv_inertia,  # Use VBD inertia (accounts for proxy_mass_scale)
-                        vbd_state_0.body_qd,  # output
+                        vbd_state_0.body_qd,  # input/output
                     ],
                 )
 
@@ -1452,7 +1260,7 @@ class Example:
                         and hasattr(self.vbd_solver, "collect_rigid_contact_forces")
                     ):
                         c_b0, c_b1, c_p0w, c_p1w, c_f_b1, c_count = self.vbd_solver.collect_rigid_contact_forces(
-                            vbd_state_0, self.vbd_contacts, float(dt_vbd)
+                            vbd_state_1, self.vbd_contacts, float(dt_vbd)
                         )
                         # GPU-only path: launch over fixed contact-buffer capacity and early-out in kernel
                         # using c_count[0]. This avoids device->host readback here.
@@ -1908,8 +1716,8 @@ class Example:
                 inputs=[
                     self.sm_task_schedule,
                     self.sm_task_time_limits,
-                    self.sm_ee_pos_target,
-                    self.sm_ee_rot_target,
+                    self.sm_ee_pos_interp,
+                    self.sm_ee_rot_interp,
                     self.mujoco_state_0.body_q,
                     self.vbd_state_0.body_q,
                     self.sm_ee_body_indices,
@@ -2230,6 +2038,11 @@ class Example:
         robot.default_shape_cfg = self.mujoco_default_shape_cfg
 
         robot_file = ROBOT_PATH / "robot_edited.urdf"
+        if not robot_file.is_file():
+            raise FileNotFoundError(
+                f"Robot URDF not found: {robot_file}. "
+                f"Set NEWTON_EXAMPLES_ASSETS_PATH to override (currently ASSETS_ROOT={ASSETS_ROOT})."
+            )
 
         robot.add_urdf(
             str(robot_file),
@@ -2836,8 +2649,8 @@ class Example:
             task_time_np = self.sm_task_time_elapsed.numpy()
             schedule_np = self.sm_task_schedule.numpy()
             time_limits_np = self.sm_task_time_limits.numpy()
-            ee_pos_target_np = self.sm_ee_pos_target.numpy()
-            ee_rot_target_np = self.sm_ee_rot_target.numpy()
+            ee_pos_target_np = self.sm_ee_pos_interp.numpy()
+            ee_rot_target_np = self.sm_ee_rot_interp.numpy()
             body_q_np = self.mujoco_state_0.body_q.numpy()
             ee_body_indices_np = self.sm_ee_body_indices.numpy()
             for arm_idx in range(self.num_arms):
