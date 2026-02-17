@@ -104,8 +104,10 @@ class Model:
         """Attribute frequency follows the number of tetrahedra (see :attr:`~newton.Model.tet_count`)."""
         SPRING = 13
         """Attribute frequency follows the number of springs (see :attr:`~newton.Model.spring_count`)."""
-        WORLD = 14
-        """Attribute frequency follows the number of worlds (see :attr:`~newton.Model.num_worlds`)."""
+        CONSTRAINT_MIMIC = 14
+        """Attribute frequency follows the number of mimic constraints (see :attr:`~newton.Model.constraint_mimic_count`)."""
+        WORLD = 15
+        """Attribute frequency follows the number of worlds (see :attr:`~newton.Model.world_count`)."""
 
     class AttributeNamespace:
         """
@@ -138,7 +140,7 @@ class Model:
         """
         self.requires_grad = False
         """Whether the model was finalized (see :meth:`ModelBuilder.finalize`) with gradient computation enabled."""
-        self.num_worlds = 0
+        self.world_count = 0
         """Number of worlds added to the ModelBuilder."""
 
         self.particle_q = None
@@ -174,9 +176,9 @@ class Model:
         self.particle_world: wp.array | None = None
         """World index for each particle, shape [particle_count], int. -1 for global."""
         self.particle_world_start = None
-        """Start index of the first particle per world, shape [num_worlds + 2], int.
+        """Start index of the first particle per world, shape [world_count + 2], int.
 
-        The entries at indices `0` to `num_worlds - 1` store the start index of the particles belonging to that world.
+        The entries at indices `0` to `world_count - 1` store the start index of the particles belonging to that world.
         The second-last element (accessible via index `-2`) stores the start index of the global particles (i.e. with
         world index `-1`) added to the end of the model, and the last element stores the total particle count.
 
@@ -249,9 +251,9 @@ class Model:
         self.shape_world = None
         """World index for each shape, shape [shape_count], int. -1 for global."""
         self.shape_world_start = None
-        """Start index of the first shape per world, shape [num_worlds + 2], int.
+        """Start index of the first shape per world, shape [world_count + 2], int.
 
-        The entries at indices `0` to `num_worlds - 1` store the start index of the shapes belonging to that world.
+        The entries at indices `0` to `world_count - 1` store the start index of the shapes belonging to that world.
         The second-last element (accessible via index `-2`) stores the start index of the global shapes (i.e. with
         world index `-1`) added to the end of the model, and the last element stores the total shape count.
 
@@ -261,6 +263,12 @@ class Model:
         The total number of global shapes can be computed as:
             `num_global_shapes = shape_world_start[-1] - shape_world_start[-2] + shape_world_start[0]`.
         """
+
+        # Heightfield collision data
+        self.shape_heightfield_data = None
+        """Array of HeightfieldData structs, shape [shape_count]. Contains grid metadata for collision kernels."""
+        self.heightfield_elevation_data = None
+        """Concatenated 1D elevation array for all heightfields. Kernels index via HeightfieldData.data_offset."""
 
         # Mesh SDF storage
         self.shape_sdf_data = None
@@ -358,9 +366,9 @@ class Model:
         self.body_world = None
         """World index for each body, shape [body_count], int. Global entities have index -1."""
         self.body_world_start = None
-        """Start index of the first body per world, shape [num_worlds + 2], int.
+        """Start index of the first body per world, shape [world_count + 2], int.
 
-        The entries at indices `0` to `num_worlds - 1` store the start index of the bodies belonging to that world.
+        The entries at indices `0` to `world_count - 1` store the start index of the bodies belonging to that world.
         The second-last element (accessible via index `-2`) stores the start index of the global bodies (i.e. with
         world index `-1`) added to the end of the model, and the last element stores the total body count.
 
@@ -436,9 +444,9 @@ class Model:
         self.joint_world = None
         """World index for each joint, shape [joint_count], int. -1 for global."""
         self.joint_world_start = None
-        """Start index of the first joint per world, shape [num_worlds + 2], int.
+        """Start index of the first joint per world, shape [world_count + 2], int.
 
-        The entries at indices `0` to `num_worlds - 1` store the start index of the joints belonging to that world.
+        The entries at indices `0` to `world_count - 1` store the start index of the joints belonging to that world.
         The second-last element (accessible via index `-2`) stores the start index of the global joints (i.e. with
         world index `-1`) added to the end of the model, and the last element stores the total joint count.
 
@@ -449,9 +457,9 @@ class Model:
             `num_global_joints = joint_world_start[-1] - joint_world_start[-2] + joint_world_start[0]`.
         """
         self.joint_dof_world_start = None
-        """Start index of the first joint degree of freedom per world, shape [num_worlds + 2], int.
+        """Start index of the first joint degree of freedom per world, shape [world_count + 2], int.
 
-        The entries at indices `0` to `num_worlds - 1` store the start index of the joint DOFs belonging to that world.
+        The entries at indices `0` to `world_count - 1` store the start index of the joint DOFs belonging to that world.
         The second-last element (accessible via index `-2`) stores the start index of the global joint DOFs (i.e. with
         world index `-1`) added to the end of the model, and the last element stores the total joint DOF count.
 
@@ -462,9 +470,9 @@ class Model:
             `num_global_joint_dofs = joint_dof_world_start[-1] - joint_dof_world_start[-2] + joint_dof_world_start[0]`.
         """
         self.joint_coord_world_start = None
-        """Start index of the first joint coordinate per world, shape [num_worlds + 2], int.
+        """Start index of the first joint coordinate per world, shape [world_count + 2], int.
 
-        The entries at indices `0` to `num_worlds - 1` store the start index of the joint coordinates belonging to that world.
+        The entries at indices `0` to `world_count - 1` store the start index of the joint coordinates belonging to that world.
         The second-last element (accessible via index `-2`) stores the start index of the global joint coordinates (i.e. with
         world index `-1`) added to the end of the model, and the last element stores the total joint coordinate count.
 
@@ -475,9 +483,9 @@ class Model:
             `num_global_joint_coords = joint_coord_world_start[-1] - joint_coord_world_start[-2] + joint_coord_world_start[0]`.
         """
         self.joint_constraint_world_start = None
-        """Start index of the first joint constraint per world, shape [num_worlds + 2], int.
+        """Start index of the first joint constraint per world, shape [world_count + 2], int.
 
-        The entries at indices `0` to `num_worlds - 1` store the start index of the joint constraints belonging to that world.
+        The entries at indices `0` to `world_count - 1` store the start index of the joint constraints belonging to that world.
         The second-last element (accessible via index `-2`) stores the start index of the global joint constraints (i.e. with
         world index `-1`) added to the end of the model, and the last element stores the total joint constraint count.
 
@@ -495,9 +503,9 @@ class Model:
         self.articulation_world = None
         """World index for each articulation, shape [articulation_count], int. -1 for global."""
         self.articulation_world_start = None
-        """Start index of the first articulation per world, shape [num_worlds + 2], int.
+        """Start index of the first articulation per world, shape [world_count + 2], int.
 
-        The entries at indices `0` to `num_worlds - 1` store the start index of the articulations belonging to that world.
+        The entries at indices `0` to `world_count - 1` store the start index of the articulations belonging to that world.
         The second-last element (accessible via index `-2`) stores the start index of the global articulations (i.e. with
         world index `-1`) added to the end of the model, and the last element stores the total articulation count.
 
@@ -509,6 +517,8 @@ class Model:
         """
         self.max_joints_per_articulation = 0
         """Maximum number of joints in any articulation (used for IK kernel dimensioning)."""
+        self.max_dofs_per_articulation = 0
+        """Maximum number of degrees of freedom in any articulation (used for Jacobian/mass matrix computation)."""
 
         self.soft_contact_ke = 1.0e3
         """Stiffness of soft contacts (used by :class:`~newton.solvers.SolverSemiImplicit` and :class:`~newton.solvers.SolverFeatherstone`)."""
@@ -554,9 +564,9 @@ class Model:
         self.equality_constraint_world = None
         """World index for each constraint, shape [equality_constraint_count], int."""
         self.equality_constraint_world_start = None
-        """Start index of the first equality constraint per world, shape [num_worlds + 2], int.
+        """Start index of the first equality constraint per world, shape [world_count + 2], int.
 
-        The entries at indices `0` to `num_worlds - 1` store the start index of the equality constraints belonging to that world.
+        The entries at indices `0` to `world_count - 1` store the start index of the equality constraints belonging to that world.
         The second-last element (accessible via index `-2`) stores the start index of the global equality constraints (i.e. with
         world index `-1`) added to the end of the model, and the last element stores the total equality constraint count.
 
@@ -566,6 +576,21 @@ class Model:
         The total number of global equality constraints can be computed as:
             `num_global_equality_constraints = equality_constraint_world_start[-1] - equality_constraint_world_start[-2] + equality_constraint_world_start[0]`.
         """
+
+        self.constraint_mimic_joint0 = None
+        """Follower joint index (``joint0 = coef0 + coef1 * joint1``), shape [constraint_mimic_count], int."""
+        self.constraint_mimic_joint1 = None
+        """Leader joint index (``joint0 = coef0 + coef1 * joint1``), shape [constraint_mimic_count], int."""
+        self.constraint_mimic_coef0 = None
+        """Offset coefficient (coef0) for the mimic constraint (``joint0 = coef0 + coef1 * joint1``), shape [constraint_mimic_count], float."""
+        self.constraint_mimic_coef1 = None
+        """Scale coefficient (coef1) for the mimic constraint (``joint0 = coef0 + coef1 * joint1``), shape [constraint_mimic_count], float."""
+        self.constraint_mimic_enabled = None
+        """Whether constraint is active, shape [constraint_mimic_count], bool."""
+        self.constraint_mimic_key = []
+        """Constraint name/key, shape [constraint_mimic_count], str."""
+        self.constraint_mimic_world = None
+        """World index for each constraint, shape [constraint_mimic_count], int."""
 
         self.particle_count = 0
         """Total number of particles in the system."""
@@ -595,6 +620,8 @@ class Model:
         """Total number of joint constraints of all joints."""
         self.equality_constraint_count = 0
         """Total number of equality constraints in the system."""
+        self.constraint_mimic_count = 0
+        """Total number of mimic constraints in the system."""
 
         # indices of particles sharing the same color
         self.particle_color_groups = []
@@ -622,6 +649,8 @@ class Model:
         If an attribute is not in this dictionary, it is assumed to be a Model attribute (assignment=Model.AttributeAssignment.MODEL)."""
 
         self._requested_state_attributes: set[str] = set()
+        self._collision_pipeline: CollisionPipeline | None = None
+        # cached collision pipeline
         self._requested_contact_attributes: set[str] = set()
 
         # attributes per body
@@ -787,7 +816,7 @@ class Model:
         Set gravity for runtime modification.
 
         Args:
-            gravity: Gravity vector (3,) or per-world array (num_worlds, 3).
+            gravity: Gravity vector (3,) or per-world array (world_count, 3).
             world: If provided, set gravity only for this world.
 
         Note:
@@ -801,80 +830,76 @@ class Model:
         if world is not None:
             if gravity_np.shape != (3,):
                 raise ValueError("Expected single gravity vector (3,) when world is specified")
-            if world < 0 or world >= self.num_worlds:
-                raise IndexError(f"world {world} out of range [0, {self.num_worlds})")
+            if world < 0 or world >= self.world_count:
+                raise IndexError(f"world {world} out of range [0, {self.world_count})")
             current = self.gravity.numpy()
             current[world] = gravity_np
             self.gravity.assign(current)
         elif gravity_np.ndim == 1:
             self.gravity.fill_(gravity_np)
         else:
-            if len(gravity_np) != self.num_worlds:
-                raise ValueError(f"Expected {self.num_worlds} gravity vectors, got {len(gravity_np)}")
+            if len(gravity_np) != self.world_count:
+                raise ValueError(f"Expected {self.world_count} gravity vectors, got {len(gravity_np)}")
             self.gravity.assign(gravity_np)
 
-    def collide(
+    def _init_collision_pipeline(self):
+        """
+        Initialize a :class:`CollisionPipeline` for this model.
+
+        This method creates a default collision pipeline for the model. The pipeline is cached on
+        the model for subsequent use by :meth:`collide`.
+
+        """
+        from .collide import BroadPhaseMode, CollisionPipeline  # noqa: PLC0415
+
+        self._collision_pipeline = CollisionPipeline(self, broad_phase_mode=BroadPhaseMode.EXPLICIT)
+
+    def contacts(
         self: Model,
-        state: State,
-        collision_pipeline: CollisionPipeline | None = None,
-        rigid_contact_max_per_pair: int | None = None,
-        soft_contact_max: int | None = None,
-        soft_contact_margin: float = 0.01,
-        edge_sdf_iter: int = 10,
-        requires_grad: bool | None = None,
     ) -> Contacts:
         """
-        Generate contact points for the particles and rigid bodies in the model.
+        Create and return a :class:`Contacts` object for this model.
 
-        This method produces a :class:`Contacts` object containing collision/contact information
-        for use in contact-dynamics kernels.
-
-        Args:
-            state (State): The current state of the model.
-            collision_pipeline (CollisionPipeline, optional): Collision pipeline to use for contact generation.
-                If not provided, a new one will be created if it hasn't been constructed before for this model.
-            rigid_contact_max_per_pair (int, optional): Maximum number of rigid contacts per shape pair.
-                If None, a kernel is launched to count the number of possible contacts.
-            soft_contact_max (int, optional): Maximum number of soft contacts.
-                If None, a kernel is launched to count the number of possible contacts.
-            soft_contact_margin (float, optional): Margin for soft contact generation. Default is 0.01.
-            edge_sdf_iter (int, optional): Number of search iterations for finding closest contact points between edges and SDF. Default is 10.
-            requires_grad (bool, optional): Whether to duplicate contact arrays for gradient computation. If None, uses :attr:`Model.requires_grad`.
-
-        Returns:
-            Contacts: The contact object containing collision information.
+        This method initializes a collision pipeline with default arguments (when not already
+        cached) and allocates a contacts buffer suitable for storing collision detection results.
+        Call :meth:`collide` to run the collision detection and populate the contacts object.
 
         Note:
             Rigid contact margins are controlled per-shape via :attr:`Model.shape_contact_margin`, which is populated
             from ``ShapeConfig.contact_margin`` during model building. If a shape doesn't specify a contact margin,
             it defaults to ``builder.rigid_contact_margin``. To adjust contact margins, set them before calling
             :meth:`ModelBuilder.finalize`.
+
+        Returns:
+            Contacts: The contact object containing collision information.
         """
-        from .collide import CollisionPipeline  # noqa: PLC0415
+        if self._collision_pipeline is None:
+            self._init_collision_pipeline()
 
-        if requires_grad is None:
-            requires_grad = self.requires_grad
+        contacts = self._collision_pipeline.contacts()
+        return contacts
 
-        if collision_pipeline is not None:
-            self._collision_pipeline = collision_pipeline
-        elif not hasattr(self, "_collision_pipeline"):
-            self._collision_pipeline = CollisionPipeline.from_model(
-                model=self,
-                rigid_contact_max_per_pair=rigid_contact_max_per_pair,
-                soft_contact_max=soft_contact_max,
-                soft_contact_margin=soft_contact_margin,
-                edge_sdf_iter=edge_sdf_iter,
-                requires_grad=requires_grad,
+    def collide(
+        self,
+        state: State,
+        contacts: Contacts,
+    ):
+        """
+        Generate contact points for the particles and rigid bodies in the model using the default collision
+        pipeline.
+
+        Args:
+            state (State): The current simulation state.
+            contacts (Contacts): The contacts buffer to populate (will be cleared first).
+        """
+
+        if self._collision_pipeline is None:
+            raise ValueError(
+                "Model does not have a collision pipeline. Call model.contacts() "
+                "or use your collision pipeline directly: CollisionPipeline.collide(state, contacts)."
             )
 
-        # update any additional parameters
-        self._collision_pipeline.soft_contact_margin = soft_contact_margin
-        self._collision_pipeline.edge_sdf_iter = edge_sdf_iter
-
-        contacts = self._collision_pipeline.collide(self, state)
-        # attach custom attributes with assignment==CONTACT
-        self._add_custom_attributes(contacts, Model.AttributeAssignment.CONTACT, requires_grad=requires_grad)
-        return contacts
+        self._collision_pipeline.collide(state, contacts)
 
     def request_state_attributes(self, *attributes: str) -> None:
         """
@@ -1082,43 +1107,3 @@ class Model:
 
         attributes.extend(self._requested_state_attributes.difference(attributes))
         return attributes
-
-    def _count_rigid_contact_points(self, rigid_contact_max_per_pair: int | None = None) -> int:
-        """
-        Count the maximum number of rigid contact points that need to be allocated.
-
-        This method estimates the upper bound on the number of rigid contact points that may be generated
-        during collision detection, based on the current set of shape contact pairs and their geometry.
-
-        Args:
-            rigid_contact_max_per_pair: Maximum number of contact points per shape pair.
-                If None or <= 0, no limit is applied.
-
-        Returns:
-            The potential number of rigid contact points that may need to be allocated.
-        """
-        from ..geometry.kernels import count_contact_points  # noqa: PLC0415
-
-        if self.shape_contact_pair_count == 0:
-            return 0
-
-        if rigid_contact_max_per_pair is None or rigid_contact_max_per_pair <= 0:
-            rigid_contact_max_per_pair = 0
-        # calculate the potential number of shape pair contact points
-        contact_count = wp.zeros(1, dtype=wp.int32, device=self.device)
-        wp.launch(
-            kernel=count_contact_points,
-            dim=self.shape_contact_pair_count,
-            inputs=[
-                self.shape_contact_pairs,
-                self.shape_type,
-                self.shape_scale,
-                self.shape_source_ptr,
-                rigid_contact_max_per_pair,
-            ],
-            outputs=[contact_count],
-            device=self.device,
-            record_tape=False,
-        )
-        counts = contact_count.numpy()
-        return int(counts[0])
