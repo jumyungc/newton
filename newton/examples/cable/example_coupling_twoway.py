@@ -737,7 +737,6 @@ class Example:
         self.vbd_iterations = 20
 
         self.vbd_collide_substeps = 1  # run VBD collision every X VBD substeps
-        self.vbd_collision_pipeline_type = "unified"
         self.vbd_mesh_use_sdf = True
         self.vbd_mesh_sdf_max_resolution = 64
 
@@ -886,9 +885,8 @@ class Example:
         if self._use_mujoco_contacts:
             self.mujoco_contacts = Contacts(0, 0)
         else:
-            self.mujoco_contacts = self.mujoco_model.collide(
-                self.mujoco_state_0, collision_pipeline=self.collision_pipeline
-            )
+            self.mujoco_contacts = self.collision_pipeline.contacts()
+            self.collision_pipeline.collide(self.mujoco_state_0, self.mujoco_contacts)
 
     def capture(self):
         self.capture_sim()
@@ -981,9 +979,7 @@ class Example:
                     if not self._use_mujoco_contacts and (
                         mujoco_collision_step_counter % self.mujoco_collide_substeps == 0
                     ):
-                        self.mujoco_contacts = self.mujoco_model.collide(
-                            mujoco_state_0, collision_pipeline=self.collision_pipeline
-                        )
+                        self.collision_pipeline.collide(mujoco_state_0, self.mujoco_contacts)
 
                     self.mujoco_solver.step(
                         mujoco_state_0, mujoco_state_1, self.control, self.mujoco_contacts, shared_substep_dt
@@ -1079,9 +1075,7 @@ class Example:
                     self.vbd_contacts is None
                 )
                 if update_vbd_history:
-                    self.vbd_contacts = self.vbd_model.collide(
-                        vbd_state_0, collision_pipeline=self.vbd_collision_pipeline
-                    )
+                    self.vbd_collision_pipeline.collide(vbd_state_0, self.vbd_contacts)
                 self.vbd_solver.set_rigid_history_update(bool(update_vbd_history))
 
                 self.vbd_solver.step(vbd_state_0, vbd_state_1, self.vbd_control, self.vbd_contacts, shared_substep_dt)
@@ -1148,9 +1142,7 @@ class Example:
                     if not self._use_mujoco_contacts and (
                         mujoco_collision_step_counter % self.mujoco_collide_substeps == 0
                     ):
-                        self.mujoco_contacts = self.mujoco_model.collide(
-                            mujoco_state_0, collision_pipeline=self.collision_pipeline
-                        )
+                        self.collision_pipeline.collide(mujoco_state_0, self.mujoco_contacts)
 
                     self.mujoco_solver.step(
                         mujoco_state_0, mujoco_state_1, self.control, self.mujoco_contacts, mujoco_substep_dt
@@ -1242,9 +1234,7 @@ class Example:
                     self.vbd_contacts is None
                 )
                 if update_vbd_history:
-                    self.vbd_contacts = self.vbd_model.collide(
-                        vbd_state_0, collision_pipeline=self.vbd_collision_pipeline
-                    )
+                    self.vbd_collision_pipeline.collide(vbd_state_0, self.vbd_contacts)
                 self.vbd_solver.set_rigid_history_update(bool(update_vbd_history))
                 self.vbd_solver.step(vbd_state_0, vbd_state_1, self.vbd_control, self.vbd_contacts, dt_vbd)
                 vbd_collision_step_counter += 1
@@ -2004,7 +1994,7 @@ class Example:
             args: Optional command-line arguments.
 
         Returns:
-            CollisionPipelineUnified instance or None for MuJoCo native contacts.
+            CollisionPipeline instance or None for MuJoCo native contacts.
         """
         if collision_mode == CollisionMode.MUJOCO:
             # MuJoCo uses its own contact solver, but we still need Newton's collision pipeline
@@ -2015,16 +2005,14 @@ class Example:
             return newton.examples.create_collision_pipeline(self.mujoco_model, args)
         elif collision_mode == CollisionMode.NEWTON_SDF:
             # Newton with SDF for mesh collision
-            return newton.CollisionPipelineUnified.from_model(
-                self.mujoco_model,
-                reduce_contacts=True,
-                broad_phase_mode=newton.BroadPhaseMode.EXPLICIT,
+            return newton.CollisionPipeline(
+                self.mujoco_model, reduce_contacts=True, broad_phase_mode=newton.BroadPhaseMode.EXPLICIT
             )
         elif collision_mode == CollisionMode.NEWTON_HYDROELASTIC:
             # Newton with hydroelastic contacts
             from newton.geometry import SDFHydroelasticConfig  # noqa: PLC0415
 
-            return newton.CollisionPipelineUnified.from_model(
+            return newton.CollisionPipeline(
                 self.mujoco_model,
                 reduce_contacts=True,
                 broad_phase_mode=newton.BroadPhaseMode.EXPLICIT,
@@ -2050,7 +2038,13 @@ class Example:
             floating=False,
             enable_self_collisions=False,
             parse_visuals_as_colliders=False,
+            ignore_inertial_definitions=True,
         )
+        # Keep pre-mimic-support behavior for this example: gripper mimic constraints
+        # were previously ignored by SolverMuJoCo and alter the baseline trajectories.
+        mimic_count = len(robot.constraint_mimic_enabled)
+        if mimic_count > 0:
+            robot.constraint_mimic_enabled[-mimic_count:] = [False] * mimic_count
 
         # Discover gripper DOFs by joint key (robust to URDF changes).
         # ModelBuilder.joint_key is per-joint; convert to DOF index using joint_qd_start.
@@ -2334,9 +2328,9 @@ class Example:
         self.vbd_collision_pipeline = newton.examples.create_collision_pipeline(
             self.vbd_model,
             args,
-            collision_pipeline_type=self.vbd_collision_pipeline_type,
         )
-        self.vbd_contacts = self.vbd_model.collide(self.vbd_state_0, collision_pipeline=self.vbd_collision_pipeline)
+        self.vbd_contacts = self.vbd_collision_pipeline.contacts()
+        self.vbd_collision_pipeline.collide(self.vbd_state_0, self.vbd_contacts)
 
         # Initialize coupling buffers only when two-way coupling is enabled.
         if self.enable_robot and self.enable_two_way_coupling:
