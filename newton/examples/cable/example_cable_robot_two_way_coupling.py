@@ -75,7 +75,10 @@ class TaskType(IntEnum):
     GRASP = 3
     HOLD_GRASP = 4
     EXTRACT = 5
-    DONE = 6
+    HOLD_EXTRACT = 6
+    INJECT = 7
+    RELEASE = 8
+    DONE = 9
 
 
 @wp.kernel(enable_backward=False)
@@ -495,10 +498,24 @@ def set_target_pose_kernel(
         ee_pos_target[arm_idx] = ee_pos_prev + extract_axis * extract_distance
         ee_quat_target = ee_quat_prev
         t_gripper = 1.0
-    elif task == TaskType.DONE.value:
+    elif task == TaskType.HOLD_EXTRACT.value:
         ee_pos_target[arm_idx] = ee_pos_prev
         ee_quat_target = ee_quat_prev
         t_gripper = 1.0
+    elif task == TaskType.INJECT.value:
+        # Reverse of EXTRACT: push back along negative capsule +Z.
+        extract_axis = wp.quat_rotate(capsule_quat_prev, wp.vec3(0.0, 0.0, 1.0))
+        ee_pos_target[arm_idx] = ee_pos_prev - extract_axis * extract_distance
+        ee_quat_target = ee_quat_prev
+        t_gripper = 1.0
+    elif task == TaskType.RELEASE.value:
+        ee_pos_target[arm_idx] = ee_pos_prev
+        ee_quat_target = ee_quat_prev
+        t_gripper = 0.0
+    elif task == TaskType.DONE.value:
+        ee_pos_target[arm_idx] = ee_pos_prev
+        ee_quat_target = ee_quat_prev
+        t_gripper = 0.0
     else:
         ee_pos_target[arm_idx] = ee_pos_prev
         t_gripper = 1.0
@@ -549,12 +566,7 @@ def apply_gripper_centering_correction_kernel(
     task = task_schedule[task_idx[arm]]
 
     if two_way_mode == 1:
-        if not (
-            task == TaskType.ENGAGE.value
-            or task == TaskType.GRASP.value
-            or task == TaskType.HOLD_GRASP.value
-            or task == TaskType.EXTRACT.value
-        ):
+        if not (task == TaskType.ENGAGE.value or task == TaskType.GRASP.value or task == TaskType.HOLD_GRASP.value):
             return
     else:
         if task != TaskType.ENGAGE.value:
@@ -617,16 +629,21 @@ def apply_one_way_gripper_gap_lock_kernel(
     current MuJoCo joint positions as locked targets.
 
     Lock lifecycle:
-      - APPROACH / ENGAGE: lock is reset (gripper free to move).
+      - APPROACH / ENGAGE / RELEASE / DONE: lock is reset (gripper free to move).
       - GRASP / HOLD_GRASP: lock triggers when gap <= stop_gap; once active it
         overrides ``gripper_target`` with the captured joint values.
-      - EXTRACT / DONE: lock remains active (gripper stays frozen).
+      - EXTRACT / HOLD_EXTRACT / INJECT: lock remains active (gripper stays frozen).
     """
     arm = wp.tid()
     task = task_schedule[task_idx[arm]]
 
-    # Reset lock at the beginning of a new grasp cycle.
-    if task == TaskType.APPROACH.value or task == TaskType.ENGAGE.value:
+    # Reset lock when the gripper should be free.
+    if (
+        task == TaskType.APPROACH.value
+        or task == TaskType.ENGAGE.value
+        or task == TaskType.RELEASE.value
+        or task == TaskType.DONE.value
+    ):
         lock_active[arm] = 0
         return
 
@@ -634,7 +651,8 @@ def apply_one_way_gripper_gap_lock_kernel(
         task == TaskType.GRASP.value
         or task == TaskType.HOLD_GRASP.value
         or task == TaskType.EXTRACT.value
-        or task == TaskType.DONE.value
+        or task == TaskType.HOLD_EXTRACT.value
+        or task == TaskType.INJECT.value
     ):
         return
 
@@ -743,12 +761,16 @@ class Example:
         self.use_graph = wp.get_device().is_cuda
         self.enable_auto_grasp = True
 
+        # Object type: "capsule" (single rigid body) or "cable" (chain of segments)
+        self.object_type = str(getattr(args, "object_type", "capsule")) if args is not None else "capsule"
+        self.use_cable = self.object_type == "cable"
+
         # ----------------------------------------------------------------
         # Coupling
         # ----------------------------------------------------------------
         coupling_mode = str(getattr(args, "coupling_mode", "two-way")) if args is not None else "two-way"
-        if coupling_mode not in ("two-way", "one-way"):
-            raise ValueError(f"coupling_mode must be 'two-way' or 'one-way', got: {coupling_mode}")
+        if coupling_mode not in ("two-way", "one-way", "none"):
+            raise ValueError(f"coupling_mode must be 'two-way', 'one-way', or 'none', got: {coupling_mode}")
         self.coupling_mode = coupling_mode
         self.enable_one_way_coupling = self.coupling_mode == "one-way"
         self.enable_two_way_coupling = self.coupling_mode == "two-way"
@@ -772,7 +794,7 @@ class Example:
 
         self.mujoco_collision_mode = CollisionMode.NEWTON_SDF
         self.mujoco_collide_substeps = 2  # run MuJoCo collision every X MuJoCo substeps
-        self.mujoco_iterations = 50
+        self.mujoco_iterations = 30
         self.mujoco_ls_iterations = 25
         self.enable_robot = True
         self.rigid_contact_max = 100000
@@ -780,10 +802,16 @@ class Example:
         # IK settings.
         self.ik_iters = 24
 
-        # Gripper joint drive tuning.
-        self.gripper_joint_target_ke = 50.0
-        self.gripper_joint_target_kd = 80.0
-        self.gripper_joint_effort_limit = 500.0
+        # Gripper joint drive tuning.  Cable mode needs stiffer drives to resist
+        # cable reaction forces during extraction.
+        if self.use_cable:
+            self.gripper_joint_target_ke = 1000.0
+            self.gripper_joint_target_kd = 500.0
+            self.gripper_joint_effort_limit = 10000.0
+        else:
+            self.gripper_joint_target_ke = 50.0
+            self.gripper_joint_target_kd = 80.0
+            self.gripper_joint_effort_limit = 500.0
 
         # MuJoCo scene defaults derived from collision mode.
         self.mujoco_default_shape_cfg = self._create_shape_config(self.mujoco_collision_mode)
@@ -809,10 +837,13 @@ class Example:
 
         # Task durations [s].
         self.sm_time_approach = 1.0
-        self.sm_time_engage = 1.0
-        self.sm_time_grasp = 3.0
-        self.sm_time_hold_grasp = 3.0
-        self.sm_time_extract = 3.0
+        self.sm_time_engage = 0.5
+        self.sm_time_grasp = 1.0
+        self.sm_time_hold_grasp = 0.5
+        self.sm_time_extract = 1.5
+        self.sm_time_hold_extract = 1.0
+        self.sm_time_inject = 1.5
+        self.sm_time_release = 0.5
 
         self._setup_mujoco_world(args)
 
@@ -820,7 +851,7 @@ class Example:
         # VBD
         # ----------------------------------------------------------------
         self.vbd_substeps = 20
-        self.vbd_iterations = 20
+        self.vbd_iterations = 10
 
         self.vbd_collide_substeps = 1  # run VBD collision every X VBD substeps
         self.vbd_mesh_use_sdf = True
@@ -842,17 +873,28 @@ class Example:
         self.vbd_capsule_contact_margin = 0.001
         self.vbd_capsule_mass = 0.01
 
-        self.vbd_env_mu = 0.1  # Static colliding objects
+        self.vbd_env_mu = 1.0  # Static colliding objects
         self.vbd_env_thickness = 1.0e-4
         self.vbd_env_contact_margin = 0.001
 
-        # Capsule geometry
+        # Capsule geometry (shared by both capsule and cable modes)
         self.capsule_radius = 0.003
         self.capsule_cylinder_height = 4.0 / 60.0
         self.capsule_tilt_angle_deg = 30.0
         self.capsule_length_offset = 0.01
         self.capsule_spawn_x_bias = 0.005
         self.hose_y_offset = 0.15
+
+        # Cable parameters (adapted from example_cable_hose_connector)
+        self.cable_num_segments = max(4, int(getattr(args, "cable_segments", 20)) if args is not None else 20)
+        self.cable_num_straight_ends = max(1, int(getattr(args, "cable_straight_ends", 3)) if args is not None else 3)
+        _cable_span_arg = getattr(args, "cable_span", None) if args is not None else None
+        self.cable_span = float(_cable_span_arg) if _cable_span_arg is not None else 2.0 * float(self.hose_y_offset)
+        self.cable_stretch_stiffness = 1.0e12  # EA [N]
+        self.cable_bend_stiffness = 1.0e1  # EI [N*m^2]
+        self.cable_stretch_damping = 1.0e-4
+        self.cable_bend_damping = 1.0e-1
+        self.cable_density = 1000.0  # [kg/m^3]
 
         # One-way grasp stop-gap [m]: finger gap at which gripper joints freeze.
         # If --one-way-stop-gap <= 0, derive from capsule diameter + contact inflation.
@@ -871,8 +913,10 @@ class Example:
 
         self.capsule_spawn_axis_offset = 0.01
 
-        self.vbd_rigid_avbd_beta = 1.0e5
+        self.vbd_rigid_avbd_beta = 1.0e6
         self.vbd_rigid_contact_k_start = 1.0e2
+        self.vbd_rigid_joint_linear_k_start = 1.0e4
+        self.vbd_rigid_joint_angular_k_start = 1.0e1
 
         self._setup_vbd_world_and_coupling(args)
 
@@ -1095,8 +1139,12 @@ class Example:
         ]
 
         finger_body_indices = {
+            robot.body_key.index("right_gripper_base"),
+            robot.body_key.index("right_gripper_camera_bracket"),
             robot.body_key.index("right_gripper_leftfinger"),
             robot.body_key.index("right_gripper_rightfinger"),
+            robot.body_key.index("left_gripper_base"),
+            robot.body_key.index("left_gripper_camera_bracket"),
             robot.body_key.index("left_gripper_leftfinger"),
             robot.body_key.index("left_gripper_rightfinger"),
         }
@@ -1222,7 +1270,263 @@ class Example:
             "capsule_half_height": 0.5 * capsule_height,
             "capsules": [("test_capsule_a", xform_a), ("test_capsule_b", xform_b)],
             "tilt_angles": [-tilt_angle_rad, -tilt_angle_rad],
+            "capsule_axis": capsule_axis,
         }
+
+    def _create_capsule_objects(self, vbd_builder, capsule_specs):
+        """Create single-body capsule objects in VBD (original mode)."""
+        self.vbd_capsule_body_ids = []
+        self.vbd_cable_all_body_ids = []
+
+        capsule_cfg = vbd_builder.default_shape_cfg.copy()
+        capsule_cfg.mu = float(self.vbd_capsule_mu)
+        capsule_cfg.thickness = float(self.vbd_capsule_thickness)
+        capsule_cfg.contact_margin = float(self.vbd_capsule_contact_margin)
+        capsule_mass = float(self.vbd_capsule_mass)
+
+        for key, xform in capsule_specs["capsules"]:
+            body_id = vbd_builder.add_body(xform=xform, key=key, mass=capsule_mass)
+            vbd_builder.add_shape_capsule(
+                body=body_id,
+                radius=capsule_specs["capsule_radius"],
+                half_height=capsule_specs["capsule_half_height"],
+                cfg=capsule_cfg,
+            )
+            self.vbd_capsule_body_ids.append(body_id)
+            self.vbd_cable_all_body_ids.append([body_id])
+
+    @staticmethod
+    def _create_cable_points(
+        pos_a: wp.vec3,
+        pos_b: wp.vec3,
+        axis: wp.vec3,
+        num_elements: int,
+        num_straight_ends: int = 1,
+    ) -> list[wp.vec3]:
+        """Generate cable polyline from *pos_a* to *pos_b* with a symmetric arch.
+
+        Closely follows ``example_cable_hose_connector.create_symmetric_straight_ends_cable_geometry_yz``
+        but generalised to an arbitrary span direction.
+
+        Symmetry is enforced by mirroring about the perpendicular bisector of
+        the A→B segment.  When *pos_a* and *pos_b* share the same Z
+        coordinate the cable start and end will also share the same Z.
+
+        Construction:
+
+        - First *num_straight_ends* segments go straight along *axis*.
+        - Last *num_straight_ends* segments are the mirror of the first about
+          the perpendicular bisector of A→B.
+        - Middle: C1-smooth cubic Bézier connecting the two stub tips, with
+          control points extending along *axis*.
+        - Resampled to approximately uniform segment length.
+        - Exact symmetry enforced by mirroring the first half onto the second.
+
+        Returns:
+            List of ``num_elements + 1`` ``wp.vec3`` points.
+        """
+        n_end = int(num_straight_ends)
+        if 2 * n_end >= num_elements:
+            raise ValueError("num_straight_ends too large for num_elements (need 2*n_end < num_elements)")
+
+        span_vec = pos_b - pos_a
+        span_length = float(wp.length(span_vec))
+        e_span = wp.normalize(span_vec)
+        seg_len = span_length / num_elements
+
+        e_np = np.array([float(e_span[0]), float(e_span[1]), float(e_span[2])])
+        a_np = np.array([float(pos_a[0]), float(pos_a[1]), float(pos_a[2])])
+
+        def _mirror(p_np: np.ndarray) -> np.ndarray:
+            """Mirror *p_np* about the perpendicular bisector of A→B."""
+            s = np.dot(p_np - a_np, e_np)
+            return p_np + (span_length - 2.0 * s) * e_np
+
+        d0 = axis
+
+        num_points = num_elements + 1
+        points_np = np.zeros((num_points, 3))
+
+        # First end: straight stubs along d0 from pos_a.
+        d0_np = np.array([float(d0[0]), float(d0[1]), float(d0[2])])
+        for i in range(n_end + 1):
+            points_np[i] = a_np + float(i) * seg_len * d0_np
+
+        # Last end: mirror of first end about the perpendicular bisector.
+        for i in range(n_end + 1):
+            points_np[num_elements - i] = _mirror(points_np[i])
+
+        # Bézier middle connecting the two stub tips.
+        p_a = points_np[n_end]
+        p_b = points_np[num_elements - n_end]
+        chord_len = float(np.linalg.norm(p_b - p_a))
+        ctrl = 1.5 * chord_len
+        c1 = p_a + ctrl * d0_np
+        c2 = _mirror(c1)
+
+        mid_segments = num_elements - 2 * n_end
+        for j in range(1, mid_segments):
+            u = float(j) / float(mid_segments)
+            omu = 1.0 - u
+            b0 = omu * omu * omu
+            b1 = 3.0 * omu * omu * u
+            b2 = 3.0 * omu * u * u
+            b3 = u * u * u
+            points_np[n_end + j] = b0 * p_a + b1 * c1 + b2 * c2 + b3 * p_b
+
+        # Resample for approximately uniform segment length.
+        ds = np.linalg.norm(points_np[1:] - points_np[:-1], axis=1)
+        arc = np.concatenate([[0.0], np.cumsum(ds)])
+        total = float(arc[-1])
+        if total > 1.0e-12:
+            target = np.linspace(0.0, total, num_elements + 1, dtype=float)
+            resampled = np.empty((num_elements + 1, 3), dtype=float)
+            seg = 0
+            for i in range(num_elements + 1):
+                ti = float(target[i])
+                while seg + 1 < arc.size and arc[seg + 1] < ti:
+                    seg += 1
+                if seg + 1 >= arc.size:
+                    resampled[i] = points_np[-1]
+                else:
+                    t0 = float(arc[seg])
+                    t1 = float(arc[seg + 1])
+                    w = 0.0 if t1 <= t0 else (ti - t0) / (t1 - t0)
+                    resampled[i] = (1.0 - w) * points_np[seg] + w * points_np[seg + 1]
+
+            # Enforce exact symmetry by mirroring the first half.
+            mid = num_elements // 2
+            for i in range(mid + 1):
+                resampled[num_elements - i] = _mirror(resampled[i])
+
+            points_np = resampled
+
+        return [wp.vec3(float(p[0]), float(p[1]), float(p[2])) for p in points_np]
+
+    def _create_cable_objects(self, vbd_builder, capsule_specs):
+        """Create one cable per capsule, each forming a symmetric arch.
+
+        Each cable replaces its corresponding capsule:
+
+        - The cable starts at the capsule *bottom* (not center), so that the
+          first ``cable_num_straight_ends`` segments align with the capsule.
+        - The cable end is at the same Y and Z as the start, offset by
+          ``cable_span`` in +X, so start and end share the same height.
+        - The remaining segments follow a smooth Bézier curve (adapted from
+          ``example_cable_hose_connector``) that arches symmetrically about the
+          midpoint, mirrored across the perpendicular bisector of the span.
+        """
+        n_seg = self.cable_num_segments
+        radius = capsule_specs["capsule_radius"]
+        axis = capsule_specs["capsule_axis"]
+        half_height = float(capsule_specs["capsule_half_height"])
+        cable_span = self.cable_span
+
+        cable_cfg = vbd_builder.default_shape_cfg.copy()
+        cable_cfg.mu = float(self.vbd_capsule_mu)
+        cable_cfg.thickness = float(self.vbd_capsule_thickness)
+        cable_cfg.contact_margin = float(self.vbd_capsule_contact_margin)
+
+        self.vbd_capsule_body_ids = []
+        self.vbd_cable_all_body_ids = []
+        self.cable_grasp_segment_indices = []
+        self._cable_grasp_offsets: list[float] = []
+        arc_length = 0.0
+
+        capsule_full_length = 2.0 * (half_height + radius)
+
+        for cable_idx, (_key, xform) in enumerate(capsule_specs["capsules"]):
+            pos = wp.transform_get_translation(xform)
+
+            # Start at the capsule bottom (pos is the capsule center).
+            cable_start = wp.vec3(
+                float(pos[0]) - half_height * float(axis[0]),
+                float(pos[1]) - half_height * float(axis[1]),
+                float(pos[2]) - half_height * float(axis[2]),
+            )
+            # End at the same Y and Z, offset purely in +X so both arms
+            # of the arch share the same height.
+            cable_end = wp.vec3(
+                float(cable_start[0]) + cable_span,
+                float(cable_start[1]),
+                float(cable_start[2]),
+            )
+
+            cable_points = self._create_cable_points(
+                pos_a=cable_start,
+                pos_b=cable_end,
+                axis=axis,
+                num_elements=n_seg,
+                num_straight_ends=self.cable_num_straight_ends,
+            )
+            cable_edge_q = newton.utils.create_parallel_transport_cable_quaternions(cable_points)
+
+            rod_bodies, _rod_joints = vbd_builder.add_rod(
+                positions=cable_points,
+                quaternions=cable_edge_q,
+                radius=radius,
+                cfg=cable_cfg,
+                stretch_stiffness=self.cable_stretch_stiffness,
+                stretch_damping=self.cable_stretch_damping,
+                bend_stiffness=self.cable_bend_stiffness,
+                bend_damping=self.cable_bend_damping,
+                key=f"cable_{cable_idx}",
+            )
+
+            arc_length = sum(
+                float(wp.length(cable_points[i + 1] - cable_points[i])) for i in range(len(cable_points) - 1)
+            )
+
+            # Find the cable segment closest to where the robot would grasp
+            # the single capsule.  The capsule grasp point is at fraction
+            # sm_grasp_axis_fraction along the capsule's local +Z axis.
+            grasp_offset_along_axis = (self.sm_grasp_axis_fraction - 0.5) * capsule_full_length
+            capsule_grasp_pt = wp.vec3(
+                float(pos[0]) + grasp_offset_along_axis * float(axis[0]),
+                float(pos[1]) + grasp_offset_along_axis * float(axis[1]),
+                float(pos[2]) + grasp_offset_along_axis * float(axis[2]),
+            )
+
+            best_seg = 0
+            best_dist = float("inf")
+            best_local_offset = 0.0
+            for seg_i in range(n_seg):
+                seg_start = cable_points[seg_i]
+                seg_end = cable_points[seg_i + 1]
+                seg_center = wp.vec3(
+                    0.5 * (float(seg_start[0]) + float(seg_end[0])),
+                    0.5 * (float(seg_start[1]) + float(seg_end[1])),
+                    0.5 * (float(seg_start[2]) + float(seg_end[2])),
+                )
+                d = float(wp.length(seg_center - capsule_grasp_pt))
+                if d < best_dist:
+                    best_dist = d
+                    best_seg = seg_i
+                    # Project grasp point onto the segment axis (local +Z).
+                    seg_dir = wp.normalize(seg_end - seg_start)
+                    seg_half = 0.5 * float(wp.length(seg_end - seg_start))
+                    # Offset from the segment body origin (= seg_start) to the
+                    # grasp point, along the segment's local Z.
+                    proj = float(wp.dot(capsule_grasp_pt - seg_start, seg_dir))
+                    best_local_offset = max(0.0, min(proj, 2.0 * seg_half))
+
+            grasp_seg = best_seg
+
+            self.vbd_capsule_body_ids.append(rod_bodies[grasp_seg])
+            self.vbd_cable_all_body_ids.append(rod_bodies)
+            self.cable_grasp_segment_indices.append(grasp_seg)
+            self._cable_grasp_offsets.append(best_local_offset)
+
+        self.cable_total_length = arc_length
+        self.vbd_cable_segment_half_height = arc_length / n_seg / 2.0
+
+        if self.verbose:
+            print(
+                f"  Created {len(capsule_specs['capsules'])} cables: "
+                f"{n_seg} segments each, arc_length={arc_length:.4f} m, "
+                f"span={cable_span:.4f} m, straight_ends={self.cable_num_straight_ends}, "
+                f"grasp segments={self.cable_grasp_segment_indices}"
+            )
 
     def _create_proxy_bodies(self, vbd_builder):
         """Create proxy bodies in VBD that mirror MuJoCo robot gripper finger bodies.
@@ -1381,18 +1685,27 @@ class Example:
             self.proxy_body_ids.append(proxy_body_id)
             self.proxy_mj_body_ids.append(mj_body_id)
 
-        # Filter self-collisions between the two fingers of each gripper.
-        for a, b in [
-            ("right_gripper_leftfinger", "right_gripper_rightfinger"),
-            ("left_gripper_leftfinger", "left_gripper_rightfinger"),
-        ]:
-            sa = proxy_finger_shape_ids.get(a, [])
-            sb = proxy_finger_shape_ids.get(b, [])
-            if not sa or not sb:
-                continue
-            for s1 in sa:
-                for s2 in sb:
-                    vbd_builder.add_shape_collision_filter_pair(int(s1), int(s2))
+        # Filter self-collisions between all parts of the same gripper.
+        right_gripper_parts = [
+            "right_gripper_base",
+            "right_gripper_camera_bracket",
+            "right_gripper_leftfinger",
+            "right_gripper_rightfinger",
+        ]
+        left_gripper_parts = [
+            "left_gripper_base",
+            "left_gripper_camera_bracket",
+            "left_gripper_leftfinger",
+            "left_gripper_rightfinger",
+        ]
+        for parts in [right_gripper_parts, left_gripper_parts]:
+            for i in range(len(parts)):
+                for j in range(i + 1, len(parts)):
+                    sa = proxy_finger_shape_ids.get(parts[i], [])
+                    sb = proxy_finger_shape_ids.get(parts[j], [])
+                    for s1 in sa:
+                        for s2 in sb:
+                            vbd_builder.add_shape_collision_filter_pair(int(s1), int(s2))
 
         if self.verbose:
             print(f"  Created {len(self.proxy_body_ids)} proxy bodies")
@@ -1461,30 +1774,18 @@ class Example:
             # Enable SDF volumes for VBD mesh shapes (used by unified mesh contact path).
             vbd_builder.default_shape_cfg.sdf_max_resolution = int(self.vbd_mesh_sdf_max_resolution)
 
-        # Create dynamic capsules in the VBD model from the shared capsule spec helper.
+        # Create dynamic objects in the VBD model from the shared capsule spec helper.
         capsule_specs = self._compute_capsule_specs()
         self.capsule_body_keys = [name for name, _xform in capsule_specs["capsules"]]
         self.capsule_tilt_angles = capsule_specs["tilt_angles"]
 
         self.vbd_capsule_radius = float(capsule_specs["capsule_radius"])
         self.vbd_capsule_half_height = float(capsule_specs["capsule_half_height"])
-        self.vbd_capsule_body_ids = []
 
-        capsule_cfg = vbd_builder.default_shape_cfg.copy()
-        capsule_cfg.mu = float(self.vbd_capsule_mu)
-        capsule_cfg.thickness = float(self.vbd_capsule_thickness)
-        capsule_cfg.contact_margin = float(self.vbd_capsule_contact_margin)
-        capsule_mass = float(self.vbd_capsule_mass)
-
-        for key, xform in capsule_specs["capsules"]:
-            body_id = vbd_builder.add_body(xform=xform, key=key, mass=capsule_mass)
-            vbd_builder.add_shape_capsule(
-                body=body_id,
-                radius=capsule_specs["capsule_radius"],
-                half_height=capsule_specs["capsule_half_height"],
-                cfg=capsule_cfg,
-            )
-            self.vbd_capsule_body_ids.append(body_id)
+        if self.use_cable:
+            self._create_cable_objects(vbd_builder, capsule_specs)
+        else:
+            self._create_capsule_objects(vbd_builder, capsule_specs)
 
         # Add static scene geometry to VBD (table + STL connectors + ground plane).
         if not HOSE_CONNECTOR_PATH.exists():
@@ -1502,6 +1803,7 @@ class Example:
         min_z = float(np.min(mesh_vertices_centered[:, 2])) if mesh_vertices_centered.size else 0.0
         mesh_z = float(-min_z)
         table_offset = wp.vec3(*table_top_center)
+
         mesh_pos_a = wp.vec3(0.0, right_hose_y, mesh_z) + table_offset
         mesh_pos_b = wp.vec3(0.0, left_hose_y, mesh_z) + table_offset
 
@@ -1510,6 +1812,38 @@ class Example:
             wp.transform(p=mesh_pos_a, q=mesh_quat),
             wp.transform(p=mesh_pos_b, q=mesh_quat),
         ]
+
+        # In cable mode, add mirrored connectors at the free end of each arch.
+        # Each mirrored STL is obtained by rotating the original STL 180° around
+        # Z at the cable's midpoint (average of start and end tips).  This
+        # guarantees the mirrored STL has exactly the same relationship to the
+        # cable end as the original has to the cable start.
+        if self.use_cable:
+            rot_pi_z = wp.quat_from_axis_angle(wp.vec3(0.0, 0.0, 1.0), wp.pi)
+            axis = capsule_specs["capsule_axis"]
+            half_ht = float(capsule_specs["capsule_half_height"])
+            orig_xforms = list(self.vbd_mesh_xforms)
+            for orig_xform, (_key, cap_xform) in zip(orig_xforms, capsule_specs["capsules"], strict=True):
+                cap_pos = wp.transform_get_translation(cap_xform)
+                cable_start_x = float(cap_pos[0]) - half_ht * float(axis[0])
+                cable_start_y = float(cap_pos[1]) - half_ht * float(axis[1])
+                cable_mid_x = cable_start_x + self.cable_span / 2.0
+                cable_mid_y = cable_start_y
+
+                orig_pos = wp.transform_get_translation(orig_xform)
+                orig_quat = wp.transform_get_rotation(orig_xform)
+                dx = float(orig_pos[0]) - cable_mid_x
+                dy = float(orig_pos[1]) - cable_mid_y
+                mirror_pos = wp.vec3(
+                    cable_mid_x - dx,
+                    cable_mid_y - dy,
+                    float(orig_pos[2]),
+                )
+                mirror_quat = rot_pi_z * orig_quat
+                self.vbd_mesh_xforms.append(wp.transform(p=mirror_pos, q=mirror_quat))
+
+            # Store the cable layout midpoint (same for both cables).
+            self._cable_layout_mid_x = cable_mid_x
 
         # Use the VBD-tuned contact parameters for static environment shapes as well.
         vbd_ground_cfg = vbd_builder.default_shape_cfg.copy()
@@ -1536,16 +1870,34 @@ class Example:
             cfg=vbd_ground_cfg,
             key="rby1_hose_connectorv3_b",
         )
+        if self.use_cable:
+            vbd_builder.add_shape_mesh(
+                body=-1,
+                mesh=mesh,
+                xform=self.vbd_mesh_xforms[2],
+                cfg=vbd_ground_cfg,
+                key="rby1_hose_connectorv3_a_mirror",
+            )
+            vbd_builder.add_shape_mesh(
+                body=-1,
+                mesh=mesh,
+                xform=self.vbd_mesh_xforms[3],
+                cfg=vbd_ground_cfg,
+                key="rby1_hose_connectorv3_b_mirror",
+            )
 
+        table_box_pos = list(self.table_pos)
+        if self.use_cable and self._cable_layout_mid_x is not None:
+            table_box_pos[0] = self._cable_layout_mid_x
+        self.vbd_table_xform = wp.transform(wp.vec3(table_box_pos))
         vbd_builder.add_shape_box(
             -1,
-            xform=wp.transform(wp.vec3(self.table_pos)),
+            xform=self.vbd_table_xform,
             hx=self.table_half_size[0],
             hy=self.table_half_size[1],
             hz=self.table_half_size[2],
             cfg=vbd_ground_cfg,
         )
-        self.vbd_table_xform = wp.transform(wp.vec3(self.table_pos))
 
         vbd_builder.add_ground_plane(cfg=vbd_ground_cfg)
 
@@ -1565,6 +1917,8 @@ class Example:
             rigid_avbd_beta=float(self.vbd_rigid_avbd_beta),
             rigid_contact_k_start=float(self.vbd_rigid_contact_k_start),
             rigid_body_contact_buffer_size=int(self.vbd_rigid_contact_buffer_size),
+            rigid_joint_linear_k_start=float(self.vbd_rigid_joint_linear_k_start),
+            rigid_joint_angular_k_start=float(self.vbd_rigid_joint_angular_k_start),
         )
 
         self.vbd_state_0 = self.vbd_model.state()
@@ -1583,8 +1937,12 @@ class Example:
             self._init_coupling_buffers()
 
         if self.verbose:
-            print(f"Created VBD world with {self.vbd_model.body_count} bodies")
-            print(f"  VBD capsules: {len(self.vbd_capsule_body_ids)}")
+            print(f"Created VBD world with {self.vbd_model.body_count} bodies (object_type={self.object_type})")
+            if self.use_cable:
+                total_cable_bodies = sum(len(b) for b in self.vbd_cable_all_body_ids)
+                print(f"  Cables: {len(self.vbd_cable_all_body_ids)}, total segments: {total_cable_bodies}")
+            else:
+                print(f"  VBD capsules: {len(self.vbd_capsule_body_ids)}")
             if self.enable_robot and self.enable_proxy_coupling:
                 print(f"  Proxy bodies: {len(self.proxy_body_ids)}")
 
@@ -1736,8 +2094,11 @@ class Example:
             TaskType.APPROACH,
             TaskType.ENGAGE,
             TaskType.GRASP,
-            TaskType.HOLD_GRASP,
+            # TaskType.HOLD_GRASP,
             TaskType.EXTRACT,
+            # TaskType.HOLD_EXTRACT,
+            # TaskType.INJECT,
+            TaskType.RELEASE,
             TaskType.DONE,
         ]
         self.num_tasks = len(task_schedule_list)
@@ -1748,8 +2109,11 @@ class Example:
             self.sm_time_approach,
             self.sm_time_engage,
             self.sm_time_grasp,
-            self.sm_time_hold_grasp,
+            # self.sm_time_hold_grasp,
             self.sm_time_extract,
+            # self.sm_time_hold_extract,
+            # self.sm_time_inject,
+            self.sm_time_release,
             999.0,
         ]
         self.sm_task_time_limits = wp.array(task_time_limits_list, dtype=float)
@@ -1766,16 +2130,22 @@ class Example:
             init_tfs.append(wp.transform(*body_q_np[ee_link_idx]))
         self.sm_task_init_body_q = wp.array(init_tfs, dtype=wp.transform)
 
-        # Grasp offset [m] specified in the capsule's local frame and rotated into world by the kernel
-        # via `wp.quat_rotate(capsule_quat(_prev), capsule_grasp_offset_from_com[arm_idx])`.
-        # full_len includes hemispheres: 2*(half_height + radius).
-        # Offset from COM: s = (fraction - 0.5) * full_len.
-        full_len = 2.0 * (self.vbd_capsule_half_height + self.vbd_capsule_radius)
-        s = (self.sm_grasp_axis_fraction - 0.5) * full_len
-        self.capsule_grasp_offset_from_com = wp.array(
-            [wp.vec3(0.0, 0.0, s), wp.vec3(0.0, 0.0, s)],
-            dtype=wp.vec3,
-        )
+        # Grasp offset [m] specified in the tracked body's local frame, rotated into world by the
+        # kernel via `wp.quat_rotate(capsule_quat(_prev), capsule_grasp_offset_from_com[arm_idx])`.
+        if self.use_cable:
+            # Each arm grasps a cable segment matching the single-capsule grasp
+            # point.  The offset along local +Z was computed per-cable during
+            # _create_cable_objects and stored in _cable_grasp_offsets.
+            offsets = [wp.vec3(0.0, 0.0, self._cable_grasp_offsets[arm_idx]) for arm_idx in range(self.num_arms)]
+            self.capsule_grasp_offset_from_com = wp.array(offsets, dtype=wp.vec3)
+        else:
+            # Single capsule: body origin is at the capsule center.
+            full_len = 2.0 * (self.vbd_capsule_half_height + self.vbd_capsule_radius)
+            s = (self.sm_grasp_axis_fraction - 0.5) * full_len
+            self.capsule_grasp_offset_from_com = wp.array(
+                [wp.vec3(0.0, 0.0, s), wp.vec3(0.0, 0.0, s)],
+                dtype=wp.vec3,
+            )
 
         # Approach offsets [m]: +/-Y lateral stand-off plus Z lift, per arm.
         oy = self.sm_approach_offset_y
@@ -1788,10 +2158,18 @@ class Example:
             dtype=wp.vec3,
         )
 
-        self.extract_distance = 0.06  # Total pull distance along capsule axis [m]
-        # Relaxed thresholds so auto-grasp can advance despite VBD pose noise.
-        self.pos_error_threshold = wp.array([0.003] * self.num_tasks, dtype=float)
-        self.rot_error_threshold = wp.array([wp.pi / 180.0] * self.num_tasks, dtype=float)  # 1° [rad]
+        self.extract_distance = 0.1  # Total pull distance along capsule axis [m]
+        # Per-task convergence thresholds.  GRASP (and HOLD_GRASP when enabled)
+        # use larger tolerances so the state machine advances reliably despite
+        # contact-force noise in two-way coupling (especially cable mode).
+        pos_thresh = [0.003] * self.num_tasks  # default 3 mm
+        pos_thresh[2] = 0.02  # GRASP: 20 mm
+        # pos_thresh[3] = 0.02  # HOLD_GRASP: 20 mm (when enabled)
+        self.pos_error_threshold = wp.array(pos_thresh, dtype=float)
+        rot_thresh = [wp.pi / 180.0] * self.num_tasks  # default 1°
+        rot_thresh[2] = 5.0 * wp.pi / 180.0  # GRASP: 5°
+        # rot_thresh[3] = 5.0 * wp.pi / 180.0  # HOLD_GRASP: 5° (when enabled)
+        self.rot_error_threshold = wp.array(rot_thresh, dtype=float)
 
         # Capsule body indices (right arm -> capsule A, left arm -> capsule B)
         capsule_a_idx = self.vbd_capsule_body_ids[0]
@@ -2511,7 +2889,6 @@ class Example:
                         self.collision_pipeline.get_hydro_contact_surface(), penetrating_only=True
                     )
                 self._render_vbd_objects()
-                self._render_proxy_bodies()
             else:
                 self.viewer.log_state(self.vbd_state_0)
                 self.viewer.log_contacts(self.vbd_contacts, self.vbd_state_0)
@@ -2523,21 +2900,40 @@ class Example:
         self.viewer.end_frame()
 
     def _render_vbd_objects(self):
-        """Render VBD capsules, table, and mesh connectors when MuJoCo is the primary viewer model."""
+        """Render VBD capsules/cable, table, and mesh connectors when MuJoCo is the primary viewer model."""
         vbd_body_q_np = self.vbd_state_0.body_q.numpy()
-        capsule_xforms = []
-        for body_idx in self.vbd_capsule_body_ids:
-            bq = vbd_body_q_np[body_idx]
-            capsule_xforms.append(wp.transform(wp.vec3(bq[0], bq[1], bq[2]), wp.quat(bq[3], bq[4], bq[5], bq[6])))
 
-        if capsule_xforms:
-            self.viewer.log_shapes(
-                "/vbd_capsules",
-                GeoType.CAPSULE,
-                (self.vbd_capsule_radius, self.vbd_capsule_half_height),
-                wp.array(capsule_xforms, dtype=wp.transform),
-                colors=wp.array([wp.vec3(0.2, 0.6, 0.9)], dtype=wp.vec3),
-            )
+        if self.use_cable:
+            seg_hh = self.vbd_cable_segment_half_height
+            cable_xforms = []
+            for cable_bodies in self.vbd_cable_all_body_ids:
+                for body_idx in cable_bodies:
+                    bq = vbd_body_q_np[body_idx]
+                    pos = wp.vec3(bq[0], bq[1], bq[2])
+                    rot = wp.quat(bq[3], bq[4], bq[5], bq[6])
+                    center = pos + wp.quat_rotate(rot, wp.vec3(0.0, 0.0, seg_hh))
+                    cable_xforms.append(wp.transform(center, rot))
+            if cable_xforms:
+                self.viewer.log_shapes(
+                    "/vbd_capsules",
+                    GeoType.CAPSULE,
+                    (self.vbd_capsule_radius, seg_hh),
+                    wp.array(cable_xforms, dtype=wp.transform),
+                    colors=wp.array([wp.vec3(0.2, 0.6, 0.9)], dtype=wp.vec3),
+                )
+        else:
+            capsule_xforms = []
+            for body_idx in self.vbd_capsule_body_ids:
+                bq = vbd_body_q_np[body_idx]
+                capsule_xforms.append(wp.transform(wp.vec3(bq[0], bq[1], bq[2]), wp.quat(bq[3], bq[4], bq[5], bq[6])))
+            if capsule_xforms:
+                self.viewer.log_shapes(
+                    "/vbd_capsules",
+                    GeoType.CAPSULE,
+                    (self.vbd_capsule_radius, self.vbd_capsule_half_height),
+                    wp.array(capsule_xforms, dtype=wp.transform),
+                    colors=wp.array([wp.vec3(0.2, 0.6, 0.9)], dtype=wp.vec3),
+                )
 
         self.viewer.log_shapes(
             "/vbd_table",
@@ -2921,15 +3317,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--coupling-mode",
         type=str,
-        choices=("two-way", "one-way"),
+        choices=("two-way", "one-way", "none"),
         default="two-way",
-        help="Coupling mode. 'two-way' preserves original behavior; 'one-way' disables force feedback to MuJoCo.",
+        help="Coupling mode. 'two-way' exchanges forces; 'one-way' disables feedback to MuJoCo; 'none' disables coupling entirely.",
     )
     parser.add_argument(
         "--primary-view",
         type=str,
         choices=("mujoco", "vbd"),
-        default="vbd",
+        default="mujoco",
         help="Primary model to visualize in the viewer.",
     )
     parser.add_argument(
@@ -2951,6 +3347,31 @@ if __name__ == "__main__":
         default=0.014,
         help="One-way only: lock gripper closure when gripper-to-gripper distance <= this value (meters). "
         "If <= 0, uses a derived default based on capsule diameter + proxy/capsule thickness + contact margins.",
+    )
+    parser.add_argument(
+        "--object-type",
+        type=str,
+        choices=("capsule", "cable"),
+        default="cable",
+        help="VBD object type: 'capsule' (single rigid body) or 'cable' (chain of segments connected by cable joints).",
+    )
+    parser.add_argument(
+        "--cable-segments",
+        type=int,
+        default=40,
+        help="Number of cable segments per object (only used when --object-type=cable). Must be >= 2.",
+    )
+    parser.add_argument(
+        "--cable-straight-ends",
+        type=int,
+        default=3,
+        help="Number of straight cable segments at each end that follow the capsule axis direction.",
+    )
+    parser.add_argument(
+        "--cable-span",
+        type=float,
+        default=None,
+        help="Width of each cable's U-shape in +X [m]. Defaults to 2*hose_y_offset for symmetric layout.",
     )
     viewer, args = newton.examples.init(parser)
 
