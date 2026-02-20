@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>newton.utils.create_capsule_mesh &#8212; Newton Physics</title>
+    <title>newton.geometry.create_empty_sdf_data &#8212; Newton Physics</title>
   
   
   
@@ -48,7 +48,7 @@
     <script src="../../_static/copybutton.js?v=f281be69"></script>
     <script src="../../_static/design-tabs.js?v=f930bc37"></script>
     <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
-    <script>DOCUMENTATION_OPTIONS.pagename = 'api/_generated/newton.utils.create_capsule_mesh';</script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'api/_generated/newton.geometry.create_empty_sdf_data';</script>
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = 'https://newton-physics.github.io/newton/switcher.json';
@@ -58,8 +58,8 @@
         </script>
     <link rel="index" title="Index" href="../../genindex.html" />
     <link rel="search" title="Search" href="../../search.html" />
-    <link rel="next" title="newton.utils.create_cone_mesh" href="newton.utils.create_cone_mesh.html" />
-    <link rel="prev" title="newton.utils.create_cable_stiffness_from_elastic_moduli" href="newton.utils.create_cable_stiffness_from_elastic_moduli.html" />
+    <link rel="next" title="newton.geometry.remesh_mesh" href="newton.geometry.remesh_mesh.html" />
+    <link rel="prev" title="newton.geometry.compute_shape_inertia" href="newton.geometry.compute_shape_inertia.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="" />
@@ -265,7 +265,7 @@
 </li>
 
 
-<li class=" ">
+<li class=" current active">
   <a class="nav-link dropdown-item nav-internal" href="../newton_geometry.html">
     newton.geometry
   </a>
@@ -314,7 +314,7 @@
 </li>
 
 
-<li class=" current active">
+<li class=" ">
   <a class="nav-link dropdown-item nav-internal" href="../newton_utils.html">
     newton.utils
   </a>
@@ -563,7 +563,7 @@
 </li>
 
 
-<li class="nav-item ">
+<li class="nav-item current active">
   <a class="nav-link nav-internal" href="../newton_geometry.html">
     newton.geometry
   </a>
@@ -612,7 +612,7 @@
 </li>
 
 
-<li class="nav-item current active">
+<li class="nav-item ">
   <a class="nav-link nav-internal" href="../newton_utils.html">
     newton.utils
   </a>
@@ -725,14 +725,14 @@
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul class="current nav bd-sidenav">
 <li class="toctree-l1 current active"><a class="reference internal" href="../newton.html">newton</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../newton_geometry.html">newton.geometry</a></li>
+<li class="toctree-l1 current active"><a class="reference internal" href="../newton_geometry.html">newton.geometry</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../newton_ik.html">newton.ik</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../newton_math.html">newton.math</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../newton_selection.html">newton.selection</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../newton_sensors.html">newton.sensors</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../newton_solvers.html">newton.solvers</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../newton_usd.html">newton.usd</a></li>
-<li class="toctree-l1 current active"><a class="reference internal" href="../newton_utils.html">newton.utils</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../newton_utils.html">newton.utils</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../newton_viewer.html">newton.viewer</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Further Reading</span></p>
@@ -788,9 +788,9 @@
     <li class="breadcrumb-item"><a href="../newton.html" class="nav-link">newton</a></li>
     
     
-    <li class="breadcrumb-item"><a href="../newton_utils.html" class="nav-link">newton.utils</a></li>
+    <li class="breadcrumb-item"><a href="../newton_geometry.html" class="nav-link">newton.geometry</a></li>
     
-    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">newton.utils.create_capsule_mesh</span></li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">newton.geometry.create_empty_sdf_data</span></li>
   </ul>
 </nav>
 </div>
@@ -807,41 +807,18 @@
 <div id="searchbox"></div>
                 <article class="bd-article">
                   
-  <section id="newton-utils-create-capsule-mesh">
-<h1>newton.utils.create_capsule_mesh<a class="headerlink" href="#newton-utils-create-capsule-mesh" title="Link to this heading">#</a></h1>
+  <section id="newton-geometry-create-empty-sdf-data">
+<h1>newton.geometry.create_empty_sdf_data<a class="headerlink" href="#newton-geometry-create-empty-sdf-data" title="Link to this heading">#</a></h1>
 <dl class="py function">
-<dt class="sig sig-object py" id="newton.utils.create_capsule_mesh">
-<span class="sig-prename descclassname"><span class="pre">newton.utils.</span></span><span class="sig-name descname"><span class="pre">create_capsule_mesh</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">radius</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">half_height</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">up_axis</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">1</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">segments</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">default_num_segments</span></span></em><span class="sig-paren">)</span><a class="reference external" href="https://github.com/newton-physics/newton/blob/main/newton/_src/utils/mesh.py#L862"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#newton.utils.create_capsule_mesh" title="Link to this definition">#</a></dt>
-<dd><p>Create a capsule (pill-shaped) mesh with hemispherical ends.</p>
-<p>Generates vertices and triangle indices for a capsule shape consisting
-of a cylinder with hemispherical caps at both ends.</p>
+<dt class="sig sig-object py" id="newton.geometry.create_empty_sdf_data">
+<span class="sig-prename descclassname"><span class="pre">newton.geometry.</span></span><span class="sig-name descname"><span class="pre">create_empty_sdf_data</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference external" href="https://github.com/newton-physics/newton/blob/main/newton/_src/geometry/sdf_utils.py#L250"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#newton.geometry.create_empty_sdf_data" title="Link to this definition">#</a></dt>
+<dd><p>Create an empty SDFData struct for shapes that don’t need SDF collision.</p>
 <dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>radius</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a>) – Radius of the capsule.</p></li>
-<li><p><strong>half_height</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a>) – Half the height of the cylindrical portion
-(distance from center to hemisphere start).</p></li>
-<li><p><strong>up_axis</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>) – Axis along which the capsule extends (0=X, 1=Y, 2=Z).
-Defaults to 1 (Y-axis).</p></li>
-<li><p><strong>segments</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>) – Number of segments for tessellation.
-Defaults to default_num_segments.</p></li>
-</ul>
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>An SDFData struct with zeroed pointers and extents.</p>
 </dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p><dl class="simple">
-<dt>A tuple containing:</dt><dd><ul class="simple">
-<li><p>vertices (np.ndarray): Float32 array of shape (N, 8) where each
-vertex contains [x, y, z, nx, ny, nz, u, v] (position, normal,
-UV coords).</p></li>
-<li><p>indices (np.ndarray): Uint32 array of triangle indices for
-rendering.</p></li>
-</ul>
-</dd>
-</dl>
-</p>
-</dd>
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)">tuple</a>[np.ndarray, np.ndarray]</p>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><em>SDFData</em></p>
 </dd>
 </dl>
 </dd></dl>
@@ -871,7 +848,7 @@ rendering.</p></li>
   </div>
   <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="visible nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.utils.create_capsule_mesh"><code class="docutils literal notranslate"><span class="pre">create_capsule_mesh()</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.geometry.create_empty_sdf_data"><code class="docutils literal notranslate"><span class="pre">create_empty_sdf_data()</span></code></a></li>
 </ul>
   </nav></div>
 

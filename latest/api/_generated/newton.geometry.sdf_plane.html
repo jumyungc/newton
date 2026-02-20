@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>newton.geometry.create_box_mesh &#8212; Newton Physics</title>
+    <title>newton.geometry.sdf_plane &#8212; Newton Physics</title>
   
   
   
@@ -48,7 +48,7 @@
     <script src="../../_static/copybutton.js?v=f281be69"></script>
     <script src="../../_static/design-tabs.js?v=f930bc37"></script>
     <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
-    <script>DOCUMENTATION_OPTIONS.pagename = 'api/_generated/newton.geometry.create_box_mesh';</script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'api/_generated/newton.geometry.sdf_plane';</script>
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = 'https://newton-physics.github.io/newton/switcher.json';
@@ -58,8 +58,8 @@
         </script>
     <link rel="index" title="Index" href="../../genindex.html" />
     <link rel="search" title="Search" href="../../search.html" />
-    <link rel="next" title="newton.geometry.create_mesh_heightfield" href="newton.geometry.create_mesh_heightfield.html" />
-    <link rel="prev" title="newton.geometry.compute_shape_inertia" href="newton.geometry.compute_shape_inertia.html" />
+    <link rel="next" title="newton.geometry.sdf_sphere" href="newton.geometry.sdf_sphere.html" />
+    <link rel="prev" title="newton.geometry.sdf_mesh" href="newton.geometry.sdf_mesh.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="" />
@@ -790,7 +790,7 @@
     
     <li class="breadcrumb-item"><a href="../newton_geometry.html" class="nav-link">newton.geometry</a></li>
     
-    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">newton.geometry.create_box_mesh</span></li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">newton.geometry.sdf_plane</span></li>
   </ul>
 </nav>
 </div>
@@ -807,26 +807,27 @@
 <div id="searchbox"></div>
                 <article class="bd-article">
                   
-  <section id="newton-geometry-create-box-mesh">
-<h1>newton.geometry.create_box_mesh<a class="headerlink" href="#newton-geometry-create-box-mesh" title="Link to this heading">#</a></h1>
+  <section id="newton-geometry-sdf-plane">
+<h1>newton.geometry.sdf_plane<a class="headerlink" href="#newton-geometry-sdf-plane" title="Link to this heading">#</a></h1>
 <dl class="py function">
-<dt class="sig sig-object py" id="newton.geometry.create_box_mesh">
-<span class="sig-prename descclassname"><span class="pre">newton.geometry.</span></span><span class="sig-name descname"><span class="pre">create_box_mesh</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">half_extents</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">duplicate_vertices</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference external" href="https://github.com/newton-physics/newton/blob/main/newton/_src/geometry/utils.py#L666"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#newton.geometry.create_box_mesh" title="Link to this definition">#</a></dt>
-<dd><p>Create a box mesh with the given half extents.</p>
+<dt class="sig sig-object py" id="newton.geometry.sdf_plane">
+<span class="sig-prename descclassname"><span class="pre">newton.geometry.</span></span><span class="sig-name descname"><span class="pre">sdf_plane</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">point</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">width</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">length</span></span></em><span class="sig-paren">)</span><a class="reference external" href="https://github.com/newton-physics/newton/blob/main/newton/_src/geometry/kernels.py#L578"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#newton.geometry.sdf_plane" title="Link to this definition">#</a></dt>
+<dd><p>Compute signed distance to a finite quad in the XY plane.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
-<li><p><strong>half_extents</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><em>list</em></a><em>[</em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>] </em><em>| </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)"><em>tuple</em></a><em>[</em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>, </em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>, </em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>] </em><em>| </em><a class="reference external" href="https://nvidia.github.io/warp/api_reference/_generated/warp.vec3f.html#warp.vec3f" title="(in Warp v1.11.1)"><em>vec3f</em></a>) – Half extents of the box along each axis (x, y, z).</p></li>
-<li><p><strong>duplicate_vertices</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – If True, duplicate vertices for each face to enable proper flat shading.
-Each face will have its own 4 vertices (24 total), allowing distinct normals per face.
-If False (default), use 8 shared corner vertices for a more compact representation.</p></li>
+<li><p><strong>[</strong><strong>m</strong><strong>]</strong> (<em>length</em>) – Query point in the mesh local frame, shape [3], float.</p></li>
+<li><p><strong>[</strong><strong>m</strong><strong>]</strong> – Half-extent along X.</p></li>
+<li><p><strong>[</strong><strong>m</strong><strong>]</strong> – Half-extent along Y.</p></li>
 </ul>
 </dd>
 <dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>A tuple of (vertices, indices) numpy arrays.</p>
-</dd>
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)">tuple</a>[<a class="reference external" href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="(in NumPy v2.4)"><em>ndarray</em></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.14)"><em>Any</em></a>, <a class="reference external" href="https://numpy.org/doc/stable/reference/generated/numpy.dtype.html#numpy.dtype" title="(in NumPy v2.4)"><em>dtype</em></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.14)"><em>Any</em></a>]], <a class="reference external" href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="(in NumPy v2.4)"><em>ndarray</em></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.14)"><em>Any</em></a>, <a class="reference external" href="https://numpy.org/doc/stable/reference/generated/numpy.dtype.html#numpy.dtype" title="(in NumPy v2.4)"><em>dtype</em></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.14)"><em>Any</em></a>]]]</p>
+<dd class="field-even"><p>Distance [m]. For finite extents (<code class="docutils literal notranslate"><span class="pre">width</span> <span class="pre">&gt;</span> <span class="pre">0</span></code> and <code class="docutils literal notranslate"><span class="pre">length</span> <span class="pre">&gt;</span> <span class="pre">0</span></code>), this
+is a Chebyshev (L∞) distance approximation to the quad sheet (not exact
+Euclidean distance). The exact Euclidean distance would be
+<code class="docutils literal notranslate"><span class="pre">sqrt(max(|x|-width,</span> <span class="pre">0)^2</span> <span class="pre">+</span> <span class="pre">max(|y|-length,</span> <span class="pre">0)^2</span> <span class="pre">+</span> <span class="pre">z^2)</span></code>.
+Otherwise, for <code class="docutils literal notranslate"><span class="pre">width</span> <span class="pre">&lt;=</span> <span class="pre">0</span></code> or <code class="docutils literal notranslate"><span class="pre">length</span> <span class="pre">&lt;=</span> <span class="pre">0</span></code>, it reduces to the
+signed distance of the infinite plane (<code class="docutils literal notranslate"><span class="pre">point.z</span></code>).</p>
 </dd>
 </dl>
 </dd></dl>
@@ -856,7 +857,7 @@ If False (default), use 8 shared corner vertices for a more compact representati
   </div>
   <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="visible nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.geometry.create_box_mesh"><code class="docutils literal notranslate"><span class="pre">create_box_mesh()</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.geometry.sdf_plane"><code class="docutils literal notranslate"><span class="pre">sdf_plane()</span></code></a></li>
 </ul>
   </nav></div>
 

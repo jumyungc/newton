@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>newton.utils.create_box_mesh &#8212; Newton Physics</title>
+    <title>newton.geometry.sdf_mesh &#8212; Newton Physics</title>
   
   
   
@@ -48,7 +48,7 @@
     <script src="../../_static/copybutton.js?v=f281be69"></script>
     <script src="../../_static/design-tabs.js?v=f930bc37"></script>
     <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
-    <script>DOCUMENTATION_OPTIONS.pagename = 'api/_generated/newton.utils.create_box_mesh';</script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'api/_generated/newton.geometry.sdf_mesh';</script>
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = 'https://newton-physics.github.io/newton/switcher.json';
@@ -58,8 +58,8 @@
         </script>
     <link rel="index" title="Index" href="../../genindex.html" />
     <link rel="search" title="Search" href="../../search.html" />
-    <link rel="next" title="newton.utils.create_cable_stiffness_from_elastic_moduli" href="newton.utils.create_cable_stiffness_from_elastic_moduli.html" />
-    <link rel="prev" title="newton.utils.compute_world_offsets" href="newton.utils.compute_world_offsets.html" />
+    <link rel="next" title="newton.geometry.sdf_plane" href="newton.geometry.sdf_plane.html" />
+    <link rel="prev" title="newton.geometry.sdf_cylinder" href="newton.geometry.sdf_cylinder.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="" />
@@ -265,7 +265,7 @@
 </li>
 
 
-<li class=" ">
+<li class=" current active">
   <a class="nav-link dropdown-item nav-internal" href="../newton_geometry.html">
     newton.geometry
   </a>
@@ -314,7 +314,7 @@
 </li>
 
 
-<li class=" current active">
+<li class=" ">
   <a class="nav-link dropdown-item nav-internal" href="../newton_utils.html">
     newton.utils
   </a>
@@ -563,7 +563,7 @@
 </li>
 
 
-<li class="nav-item ">
+<li class="nav-item current active">
   <a class="nav-link nav-internal" href="../newton_geometry.html">
     newton.geometry
   </a>
@@ -612,7 +612,7 @@
 </li>
 
 
-<li class="nav-item current active">
+<li class="nav-item ">
   <a class="nav-link nav-internal" href="../newton_utils.html">
     newton.utils
   </a>
@@ -725,14 +725,14 @@
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul class="current nav bd-sidenav">
 <li class="toctree-l1 current active"><a class="reference internal" href="../newton.html">newton</a></li>
-<li class="toctree-l1"><a class="reference internal" href="../newton_geometry.html">newton.geometry</a></li>
+<li class="toctree-l1 current active"><a class="reference internal" href="../newton_geometry.html">newton.geometry</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../newton_ik.html">newton.ik</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../newton_math.html">newton.math</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../newton_selection.html">newton.selection</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../newton_sensors.html">newton.sensors</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../newton_solvers.html">newton.solvers</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../newton_usd.html">newton.usd</a></li>
-<li class="toctree-l1 current active"><a class="reference internal" href="../newton_utils.html">newton.utils</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../newton_utils.html">newton.utils</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../newton_viewer.html">newton.viewer</a></li>
 </ul>
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">Further Reading</span></p>
@@ -788,9 +788,9 @@
     <li class="breadcrumb-item"><a href="../newton.html" class="nav-link">newton</a></li>
     
     
-    <li class="breadcrumb-item"><a href="../newton_utils.html" class="nav-link">newton.utils</a></li>
+    <li class="breadcrumb-item"><a href="../newton_geometry.html" class="nav-link">newton.geometry</a></li>
     
-    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">newton.utils.create_box_mesh</span></li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">newton.geometry.sdf_mesh</span></li>
   </ul>
 </nav>
 </div>
@@ -807,35 +807,22 @@
 <div id="searchbox"></div>
                 <article class="bd-article">
                   
-  <section id="newton-utils-create-box-mesh">
-<h1>newton.utils.create_box_mesh<a class="headerlink" href="#newton-utils-create-box-mesh" title="Link to this heading">#</a></h1>
+  <section id="newton-geometry-sdf-mesh">
+<h1>newton.geometry.sdf_mesh<a class="headerlink" href="#newton-geometry-sdf-mesh" title="Link to this heading">#</a></h1>
 <dl class="py function">
-<dt class="sig sig-object py" id="newton.utils.create_box_mesh">
-<span class="sig-prename descclassname"><span class="pre">newton.utils.</span></span><span class="sig-name descname"><span class="pre">create_box_mesh</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">extents</span></span></em><span class="sig-paren">)</span><a class="reference external" href="https://github.com/newton-physics/newton/blob/main/newton/_src/utils/mesh.py#L1113"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#newton.utils.create_box_mesh" title="Link to this definition">#</a></dt>
-<dd><p>Create a rectangular box (cuboid) mesh.</p>
-<p>Generates vertices and triangle indices for a box shape with 6 faces.
-Each face consists of 2 triangles with proper normals pointing outward.</p>
+<dt class="sig sig-object py" id="newton.geometry.sdf_mesh">
+<span class="sig-prename descclassname"><span class="pre">newton.geometry.</span></span><span class="sig-name descname"><span class="pre">sdf_mesh</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">mesh</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">point</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">max_dist</span></span></em><span class="sig-paren">)</span><a class="reference external" href="https://github.com/newton-physics/newton/blob/main/newton/_src/geometry/kernels.py#L893"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#newton.geometry.sdf_mesh" title="Link to this definition">#</a></dt>
+<dd><p>Compute signed distance to a triangle mesh.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>extents</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)"><em>tuple</em></a><em>[</em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>, </em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>, </em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>]</em>) – Half-extents of the box in each
-dimension (half_width, half_length, half_height). The full box
-dimensions will be twice these values.</p>
-</dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p><dl class="simple">
-<dt>A tuple containing:</dt><dd><ul class="simple">
-<li><p>vertices (np.ndarray): Float32 array of shape (N, 8) where each
-vertex contains [x, y, z, nx, ny, nz, u, v] (position, normal,
-UV coords).</p></li>
-<li><p>indices (np.ndarray): Uint32 array of triangle indices for
-rendering.</p></li>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>mesh</strong> (<a class="reference external" href="https://nvidia.github.io/warp/api_reference/_generated/warp.uint64.html#warp.uint64" title="(in Warp v1.11.1)"><em>uint64</em></a>) – Warp mesh ID (<code class="docutils literal notranslate"><span class="pre">mesh.id</span></code>).</p></li>
+<li><p><strong>[</strong><strong>m</strong><strong>]</strong> (<em>max_dist</em>) – Query point in mesh local frame, shape [3], float.</p></li>
+<li><p><strong>[</strong><strong>m</strong><strong>]</strong> – Maximum query distance.</p></li>
 </ul>
 </dd>
-</dl>
-</p>
-</dd>
-<dt class="field-odd">Return type<span class="colon">:</span></dt>
-<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)">tuple</a>[np.ndarray, np.ndarray]</p>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Signed distance [m], negative inside, zero on surface, positive outside.</p>
 </dd>
 </dl>
 </dd></dl>
@@ -865,7 +852,7 @@ rendering.</p></li>
   </div>
   <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="visible nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.utils.create_box_mesh"><code class="docutils literal notranslate"><span class="pre">create_box_mesh()</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.geometry.sdf_mesh"><code class="docutils literal notranslate"><span class="pre">sdf_mesh()</span></code></a></li>
 </ul>
   </nav></div>
 

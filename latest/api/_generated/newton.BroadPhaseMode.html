@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>newton.geometry.create_mesh_heightfield &#8212; Newton Physics</title>
+    <title>newton.BroadPhaseMode &#8212; Newton Physics</title>
   
   
   
@@ -48,7 +48,7 @@
     <script src="../../_static/copybutton.js?v=f281be69"></script>
     <script src="../../_static/design-tabs.js?v=f930bc37"></script>
     <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
-    <script>DOCUMENTATION_OPTIONS.pagename = 'api/_generated/newton.geometry.create_mesh_heightfield';</script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'api/_generated/newton.BroadPhaseMode';</script>
     <script>
         DOCUMENTATION_OPTIONS.theme_version = '0.16.1';
         DOCUMENTATION_OPTIONS.theme_switcher_json_url = 'https://newton-physics.github.io/newton/switcher.json';
@@ -58,8 +58,8 @@
         </script>
     <link rel="index" title="Index" href="../../genindex.html" />
     <link rel="search" title="Search" href="../../search.html" />
-    <link rel="next" title="newton.geometry.create_mesh_terrain" href="newton.geometry.create_mesh_terrain.html" />
-    <link rel="prev" title="newton.geometry.create_box_mesh" href="newton.geometry.create_box_mesh.html" />
+    <link rel="next" title="newton.eval_fk" href="newton.eval_fk.html" />
+    <link rel="prev" title="newton.BroadPhaseInstance" href="newton.BroadPhaseInstance.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   <meta name="docsearch:version" content="" />
@@ -258,14 +258,14 @@
 </li>
 
 
-<li class=" ">
+<li class=" current active">
   <a class="nav-link dropdown-item nav-internal" href="../newton.html">
     newton
   </a>
 </li>
 
 
-<li class=" current active">
+<li class=" ">
   <a class="nav-link dropdown-item nav-internal" href="../newton_geometry.html">
     newton.geometry
   </a>
@@ -556,14 +556,14 @@
 </li>
 
 
-<li class="nav-item ">
+<li class="nav-item current active">
   <a class="nav-link nav-internal" href="../newton.html">
     newton
   </a>
 </li>
 
 
-<li class="nav-item current active">
+<li class="nav-item ">
   <a class="nav-link nav-internal" href="../newton_geometry.html">
     newton.geometry
   </a>
@@ -725,7 +725,7 @@
 <p aria-level="2" class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul class="current nav bd-sidenav">
 <li class="toctree-l1 current active"><a class="reference internal" href="../newton.html">newton</a></li>
-<li class="toctree-l1 current active"><a class="reference internal" href="../newton_geometry.html">newton.geometry</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../newton_geometry.html">newton.geometry</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../newton_ik.html">newton.ik</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../newton_math.html">newton.math</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../newton_selection.html">newton.selection</a></li>
@@ -787,10 +787,7 @@
     
     <li class="breadcrumb-item"><a href="../newton.html" class="nav-link">newton</a></li>
     
-    
-    <li class="breadcrumb-item"><a href="../newton_geometry.html" class="nav-link">newton.geometry</a></li>
-    
-    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">newton.geometry.create_mesh_heightfield</span></li>
+    <li class="breadcrumb-item active" aria-current="page"><span class="ellipsis">newton.BroadPhaseMode</span></li>
   </ul>
 </nav>
 </div>
@@ -807,40 +804,12 @@
 <div id="searchbox"></div>
                 <article class="bd-article">
                   
-  <section id="newton-geometry-create-mesh-heightfield">
-<h1>newton.geometry.create_mesh_heightfield<a class="headerlink" href="#newton-geometry-create-mesh-heightfield" title="Link to this heading">#</a></h1>
-<dl class="py function">
-<dt class="sig sig-object py" id="newton.geometry.create_mesh_heightfield">
-<span class="sig-prename descclassname"><span class="pre">newton.geometry.</span></span><span class="sig-name descname"><span class="pre">create_mesh_heightfield</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">heightfield</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">extent_x</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">extent_y</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">center_x</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">center_y</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ground_z</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0.0</span></span></em><span class="sig-paren">)</span><a class="reference external" href="https://github.com/newton-physics/newton/blob/main/newton/_src/geometry/terrain_generator.py#L604"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#newton.geometry.create_mesh_heightfield" title="Link to this definition">#</a></dt>
-<dd><p>Convert a 2D heightfield array to a watertight triangle mesh.</p>
-<p>Creates a closed mesh with top surface (from heightfield), bottom surface (at ground_z),
-and side walls connecting them. Each grid cell becomes two triangles.</p>
-<dl class="field-list simple">
-<dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><strong>heightfield</strong> (<a class="reference external" href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="(in NumPy v2.4)"><em>ndarray</em></a>) – (grid_size_x, grid_size_y) array of Z heights for top surface</p></li>
-<li><p><strong>extent_x</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a>) – Physical size in X direction (meters)</p></li>
-<li><p><strong>extent_y</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a>) – Physical size in Y direction (meters)</p></li>
-<li><p><strong>center_x</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a>) – Center X coordinate (default: 0.0)</p></li>
-<li><p><strong>center_y</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a>) – Center Y coordinate (default: 0.0)</p></li>
-<li><p><strong>ground_z</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a>) – Z coordinate of bottom surface (default: 0.0)</p></li>
-</ul>
-</dd>
-<dt class="field-even">Returns<span class="colon">:</span></dt>
-<dd class="field-even"><p>tuple of (vertices, indices) where vertices is (N, 3) float32 array
-and indices is (M,) int32 array of triangle indices (flattened)</p>
-</dd>
-<dt class="field-odd">Raises<span class="colon">:</span></dt>
-<dd class="field-odd"><ul class="simple">
-<li><p><a class="reference external" href="https://docs.python.org/3/library/exceptions.html#ValueError" title="(in Python v3.14)"><strong>ValueError</strong></a> – If heightfield is not a 2D array</p></li>
-<li><p><a class="reference external" href="https://docs.python.org/3/library/exceptions.html#ValueError" title="(in Python v3.14)"><strong>ValueError</strong></a> – If heightfield dimensions are smaller than 2x2</p></li>
-<li><p><a class="reference external" href="https://docs.python.org/3/library/exceptions.html#ValueError" title="(in Python v3.14)"><strong>ValueError</strong></a> – If extent_x or extent_y are not positive</p></li>
-</ul>
-</dd>
-<dt class="field-even">Return type<span class="colon">:</span></dt>
-<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)">tuple</a>[<a class="reference external" href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="(in NumPy v2.4)"><em>ndarray</em></a>, <a class="reference external" href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="(in NumPy v2.4)"><em>ndarray</em></a>]</p>
-</dd>
-</dl>
+  <section id="newton-broadphasemode">
+<h1>newton.BroadPhaseMode<a class="headerlink" href="#newton-broadphasemode" title="Link to this heading">#</a></h1>
+<dl class="py data">
+<dt class="sig sig-object py" id="newton.BroadPhaseMode">
+<span class="sig-prename descclassname"><span class="pre">newton.</span></span><span class="sig-name descname"><span class="pre">BroadPhaseMode</span></span><a class="reference external" href="https://github.com/newton-physics/newton/blob/main/newton/__init__.py"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#newton.BroadPhaseMode" title="Link to this definition">#</a></dt>
+<dd><p>alias of <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Literal" title="(in Python v3.14)"><code class="xref py py-obj docutils literal notranslate"><span class="pre">Literal</span></code></a>[‘nxn’, ‘sap’, ‘explicit’]</p>
 </dd></dl>
 
 </section>
@@ -868,7 +837,7 @@ and indices is (M,) int32 array of triangle indices (flattened)</p>
   </div>
   <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="visible nav section-nav flex-column">
-<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.geometry.create_mesh_heightfield"><code class="docutils literal notranslate"><span class="pre">create_mesh_heightfield()</span></code></a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.BroadPhaseMode"><code class="docutils literal notranslate"><span class="pre">BroadPhaseMode</span></code></a></li>
 </ul>
   </nav></div>
 
