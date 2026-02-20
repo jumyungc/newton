@@ -891,7 +891,7 @@ class Example:
         _cable_span_arg = getattr(args, "cable_span", None) if args is not None else None
         self.cable_span = float(_cable_span_arg) if _cable_span_arg is not None else 2.0 * float(self.hose_y_offset)
         self.cable_stretch_stiffness = 1.0e12  # EA [N]
-        self.cable_bend_stiffness = 1.0e1  # EI [N*m^2]
+        self.cable_bend_stiffness = 5.0e-1  # EI [N*m^2]
         self.cable_stretch_damping = 1.0e-4
         self.cable_bend_damping = 1.0e-1
         self.cable_density = 1000.0  # [kg/m^3]

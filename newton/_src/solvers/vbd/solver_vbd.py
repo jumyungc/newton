@@ -68,7 +68,7 @@ from .rigid_vbd_kernels import (
     build_body_body_contact_lists,  # Body-body (rigid-rigid) contact adjacency
     build_body_particle_contact_lists,  # Body-particle (rigid-particle) soft-contact adjacency
     compute_cable_dahl_parameters,  # Cable bending plasticity
-    compute_rigid_contact_forces_world_kernel,
+    compute_rigid_contact_forces,
     copy_rigid_body_transforms_back,
     # Adjacency building kernels
     count_num_adjacent_joints,
@@ -81,6 +81,7 @@ from .rigid_vbd_kernels import (
     update_cable_dahl_state,
     update_duals_body_body_contacts,  # Body-body (rigid-rigid) contacts (AVBD penalty update)
     update_duals_body_particle_contacts,  # Body-particle soft contacts (AVBD penalty update)
+    update_duals_joint,  # Cable joints (AVBD penalty update)
     warmstart_body_body_contacts,  # Body-body (rigid-rigid) contacts (penalty warmstart)
     warmstart_body_particle_contacts,  # Body-particle soft contacts (penalty warmstart)
     warmstart_joints,  # Cable joints (stretch & bend)
@@ -316,6 +317,7 @@ class SolverVBD(SolverBase):
 
         # Cached empty arrays for kernels that require wp.array arguments even when counts are zero.
         self._empty_body_q = wp.empty(0, dtype=wp.transform, device=self.device)
+
         # Optional per-body forward-step skip mask (1 => skip rigid forward integration).
         self._body_skip_forward_mask = wp.zeros(self.model.body_count, dtype=wp.int32, device=self.device)
 
@@ -1922,6 +1924,26 @@ class SolverVBD(SolverBase):
                     device=self.device,
                 )
 
+        # Update joint penalties at new positions
+        wp.launch(
+            kernel=update_duals_joint,
+            dim=model.joint_count,
+            inputs=[
+                model.joint_type,
+                model.joint_parent,
+                model.joint_child,
+                model.joint_X_p,
+                model.joint_X_c,
+                self.joint_constraint_start,
+                self.joint_penalty_k_max,
+                state_out.body_q,
+                model.body_q,
+                self.avbd_beta,
+                self.joint_penalty_k,  # input/output
+            ],
+            device=self.device,
+        )
+
     def collect_rigid_contact_forces(
         self, state: State, contacts: Contacts, dt: float
     ) -> tuple[wp.array, wp.array, wp.array, wp.array, wp.array, wp.array]:
@@ -1955,7 +1977,7 @@ class SolverVBD(SolverBase):
         # Reuse the existing per-contact force buffer in Contacts (allocated by default).
         # Force convention: force is applied to body1, and -force is applied to body0.
         wp.launch(
-            kernel=compute_rigid_contact_forces_world_kernel,
+            kernel=compute_rigid_contact_forces,
             dim=max_contacts,
             inputs=[
                 float(dt),

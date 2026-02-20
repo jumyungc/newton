@@ -1643,7 +1643,7 @@ def accumulate_body_body_contacts_per_body(
 
 
 @wp.kernel
-def compute_rigid_contact_forces_world_kernel(
+def compute_rigid_contact_forces(
     dt: float,
     # Contact data
     rigid_contact_count: wp.array(dtype=int),
