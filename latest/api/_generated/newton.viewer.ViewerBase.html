@@ -811,8 +811,33 @@
 <h1>newton.viewer.ViewerBase<a class="headerlink" href="#newton-viewer-viewerbase" title="Link to this heading">#</a></h1>
 <dl class="py class">
 <dt class="sig sig-object py" id="newton.viewer.ViewerBase">
-<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">newton.viewer.</span></span><span class="sig-name descname"><span class="pre">ViewerBase</span></span><a class="reference external" href="https://github.com/newton-physics/newton/blob/main/newton/_src/viewer/viewer.py#L23"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#newton.viewer.ViewerBase" title="Link to this definition">#</a></dt>
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">newton.viewer.</span></span><span class="sig-name descname"><span class="pre">ViewerBase</span></span><a class="reference external" href="https://github.com/newton-physics/newton/blob/main/newton/_src/viewer/viewer.py#L24"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#newton.viewer.ViewerBase" title="Link to this definition">#</a></dt>
 <dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/abc.html#abc.ABC" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ABC</span></code></a></p>
+<dl class="py class">
+<dt class="sig sig-object py" id="newton.viewer.ViewerBase.SDFMarginMode">
+<em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">SDFMarginMode</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">*</span></span><span class="n"><span class="pre">values</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#newton.viewer.ViewerBase.SDFMarginMode" title="Link to this definition">#</a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/enum.html#enum.IntEnum" title="(in Python v3.14)"><code class="xref py py-class docutils literal notranslate"><span class="pre">IntEnum</span></code></a></p>
+<p>Controls which offset surface is visualized for SDF debug wireframes.</p>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="newton.viewer.ViewerBase.SDFMarginMode.MARGIN">
+<span class="sig-name descname"><span class="pre">MARGIN</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">1</span></em><a class="headerlink" href="#newton.viewer.ViewerBase.SDFMarginMode.MARGIN" title="Link to this definition">#</a></dt>
+<dd><p>Wireframe at <code class="docutils literal notranslate"><span class="pre">shape_margin</span></code> only.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="newton.viewer.ViewerBase.SDFMarginMode.MARGIN_GAP">
+<span class="sig-name descname"><span class="pre">MARGIN_GAP</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">2</span></em><a class="headerlink" href="#newton.viewer.ViewerBase.SDFMarginMode.MARGIN_GAP" title="Link to this definition">#</a></dt>
+<dd><p>Wireframe at <code class="docutils literal notranslate"><span class="pre">shape_margin</span></code> + <code class="docutils literal notranslate"><span class="pre">shape_gap</span></code> (outer contact threshold), not gap alone.</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="newton.viewer.ViewerBase.SDFMarginMode.OFF">
+<span class="sig-name descname"><span class="pre">OFF</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">0</span></em><a class="headerlink" href="#newton.viewer.ViewerBase.SDFMarginMode.OFF" title="Link to this definition">#</a></dt>
+<dd><p>Do not draw SDF margin debug wireframes.</p>
+</dd></dl>
+
+</dd></dl>
+
 <dl class="py class">
 <dt class="sig sig-object py" id="newton.viewer.ViewerBase.ShapeInstances">
 <em class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">ShapeInstances</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">static</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">flags</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">mesh</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">device</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#newton.viewer.ViewerBase.ShapeInstances" title="Link to this definition">#</a></dt>
@@ -853,7 +878,7 @@
 <dd><p>Allocates the batch of shape instances as Warp arrays.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
-<dd class="field-odd"><p><strong>shape_colors</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec3</em><em>) </em><em>| </em><em>None</em>) – The colors of the shapes.</p>
+<dd class="field-odd"><p><strong>shape_colors</strong> (<em>wp.array</em><em>[</em><em>wp.vec3</em><em>] </em><em>| </em><em>None</em>) – The colors of the shapes.</p>
 </dd>
 </dl>
 </dd></dl>
@@ -866,7 +891,7 @@
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>state</strong> (<a class="reference internal" href="newton.State.html#newton.State" title="newton._src.sim.state.State"><em>State</em></a>) – The current state of the simulation.</p></li>
-<li><p><strong>world_offsets</strong> (<em>array</em><em>(</em><em>ndim=1</em><em>, </em><em>dtype=vec3f</em><em>)</em>) – The world offsets.</p></li>
+<li><p><strong>world_offsets</strong> (<em>wp.array</em><em>(</em><em>dtype=&lt;class 'warp._src.types.vec3f'&gt;</em><em>, </em><em>ndim=1</em><em>)</em>) – The world offsets.</p></li>
 </ul>
 </dd>
 </dl>
@@ -882,9 +907,9 @@
 <dt class="sig sig-object py" id="newton.viewer.ViewerBase.ShapeInstances.colors_changed">
 <span class="sig-name descname"><span class="pre">colors_changed</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><span class="pre">bool</span></a></em><a class="headerlink" href="#newton.viewer.ViewerBase.ShapeInstances.colors_changed" title="Link to this definition">#</a></dt>
 <dd><p>Indicates that finalized
-<code class="xref py py-attr docutils literal notranslate"><span class="pre">ShapeInstances.colors</span></code> changed and
+<code class="docutils literal notranslate"><span class="pre">ShapeInstances.colors</span></code> changed and
 should be included in
-<code class="xref py py-meth docutils literal notranslate"><span class="pre">log_instances()</span></code>.</p>
+<a class="reference internal" href="#newton.viewer.ViewerBase.log_instances" title="newton.viewer.ViewerBase.log_instances"><code class="xref py py-meth docutils literal notranslate"><span class="pre">log_instances()</span></code></a>.</p>
 </dd></dl>
 
 </dd></dl>
@@ -926,6 +951,12 @@ current model needs to be discarded (e.g. before <a class="reference internal" h
 when switching examples).</p>
 <dl class="field-list simple">
 </dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="newton.viewer.ViewerBase.clear_wireframe_vbo_cache">
+<span class="sig-name descname"><span class="pre">clear_wireframe_vbo_cache</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#newton.viewer.ViewerBase.clear_wireframe_vbo_cache" title="Link to this definition">#</a></dt>
+<dd><p>Clear the shared wireframe VBO cache (overridden by GL viewer).</p>
 </dd></dl>
 
 <dl class="py method">
@@ -993,7 +1024,7 @@ when switching examples).</p>
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Unique path/name for the array signal.</p></li>
-<li><p><strong>array</strong> (<em>wp.array</em><em>(</em><em>dtype=Any</em><em>) </em><em>| </em><em>np.ndarray</em>) – Array data as a Warp array or NumPy array.</p></li>
+<li><p><strong>array</strong> (<em>wp.array</em><em>[</em><em>Any</em><em>] </em><em>| </em><em>np.ndarray</em>) – Array data as a Warp array or NumPy array.</p></li>
 </ul>
 </dd>
 </dl>
@@ -1011,10 +1042,10 @@ If the viewer backend does not specialize this path, it will fall back to
 <li><p><strong>name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Unique path/name for the capsule batch.</p></li>
 <li><p><strong>mesh</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Path/name of a mesh previously registered via
 <a class="reference internal" href="#newton.viewer.ViewerBase.log_mesh" title="newton.viewer.ViewerBase.log_mesh"><code class="xref py py-meth docutils literal notranslate"><span class="pre">log_mesh()</span></code></a>.</p></li>
-<li><p><strong>xforms</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.transform</em><em>) </em><em>| </em><em>None</em>) – Optional per-capsule transforms as a Warp transform array.</p></li>
-<li><p><strong>scales</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec3</em><em>) </em><em>| </em><em>None</em>) – Optional per-capsule scales as a Warp vec3 array.</p></li>
-<li><p><strong>colors</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec3</em><em>) </em><em>| </em><em>None</em>) – Optional per-capsule colors as a Warp vec3 array.</p></li>
-<li><p><strong>materials</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec4</em><em>) </em><em>| </em><em>None</em>) – Optional per-capsule material parameters as a Warp vec4 array.</p></li>
+<li><p><strong>xforms</strong> (<em>wp.array</em><em>[</em><em>wp.transform</em><em>] </em><em>| </em><em>None</em>) – Optional per-capsule transforms as a Warp transform array.</p></li>
+<li><p><strong>scales</strong> (<em>wp.array</em><em>[</em><em>wp.vec3</em><em>] </em><em>| </em><em>None</em>) – Optional per-capsule scales as a Warp vec3 array.</p></li>
+<li><p><strong>colors</strong> (<em>wp.array</em><em>[</em><em>wp.vec3</em><em>] </em><em>| </em><em>None</em>) – Optional per-capsule colors as a Warp vec3 array.</p></li>
+<li><p><strong>materials</strong> (<em>wp.array</em><em>[</em><em>wp.vec4</em><em>] </em><em>| </em><em>None</em>) – Optional per-capsule material parameters as a Warp vec4 array.</p></li>
 <li><p><strong>hidden</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – Whether the capsule batch should be hidden.</p></li>
 </ul>
 </dd>
@@ -1126,10 +1157,10 @@ collision is not enabled.</p></li>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Unique path/name for the instance batch.</p></li>
 <li><p><strong>mesh</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Path/name of a mesh previously registered via <a class="reference internal" href="#newton.viewer.ViewerBase.log_mesh" title="newton.viewer.ViewerBase.log_mesh"><code class="xref py py-meth docutils literal notranslate"><span class="pre">log_mesh()</span></code></a>.</p></li>
-<li><p><strong>xforms</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.transform</em><em>) </em><em>| </em><em>None</em>) – Optional per-instance transforms as a Warp transform array.</p></li>
-<li><p><strong>scales</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec3</em><em>) </em><em>| </em><em>None</em>) – Optional per-instance scales as a Warp vec3 array.</p></li>
-<li><p><strong>colors</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec3</em><em>) </em><em>| </em><em>None</em>) – Optional per-instance colors as a Warp vec3 array.</p></li>
-<li><p><strong>materials</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec4</em><em>) </em><em>| </em><em>None</em>) – Optional per-instance material parameters as a Warp vec4 array.</p></li>
+<li><p><strong>xforms</strong> (<em>wp.array</em><em>[</em><em>wp.transform</em><em>] </em><em>| </em><em>None</em>) – Optional per-instance transforms as a Warp transform array.</p></li>
+<li><p><strong>scales</strong> (<em>wp.array</em><em>[</em><em>wp.vec3</em><em>] </em><em>| </em><em>None</em>) – Optional per-instance scales as a Warp vec3 array.</p></li>
+<li><p><strong>colors</strong> (<em>wp.array</em><em>[</em><em>wp.vec3</em><em>] </em><em>| </em><em>None</em>) – Optional per-instance colors as a Warp vec3 array.</p></li>
+<li><p><strong>materials</strong> (<em>wp.array</em><em>[</em><em>wp.vec4</em><em>] </em><em>| </em><em>None</em>) – Optional per-instance material parameters as a Warp vec4 array.</p></li>
 <li><p><strong>hidden</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – Whether the instance batch should be hidden.</p></li>
 </ul>
 </dd>
@@ -1144,9 +1175,9 @@ collision is not enabled.</p></li>
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Unique path/name for the line batch.</p></li>
-<li><p><strong>starts</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec3</em><em>) </em><em>| </em><em>None</em>) – Optional line start points as a Warp vec3 array.</p></li>
-<li><p><strong>ends</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec3</em><em>) </em><em>| </em><em>None</em>) – Optional line end points as a Warp vec3 array.</p></li>
-<li><p><strong>colors</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec3</em><em>) </em><em>| </em><em>wp.array</em><em>(</em><em>dtype=wp.float32</em><em>) </em><em>| </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)"><em>tuple</em></a><em>[</em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>, </em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>, </em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>] </em><em>| </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><em>list</em></a><em>[</em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>] </em><em>| </em><em>None</em>) – Per-line colors as a Warp array, or a single RGB triplet.</p></li>
+<li><p><strong>starts</strong> (<em>wp.array</em><em>[</em><em>wp.vec3</em><em>] </em><em>| </em><em>None</em>) – Optional line start points as a Warp vec3 array.</p></li>
+<li><p><strong>ends</strong> (<em>wp.array</em><em>[</em><em>wp.vec3</em><em>] </em><em>| </em><em>None</em>) – Optional line end points as a Warp vec3 array.</p></li>
+<li><p><strong>colors</strong> (<em>wp.array</em><em>[</em><em>wp.vec3</em><em>] </em><em>| </em><em>wp.array</em><em>[</em><em>wp.float32</em><em>] </em><em>| </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)"><em>tuple</em></a><em>[</em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>, </em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>, </em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>] </em><em>| </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><em>list</em></a><em>[</em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>] </em><em>| </em><em>None</em>) – Per-line colors as a Warp array, or a single RGB triplet.</p></li>
 <li><p><strong>width</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a>) – Line width in rendered scene units.</p></li>
 <li><p><strong>hidden</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – Whether the line batch should be hidden.</p></li>
 </ul>
@@ -1162,10 +1193,10 @@ collision is not enabled.</p></li>
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Unique path/name for the mesh asset.</p></li>
-<li><p><strong>points</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec3</em><em>)</em>) – Vertex positions as a Warp vec3 array.</p></li>
-<li><p><strong>indices</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.int32</em><em>) </em><em>| </em><em>wp.array</em><em>(</em><em>dtype=wp.uint32</em><em>)</em>) – Triangle index buffer as a Warp integer array.</p></li>
-<li><p><strong>normals</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec3</em><em>) </em><em>| </em><em>None</em>) – Optional vertex normals as a Warp vec3 array.</p></li>
-<li><p><strong>uvs</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec2</em><em>) </em><em>| </em><em>None</em>) – Optional texture coordinates as a Warp vec2 array.</p></li>
+<li><p><strong>points</strong> (<em>wp.array</em><em>[</em><em>wp.vec3</em><em>]</em>) – Vertex positions as a Warp vec3 array.</p></li>
+<li><p><strong>indices</strong> (<em>wp.array</em><em>[</em><em>wp.int32</em><em>] </em><em>| </em><em>wp.array</em><em>[</em><em>wp.uint32</em><em>]</em>) – Triangle index buffer as a Warp integer array.</p></li>
+<li><p><strong>normals</strong> (<em>wp.array</em><em>[</em><em>wp.vec3</em><em>] </em><em>| </em><em>None</em>) – Optional vertex normals as a Warp vec3 array.</p></li>
+<li><p><strong>uvs</strong> (<em>wp.array</em><em>[</em><em>wp.vec2</em><em>] </em><em>| </em><em>None</em>) – Optional texture coordinates as a Warp vec2 array.</p></li>
 <li><p><strong>texture</strong> (<em>np.ndarray</em><em> | </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a><em> | </em><em>None</em>) – Optional texture image array or path.</p></li>
 <li><p><strong>hidden</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – Whether the mesh should be hidden.</p></li>
 <li><p><strong>backface_culling</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – Whether back-face culling should be enabled.</p></li>
@@ -1182,9 +1213,9 @@ collision is not enabled.</p></li>
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Unique path/name for the point batch.</p></li>
-<li><p><strong>points</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec3</em><em>) </em><em>| </em><em>None</em>) – Optional point positions as a Warp vec3 array.</p></li>
-<li><p><strong>radii</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.float32</em><em>) </em><em>| </em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em> | </em><em>None</em>) – Optional per-point radii array or a single radius value.</p></li>
-<li><p><strong>colors</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec3</em><em>) </em><em>| </em><em>wp.array</em><em>(</em><em>dtype=wp.float32</em><em>) </em><em>| </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)"><em>tuple</em></a><em>[</em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>, </em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>, </em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>] </em><em>| </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><em>list</em></a><em>[</em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>] </em><em>| </em><em>None</em>) – Optional per-point colors or a single RGB triplet.</p></li>
+<li><p><strong>points</strong> (<em>wp.array</em><em>[</em><em>wp.vec3</em><em>] </em><em>| </em><em>None</em>) – Optional point positions as a Warp vec3 array.</p></li>
+<li><p><strong>radii</strong> (<em>wp.array</em><em>[</em><em>wp.float32</em><em>] </em><em>| </em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em> | </em><em>None</em>) – Optional per-point radii array or a single radius value.</p></li>
+<li><p><strong>colors</strong> (<em>wp.array</em><em>[</em><em>wp.vec3</em><em>] </em><em>| </em><em>wp.array</em><em>[</em><em>wp.float32</em><em>] </em><em>| </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)"><em>tuple</em></a><em>[</em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>, </em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>, </em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>] </em><em>| </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><em>list</em></a><em>[</em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>] </em><em>| </em><em>None</em>) – Optional per-point colors or a single RGB triplet.</p></li>
 <li><p><strong>hidden</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – Whether the points should be hidden.</p></li>
 </ul>
 </dd>
@@ -1220,9 +1251,9 @@ render a batch of instances with the provided transforms/colors/materials.</p>
 - Capsule/Cylinder/Cone: (radius, height)
 - Plane: (width, length) or float for both
 - Box: (x_extent, y_extent, z_extent) or float for all</p></li>
-<li><p><strong>xforms</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.transform</em><em>)</em>) – wp.array(dtype=wp.transform) of instance transforms</p></li>
-<li><p><strong>colors</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec3</em><em>) </em><em>| </em><em>None</em>) – wp.array(dtype=wp.vec3) or None (broadcasted if length 1)</p></li>
-<li><p><strong>materials</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec4</em><em>) </em><em>| </em><em>None</em>) – wp.array(dtype=wp.vec4) or None (broadcasted if length 1)</p></li>
+<li><p><strong>xforms</strong> (<em>wp.array</em><em>[</em><em>wp.transform</em><em>]</em>) – wp.array[wp.transform] of instance transforms</p></li>
+<li><p><strong>colors</strong> (<em>wp.array</em><em>[</em><em>wp.vec3</em><em>] </em><em>| </em><em>None</em>) – wp.array[wp.vec3] or None (broadcasted if length 1)</p></li>
+<li><p><strong>materials</strong> (<em>wp.array</em><em>[</em><em>wp.vec4</em><em>] </em><em>| </em><em>None</em>) – wp.array[wp.vec4] or None (broadcasted if length 1)</p></li>
 <li><p><strong>geo_thickness</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a>) – Optional thickness used for hashing and solidification.</p></li>
 <li><p><strong>geo_is_solid</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – If False, use shell-thickening for mesh-based geometry.</p></li>
 <li><p><strong>geo_src</strong> (<a class="reference internal" href="newton.Mesh.html#newton.Mesh" title="newton.Mesh"><em>newton.Mesh</em></a><em> | </em><a class="reference internal" href="newton.Heightfield.html#newton.Heightfield" title="newton.Heightfield"><em>newton.Heightfield</em></a><em> | </em><em>None</em>) – Source geometry to use only when <code class="docutils literal notranslate"><span class="pre">geo_type</span></code> is
@@ -1240,6 +1271,25 @@ render a batch of instances with the provided transforms/colors/materials.</p>
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><p><strong>state</strong> (<a class="reference internal" href="newton.State.html#newton.State" title="newton._src.sim.state.State"><em>State</em></a>) – The current state of the simulation.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="newton.viewer.ViewerBase.log_wireframe_shape">
+<span class="sig-name descname"><span class="pre">log_wireframe_shape</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">vertex_data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">world_matrix</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hidden</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#newton.viewer.ViewerBase.log_wireframe_shape" title="Link to this definition">#</a></dt>
+<dd><p>Log a wireframe shape for rendering via the geometry-shader line pipeline.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Unique path/name for the wireframe shape.</p></li>
+<li><p><strong>vertex_data</strong> (<a class="reference external" href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="(in NumPy v2.4)"><em>ndarray</em></a><em> | </em><em>None</em>) – <code class="docutils literal notranslate"><span class="pre">(N,</span> <span class="pre">6)</span></code> float32 array of interleaved <code class="docutils literal notranslate"><span class="pre">[px,py,pz,</span> <span class="pre">cr,cg,cb]</span></code>
+line-segment vertices (pairs).  Pass <code class="docutils literal notranslate"><span class="pre">None</span></code> to keep existing
+geometry and only update the transform.</p></li>
+<li><p><strong>world_matrix</strong> (<a class="reference external" href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="(in NumPy v2.4)"><em>ndarray</em></a><em> | </em><em>None</em>) – 4x4 float32 model-to-world matrix, or <code class="docutils literal notranslate"><span class="pre">None</span></code> to
+keep the current matrix.</p></li>
+<li><p><strong>hidden</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – Whether the wireframe shape should be hidden.</p></li>
+</ul>
 </dd>
 </dl>
 </dd></dl>
@@ -1326,6 +1376,12 @@ Example: (5.0, 5.0, 0.0) for 5 units spacing in X and Y.</p>
   <nav class="bd-toc-nav page-toc" aria-labelledby="pst-page-navigation-heading-2">
     <ul class="visible nav section-nav flex-column">
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerBase"><code class="docutils literal notranslate"><span class="pre">ViewerBase</span></code></a><ul class="visible nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerBase.SDFMarginMode"><code class="docutils literal notranslate"><span class="pre">SDFMarginMode</span></code></a><ul class="nav section-nav flex-column">
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerBase.SDFMarginMode.MARGIN"><code class="docutils literal notranslate"><span class="pre">MARGIN</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerBase.SDFMarginMode.MARGIN_GAP"><code class="docutils literal notranslate"><span class="pre">MARGIN_GAP</span></code></a></li>
+<li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerBase.SDFMarginMode.OFF"><code class="docutils literal notranslate"><span class="pre">OFF</span></code></a></li>
+</ul>
+</li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerBase.ShapeInstances"><code class="docutils literal notranslate"><span class="pre">ShapeInstances</span></code></a><ul class="nav section-nav flex-column">
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerBase.ShapeInstances.__init__"><code class="docutils literal notranslate"><span class="pre">__init__()</span></code></a></li>
 <li class="toc-h4 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerBase.ShapeInstances.add"><code class="docutils literal notranslate"><span class="pre">add()</span></code></a></li>
@@ -1339,6 +1395,7 @@ Example: (5.0, 5.0, 0.0) for 5 units spacing in X and Y.</p>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerBase.apply_forces"><code class="docutils literal notranslate"><span class="pre">apply_forces()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerBase.begin_frame"><code class="docutils literal notranslate"><span class="pre">begin_frame()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerBase.clear_model"><code class="docutils literal notranslate"><span class="pre">clear_model()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerBase.clear_wireframe_vbo_cache"><code class="docutils literal notranslate"><span class="pre">clear_wireframe_vbo_cache()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerBase.close"><code class="docutils literal notranslate"><span class="pre">close()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerBase.end_frame"><code class="docutils literal notranslate"><span class="pre">end_frame()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerBase.is_key_down"><code class="docutils literal notranslate"><span class="pre">is_key_down()</span></code></a></li>
@@ -1358,6 +1415,7 @@ Example: (5.0, 5.0, 0.0) for 5 units spacing in X and Y.</p>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerBase.log_scalar"><code class="docutils literal notranslate"><span class="pre">log_scalar()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerBase.log_shapes"><code class="docutils literal notranslate"><span class="pre">log_shapes()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerBase.log_state"><code class="docutils literal notranslate"><span class="pre">log_state()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerBase.log_wireframe_shape"><code class="docutils literal notranslate"><span class="pre">log_wireframe_shape()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerBase.set_camera"><code class="docutils literal notranslate"><span class="pre">set_camera()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerBase.set_model"><code class="docutils literal notranslate"><span class="pre">set_model()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerBase.set_world_offsets"><code class="docutils literal notranslate"><span class="pre">set_world_offsets()</span></code></a></li>

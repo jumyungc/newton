@@ -880,6 +880,11 @@ and whenever the current model is discarded.</p>
 </dd></dl>
 
 <dl class="py method">
+<dt class="sig sig-object py" id="newton.viewer.ViewerGL.clear_wireframe_vbo_cache">
+<span class="sig-name descname"><span class="pre">clear_wireframe_vbo_cache</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#newton.viewer.ViewerGL.clear_wireframe_vbo_cache" title="Link to this definition">#</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
 <dt class="sig sig-object py" id="newton.viewer.ViewerGL.close">
 <span class="sig-name descname"><span class="pre">close</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#newton.viewer.ViewerGL.close" title="Link to this definition">#</a></dt>
 <dd><p>Close the viewer and clean up resources.</p>
@@ -981,7 +986,7 @@ Int examples: pyglet.window.key.W, pyglet.window.key.SPACE</p>
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Unique path/name for the array signal.</p></li>
-<li><p><strong>array</strong> (<em>wp.array</em><em>(</em><em>dtype=Any</em><em>) </em><em>| </em><em>np.ndarray</em>) – Array data to visualize.</p></li>
+<li><p><strong>array</strong> (<em>wp.array</em><em>[</em><em>Any</em><em>] </em><em>| </em><em>np.ndarray</em>) – Array data to visualize.</p></li>
 </ul>
 </dd>
 </dl>
@@ -998,10 +1003,10 @@ prototype meshes (unit cylinder + unit sphere) and applying per-instance transfo
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Unique name for the capsule instancer group.</p></li>
 <li><p><strong>mesh</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Capsule prototype mesh path from ViewerBase (unused in this backend).</p></li>
-<li><p><strong>xforms</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.transform</em><em>) </em><em>| </em><em>None</em>) – Capsule instance transforms (wp.transform), length N.</p></li>
-<li><p><strong>scales</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec3</em><em>) </em><em>| </em><em>None</em>) – Capsule body instance scales, expected (radius, radius, half_height), length N.</p></li>
-<li><p><strong>colors</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec3</em><em>) </em><em>| </em><em>None</em>) – Capsule instance colors (wp.vec3), length N or None (no update).</p></li>
-<li><p><strong>materials</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec4</em><em>) </em><em>| </em><em>None</em>) – Capsule instance materials (wp.vec4), length N or None (no update).</p></li>
+<li><p><strong>xforms</strong> (<em>wp.array</em><em>[</em><em>wp.transform</em><em>] </em><em>| </em><em>None</em>) – Capsule instance transforms (wp.transform), length N.</p></li>
+<li><p><strong>scales</strong> (<em>wp.array</em><em>[</em><em>wp.vec3</em><em>] </em><em>| </em><em>None</em>) – Capsule body instance scales, expected (radius, radius, half_height), length N.</p></li>
+<li><p><strong>colors</strong> (<em>wp.array</em><em>[</em><em>wp.vec3</em><em>] </em><em>| </em><em>None</em>) – Capsule instance colors (wp.vec3), length N or None (no update).</p></li>
+<li><p><strong>materials</strong> (<em>wp.array</em><em>[</em><em>wp.vec4</em><em>] </em><em>| </em><em>None</em>) – Capsule instance materials (wp.vec4), length N or None (no update).</p></li>
 <li><p><strong>hidden</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – Whether the instances are hidden.</p></li>
 </ul>
 </dd>
@@ -1055,10 +1060,10 @@ released by the user.</p></li>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Unique name for the instancer.</p></li>
 <li><p><strong>mesh</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Name of the base mesh.</p></li>
-<li><p><strong>xforms</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.transform</em><em>) </em><em>| </em><em>None</em>) – Array of transforms.</p></li>
-<li><p><strong>scales</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec3</em><em>) </em><em>| </em><em>None</em>) – Array of scales.</p></li>
-<li><p><strong>colors</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec3</em><em>) </em><em>| </em><em>None</em>) – Array of colors.</p></li>
-<li><p><strong>materials</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec4</em><em>) </em><em>| </em><em>None</em>) – Array of materials.</p></li>
+<li><p><strong>xforms</strong> (<em>wp.array</em><em>[</em><em>wp.transform</em><em>] </em><em>| </em><em>None</em>) – Array of transforms.</p></li>
+<li><p><strong>scales</strong> (<em>wp.array</em><em>[</em><em>wp.vec3</em><em>] </em><em>| </em><em>None</em>) – Array of scales.</p></li>
+<li><p><strong>colors</strong> (<em>wp.array</em><em>[</em><em>wp.vec3</em><em>] </em><em>| </em><em>None</em>) – Array of colors.</p></li>
+<li><p><strong>materials</strong> (<em>wp.array</em><em>[</em><em>wp.vec4</em><em>] </em><em>| </em><em>None</em>) – Array of materials.</p></li>
 <li><p><strong>hidden</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – Whether the instances are hidden.</p></li>
 </ul>
 </dd>
@@ -1073,9 +1078,9 @@ released by the user.</p></li>
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Unique identifier for the line batch.</p></li>
-<li><p><strong>starts</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec3</em><em>) </em><em>| </em><em>None</em>) – Array of line start positions (shape: [N, 3]) or None for empty.</p></li>
-<li><p><strong>ends</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec3</em><em>) </em><em>| </em><em>None</em>) – Array of line end positions (shape: [N, 3]) or None for empty.</p></li>
-<li><p><strong>colors</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec3</em><em>) </em><em>| </em><em>wp.array</em><em>(</em><em>dtype=wp.float32</em><em>) </em><em>| </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)"><em>tuple</em></a><em>[</em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>, </em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>, </em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>] </em><em>| </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><em>list</em></a><em>[</em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>] </em><em>| </em><em>None</em>) – Array of line colors (shape: [N, 3]) or tuple/list of RGB or None for empty.</p></li>
+<li><p><strong>starts</strong> (<em>wp.array</em><em>[</em><em>wp.vec3</em><em>] </em><em>| </em><em>None</em>) – Array of line start positions (shape: [N, 3]) or None for empty.</p></li>
+<li><p><strong>ends</strong> (<em>wp.array</em><em>[</em><em>wp.vec3</em><em>] </em><em>| </em><em>None</em>) – Array of line end positions (shape: [N, 3]) or None for empty.</p></li>
+<li><p><strong>colors</strong> (<em>wp.array</em><em>[</em><em>wp.vec3</em><em>] </em><em>| </em><em>wp.array</em><em>[</em><em>wp.float32</em><em>] </em><em>| </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)"><em>tuple</em></a><em>[</em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>, </em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>, </em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>] </em><em>| </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><em>list</em></a><em>[</em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>] </em><em>| </em><em>None</em>) – Array of line colors (shape: [N, 3]) or tuple/list of RGB or None for empty.</p></li>
 <li><p><strong>width</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a>) – The width of the lines.</p></li>
 <li><p><strong>hidden</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – Whether the lines are initially hidden.</p></li>
 </ul>
@@ -1091,10 +1096,10 @@ released by the user.</p></li>
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Unique name for the mesh.</p></li>
-<li><p><strong>points</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec3</em><em>)</em>) – Vertex positions.</p></li>
-<li><p><strong>indices</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.int32</em><em>) </em><em>| </em><em>wp.array</em><em>(</em><em>dtype=wp.uint32</em><em>)</em>) – Triangle indices.</p></li>
-<li><p><strong>normals</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec3</em><em>) </em><em>| </em><em>None</em>) – Vertex normals.</p></li>
-<li><p><strong>uvs</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec2</em><em>) </em><em>| </em><em>None</em>) – Vertex UVs.</p></li>
+<li><p><strong>points</strong> (<em>wp.array</em><em>[</em><em>wp.vec3</em><em>]</em>) – Vertex positions.</p></li>
+<li><p><strong>indices</strong> (<em>wp.array</em><em>[</em><em>wp.int32</em><em>] </em><em>| </em><em>wp.array</em><em>[</em><em>wp.uint32</em><em>]</em>) – Triangle indices.</p></li>
+<li><p><strong>normals</strong> (<em>wp.array</em><em>[</em><em>wp.vec3</em><em>] </em><em>| </em><em>None</em>) – Vertex normals.</p></li>
+<li><p><strong>uvs</strong> (<em>wp.array</em><em>[</em><em>wp.vec2</em><em>] </em><em>| </em><em>None</em>) – Vertex UVs.</p></li>
 <li><p><strong>texture</strong> (<em>np.ndarray</em><em> | </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a><em> | </em><em>None</em>) – Texture path/URL or image array (H, W, C).</p></li>
 <li><p><strong>hidden</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – Whether the mesh is hidden.</p></li>
 <li><p><strong>backface_culling</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – Enable backface culling.</p></li>
@@ -1111,9 +1116,9 @@ released by the user.</p></li>
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><ul class="simple">
 <li><p><strong>name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Unique name for the point batch.</p></li>
-<li><p><strong>points</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec3</em><em>) </em><em>| </em><em>None</em>) – Array of point positions.</p></li>
-<li><p><strong>radii</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.float32</em><em>) </em><em>| </em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em> | </em><em>None</em>) – Array of point radius values.</p></li>
-<li><p><strong>colors</strong> (<em>wp.array</em><em>(</em><em>dtype=wp.vec3</em><em>) </em><em>| </em><em>wp.array</em><em>(</em><em>dtype=wp.float32</em><em>) </em><em>| </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)"><em>tuple</em></a><em>[</em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>, </em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>, </em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>] </em><em>| </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><em>list</em></a><em>[</em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>] </em><em>| </em><em>None</em>) – Array of point colors.</p></li>
+<li><p><strong>points</strong> (<em>wp.array</em><em>[</em><em>wp.vec3</em><em>] </em><em>| </em><em>None</em>) – Array of point positions.</p></li>
+<li><p><strong>radii</strong> (<em>wp.array</em><em>[</em><em>wp.float32</em><em>] </em><em>| </em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em> | </em><em>None</em>) – Array of point radius values.</p></li>
+<li><p><strong>colors</strong> (<em>wp.array</em><em>[</em><em>wp.vec3</em><em>] </em><em>| </em><em>wp.array</em><em>[</em><em>wp.float32</em><em>] </em><em>| </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)"><em>tuple</em></a><em>[</em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>, </em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>, </em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>] </em><em>| </em><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><em>list</em></a><em>[</em><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><em>float</em></a><em>] </em><em>| </em><em>None</em>) – Array of point colors.</p></li>
 <li><p><strong>hidden</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – Whether the points are hidden.</p></li>
 </ul>
 </dd>
@@ -1144,6 +1149,23 @@ Everything else (capsules, SDF, particles, joints, …) uses the standard path.<
 <dl class="field-list simple">
 <dt class="field-odd">Parameters<span class="colon">:</span></dt>
 <dd class="field-odd"><p><strong>state</strong> (<a class="reference internal" href="newton.State.html#newton.State" title="newton._src.sim.state.State"><em>State</em></a>) – Current simulation state for all rendered bodies/shapes.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="newton.viewer.ViewerGL.log_wireframe_shape">
+<span class="sig-name descname"><span class="pre">log_wireframe_shape</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">vertex_data</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">world_matrix</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hidden</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#newton.viewer.ViewerGL.log_wireframe_shape" title="Link to this definition">#</a></dt>
+<dd><p>Log a wireframe shape for geometry-shader line rendering.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>name</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Unique path/name for the wireframe shape.</p></li>
+<li><p><strong>vertex_data</strong> (<a class="reference external" href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="(in NumPy v2.4)"><em>ndarray</em></a><em> | </em><em>None</em>) – <code class="docutils literal notranslate"><span class="pre">(N,</span> <span class="pre">6)</span></code> float32 interleaved vertex data, or <code class="docutils literal notranslate"><span class="pre">None</span></code>
+to keep existing geometry.</p></li>
+<li><p><strong>world_matrix</strong> (<a class="reference external" href="https://numpy.org/doc/stable/reference/generated/numpy.ndarray.html#numpy.ndarray" title="(in NumPy v2.4)"><em>ndarray</em></a><em> | </em><em>None</em>) – 4x4 float32 world matrix, or <code class="docutils literal notranslate"><span class="pre">None</span></code> to keep current.</p></li>
+<li><p><strong>hidden</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – Whether the shape is hidden.</p></li>
+</ul>
 </dd>
 </dl>
 </dd></dl>
@@ -1376,6 +1398,7 @@ Everything else (capsules, SDF, particles, joints, …) uses the standard path.<
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerGL.apply_forces"><code class="docutils literal notranslate"><span class="pre">apply_forces()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerGL.begin_frame"><code class="docutils literal notranslate"><span class="pre">begin_frame()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerGL.clear_model"><code class="docutils literal notranslate"><span class="pre">clear_model()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerGL.clear_wireframe_vbo_cache"><code class="docutils literal notranslate"><span class="pre">clear_wireframe_vbo_cache()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerGL.close"><code class="docutils literal notranslate"><span class="pre">close()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerGL.end_frame"><code class="docutils literal notranslate"><span class="pre">end_frame()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerGL.get_frame"><code class="docutils literal notranslate"><span class="pre">get_frame()</span></code></a></li>
@@ -1392,6 +1415,7 @@ Everything else (capsules, SDF, particles, joints, …) uses the standard path.<
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerGL.log_points"><code class="docutils literal notranslate"><span class="pre">log_points()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerGL.log_scalar"><code class="docutils literal notranslate"><span class="pre">log_scalar()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerGL.log_state"><code class="docutils literal notranslate"><span class="pre">log_state()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerGL.log_wireframe_shape"><code class="docutils literal notranslate"><span class="pre">log_wireframe_shape()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerGL.on_key_press"><code class="docutils literal notranslate"><span class="pre">on_key_press()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerGL.on_key_release"><code class="docutils literal notranslate"><span class="pre">on_key_release()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#newton.viewer.ViewerGL.on_mouse_drag"><code class="docutils literal notranslate"><span class="pre">on_mouse_drag()</span></code></a></li>
