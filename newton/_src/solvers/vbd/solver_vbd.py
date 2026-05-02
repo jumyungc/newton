@@ -116,7 +116,11 @@ class SolverVBD(SolverBase):
           convention (``D = kd * ke``) can produce excessive damping. When using joint limits
           with VBD, explicitly set ``limit_kd`` to a small value.
         - :attr:`~newton.Control.joint_f` (feedforward forces) is supported.
-        - Not supported: :attr:`~newton.Model.joint_armature`, :attr:`~newton.Model.joint_friction`,
+        - :attr:`~newton.Model.joint_friction` is supported for REVOLUTE, PRISMATIC, and D6
+          joints as a per-DOF Coulomb dry-friction force/torque [N or N·m]. The model is
+          regularized via a smooth ``tanh(qd / eps)`` velocity-opposing law (not an exact LCP
+          stick).
+        - Not supported: :attr:`~newton.Model.joint_armature`,
           :attr:`~newton.Model.joint_effort_limit`, :attr:`~newton.Model.joint_velocity_limit`,
           :attr:`~newton.Model.joint_target_mode`, equality constraints, mimic constraints.
 
@@ -2437,6 +2441,7 @@ class SolverVBD(SolverBase):
                     self.rigid_joint_alpha,
                     model.joint_dof_dim,
                     self.joint_rest_angle,
+                    model.joint_friction,
                     self.body_forces,
                     self.body_torques,
                     self.body_hessian_ll,
