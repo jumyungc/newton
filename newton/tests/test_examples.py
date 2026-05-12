@@ -253,6 +253,28 @@ add_example_test(
     use_viewer=True,
     test_options={"num-frames": 150},
 )
+for contact_mode in ("soft", "hard", "hard_history"):
+    add_example_test(
+        TestBasicExamples,
+        name="basic.example_basic_avbd_stack",
+        devices=test_devices,
+        use_viewer=True,
+        test_options={"num-frames": 20, "layout": "stack", "contact_mode": contact_mode},
+        test_suffix=contact_mode,
+    )
+add_example_test(
+    TestBasicExamples,
+    name="basic.example_basic_avbd_stack",
+    devices=test_devices,
+    use_viewer=True,
+    test_options={
+        "num-frames": 20,
+        "layout": "pyramid",
+        "pyramid_rows": 6,
+        "contact_mode": "hard_history",
+    },
+    test_suffix="pyramid_hard_history",
+)
 
 
 class TestCableExamples(unittest.TestCase):

@@ -236,6 +236,8 @@ class SolverVBD(SolverBase):
         rigid_joint_linear_kd: float = 0.0,  # Rayleigh damping for non-cable linear joint constraints
         rigid_joint_angular_kd: float = 0.0,  # Rayleigh damping for non-cable angular joint constraints
         rigid_enable_dahl_friction: bool | None = None,  # Deprecated: auto-detected from model attributes
+        rigid_primal_warmstart: float = 1.0,  # Blend current body pose toward inertial target before VBD iterations
+        rigid_adaptive_primal_warmstart: bool = False,  # Derive primal warm-start from gravity-direction acceleration
     ):
         """
         Args:
@@ -345,6 +347,14 @@ class SolverVBD(SolverBase):
                 Negative values are clamped to 0.
             rigid_enable_dahl_friction: Deprecated and ignored. Dahl friction is auto-detected
                 from ``model.vbd.dahl_eps_max`` / ``model.vbd.dahl_tau``.
+            rigid_primal_warmstart: Blend factor for the body pose used to start each
+                VBD step. ``1.0`` (default) preserves the semi-implicit forward step.
+                ``0.0`` keeps the primal solve at the previous pose while retaining the
+                same inertial target.
+            rigid_adaptive_primal_warmstart: Whether to compute the primal warm-start
+                blend from the body's acceleration along gravity, following the AVBD
+                reference warm-start. When enabled, ``rigid_primal_warmstart`` is used
+                only when gravity is zero.
 
         Note:
             - The `integrate_with_external_rigid_solver` argument enables one-way coupling between rigid body and soft body
@@ -428,6 +438,8 @@ class SolverVBD(SolverBase):
             rigid_joint_angular_k_start,
             rigid_joint_linear_kd,
             rigid_joint_angular_kd,
+            rigid_primal_warmstart,
+            rigid_adaptive_primal_warmstart,
         )
 
         # Controls whether the next step() refreshes contact state derived from
@@ -559,6 +571,8 @@ class SolverVBD(SolverBase):
         rigid_joint_angular_k_start: float,
         rigid_joint_linear_kd: float,
         rigid_joint_angular_kd: float,
+        rigid_primal_warmstart: float,
+        rigid_adaptive_primal_warmstart: bool,
     ) -> None:
         """Initialize rigid body-specific AVBD data structures and settings.
 
@@ -600,7 +614,11 @@ class SolverVBD(SolverBase):
             raise ValueError(f"rigid_joint_linear_ke must be >= 0, got {rigid_joint_linear_ke}")
         if rigid_joint_angular_ke < 0:
             raise ValueError(f"rigid_joint_angular_ke must be >= 0, got {rigid_joint_angular_ke}")
+        if not (0.0 <= rigid_primal_warmstart <= 1.0):
+            raise ValueError(f"rigid_primal_warmstart must be in [0, 1], got {rigid_primal_warmstart}")
         self.rigid_avbd_gamma = rigid_avbd_gamma
+        self.rigid_primal_warmstart = rigid_primal_warmstart
+        self.rigid_adaptive_primal_warmstart = rigid_adaptive_primal_warmstart
         self.rigid_contact_k_start_value = -1.0 if rigid_avbd_linear_beta == 0.0 else float(rigid_contact_k_start)
         self.rigid_joint_linear_k_start = rigid_joint_linear_k_start if rigid_avbd_linear_beta > 0.0 else None
         self.rigid_joint_angular_k_start = rigid_joint_angular_k_start if rigid_avbd_angular_beta > 0.0 else None
@@ -633,8 +651,9 @@ class SolverVBD(SolverBase):
             # Previous-step body transforms, advanced by update_body_velocity() each step.
             # Provides contact friction velocity and joint C0 feedforward for kinematic tracking.
             # Kinematic bodies: set body_q.
-            # Dynamic teleportation: also set body_q_prev and body_qd.
+            # Dynamic teleportation: also set body_q_prev, body_qd, and body_qd_prev.
             self.body_q_prev = wp.clone(model.body_q, device=self.device)
+            self.body_qd_prev = wp.clone(model.body_qd, device=self.device)
             self.body_inertia_q = wp.zeros_like(model.body_q, device=self.device)  # inertial target poses for AVBD
 
             # Adjacency and dimensions
@@ -1957,6 +1976,8 @@ class SolverVBD(SolverBase):
                 kernel=forward_step_rigid_bodies,
                 inputs=[
                     dt,
+                    self.rigid_primal_warmstart,
+                    int(self.rigid_adaptive_primal_warmstart),
                     model.gravity,
                     model.body_world,
                     body_f_for_integration,
@@ -1966,6 +1987,7 @@ class SolverVBD(SolverBase):
                     self.body_inv_inertia_effective,
                     state_in.body_q,  # input/output
                     state_in.body_qd,  # input/output
+                    self.body_qd_prev,  # input/output
                 ],
                 outputs=[
                     self.body_inertia_q,

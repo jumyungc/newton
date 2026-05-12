@@ -1811,6 +1811,8 @@ def _fill_adjacent_joints(
 def forward_step_rigid_bodies(
     # Inputs
     dt: float,
+    primal_warmstart: float,
+    adaptive_primal_warmstart: int,
     gravity: wp.array[wp.vec3],
     body_world: wp.array[wp.int32],
     body_f: wp.array[wp.spatial_vector],
@@ -1820,6 +1822,7 @@ def forward_step_rigid_bodies(
     body_inv_inertia: wp.array[wp.mat33],
     body_q: wp.array[wp.transform],
     body_qd: wp.array[wp.spatial_vector],
+    body_qd_prev: wp.array[wp.spatial_vector],
     body_inertia_q: wp.array[wp.transform],
 ):
     """
@@ -1827,6 +1830,8 @@ def forward_step_rigid_bodies(
 
     Args:
         dt: Time step [s].
+        primal_warmstart: Blend factor from previous pose to inertial target before VBD iterations.
+        adaptive_primal_warmstart: Whether to derive the blend factor from acceleration along gravity.
         gravity: Gravity vector array (world frame).
         body_world: World index for each body.
         body_f: External forces on bodies (spatial wrenches, world frame).
@@ -1836,16 +1841,19 @@ def forward_step_rigid_bodies(
         body_inv_inertia: Inverse inertia tensors (local body frame).
         body_q: Body transforms (input: start-of-step pose, output: integrated pose).
         body_qd: Body velocities (input: start-of-step velocity, output: integrated velocity).
+        body_qd_prev: Previous step body velocities (input/output).
         body_inertia_q: Inertial target body transforms for the AVBD solve (output).
     """
     tid = wp.tid()
 
     q_current = body_q[tid]
+    qd_previous = body_qd_prev[tid]
 
     # Early exit for kinematic bodies (inv_mass == 0).
     inv_m = body_inv_mass[tid]
     if inv_m == 0.0:
         body_inertia_q[tid] = q_current
+        body_qd_prev[tid] = body_qd[tid]
         return
 
     # Read body state (only for dynamic bodies)
@@ -1871,9 +1879,37 @@ def forward_step_rigid_bodies(
         dt,
     )
 
-    # Update current transform, velocity, and set inertial target
-    body_q[tid] = q_new
+    # Update current transform, velocity, and set inertial target.
+    x_current = wp.transform_get_translation(q_current)
+    r_current = wp.transform_get_rotation(q_current)
+    x_new = wp.transform_get_translation(q_new)
+    r_new = wp.transform_get_rotation(q_new)
+
+    warmstart = wp.clamp(primal_warmstart, 0.0, 1.0)
+    if adaptive_primal_warmstart != 0:
+        gravity_len = wp.length(world_g)
+        if gravity_len > 0.0 and dt > 0.0:
+            accel = (wp.spatial_top(qd_current) - wp.spatial_top(qd_previous)) / dt
+            accel_ext = wp.dot(accel, world_g / gravity_len)
+            warmstart = wp.clamp(accel_ext / gravity_len, 0.0, 1.0)
+            if not wp.isfinite(warmstart):
+                warmstart = 0.0
+
+        r_vel = wp.normalize(r_current + wp.quat(wp.spatial_bottom(qd_current), 0.0) * r_current * 0.5 * dt)
+        x_com_current = x_current + wp.quat_rotate(r_current, com_local)
+        x_com_vel = x_com_current + wp.spatial_top(qd_current) * dt
+        x_vel = x_com_vel - wp.quat_rotate(r_vel, com_local)
+
+        x_warm = x_vel + (x_new - x_vel) * warmstart
+        body_q[tid] = wp.transform(x_warm, r_vel)
+    elif warmstart < 1.0:
+        x_warm = x_current + (x_new - x_current) * warmstart
+        r_warm = wp.normalize(r_current * (1.0 - warmstart) + r_new * warmstart)
+        body_q[tid] = wp.transform(x_warm, r_warm)
+    else:
+        body_q[tid] = q_new
     body_qd[tid] = qd_new
+    body_qd_prev[tid] = qd_current
     body_inertia_q[tid] = q_new
 
 
@@ -3773,7 +3809,7 @@ def update_body_velocity(
         stick_freeze_angular_eps: Angular deadzone [rad] for anti-creep snapping.
         body_q_prev: Previous body transforms (input/output, advanced to current
             pose for next step). For kinematic bodies set body_q. For dynamic
-            teleportation also set body_q_prev and body_qd.
+            teleportation also set body_q_prev, body_qd, and body_qd_prev.
         body_qd: Output body velocities (spatial vectors, world frame), bound to state_out.
         body_qd_mirror: Output body velocities, bound to state_in. Mirrors body_qd so the
             next step's forward integrator sees the finalized velocity even when the

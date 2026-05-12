@@ -434,6 +434,21 @@ def _d6_fully_free_structural_slots_are_inactive(test, device):
     np.testing.assert_array_equal(solver.joint_is_hard.numpy()[start : start + 2], [0, 0])
 
 
+def _rigid_primal_warmstart_validates_range(test, device):
+    """Rigid primal warm-start blend should be constrained to [0, 1]."""
+    builder = newton.ModelBuilder(gravity=0.0)
+    body = builder.add_body()
+    builder.add_shape_box(body, hx=0.1, hy=0.1, hz=0.1)
+    builder.color()
+    model = builder.finalize(device=device)
+
+    with test.assertRaisesRegex(ValueError, "rigid_primal_warmstart must be in \\[0, 1\\]"):
+        newton.solvers.SolverVBD(model, rigid_primal_warmstart=-0.1)
+
+    with test.assertRaisesRegex(ValueError, "rigid_primal_warmstart must be in \\[0, 1\\]"):
+        newton.solvers.SolverVBD(model, rigid_primal_warmstart=1.1)
+
+
 def _rigid_contact_history_snapshot_copies_active_rows(test, device):
     """Snapshot writes solved state by active contact row and leaves inactive rows untouched."""
     with wp.ScopedDevice(device):
@@ -617,6 +632,12 @@ add_function_test(
     TestSolverVBD,
     "test_d6_fully_free_structural_slots_are_inactive",
     _d6_fully_free_structural_slots_are_inactive,
+    devices=devices,
+)
+add_function_test(
+    TestSolverVBD,
+    "test_rigid_primal_warmstart_validates_range",
+    _rigid_primal_warmstart_validates_range,
     devices=devices,
 )
 add_function_test(
