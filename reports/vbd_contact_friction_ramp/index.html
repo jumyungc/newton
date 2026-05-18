@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VBD Contact Friction Ramp</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17202a;
+      --muted: #5f6f82;
+      --line: #d9e0e8;
+      --panel: #f7f9fb;
+      --max: 1120px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: #fff;
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+    }
+    header { border-bottom: 1px solid var(--line); background: #fbfcfd; }
+    main, .header-inner, footer { width: min(var(--max), calc(100vw - 32px)); margin: 0 auto; }
+    .header-inner { padding: 36px 0 28px; }
+    h1 { margin: 0 0 10px; font-size: clamp(2rem, 4vw, 3.35rem); line-height: 1.05; letter-spacing: 0; }
+    h2 { margin: 0 0 10px; font-size: 1.45rem; line-height: 1.2; letter-spacing: 0; }
+    h3 { margin: 0 0 10px; font-size: 1.18rem; line-height: 1.25; letter-spacing: 0; }
+    p { margin: 0 0 12px; }
+    code {
+      padding: 0.08em 0.25em;
+      border-radius: 4px;
+      background: #edf2f7;
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+    }
+    .subtitle { max-width: 860px; margin: 0; color: var(--muted); font-size: 1.05rem; }
+    .metric-row, .takeaways, .video-grid, .plot-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+    .metric-row { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 22px; gap: 12px; }
+    .takeaways { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 14px; gap: 12px; }
+    .metric, .takeaway {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 14px 16px;
+    }
+    .metric .label { color: var(--muted); font-size: 0.82rem; font-weight: 650; text-transform: uppercase; }
+    .metric .value { display: block; margin-top: 4px; font-size: 1.28rem; font-weight: 760; }
+    main { padding: 28px 0 48px; }
+    section { margin: 0 0 38px; }
+    .two-col {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(320px, 0.72fr);
+      gap: 22px;
+      align-items: start;
+    }
+    figure {
+      margin: 0 0 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      overflow: hidden;
+    }
+    figure img, video { display: block; width: 100%; height: auto; }
+    video { background: #111827; }
+    figcaption {
+      padding: 10px 12px 12px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+    .plot-stack { display: grid; grid-template-columns: 1fr; gap: 18px; }
+    .video-stack { display: grid; grid-template-columns: 1fr; gap: 18px; }
+    .video-stack figure { margin-bottom: 0; }
+    .video-stack h3 { padding: 12px 14px 0; }
+    footer { padding: 0 0 42px; color: var(--muted); font-size: 0.9rem; }
+    @media (max-width: 860px) {
+      .metric-row, .takeaways, .video-grid, .plot-grid, .two-col { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <h1>VBD Contact Friction Ramp</h1>
+      <p class="subtitle">
+        Box friction validation with stick/deadzone helpers disabled, covering
+        static ramp classification, dynamic ramp sliding, and dynamic slide
+        stop distance.
+      </p>
+      <div class="metric-row">
+        <div class="metric"><span class="label">Modes</span><span class="value">soft / hard</span></div>
+        <div class="metric"><span class="label">Reference Iterations</span><span class="value">8</span></div>
+        <div class="metric"><span class="label">Stiffness</span><span class="value">1e4 / 1e7</span></div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="two-col">
+      <div>
+        <h2>Setup</h2>
+        <p>
+          <strong>Static Ramp</strong> starts boxes at rest on ramps and checks the Coulomb
+          threshold: below <code>atan(mu)</code> they should stick, above it they
+          should slide.
+        </p>
+        <p>
+          <strong>Dynamic Ramp</strong> uses the same ramp grid with downhill
+          initial velocity. <strong>Dynamic Slide</strong> uses flat tracks and
+          checks horizontal stop distance against analytic Coulomb sliding.
+        </p>
+      </div>
+      <figure>
+        <img src="assets/scene_overview.png" alt="Friction ramp validation setup.">
+        <figcaption>Static ramp, dynamic ramp, and dynamic slide validation setup.</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2>Comparison Videos</h2>
+      <div class="video-stack">
+        <figure>
+          <h3>Static Ramp</h3>
+          <video controls preload="metadata" muted playsinline>
+            <source src="assets/friction_ramp_static_soft_hard.mp4" type="video/mp4">
+          </video>
+          <figcaption>
+            Static ramp grid, comparing soft and hard contact at <code>8</code>
+            VBD iterations. Green should stick, red should slide, yellow is near threshold,
+            and magenta marks the analytic downhill position while it is still on the finite ramp.
+          </figcaption>
+        </figure>
+        <figure>
+          <h3>Dynamic Ramp</h3>
+          <video controls preload="metadata" muted playsinline>
+            <source src="assets/friction_ramp_dynamic_ramp_soft_hard.mp4" type="video/mp4">
+          </video>
+          <figcaption>
+            Same ramp grid with downhill initial velocity. This is a visual
+            companion to the static ramp check; on-ramp error excludes cases that
+            have already reached the finite ramp end.
+          </figcaption>
+        </figure>
+        <figure>
+          <h3>Dynamic Slide</h3>
+          <video controls preload="metadata" muted playsinline>
+            <source src="assets/friction_ramp_dynamic_soft_hard.mp4" type="video/mp4">
+          </video>
+          <figcaption>
+            Flat sliding from the validation scene. The dashed magenta marker is
+            the analytic Coulomb position for each <code>mu</code>; the overlay reports
+            current position error, so the hard case's few-millimeter short stop is visible.
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section>
+      <h2>Result</h2>
+      <div class="takeaways">
+        <div class="takeaway">
+          <strong>Static Ramp.</strong>
+          Hard contact with <code>ke=1e7</code> gives strong static holding in this box test.
+        </div>
+        <div class="takeaway">
+          <strong>Dynamic Ramp.</strong>
+          The same trend appears on ramp geometry; on-ramp error is used while boxes remain on the finite ramp.
+        </div>
+        <div class="takeaway">
+          <strong>Dynamic Slide.</strong>
+          Soft contact gives smoother stop-distance tracking; hard stops a few millimeters short.
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Static Ramp</h2>
+      <figure>
+        <img src="assets/static_box_mode_comparison_iter_08.png" alt="Static ramp mode comparison at 8 iterations.">
+        <figcaption>Fixed iteration comparison at <code>8</code> VBD iterations.</figcaption>
+      </figure>
+      <div class="plot-grid">
+        <figure>
+          <img src="assets/static_box_iteration_comparison_soft.png" alt="Static ramp soft iteration comparison.">
+          <figcaption>Soft contact iteration sensitivity.</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/static_box_iteration_comparison_hard.png" alt="Static ramp hard iteration comparison.">
+          <figcaption>Hard contact iteration sensitivity.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section>
+      <h2>Dynamic Ramp</h2>
+      <figure>
+        <img src="assets/dynamic_ramp_mode_comparison_iter_08.png" alt="Dynamic ramp mode comparison at 8 iterations.">
+        <figcaption>
+          Dynamic-ramp mode comparison for the first <code>0.85 s</code>, before the
+          fastest above-threshold boxes leave the finite ramp.
+        </figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2>Dynamic Slide</h2>
+      <figure>
+        <img src="assets/dynamic_box_mode_comparison_iter_08.png" alt="Dynamic slide mode comparison at 8 iterations.">
+        <figcaption>Fixed iteration comparison at <code>8</code> VBD iterations.</figcaption>
+      </figure>
+      <div class="plot-grid">
+        <figure>
+          <img src="assets/dynamic_box_iteration_comparison_soft.png" alt="Dynamic slide soft iteration comparison.">
+          <figcaption>Soft contact iteration sensitivity.</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/dynamic_box_iteration_comparison_hard.png" alt="Dynamic slide hard iteration comparison.">
+          <figcaption>Hard contact iteration sensitivity.</figcaption>
+        </figure>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    Report payload: this page, three mp4 comparison videos, and the PNGs in
+    <code>assets/</code>. Raw CSVs, scripts, and PDFs are intentionally excluded.
+  </footer>
+</body>
+</html>
