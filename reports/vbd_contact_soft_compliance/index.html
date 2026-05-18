@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VBD Contact Soft Compliance</title>
+  <style>
+    :root { color-scheme: light; --ink:#17202a; --muted:#5f6f82; --line:#d9e0e8; --max:1120px; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:#fff; color:var(--ink); font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; line-height:1.5; }
+    header { border-bottom:1px solid var(--line); background:#fbfcfd; }
+    main,.header-inner,footer { width:min(var(--max),calc(100vw - 32px)); margin:0 auto; }
+    .header-inner { padding:36px 0 28px; }
+    h1 { margin:0 0 10px; font-size:clamp(2rem,4vw,3.35rem); line-height:1.05; letter-spacing:0; }
+    h2 { margin:0 0 10px; font-size:1.45rem; line-height:1.2; letter-spacing:0; }
+    p { margin:0 0 12px; }
+    code { padding:.08em .25em; border-radius:4px; background:#edf2f7; font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace; font-size:.92em; }
+    .subtitle { max-width:860px; margin:0; color:var(--muted); font-size:1.05rem; }
+    .metric-row,.takeaways,.plot-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-top:22px; }
+    .takeaways { margin-top:14px; }
+    .plot-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; margin-top:0; }
+    .metric,.takeaway { border:1px solid var(--line); border-radius:8px; background:#fff; padding:14px 16px; }
+    .metric .label { color:var(--muted); font-size:.82rem; font-weight:650; text-transform:uppercase; }
+    .metric .value { display:block; margin-top:4px; font-size:1.28rem; font-weight:760; }
+    main { padding:28px 0 48px; }
+    section { margin:0 0 38px; }
+    .two-col { display:grid; grid-template-columns:minmax(0,0.72fr) minmax(460px,1fr); gap:22px; align-items:start; }
+    figure { margin:0 0 18px; border:1px solid var(--line); border-radius:8px; background:#fff; overflow:hidden; }
+    figure img,video { display:block; width:100%; height:auto; }
+    video { background:#111827; }
+    figcaption { padding:10px 12px 12px; border-top:1px solid var(--line); color:var(--muted); font-size:.92rem; }
+    .video-main { max-width:980px; margin:14px auto 18px; }
+    footer { padding:0 0 42px; color:var(--muted); font-size:.9rem; }
+    @media (max-width:860px) { .metric-row,.takeaways,.plot-grid,.two-col { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <h1>VBD Contact Soft Compliance</h1>
+      <p class="subtitle">
+        Analytic check that soft VBD contact behaves like a linear penalty spring:
+        penetration equals load divided by the summed contact stiffness.
+      </p>
+      <div class="metric-row">
+        <div class="metric"><span class="label">Contact Mode</span><span class="value">soft</span></div>
+        <div class="metric"><span class="label">Iterations</span><span class="value">40</span></div>
+        <div class="metric"><span class="label">Max Error</span><span class="value">7.29e-06 mm</span></div>
+      </div>
+    </div>
+  </header>
+  <main>
+    <section class="two-col">
+      <div>
+        <h2>Setup</h2>
+        <p>
+          Each box rests on a fixed support with friction and damping disabled.
+          The analytic target is <code>penetration = m g / (4 ke)</code>, using
+          four box-support contact points.
+        </p>
+        <p>
+          The validation starts at this analytic equilibrium. That makes the
+          report a clean compliance check rather than a settling or damping test.
+        </p>
+      </div>
+      <figure>
+        <img src="assets/scene_overview.png" alt="Soft contact compliance setup.">
+        <figcaption>Blue boxes are simulated bodies; magenta marks the analytic target depth.</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2>Comparison Video</h2>
+      <p>
+        The video replays the same equilibrium validation. The boxes should stay
+        locked to the magenta analytic targets; the overlay reports the maximum
+        instantaneous penetration error.
+      </p>
+      <figure class="video-main">
+        <video controls preload="metadata" muted playsinline>
+          <source src="assets/soft_contact_compliance.mp4" type="video/mp4">
+        </video>
+        <figcaption>Mass scaling and inverse-stiffness scaling, side by side.</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2>Result</h2>
+      <div class="takeaways">
+        <div class="takeaway"><strong>Mass scaling.</strong> At fixed <code>ke</code>, penetration is linear in mass.</div>
+        <div class="takeaway"><strong>Stiffness scaling.</strong> At fixed mass, penetration follows <code>1 / ke</code>.</div>
+        <div class="takeaway"><strong>Error.</strong> Max final relative error is <code>0.00942%</code>.</div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Analytic Scaling</h2>
+      <figure>
+        <img src="assets/soft_contact_compliance_scaling.png" alt="Soft contact compliance scaling plot.">
+        <figcaption>Measured penetration overlays the analytic spring-balance prediction.</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2>Ratio Equivalence</h2>
+      <p>
+        Soft-contact penetration depends on <code>m / ke</code>. A heavier box
+        with proportionally higher stiffness should land at the same penetration
+        as a lighter box with proportionally lower stiffness.
+      </p>
+      <figure>
+        <img src="assets/soft_contact_compliance_ratio_equivalence.png" alt="Soft contact compliance ratio equivalence plot.">
+        <figcaption>Different mass/stiffness pairs with the same <code>m / ke</code> produce the same depth.</figcaption>
+      </figure>
+    </section>
+
+  </main>
+  <footer>
+    Report payload: this page, one mp4 comparison video, and the PNGs in
+    <code>assets/</code>. Raw CSVs and scripts are intentionally excluded.
+  </footer>
+</body>
+</html>
