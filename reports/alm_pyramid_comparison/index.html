@@ -1,0 +1,503 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ALM Pyramid Contact Comparison</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17202a;
+      --muted: #5f6f82;
+      --line: #d9e0e8;
+      --panel: #f7f9fb;
+      --accent: #1f6f8b;
+      --max: 1320px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: #ffffff;
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+    }
+
+    header {
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfd;
+    }
+
+    main,
+    .header-inner,
+    footer {
+      width: min(var(--max), calc(100vw - 32px));
+      margin: 0 auto;
+    }
+
+    .header-inner {
+      padding: 36px 0 28px;
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: clamp(2rem, 4vw, 3.35rem);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      max-width: 890px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 1.05rem;
+    }
+
+    .metric-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 22px;
+    }
+
+    .metric,
+    .note {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 14px 16px;
+    }
+
+    .metric .label,
+    .variant-metrics .label {
+      color: var(--muted);
+      font-size: 0.82rem;
+      font-weight: 650;
+      text-transform: uppercase;
+    }
+
+    .metric .value,
+    .variant-metrics .value {
+      display: block;
+      margin-top: 4px;
+      font-size: 1.2rem;
+      font-weight: 760;
+    }
+
+    main {
+      padding: 28px 0 48px;
+    }
+
+    section {
+      margin: 0 0 38px;
+    }
+
+    h2 {
+      margin: 0 0 10px;
+      font-size: 1.45rem;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 0 0 10px;
+      font-size: 1.18rem;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 12px;
+    }
+
+    code {
+      padding: 0.08em 0.25em;
+      border-radius: 4px;
+      background: #edf2f7;
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+    }
+
+    figure {
+      margin: 0 0 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      overflow: hidden;
+    }
+
+    figure img,
+    video {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    video {
+      background: #111827;
+      aspect-ratio: 16 / 9;
+    }
+
+    .missing-video {
+      display: flex;
+      min-height: 240px;
+      aspect-ratio: 16 / 9;
+      align-items: center;
+      justify-content: center;
+      padding: 22px;
+      background: #111827;
+      color: #d7dee8;
+      text-align: center;
+      font-size: 0.96rem;
+    }
+
+    .missing-video strong {
+      display: block;
+      margin-bottom: 6px;
+      color: #ffffff;
+      font-size: 1.05rem;
+    }
+
+    .missing-video code {
+      background: rgba(255, 255, 255, 0.12);
+      color: #ffffff;
+    }
+
+    figcaption {
+      padding: 10px 12px 12px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .video-main {
+      max-width: 1040px;
+      margin: 14px auto 18px;
+    }
+
+    .video-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+      align-items: start;
+    }
+
+    .video-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      overflow: hidden;
+    }
+
+    .video-card-header {
+      display: flex;
+      min-height: 158px;
+      flex-direction: column;
+      padding: 16px 16px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .video-card-header p {
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .video-card .metric {
+      margin-top: auto;
+      padding: 9px 10px;
+      background: var(--panel);
+    }
+
+    .video-card figure {
+      margin: 0;
+      border: 0;
+      border-radius: 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0 0;
+      font-size: 0.94rem;
+    }
+
+    th,
+    td {
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--panel);
+      font-weight: 700;
+    }
+
+    footer {
+      padding: 0 0 42px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    @media (max-width: 1100px) {
+      .video-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 860px) {
+      .metric-row {
+        grid-template-columns: 1fr;
+      }
+
+      .video-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .video-card-header {
+        min-height: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <h1>ALM Pyramid Contact Comparison</h1>
+      <p class="subtitle">
+        Six box-pyramid contact variants prepared for side-by-side visual comparison:
+        new compliant ALM large-gap versus small-gap behavior, old hard AVBD,
+        old soft contact, finite versus hard-limit stiffness, and ramped versus
+        fixed hard-contact penalty.
+      </p>
+      <div class="metric-row">
+        <div class="metric">
+          <span class="label">Scene</span>
+          <span class="value">136 rigid boxes</span>
+        </div>
+        <div class="metric">
+          <span class="label">Budget</span>
+          <span class="value">1 substep, 10 iterations</span>
+        </div>
+        <div class="metric">
+          <span class="label">Contact gap</span>
+          <span class="value">0.5 m baseline, 0.05 m in V4</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>Comparison Video</h2>
+      <p>
+        Six-way synchronized comparison assembled from the individual version clips.
+        The block is centered and constrained to match the stack-stability report style.
+      </p>
+      <figure class="video-main">
+        <video controls preload="metadata" muted playsinline>
+          <source src="assets/pyramid_alm_six_way_comparison.mp4?v=20260518f" type="video/mp4">
+        </video>
+        <figcaption>
+          Six-way view: same camera, same budget, same stack geometry. The captions
+          below define the exact version mapping.
+        </figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2>Version Matrix</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Version</th>
+            <th>Name</th>
+            <th>Main knobs</th>
+            <th>Purpose</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>1</td>
+            <td>New ALM, finite stiffness, large gap</td>
+            <td><code>compliant_alm=True</code>, <code>ke=1e6</code>, automatic rho, <code>gap=0.5</code></td>
+            <td>Practical new-ALM baseline that was stable in the long CPU/CUDA checks.</td>
+          </tr>
+          <tr>
+            <td>2</td>
+            <td>New ALM, hard-limit stiffness, large gap</td>
+            <td><code>compliant_alm=True</code>, <code>ke=1e10</code>, automatic rho, <code>gap=0.5</code></td>
+            <td>Pairs with Version 5 to compare new hard-limit ALM against old matched-k hard ALM.</td>
+          </tr>
+          <tr>
+            <td>3</td>
+            <td>Old soft penalty, large gap</td>
+            <td><code>hard=False</code>, <code>ke=1e3</code>, <code>kd=0</code>, <code>gap=0.5</code></td>
+            <td>Pairs with Version 6 to compare tuned old soft penalty against ramped old hard contact.</td>
+          </tr>
+          <tr>
+            <td>4</td>
+            <td>New ALM, finite stiffness, small gap</td>
+            <td><code>compliant_alm=True</code>, <code>ke=1e6</code>, automatic rho, <code>gap=0.05</code></td>
+            <td>Pure gap comparison against Version 1: same new-ALM settings, smaller detection gap.</td>
+          </tr>
+          <tr>
+            <td>5</td>
+            <td>Old hard ALM, fixed k matched to new-ALM rho</td>
+            <td>Box <code>ke=450</code>, ground <code>ke=1350</code>, <code>beta=0</code>, <code>gap=0.5</code></td>
+            <td>Pairs with Version 2 to test old-hard versus new-hard behavior at matching stiffness scale.</td>
+          </tr>
+          <tr>
+            <td>6</td>
+            <td>Old hard AVBD, beta-ramped k, large gap</td>
+            <td><code>ke=1e10</code>, <code>k_start=1</code>, <code>linear_beta=3e3</code>, <code>angular_beta=1e2</code></td>
+            <td>Shows the AVBD-style ramp strategy: start soft, increase hard-contact k from residuals.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Side-By-Side Videos</h2>
+      <p>
+        These clips are numbered left-to-right: top row Versions 1-3, bottom row
+        Versions 4-6. Desktop columns pair V1/V4 for the new-ALM gap check,
+        V2/V5 for new hard-limit ALM versus old matched-k hard ALM, and V3/V6
+        for old soft penalty versus old ramped hard contact.
+      </p>
+      <div class="video-grid">
+        <article class="video-card">
+          <div class="video-card-header">
+            <h3>Version 1: New ALM, Finite k</h3>
+            <p>New ALM with finite physical stiffness and the valid brick-height contact gap.</p>
+            <div class="metric"><span class="label">File</span><span class="value">v01_new_alm_finite_large_gap.mp4</span></div>
+          </div>
+          <figure>
+            <video controls preload="metadata" muted playsinline>
+              <source src="assets/v01_new_alm_finite_large_gap.mp4?v=20260518f" type="video/mp4">
+            </video>
+            <figcaption>Best practical new-ALM baseline.</figcaption>
+          </figure>
+        </article>
+
+        <article class="video-card">
+          <div class="video-card-header">
+            <h3>Version 2: New ALM, Hard-Limit k</h3>
+            <p>New ALM hard-limit stiffness with the valid large contact gap.</p>
+            <div class="metric"><span class="label">File</span><span class="value">v02_new_alm_inf_large_gap.mp4</span></div>
+          </div>
+          <figure>
+            <video controls preload="metadata" muted playsinline>
+              <source src="assets/v02_new_alm_inf_large_gap.mp4?v=20260518f" type="video/mp4">
+            </video>
+            <figcaption>Hard-limit contrast, <code>ke=1e10</code>.</figcaption>
+          </figure>
+        </article>
+
+        <article class="video-card">
+          <div class="video-card-header">
+            <h3>Version 3: Old Soft Penalty</h3>
+            <p>Old soft penalty contact with tuned finite stiffness.</p>
+            <div class="metric"><span class="label">File</span><span class="value">v03_old_soft_large_gap.mp4</span></div>
+          </div>
+          <figure>
+            <video controls preload="metadata" muted playsinline>
+              <source src="assets/v03_old_soft_large_gap.mp4?v=20260518f" type="video/mp4">
+            </video>
+            <figcaption>Soft-contact reference, <code>ke=1e3</code>, <code>kd=0</code>.</figcaption>
+          </figure>
+        </article>
+
+        <article class="video-card">
+          <div class="video-card-header">
+            <h3>Version 4: New ALM, Small Gap</h3>
+            <p>Same new-ALM finite-stiffness setup as Version 1, but with the small contact gap.</p>
+            <div class="metric"><span class="label">File</span><span class="value">v04_new_alm_finite_small_gap.mp4</span></div>
+          </div>
+          <figure>
+            <video controls preload="metadata" muted playsinline>
+              <source src="assets/v04_new_alm_finite_small_gap.mp4?v=20260518f" type="video/mp4">
+            </video>
+            <figcaption>New-ALM gap contrast case.</figcaption>
+          </figure>
+        </article>
+
+        <article class="video-card">
+          <div class="video-card-header">
+            <h3>Version 5: Old Hard, Matched k</h3>
+            <p>Old hard ALM fixed-k case matched to the new-ALM hard-limit rho scale.</p>
+            <div class="metric"><span class="label">File</span><span class="value">v05_old_hard_matched_rho_large_gap.mp4</span></div>
+          </div>
+          <figure>
+            <video controls preload="metadata" muted playsinline>
+              <source src="assets/v05_old_hard_matched_rho_large_gap.mp4?v=20260518f" type="video/mp4">
+            </video>
+            <figcaption>Equivalence check: old <code>k</code> matched to new rho.</figcaption>
+          </figure>
+        </article>
+
+        <article class="video-card">
+          <div class="video-card-header">
+            <h3>Version 6: Old Hard, Ramped k</h3>
+            <p>Old hard AVBD contact with beta-ramped contact stiffness.</p>
+            <div class="metric"><span class="label">File</span><span class="value">v06_old_hard_ramped_large_gap.mp4</span></div>
+          </div>
+          <figure>
+            <video controls preload="metadata" muted playsinline>
+              <source src="assets/v06_old_hard_ramped_large_gap.mp4?v=20260518f" type="video/mp4">
+            </video>
+            <figcaption>Ramped-k reference, <code>linear_beta=3e3</code>.</figcaption>
+          </figure>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>Recording Checklist</h2>
+      <div class="note">
+        <p>
+          For each version, set <code>example_box_pyramid.py</code> to the matching
+          configuration, run the same camera and frame budget, then place the MP4 in
+          <code>reports/alm_pyramid_comparison/assets/</code> using the filename shown above.
+        </p>
+        <p>
+          The active development branch for this comparison is <code>alm-comparison</code>.
+          Keep the scene, camera, timestep, substeps, and iteration count fixed while
+          swapping only the version-specific contact parameters.
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    Prepared for the ALM/AVBD pyramid comparison video matrix.
+  </footer>
+  <script>
+    for (const video of document.querySelectorAll("video")) {
+      const source = video.querySelector("source");
+      const asset = source ? source.getAttribute("src") : "missing video";
+      const markMissing = () => {
+        const figure = video.closest("figure");
+        if (!figure || figure.querySelector(".missing-video")) {
+          return;
+        }
+        video.hidden = true;
+        const placeholder = document.createElement("div");
+        placeholder.className = "missing-video";
+        placeholder.innerHTML = `<div><strong>Video not recorded yet</strong><code>${asset}</code></div>`;
+        figure.insertBefore(placeholder, video);
+      };
+
+      video.addEventListener("error", markMissing, true);
+      if (source) {
+        source.addEventListener("error", markMissing, true);
+      }
+    }
+  </script>
+</body>
+</html>
