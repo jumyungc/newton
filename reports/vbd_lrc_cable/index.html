@@ -1,0 +1,55 @@
+<!doctype html><meta charset='utf-8'><title>VBD Cable LRC Report</title>
+<style>body{font-family:Inter,Arial,sans-serif;max-width:1180px;margin:32px auto;line-height:1.45;color:#222}table{border-collapse:collapse;width:100%;font-size:13px}td,th{border-bottom:1px solid #ddd;padding:6px 8px;text-align:right}td:first-child,th:first-child{text-align:left}h1,h2{margin-top:28px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:18px}.note{background:#f6f8fa;border-left:4px solid #4c78a8;padding:12px 14px}.bad{color:#a33}.good{color:#176b35}video,img{max-width:100%;border:1px solid #ddd}</style>
+<h1>VBD rigid cable long-range constraints</h1>
+<p class='note'>Experiment target: test whether tension-only long-range distance constraints reduce local VBD stretch/jitter enough to justify their extra cost.</p>
+<h2>Approach</h2>
+<p>The solver hook adds unilateral rigid body distance constraints. Each LRC pair is active only when the body-origin chord exceeds its rest chord plus slack, so bent cables do not receive compression. LRC pairs are validated against existing rigid body coloring; the tested odd hop distances preserve the alternating cable colors.</p>
+<h2>Summary plots</h2><div class='grid'>
+<img src='assets/plot_adjacent_violation_max.png'>
+<img src='assets/plot_jitter_rms_last30.png'>
+<img src='assets/plot_ms_per_frame.png'>
+</div>
+<h2>Vertical chain, top pinned</h2>
+<p>Selected LRC candidate: <strong>pin_star_odd_k1e3</strong> (23 constraints). Lower quality score is better.</p>
+<table><tr><th>Variant</th><th>LRC count</th><th>Max adj violation</th><th>Jitter</th><th>Quality</th><th>ms/frame</th><th>overhead vs baseline</th></tr>
+<tr><td>baseline</td><td>0</td><td>0.00470141</td><td>0.00181249</td><td>0.00515453</td><td>5.106</td><td>+0.0%</td></tr>
+<tr><td>slide_hop3_stride4</td><td>12</td><td>0.00465801</td><td>0.00179025</td><td>0.00510558</td><td>5.539</td><td>+8.5%</td></tr>
+<tr><td>slide_multiscale_stride8</td><td>17</td><td>0.00446966</td><td>0.00163643</td><td>0.00487877</td><td>5.547</td><td>+8.6%</td></tr>
+<tr><td>pin_star_odd_k1e3</td><td>23</td><td>0.00218657</td><td>0.000441185</td><td>0.00229686</td><td>5.533</td><td>+8.4%</td></tr>
+<tr><td>pin_star_sparse_k2e3</td><td>11</td><td>0.00220373</td><td>0.000482201</td><td>0.00232428</td><td>5.580</td><td>+9.3%</td></tr>
+<tr><td>hard_pin_star_sparse</td><td>11</td><td>0.00684652</td><td>0.014582</td><td>0.010492</td><td>5.565</td><td>+9.0%</td></tr>
+</table>
+<div class='grid'>
+<div><h3>Baseline</h3><video src='assets/vertical_one_pin_baseline.mp4' controls loop muted></video></div>
+<div><h3>pin_star_odd_k1e3</h3><video src='assets/vertical_one_pin_pin_star_odd_k1e3.mp4' controls loop muted></video></div>
+</div>
+<h2>Horizontal chain, one end pinned swing</h2>
+<p>Selected LRC candidate: <strong>pin_star_odd_k1e3</strong> (23 constraints). Lower quality score is better.</p>
+<table><tr><th>Variant</th><th>LRC count</th><th>Max adj violation</th><th>Jitter</th><th>Quality</th><th>ms/frame</th><th>overhead vs baseline</th></tr>
+<tr><td>baseline</td><td>0</td><td>0.00932422</td><td>0.0239979</td><td>0.0153237</td><td>5.066</td><td>+0.0%</td></tr>
+<tr><td>slide_hop3_stride4</td><td>12</td><td>0.00933018</td><td>0.0239894</td><td>0.0153275</td><td>5.534</td><td>+9.2%</td></tr>
+<tr><td>slide_multiscale_stride8</td><td>17</td><td>0.00915454</td><td>0.0238363</td><td>0.0151136</td><td>5.534</td><td>+9.2%</td></tr>
+<tr><td>pin_star_odd_k1e3</td><td>23</td><td>0.00606612</td><td>0.0234488</td><td>0.0119283</td><td>5.492</td><td>+8.4%</td></tr>
+<tr><td>pin_star_sparse_k2e3</td><td>11</td><td>0.00613596</td><td>0.0234415</td><td>0.0119963</td><td>5.544</td><td>+9.4%</td></tr>
+<tr><td>hard_pin_star_sparse</td><td>11</td><td>0.00676537</td><td>0.0233691</td><td>0.0126077</td><td>5.514</td><td>+8.8%</td></tr>
+</table>
+<div class='grid'>
+<div><h3>Baseline</h3><video src='assets/horizontal_one_pin_baseline.mp4' controls loop muted></video></div>
+<div><h3>pin_star_odd_k1e3</h3><video src='assets/horizontal_one_pin_pin_star_odd_k1e3.mp4' controls loop muted></video></div>
+</div>
+<h2>Horizontal chain, both ends pinned</h2>
+<p>Selected LRC candidate: <strong>pin_star_odd_k1e3</strong> (45 constraints). Lower quality score is better.</p>
+<table><tr><th>Variant</th><th>LRC count</th><th>Max adj violation</th><th>Jitter</th><th>Quality</th><th>ms/frame</th><th>overhead vs baseline</th></tr>
+<tr><td>baseline</td><td>0</td><td>0.00781585</td><td>0.00942863</td><td>0.010173</td><td>5.117</td><td>+0.0%</td></tr>
+<tr><td>slide_hop3_stride4</td><td>12</td><td>0.00776723</td><td>0.00941898</td><td>0.010122</td><td>5.526</td><td>+8.0%</td></tr>
+<tr><td>slide_multiscale_stride8</td><td>17</td><td>0.00753438</td><td>0.00935466</td><td>0.00987305</td><td>5.515</td><td>+7.8%</td></tr>
+<tr><td>pin_star_odd_k1e3</td><td>45</td><td>0.00561506</td><td>0.00862082</td><td>0.00777026</td><td>5.509</td><td>+7.7%</td></tr>
+<tr><td>pin_star_sparse_k2e3</td><td>22</td><td>0.00573222</td><td>0.00862307</td><td>0.00788799</td><td>5.536</td><td>+8.2%</td></tr>
+<tr><td>hard_pin_star_sparse</td><td>22</td><td>0.587388</td><td>1.20204</td><td>0.887897</td><td>5.525</td><td>+8.0%</td></tr>
+</table>
+<div class='grid'>
+<div><h3>Baseline</h3><video src='assets/two_pin_baseline.mp4' controls loop muted></video></div>
+<div><h3>pin_star_odd_k1e3</h3><video src='assets/two_pin_pin_star_odd_k1e3.mp4' controls loop muted></video></div>
+</div>
+<h2>Files</h2><ul><li><code>metrics.json</code></li><li><code>summary.csv</code></li><li><code>assets/*.mp4</code></li><li><code>assets/plot_*.png</code></li></ul>
+<h2>Conclusion</h2><p>Soft unilateral LRC improves the measured cable behavior, and fusing LRC accumulation into solve_rigid_body removes most of the earlier overhead. The best-quality variant remains pin_star_odd_k1e3: quality improves by about 55% for the vertical one-pin case, 22% for the horizontal swing, and 24% for the two-pin case. With fused per-body LRC adjacency, its frame-time overhead is now about 8-9% instead of the earlier separate-kernel 37-50% range. Sliding hop LRC gives only small gains, while hard LRC remains less robust, especially in the two-pin case. The next step is to tune the sparse pin-star schedule and stiffness/slack rather than optimize kernel launches.</p>
