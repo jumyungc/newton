@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Newton AVBD Pyramid Report</title>
+  <style>
+    body {
+      margin: 0;
+      background: #111419;
+      color: #e8ebef;
+      font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 32px 20px 56px;
+    }
+    h1, h2 { margin: 0 0 10px; }
+    h1 { font-size: 30px; }
+    h2 { font-size: 22px; margin-top: 34px; }
+    p { color: #c4cbd4; }
+    video {
+      width: 100%;
+      border: 1px solid #343a44;
+      background: #090b0f;
+      display: block;
+    }
+    .stable, .broken {
+      display: inline-block;
+      margin: 0 0 12px;
+      font-weight: 700;
+    }
+    .stable { color: #76e796; }
+    .broken { color: #ff6f67; }
+    .tables {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 18px;
+      margin-top: 16px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #181c23;
+    }
+    caption {
+      text-align: left;
+      font-weight: 700;
+      padding: 10px 12px;
+      background: #202631;
+    }
+    th, td {
+      border-top: 1px solid #2d3440;
+      padding: 7px 12px;
+      vertical-align: top;
+    }
+    th {
+      width: 48%;
+      color: #aab3c0;
+      font-weight: 600;
+      text-align: left;
+    }
+    a { color: #8ab4ff; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Newton AVBD Pyramid Comparison</h1>
+  <p>
+    Full 16-row avbd-demo3d pyramid, same computational budget as the reference:
+    60 Hz, one substep, ten VBD iterations, gravity -10. The videos compare
+    forward warm-start choices and the softer parameter set that looked partially
+    stable during debugging.
+  </p>
+  <p>
+    Stability criterion here is intentionally mechanical: finite poses, top box center
+    above 90% of the compact stacked height (7.75), row means still
+    ordered upward, no body below the ground, and max out-of-plane |y| below 2 m.
+  </p>
+  
+<section>
+  <h2>Stiff Hard History, Adaptive Reference Warm Start</h2>
+  <p class="stable">Stable</p>
+  <video controls muted loop playsinline poster="videos/stiff_hard_history_adaptive_warmstart_final.png">
+    <source src="videos/stiff_hard_history_adaptive_warmstart.mp4" type="video/mp4">
+  </video>
+  <div class="tables">
+    <table><caption>Used Parameters</caption><tr><th>frames</th><td>240</td></tr>
+<tr><th>frame_dt</th><td>1/60 s</td></tr>
+<tr><th>sim_dt</th><td>1/60 s</td></tr>
+<tr><th>sim_substeps</th><td>1</td></tr>
+<tr><th>solver_iterations</th><td>10</td></tr>
+<tr><th>gravity</th><td>-10</td></tr>
+<tr><th>body_ordering</th><td>serial one-body-per-color rigid VBD groups</td></tr>
+<tr><th>contact_mode</th><td>hard body-body contact with history</td></tr>
+<tr><th>contact_ke</th><td>100000000.0</td></tr>
+<tr><th>contact_kd</th><td>0.0</td></tr>
+<tr><th>rigid_contact_k_start</th><td>1.0</td></tr>
+<tr><th>collision_gap</th><td>0.0</td></tr>
+<tr><th>shape_margin</th><td>0.01</td></tr>
+<tr><th>friction_mu</th><td>0.5</td></tr>
+<tr><th>rigid_avbd_alpha</th><td>0.99</td></tr>
+<tr><th>rigid_avbd_linear_beta</th><td>10000.0</td></tr>
+<tr><th>rigid_avbd_angular_beta</th><td>100.0</td></tr>
+<tr><th>rigid_avbd_gamma</th><td>0.999</td></tr>
+<tr><th>rigid_primal_warmstart</th><td>0.0</td></tr>
+<tr><th>rigid_adaptive_primal_warmstart</th><td>True</td></tr>
+<tr><th>contact_matching_pos_threshold</th><td>0.00075</td></tr>
+<tr><th>contact_matching_normal_dot_threshold</th><td>0.995</td></tr>
+<tr><th>rigid_contact_stick_motion_eps</th><td>0.0</td></tr>
+<tr><th>rigid_contact_stick_freeze_translation_eps</th><td>0.0</td></tr>
+<tr><th>rigid_contact_stick_freeze_angular_eps</th><td>0.0</td></tr>
+<tr><th>pyramid</th><td>16 rows, 136 boxes, full size {1, 0.5, 0.5}</td></tr>
+<tr><th>ground</th><td>kinematic box, half extents (50, 50, 0.5), top at z=0</td></tr></table>
+    <table><caption>Metrics</caption><tr><th>top_z</th><td>7.491548538208008</td></tr>
+<tr><th>top_ratio</th><td>0.966651439666748</td></tr>
+<tr><th>min_z</th><td>0.2449941486120224</td></tr>
+<tr><th>final_linear_speed</th><td>0.1566658467054367</td></tr>
+<tr><th>final_angular_speed</th><td>0.0463426373898983</td></tr>
+<tr><th>xy_spread</th><td>8.06590461730957</td></tr>
+<tr><th>y_abs_max</th><td>0.15585488080978394</td></tr>
+<tr><th>min_row_delta</th><td>0.46721506118774414</td></tr>
+<tr><th>stable</th><td>True</td></tr>
+<tr><th>max_contacts</th><td>1719</td></tr>
+<tr><th>max_linear_speed</th><td>11.167572975158691</td></tr>
+<tr><th>max_angular_speed</th><td>6.392855644226074</td></tr>
+<tr><th>elapsed_seconds</th><td>16.5</td></tr>
+<tr><th>frames_written</th><td>121</td></tr></table>
+  </div>
+</section>
+
+<section>
+  <h2>Stiff Hard History, Original Forward Step</h2>
+  <p class="stable">Stable</p>
+  <video controls muted loop playsinline poster="videos/stiff_hard_history_original_forward_final.png">
+    <source src="videos/stiff_hard_history_original_forward.mp4" type="video/mp4">
+  </video>
+  <div class="tables">
+    <table><caption>Used Parameters</caption><tr><th>frames</th><td>240</td></tr>
+<tr><th>frame_dt</th><td>1/60 s</td></tr>
+<tr><th>sim_dt</th><td>1/60 s</td></tr>
+<tr><th>sim_substeps</th><td>1</td></tr>
+<tr><th>solver_iterations</th><td>10</td></tr>
+<tr><th>gravity</th><td>-10</td></tr>
+<tr><th>body_ordering</th><td>serial one-body-per-color rigid VBD groups</td></tr>
+<tr><th>contact_mode</th><td>hard body-body contact with history</td></tr>
+<tr><th>contact_ke</th><td>100000000.0</td></tr>
+<tr><th>contact_kd</th><td>0.0</td></tr>
+<tr><th>rigid_contact_k_start</th><td>1.0</td></tr>
+<tr><th>collision_gap</th><td>0.0</td></tr>
+<tr><th>shape_margin</th><td>0.01</td></tr>
+<tr><th>friction_mu</th><td>0.5</td></tr>
+<tr><th>rigid_avbd_alpha</th><td>0.99</td></tr>
+<tr><th>rigid_avbd_linear_beta</th><td>10000.0</td></tr>
+<tr><th>rigid_avbd_angular_beta</th><td>100.0</td></tr>
+<tr><th>rigid_avbd_gamma</th><td>0.999</td></tr>
+<tr><th>rigid_primal_warmstart</th><td>1.0</td></tr>
+<tr><th>rigid_adaptive_primal_warmstart</th><td>False</td></tr>
+<tr><th>contact_matching_pos_threshold</th><td>0.00075</td></tr>
+<tr><th>contact_matching_normal_dot_threshold</th><td>0.995</td></tr>
+<tr><th>rigid_contact_stick_motion_eps</th><td>0.0</td></tr>
+<tr><th>rigid_contact_stick_freeze_translation_eps</th><td>0.0</td></tr>
+<tr><th>rigid_contact_stick_freeze_angular_eps</th><td>0.0</td></tr>
+<tr><th>pyramid</th><td>16 rows, 136 boxes, full size {1, 0.5, 0.5}</td></tr>
+<tr><th>ground</th><td>kinematic box, half extents (50, 50, 0.5), top at z=0</td></tr></table>
+    <table><caption>Metrics</caption><tr><th>top_z</th><td>7.401527404785156</td></tr>
+<tr><th>top_ratio</th><td>0.9550358057022095</td></tr>
+<tr><th>min_z</th><td>0.23330138623714447</td></tr>
+<tr><th>final_linear_speed</th><td>0.9037819504737854</td></tr>
+<tr><th>final_angular_speed</th><td>0.16779598593711853</td></tr>
+<tr><th>xy_spread</th><td>8.06324577331543</td></tr>
+<tr><th>y_abs_max</th><td>0.7973071932792664</td></tr>
+<tr><th>min_row_delta</th><td>0.45424365997314453</td></tr>
+<tr><th>stable</th><td>True</td></tr>
+<tr><th>max_contacts</th><td>1774</td></tr>
+<tr><th>max_linear_speed</th><td>11.334227561950684</td></tr>
+<tr><th>max_angular_speed</th><td>5.4864091873168945</td></tr>
+<tr><th>elapsed_seconds</th><td>16.415</td></tr>
+<tr><th>frames_written</th><td>121</td></tr></table>
+  </div>
+</section>
+
+<section>
+  <h2>Soft Debug Setup, ke=100 and gap=0.1</h2>
+  <p class="broken">Broken</p>
+  <video controls muted loop playsinline poster="videos/soft_debug_ke100_gap01_final.png">
+    <source src="videos/soft_debug_ke100_gap01.mp4" type="video/mp4">
+  </video>
+  <div class="tables">
+    <table><caption>Used Parameters</caption><tr><th>frames</th><td>480</td></tr>
+<tr><th>frame_dt</th><td>1/60 s</td></tr>
+<tr><th>sim_dt</th><td>1/60 s</td></tr>
+<tr><th>sim_substeps</th><td>1</td></tr>
+<tr><th>solver_iterations</th><td>10</td></tr>
+<tr><th>gravity</th><td>-10</td></tr>
+<tr><th>body_ordering</th><td>serial one-body-per-color rigid VBD groups</td></tr>
+<tr><th>contact_mode</th><td>hard body-body contact with history</td></tr>
+<tr><th>contact_ke</th><td>100.0</td></tr>
+<tr><th>contact_kd</th><td>1e-05</td></tr>
+<tr><th>rigid_contact_k_start</th><td>1.0</td></tr>
+<tr><th>collision_gap</th><td>0.1</td></tr>
+<tr><th>shape_margin</th><td>0.0</td></tr>
+<tr><th>friction_mu</th><td>0.5</td></tr>
+<tr><th>rigid_avbd_alpha</th><td>0.95</td></tr>
+<tr><th>rigid_avbd_linear_beta</th><td>0.0</td></tr>
+<tr><th>rigid_avbd_angular_beta</th><td>0.0</td></tr>
+<tr><th>rigid_avbd_gamma</th><td>0.999</td></tr>
+<tr><th>rigid_primal_warmstart</th><td>0.0</td></tr>
+<tr><th>rigid_adaptive_primal_warmstart</th><td>True</td></tr>
+<tr><th>contact_matching_pos_threshold</th><td>default</td></tr>
+<tr><th>contact_matching_normal_dot_threshold</th><td>default</td></tr>
+<tr><th>rigid_contact_stick_motion_eps</th><td>0.0</td></tr>
+<tr><th>rigid_contact_stick_freeze_translation_eps</th><td>0.0</td></tr>
+<tr><th>rigid_contact_stick_freeze_angular_eps</th><td>0.0</td></tr>
+<tr><th>pyramid</th><td>16 rows, 136 boxes, full size {1, 0.5, 0.5}</td></tr>
+<tr><th>ground</th><td>kinematic box, half extents (50, 50, 0.5), top at z=0</td></tr></table>
+    <table><caption>Metrics</caption><tr><th>top_z</th><td>2.221426248550415</td></tr>
+<tr><th>top_ratio</th><td>0.2866356372833252</td></tr>
+<tr><th>min_z</th><td>0.052471790462732315</td></tr>
+<tr><th>final_linear_speed</th><td>6.102309703826904</td></tr>
+<tr><th>final_angular_speed</th><td>11.76858901977539</td></tr>
+<tr><th>xy_spread</th><td>8.131725311279297</td></tr>
+<tr><th>y_abs_max</th><td>8.106208801269531</td></tr>
+<tr><th>min_row_delta</th><td>-0.5872048139572144</td></tr>
+<tr><th>stable</th><td>False</td></tr>
+<tr><th>max_contacts</th><td>1776</td></tr>
+<tr><th>max_linear_speed</th><td>14.070499420166016</td></tr>
+<tr><th>max_angular_speed</th><td>27.183490753173828</td></tr>
+<tr><th>elapsed_seconds</th><td>118.059</td></tr>
+<tr><th>frames_written</th><td>241</td></tr></table>
+  </div>
+</section>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VBD LRC</title>
+  <style>
+  body { margin: 0; background: #111419; color: #e8ebef; font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { max-width: 1120px; margin: 0 auto; padding: 32px 20px 56px; }
+  h1, h2, h3 { margin: 0 0 10px; }
+  h1 { font-size: 30px; letter-spacing: 0; }
+  h2 { font-size: 22px; margin-top: 34px; }
+  h3 { font-size: 16px; color: #dbe2ea; margin-top: 0; }
+  p { color: #c4cbd4; }
+  a { color: #8ab4ff; }
+  video, img { width: 100%; border: 1px solid #343a44; background: #090b0f; display: block; }
+  .note { color: #c4cbd4; max-width: 900px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; margin-top: 16px; }
+  .plots { display: grid; grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 18px; margin-top: 16px; }
+  .tables { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; margin-top: 16px; }
+  table { width: 100%; border-collapse: collapse; background: #181c23; }
+  caption { text-align: left; font-weight: 700; padding: 10px 12px; background: #202631; color: #e8ebef; }
+  th, td { border-top: 1px solid #2d3440; padding: 7px 10px; vertical-align: top; }
+  th { color: #aab3c0; font-weight: 600; text-align: left; }
+  td { color: #e8ebef; text-align: right; white-space: nowrap; }
+  td:first-child { text-align: left; white-space: normal; }
+  .good { color: #76e796; font-weight: 700; }
+  .muted { color: #aab3c0; }
+  .warn { color: #ffd166; }
+</style>
+</head>
+<body><main>
+  <h1>VBD LRC</h1>
+  <p class="note">240-frame dense comparison, 96 segments, 60 Hz, four substeps, four VBD iterations. Stretch damping is zero. Lower quality score is better, but the tables keep adjacent stretch, jitter, and cost separate.</p>
+<section><h2>Summary</h2>
+  <div class="plots">
+    <img src="plots/plot_quality_score.png" alt="quality plot">
+    <img src="plots/plot_adjacent_violation_max.png" alt="adjacent stretch plot">
+    <img src="plots/plot_jitter_rms_last30.png" alt="jitter plot">
+    <img src="plots/plot_tradeoff.png" alt="tradeoff plot">
+  </div>
+</section>
+<section><h2>Comparison</h2>
+  <p class="note">Compare each variant against its own Base case. The preferred candidate is chosen from variants within 2% of the best quality score, then by lower frame time and fewer links. This avoids choosing a denser option for a negligible metric win.</p>
+  <p class="note"><span class="warn">Same-ke result:</span> the soft sparse LRC with ke_lrc = stretch_ke = 3e5 is stable in this run and wins the combined score in all cases. It should still be treated as a stiffness probe until tested on more shapes, because a long chord at the same numeric ke is not the same physical object as one local stretch joint.</p>
+</section>
+<section><h2>Parameters</h2><div class="tables">
+<table><caption>Run</caption>
+<tr><th>segments</th><td>96</td></tr>
+<tr><th>segment_length</th><td>0.05</td></tr>
+<tr><th>frames</th><td>240</td></tr>
+<tr><th>fps</th><td>60</td></tr>
+<tr><th>substeps</th><td>4</td></tr>
+<tr><th>VBD iterations</th><td>4</td></tr>
+<tr><th>sim dt</th><td>1 / (60 * 4)</td></tr>
+<tr><th>device</th><td>cuda:0</td></tr>
+</table>
+<table><caption>Model</caption>
+<tr><th>stretch_ke</th><td>3e5</td></tr>
+<tr><th>stretch_kd</th><td>0</td></tr>
+<tr><th>bend_ke</th><td>2e1</td></tr>
+<tr><th>bend_kd</th><td>1e-3</td></tr>
+<tr><th>radius</th><td>0.025</td></tr>
+<tr><th>beta</th><td>0</td></tr>
+<tr><th>LRC slack ratio</th><td>0.002</td></tr>
+<tr><th>LRC mode</th><td>soft unilateral, except hard probe</td></tr>
+</table>
+<table><caption>Variants</caption>
+<tr><th>Base</th><td>no LRC</td></tr>
+<tr><th>S3</th><td>sliding hop 3, stride 4, ke 1e3</td></tr>
+<tr><th>MS</th><td>sliding hops 3/7/15, stride 8, ke 8e2</td></tr>
+<tr><th>Odd1k</th><td>pin-star, stride 2, start 3, ke 1e3</td></tr>
+<tr><th>Sp2k</th><td>pin-star sparse, stride 4, start 5, ke 2e3</td></tr>
+<tr><th>Hard</th><td>hard sparse probe, ke 2e2</td></tr>
+<tr><th>Sp-Ks</th><td>soft sparse, ke 3e5 = stretch_ke</td></tr>
+</table></div></section>
+<section><h2>Case A</h2>
+<p><span class="good">Selected: Sp-Ks</span> <span class="muted">(23 links, quality 94.8% better, frame time +3.4%).</span></p>
+<div class="grid">
+<div><h3>Base</h3><video controls muted loop playsinline preload="metadata" poster="posters/vertical_one_pin_baseline.jpg"><source src="videos/vertical_one_pin_baseline.mp4" type="video/mp4"></video></div>
+<div><h3>Sp-Ks</h3><video controls muted loop playsinline preload="metadata" poster="posters/vertical_one_pin_pin_star_sparse_k3e5.jpg"><source src="videos/vertical_one_pin_pin_star_sparse_k3e5.mp4" type="video/mp4"></video></div>
+</div>
+<div class="tables"><table><caption>Metrics</caption><tr><th>Variant</th><th>Links</th><th>Quality</th><th>Q change</th><th>Max adj</th><th>Adj change</th><th>Jitter</th><th>Jit change</th><th>ms/frame</th><th>Overhead</th></tr>
+<tr><td>Base</td><td>0</td><td>0.00922</td><td>+0.0%</td><td>0.007947</td><td>+0.0%</td><td>0.005093</td><td>+0.0%</td><td>5.425</td><td>+0.0%</td></tr>
+<tr><td>S3</td><td>24</td><td>0.009122</td><td>+1.1%</td><td>0.007872</td><td>+0.9%</td><td>0.004998</td><td>+1.9%</td><td>5.701</td><td>+5.1%</td></tr>
+<tr><td>MS</td><td>35</td><td>0.008547</td><td>+7.3%</td><td>0.007487</td><td>+5.8%</td><td>0.004241</td><td>+16.7%</td><td>5.675</td><td>+4.6%</td></tr>
+<tr><td>Odd1k</td><td>47</td><td>0.001708</td><td>+81.5%</td><td>0.001675</td><td>+78.9%</td><td>0.0001302</td><td>+97.4%</td><td>5.581</td><td>+2.9%</td></tr>
+<tr><td>Sp2k</td><td>23</td><td>0.001715</td><td>+81.4%</td><td>0.001681</td><td>+78.8%</td><td>0.0001358</td><td>+97.3%</td><td>5.674</td><td>+4.6%</td></tr>
+<tr><td>Hard</td><td>23</td><td>0.01278</td><td>-38.6%</td><td>0.008537</td><td>-7.4%</td><td>0.01696</td><td>-233.0%</td><td>5.665</td><td>+4.4%</td></tr>
+<tr><td class="good">Sp-Ks</td><td>23</td><td>0.0004823</td><td>+94.8%</td><td>0.0004823</td><td>+93.9%</td><td>1.313e-08</td><td>+100.0%</td><td>5.608</td><td>+3.4%</td></tr>
+</table></div></section>
+<section><h2>Case B</h2>
+<p><span class="good">Selected: Sp-Ks</span> <span class="muted">(23 links, quality 57.4% better, frame time +9.1%).</span></p>
+<div class="grid">
+<div><h3>Base</h3><video controls muted loop playsinline preload="metadata" poster="posters/horizontal_one_pin_baseline.jpg"><source src="videos/horizontal_one_pin_baseline.mp4" type="video/mp4"></video></div>
+<div><h3>Sp-Ks</h3><video controls muted loop playsinline preload="metadata" poster="posters/horizontal_one_pin_pin_star_sparse_k3e5.jpg"><source src="videos/horizontal_one_pin_pin_star_sparse_k3e5.mp4" type="video/mp4"></video></div>
+</div>
+<div class="tables"><table><caption>Metrics</caption><tr><th>Variant</th><th>Links</th><th>Quality</th><th>Q change</th><th>Max adj</th><th>Adj change</th><th>Jitter</th><th>Jit change</th><th>ms/frame</th><th>Overhead</th></tr>
+<tr><td>Base</td><td>0</td><td>0.02698</td><td>+0.0%</td><td>0.01863</td><td>+0.0%</td><td>0.03337</td><td>+0.0%</td><td>5.095</td><td>+0.0%</td></tr>
+<tr><td>S3</td><td>24</td><td>0.02681</td><td>+0.6%</td><td>0.01851</td><td>+0.7%</td><td>0.03322</td><td>+0.5%</td><td>5.559</td><td>+9.1%</td></tr>
+<tr><td>MS</td><td>35</td><td>0.02553</td><td>+5.4%</td><td>0.01756</td><td>+5.7%</td><td>0.03187</td><td>+4.5%</td><td>5.629</td><td>+10.5%</td></tr>
+<tr><td>Odd1k</td><td>47</td><td>0.01436</td><td>+46.8%</td><td>0.007436</td><td>+60.1%</td><td>0.02769</td><td>+17.0%</td><td>5.657</td><td>+11.0%</td></tr>
+<tr><td>Sp2k</td><td>23</td><td>0.0149</td><td>+44.8%</td><td>0.007989</td><td>+57.1%</td><td>0.02766</td><td>+17.1%</td><td>5.610</td><td>+10.1%</td></tr>
+<tr><td>Hard</td><td>23</td><td>0.02039</td><td>+24.4%</td><td>0.01259</td><td>+32.4%</td><td>0.03118</td><td>+6.6%</td><td>5.622</td><td>+10.3%</td></tr>
+<tr><td class="good">Sp-Ks</td><td>23</td><td>0.01149</td><td>+57.4%</td><td>0.005479</td><td>+70.6%</td><td>0.02403</td><td>+28.0%</td><td>5.557</td><td>+9.1%</td></tr>
+</table></div></section>
+<section><h2>Case C</h2>
+<p><span class="good">Selected: Sp-Ks</span> <span class="muted">(46 links, quality 63.1% better, frame time +10.1%).</span></p>
+<div class="grid">
+<div><h3>Base</h3><video controls muted loop playsinline preload="metadata" poster="posters/two_pin_baseline.jpg"><source src="videos/two_pin_baseline.mp4" type="video/mp4"></video></div>
+<div><h3>Sp-Ks</h3><video controls muted loop playsinline preload="metadata" poster="posters/two_pin_pin_star_sparse_k3e5.jpg"><source src="videos/two_pin_pin_star_sparse_k3e5.mp4" type="video/mp4"></video></div>
+</div>
+<div class="tables"><table><caption>Metrics</caption><tr><th>Variant</th><th>Links</th><th>Quality</th><th>Q change</th><th>Max adj</th><th>Adj change</th><th>Jitter</th><th>Jit change</th><th>ms/frame</th><th>Overhead</th></tr>
+<tr><td>Base</td><td>0</td><td>0.01299</td><td>+0.0%</td><td>0.009839</td><td>+0.0%</td><td>0.01261</td><td>+0.0%</td><td>5.089</td><td>+0.0%</td></tr>
+<tr><td>S3</td><td>24</td><td>0.01296</td><td>+0.3%</td><td>0.009818</td><td>+0.2%</td><td>0.01257</td><td>+0.3%</td><td>5.553</td><td>+9.1%</td></tr>
+<tr><td>MS</td><td>35</td><td>0.01251</td><td>+3.7%</td><td>0.009489</td><td>+3.6%</td><td>0.01209</td><td>+4.1%</td><td>5.559</td><td>+9.2%</td></tr>
+<tr><td>Odd1k</td><td>93</td><td>0.006593</td><td>+49.3%</td><td>0.004266</td><td>+56.6%</td><td>0.009307</td><td>+26.2%</td><td>5.672</td><td>+11.5%</td></tr>
+<tr><td>Sp2k</td><td>46</td><td>0.0066</td><td>+49.2%</td><td>0.004277</td><td>+56.5%</td><td>0.009291</td><td>+26.3%</td><td>5.607</td><td>+10.2%</td></tr>
+<tr><td>Hard</td><td>46</td><td>7.883</td><td>-60577.5%</td><td>4.559</td><td>-46231.1%</td><td>13.298</td><td>-105351.6%</td><td>5.594</td><td>+9.9%</td></tr>
+<tr><td class="good">Sp-Ks</td><td>46</td><td>0.004793</td><td>+63.1%</td><td>0.004707</td><td>+52.2%</td><td>0.0003436</td><td>+97.3%</td><td>5.601</td><td>+10.1%</td></tr>
+</table></div></section>
+<section><h2>Files</h2><div class="tables"><table><caption>Artifacts</caption><tr><th>data</th><td><a href="data/metrics.json">metrics.json</a>, <a href="data/summary.csv">summary.csv</a></td></tr><tr><th>plots</th><td>plot_*.png</td></tr><tr><th>videos</th><td>videos/*.mp4</td></tr></table></div></section>
+<section><h2>Conclusion</h2><p>The longer run keeps the same direction as the shorter run: pin-star LRC is much more useful than sliding local windows. The new same-ke sparse probe is the current best candidate for these three cable cases: it reduces the combined score by 57-95% with about 3-10% frame-time overhead. The caveat is two-pin max adjacent stretch: lower-k LRC has a slightly smaller peak adjacent violation, while same-ke wins by removing almost all late jitter.</p></section>
+</main></body></html>
