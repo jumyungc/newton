@@ -1,0 +1,13 @@
+{
+  "mu": 0.2,
+  "left_wrap_angle": 1.5707963267948966,
+  "right_wrap_angle": 1.5707963267948966,
+  "labels": [
+    "left mass side",
+    "between pulleys",
+    "right mass side"
+  ],
+  "middle_span_tension": 15.782779693603516,
+  "left_mass": 1.0,
+  "right_mass": 1.8744560875853382
+}
