@@ -1,0 +1,325 @@
+{
+  "budget": {
+    "iterations": 4,
+    "frame_dt": 0.016666666666666666,
+    "substeps": 4,
+    "seconds": 4,
+    "rigid_joint_linear_ke": 10000.0,
+    "rigid_joint_angular_ke": 100000.0,
+    "rigid_avbd_beta": 0.0
+  },
+  "single_pendulum": {
+    "max_force_error_n": 0.010388637546795046,
+    "rms_force_error_n": 0.0025626031676404407,
+    "rms_force_reference_n": 10.578551201301675,
+    "rms_force_error_percent_of_reference": 0.024224519207555723,
+    "max_force_relative_error": 0.0017807417467804179,
+    "max_torque_error_nm": 0.0036585241509747846,
+    "rms_torque_error_nm": 0.0008470815844638529,
+    "rms_torque_reference_nm": 0.006259544122355712,
+    "rms_torque_error_percent_of_reference": 13.532640203597813,
+    "max_torque_relative_error": 0.0036585241509747846
+  },
+  "double_pendulum": {
+    "max_force_error_n": 0.4884334193521961,
+    "rms_force_error_n": 0.12149438531924134,
+    "rms_force_reference_n": 8.708118224972631,
+    "rms_force_error_percent_of_reference": 1.3951852992857499,
+    "max_force_relative_error": 0.07211456135130576,
+    "max_torque_error_nm": 0.22065593462857835,
+    "rms_torque_error_nm": 0.05609857602357104,
+    "rms_torque_reference_nm": 0.3230946310054836,
+    "rms_torque_error_percent_of_reference": 17.362893295066524,
+    "max_torque_relative_error": 0.22065593462857835
+  },
+  "soft_single_pendulum": {
+    "max_force_error_n": 0.009078312206188639,
+    "rms_force_error_n": 0.0027038662567259197,
+    "rms_force_reference_n": 10.587980104382579,
+    "rms_force_error_percent_of_reference": 0.025537130123683693,
+    "max_force_relative_error": 0.0016811381967824582,
+    "max_torque_error_nm": 0.003270919519934523,
+    "rms_torque_error_nm": 0.0008918030997301127,
+    "rms_torque_reference_nm": 0.006280731394863417,
+    "rms_torque_error_percent_of_reference": 14.199032623166433,
+    "max_torque_relative_error": 0.003270919519934523
+  },
+  "soft_double_pendulum": {
+    "max_force_error_n": 0.40738817082138357,
+    "rms_force_error_n": 0.1310142333351472,
+    "rms_force_reference_n": 8.865865653016614,
+    "rms_force_error_percent_of_reference": 1.4777376340072281,
+    "max_force_relative_error": 0.032541618897965356,
+    "max_torque_error_nm": 0.2002695649695021,
+    "rms_torque_error_nm": 0.06259850906202767,
+    "rms_torque_reference_nm": 0.32779015993571337,
+    "rms_torque_error_percent_of_reference": 19.097128807742298,
+    "max_torque_relative_error": 0.18494807865409268
+  },
+  "joint_scales": {
+    "single_pendulum": [
+      {
+        "label": "single joint",
+        "rms_force_reference_n": 10.578551201301675,
+        "rms_force_error_n": 0.0025626031676404407,
+        "rms_force_error_percent_of_reference": 0.024224519207555723,
+        "rms_torque_reference_nm": 0.006259544122355712,
+        "rms_torque_error_nm": 0.0008470815844638529,
+        "rms_torque_error_percent_of_reference": 13.532640203597813
+      }
+    ],
+    "double_pendulum": [
+      {
+        "label": "root joint",
+        "rms_force_reference_n": 10.785337749200355,
+        "rms_force_error_n": 0.17180616932961965,
+        "rms_force_error_percent_of_reference": 1.5929604925201128,
+        "rms_torque_reference_nm": 0.45675487111379587,
+        "rms_torque_error_nm": 0.0793348382258488,
+        "rms_torque_error_percent_of_reference": 17.36923747137955
+      },
+      {
+        "label": "middle joint",
+        "rms_force_reference_n": 5.944672882158851,
+        "rms_force_error_n": 0.0021003591318215237,
+        "rms_force_error_percent_of_reference": 0.035331786516380415,
+        "rms_torque_reference_nm": 0.012460693518376397,
+        "rms_torque_error_nm": 0.0002896677806691791,
+        "rms_torque_error_percent_of_reference": 2.324652157137095
+      }
+    ]
+  },
+  "load_metadata": {
+    "single_pendulum": {
+      "body_mass_kg": 1.0,
+      "body_weight_n": 9.8100004196167
+    },
+    "double_pendulum": {
+      "link_mass_kg": 0.5119999647140503,
+      "link_weight_n": 5.022719868688569,
+      "root_subtree_weight_n": 10.045439737377137
+    }
+  },
+  "sweeps": {
+    "iteration_sweep": {
+      "single_pendulum": [
+        {
+          "iterations": 2,
+          "max_force_error_n": 0.008694122686515114,
+          "rms_force_error_n": 0.0027838179824634436,
+          "rms_force_reference_n": 10.581195888938074,
+          "rms_force_error_percent_of_reference": 0.026309105432720862,
+          "max_force_relative_error": 0.0008459655150339861,
+          "max_torque_error_nm": 0.0035125389514121252,
+          "rms_torque_error_nm": 0.0009026526645936327,
+          "rms_torque_reference_nm": 0.00630071407400992,
+          "rms_torque_error_percent_of_reference": 14.326196269039132,
+          "max_torque_relative_error": 0.0035125389514121252
+        },
+        {
+          "iterations": 4,
+          "max_force_error_n": 0.010388637546795046,
+          "rms_force_error_n": 0.0025626031676404407,
+          "rms_force_reference_n": 10.578551201301675,
+          "rms_force_error_percent_of_reference": 0.024224519207555723,
+          "max_force_relative_error": 0.0017807417467804179,
+          "max_torque_error_nm": 0.0036585241509747846,
+          "rms_torque_error_nm": 0.0008470815844638529,
+          "rms_torque_reference_nm": 0.006259544122355712,
+          "rms_torque_error_percent_of_reference": 13.532640203597813,
+          "max_torque_relative_error": 0.0036585241509747846
+        },
+        {
+          "iterations": 8,
+          "max_force_error_n": 0.00810640046348739,
+          "rms_force_error_n": 0.0023835419783589705,
+          "rms_force_reference_n": 10.577387346825155,
+          "rms_force_error_percent_of_reference": 0.022534316842186933,
+          "max_force_relative_error": 0.0007234100306573843,
+          "max_torque_error_nm": 0.0030660033978051615,
+          "rms_torque_error_nm": 0.0008233205625063165,
+          "rms_torque_reference_nm": 0.006256082293145449,
+          "rms_torque_error_percent_of_reference": 13.160321810478697,
+          "max_torque_relative_error": 0.0030660033978051615
+        },
+        {
+          "iterations": 16,
+          "max_force_error_n": 0.007558704594766903,
+          "rms_force_error_n": 0.00237800011156614,
+          "rms_force_reference_n": 10.577063206753225,
+          "rms_force_error_percent_of_reference": 0.022482612281713873,
+          "max_force_relative_error": 0.0008405761271810566,
+          "max_torque_error_nm": 0.004530506538969803,
+          "rms_torque_error_nm": 0.0008408405371777874,
+          "rms_torque_reference_nm": 0.006279136904644281,
+          "rms_torque_error_percent_of_reference": 13.39102093085231,
+          "max_torque_relative_error": 0.004530506538969803
+        }
+      ],
+      "double_pendulum": [
+        {
+          "iterations": 2,
+          "max_force_error_n": 1.1948921012787443,
+          "rms_force_error_n": 0.4310335274523934,
+          "rms_force_reference_n": 8.637799567135925,
+          "rms_force_error_percent_of_reference": 4.990084848603556,
+          "max_force_relative_error": 0.20478419058234398,
+          "max_torque_error_nm": 0.5195959185118373,
+          "rms_torque_error_nm": 0.18570046902369322,
+          "rms_torque_reference_nm": 0.1381503292014371,
+          "rms_torque_error_percent_of_reference": 134.419128855584,
+          "max_torque_relative_error": 0.5195959185118373
+        },
+        {
+          "iterations": 4,
+          "max_force_error_n": 0.4884334193521961,
+          "rms_force_error_n": 0.12149438531924134,
+          "rms_force_reference_n": 8.708118224972631,
+          "rms_force_error_percent_of_reference": 1.3951852992857499,
+          "max_force_relative_error": 0.07211456135130576,
+          "max_torque_error_nm": 0.22065593462857835,
+          "rms_torque_error_nm": 0.05609857602357104,
+          "rms_torque_reference_nm": 0.3230946310054836,
+          "rms_torque_error_percent_of_reference": 17.362893295066524,
+          "max_torque_relative_error": 0.22065593462857835
+        },
+        {
+          "iterations": 8,
+          "max_force_error_n": 0.06881259829566955,
+          "rms_force_error_n": 0.011673350213993338,
+          "rms_force_reference_n": 8.83451647424896,
+          "rms_force_error_percent_of_reference": 0.1321334364819973,
+          "max_force_relative_error": 0.015868645309012396,
+          "max_torque_error_nm": 0.02102527909263685,
+          "rms_torque_error_nm": 0.003917292313502091,
+          "rms_torque_reference_nm": 0.43271790120364456,
+          "rms_torque_error_percent_of_reference": 0.9052762325306586,
+          "max_torque_relative_error": 0.018898179748170763
+        },
+        {
+          "iterations": 16,
+          "max_force_error_n": 0.012954613887792107,
+          "rms_force_error_n": 0.002663830954080691,
+          "rms_force_reference_n": 8.857549489984695,
+          "rms_force_error_percent_of_reference": 0.030074130063768842,
+          "max_force_relative_error": 0.0037741704511295997,
+          "max_torque_error_nm": 0.003031533053321489,
+          "rms_torque_error_nm": 0.0005436894344099718,
+          "rms_torque_reference_nm": 0.43418741496442126,
+          "rms_torque_error_percent_of_reference": 0.12521998926535527,
+          "max_torque_relative_error": 0.0020689625206653335
+        }
+      ]
+    },
+    "substep_sweep": {
+      "single_pendulum": [
+        {
+          "substeps": 1,
+          "max_force_error_n": 0.004974336301869465,
+          "rms_force_error_n": 0.0019155345069058931,
+          "rms_force_reference_n": 10.384195030867843,
+          "rms_force_error_percent_of_reference": 0.018446634536541495,
+          "max_force_relative_error": 0.000581989111300087,
+          "max_torque_error_nm": 0.0012516630707599674,
+          "rms_torque_error_nm": 0.0003476123855457914,
+          "rms_torque_reference_nm": 0.005136659105144281,
+          "rms_torque_error_percent_of_reference": 6.767285475449659,
+          "max_torque_relative_error": 0.0012516630707599674
+        },
+        {
+          "substeps": 2,
+          "max_force_error_n": 0.005720409020106061,
+          "rms_force_error_n": 0.0018746418482815045,
+          "rms_force_reference_n": 10.50238809016405,
+          "rms_force_error_percent_of_reference": 0.017849672209668096,
+          "max_force_relative_error": 0.0006169282515537818,
+          "max_torque_error_nm": 0.0016483814321759382,
+          "rms_torque_error_nm": 0.0004016069397160682,
+          "rms_torque_reference_nm": 0.005701723760205999,
+          "rms_torque_error_percent_of_reference": 7.043605699016861,
+          "max_torque_relative_error": 0.0016483814321759382
+        },
+        {
+          "substeps": 4,
+          "max_force_error_n": 0.010388637546795046,
+          "rms_force_error_n": 0.0025626031676404407,
+          "rms_force_reference_n": 10.578551201301675,
+          "rms_force_error_percent_of_reference": 0.024224519207555723,
+          "max_force_relative_error": 0.0017807417467804179,
+          "max_torque_error_nm": 0.0036585241509747846,
+          "rms_torque_error_nm": 0.0008470815844638529,
+          "rms_torque_reference_nm": 0.006259544122355712,
+          "rms_torque_error_percent_of_reference": 13.532640203597813,
+          "max_torque_relative_error": 0.0036585241509747846
+        },
+        {
+          "substeps": 8,
+          "max_force_error_n": 0.020230809024403777,
+          "rms_force_error_n": 0.007035261836932676,
+          "rms_force_reference_n": 10.62380033234032,
+          "rms_force_error_percent_of_reference": 0.06622170613952866,
+          "max_force_relative_error": 0.00824767570691335,
+          "max_torque_error_nm": 0.016715222013488074,
+          "rms_torque_error_nm": 0.0031183552649603112,
+          "rms_torque_reference_nm": 0.008118992860636581,
+          "rms_torque_error_percent_of_reference": 38.40815380044332,
+          "max_torque_relative_error": 0.016715222013488074
+        }
+      ],
+      "double_pendulum": [
+        {
+          "substeps": 1,
+          "max_force_error_n": 2.7057175711908705,
+          "rms_force_error_n": 0.9429030993259806,
+          "rms_force_reference_n": 8.25472522619773,
+          "rms_force_error_percent_of_reference": 11.42258613688948,
+          "max_force_relative_error": 0.3572770038074294,
+          "max_torque_error_nm": 1.08784747987551,
+          "rms_torque_error_nm": 0.46779475091186984,
+          "rms_torque_reference_nm": 0.3987490425818547,
+          "rms_torque_error_percent_of_reference": 117.31557971473788,
+          "max_torque_relative_error": 1.0805144523075525
+        },
+        {
+          "substeps": 2,
+          "max_force_error_n": 1.4413135274563387,
+          "rms_force_error_n": 0.4945026046012574,
+          "rms_force_reference_n": 8.363435669044899,
+          "rms_force_error_percent_of_reference": 5.912673023020089,
+          "max_force_relative_error": 0.21419728549035355,
+          "max_torque_error_nm": 0.6846642835978636,
+          "rms_torque_error_nm": 0.23929660129871447,
+          "rms_torque_reference_nm": 0.076111407250248,
+          "rms_torque_error_percent_of_reference": 314.40307037278535,
+          "max_torque_relative_error": 0.6846642835978636
+        },
+        {
+          "substeps": 4,
+          "max_force_error_n": 0.4884334193521961,
+          "rms_force_error_n": 0.12149438531924134,
+          "rms_force_reference_n": 8.708118224972631,
+          "rms_force_error_percent_of_reference": 1.3951852992857499,
+          "max_force_relative_error": 0.07211456135130576,
+          "max_torque_error_nm": 0.22065593462857835,
+          "rms_torque_error_nm": 0.05609857602357104,
+          "rms_torque_reference_nm": 0.3230946310054836,
+          "rms_torque_error_percent_of_reference": 17.362893295066524,
+          "max_torque_relative_error": 0.22065593462857835
+        },
+        {
+          "substeps": 8,
+          "max_force_error_n": 0.1338475169406151,
+          "rms_force_error_n": 0.021627697761101766,
+          "rms_force_reference_n": 9.222494147055974,
+          "rms_force_error_percent_of_reference": 0.23451028990900263,
+          "max_force_relative_error": 0.017034781851279955,
+          "max_torque_error_nm": 0.06240114718626977,
+          "rms_torque_error_nm": 0.009770117373485676,
+          "rms_torque_reference_nm": 0.4832709817084408,
+          "rms_torque_error_percent_of_reference": 2.02166439601789,
+          "max_torque_relative_error": 0.06240114718626977
+        }
+      ]
+    }
+  }
+}

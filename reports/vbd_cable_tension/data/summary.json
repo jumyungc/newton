@@ -1,0 +1,95 @@
+{
+  "load_cases": {
+    "T = mg": {
+      "expected_n": 9.81,
+      "final_n": 9.799003601074219,
+      "tail_mean_n": 9.799003601074219,
+      "tail_abs_error_n": 0.010996398925781747,
+      "tail_relative_error": 0.001120937709050127
+    },
+    "T = mg + 5 N": {
+      "expected_n": 14.81,
+      "final_n": 14.793872833251953,
+      "tail_mean_n": 14.793872833251953,
+      "tail_abs_error_n": 0.016127166748047372,
+      "tail_relative_error": 0.0010889376602327733
+    }
+  },
+  "single_pulley_profiles": [
+    {
+      "mu": 0.0,
+      "min_tension_n": 19.31427001953125,
+      "max_tension_n": 19.839054107666016,
+      "measured_ratio": 1.0271707958729006,
+      "capstan_ratio_bound": 1.0
+    },
+    {
+      "mu": 0.3,
+      "min_tension_n": 19.997371673583984,
+      "max_tension_n": 25.192655563354492,
+      "measured_ratio": 1.259798336230023,
+      "capstan_ratio_bound": 3.513585624285733
+    },
+    {
+      "mu": 0.8,
+      "min_tension_n": 19.999004364013672,
+      "max_tension_n": 24.290138244628906,
+      "measured_ratio": 1.2145673755807926,
+      "capstan_ratio_bound": 28.53216832255737
+    }
+  ],
+  "capstan_reference": {
+    "mu": 0.2,
+    "wrap_angle": 1.5707963267948966,
+    "per_pulley_ratio": 1.369107770624847,
+    "left_mass": 1.0,
+    "right_mass": 1.8744560875853382,
+    "labels": [
+      "left mass side",
+      "between pulleys",
+      "right mass side"
+    ],
+    "tensions": [
+      9.81,
+      13.430947229829748,
+      18.38841421921217
+    ]
+  },
+  "capstan_two_pulley": {
+    "mu": 0.2,
+    "left_wrap_angle": 1.5707963267948966,
+    "right_wrap_angle": 1.5707963267948966,
+    "labels": [
+      "left mass side",
+      "between pulleys",
+      "right mass side"
+    ],
+    "reference_tension_n": [
+      9.81,
+      13.430947229829748,
+      18.38841421921217
+    ],
+    "diagnostic_tension_n": [
+      9.81,
+      15.782779693603516,
+      18.38841421921217
+    ],
+    "middle_span_tension_n": 15.782779693603516,
+    "relative_difference": [
+      0.0,
+      0.17510548016676108,
+      0.0
+    ]
+  },
+  "settings": {
+    "load_iterations": 32,
+    "load_dt": 0.0033333333333333335,
+    "load_steps": 160,
+    "wrap_iterations": 32,
+    "wrap_dt": 0.0016666666666666668,
+    "wrap_steps": 600,
+    "capstan_iterations": 32,
+    "capstan_dt": 0.0016666666666666668,
+    "capstan_steps": 900
+  }
+}
