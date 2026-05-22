@@ -125,6 +125,7 @@ class Example:
             child_xform=wp.transform(p=wp.vec3(0.0, 0.0, +cuboid_hz), q=wp.quat_identity()),
             limit_lower=-0.3,
             limit_upper=0.3,
+            limit_kd=1.0e-1,
             label="prismatic_a_b",
         )
         # Create articulation from joints
@@ -311,6 +312,4 @@ if __name__ == "__main__":
     viewer, args = newton.examples.init(parser)
 
     # Create viewer and run
-    example = Example(viewer, args)
-
-    newton.examples.run(example, args)
+    newton.examples.run(Example(viewer, args), args)
