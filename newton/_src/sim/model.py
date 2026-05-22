@@ -763,6 +763,7 @@ class Model:
         # allocated when explicitly requested via request_state_attributes().
         self.attribute_frequency["body_qdd"] = Model.AttributeFrequency.BODY
         self.attribute_frequency["body_parent_f"] = Model.AttributeFrequency.BODY
+        self.attribute_frequency["vbd:cable_tension"] = Model.AttributeFrequency.JOINT
 
         # attributes per joint
         self.attribute_frequency["joint_type"] = Model.AttributeFrequency.JOINT
@@ -866,6 +867,16 @@ class Model:
 
         if "body_parent_f" in requested:
             s.body_parent_f = wp.zeros_like(self.body_qd, requires_grad=requires_grad)
+
+        if "vbd:cable_tension" in requested:
+            if not hasattr(s, "vbd"):
+                s.vbd = Model.AttributeNamespace("vbd")
+            s.vbd.cable_tension = wp.zeros(
+                self.joint_count,
+                dtype=wp.float32,
+                device=self.device,
+                requires_grad=requires_grad,
+            )
 
         if "mujoco:qfrc_actuator" in requested:
             if not hasattr(s, "mujoco"):

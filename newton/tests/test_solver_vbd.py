@@ -39,6 +39,15 @@ def _eval_self_contact_norm_kernel(
 
 
 @wp.kernel
+def _set_body_linear_force_kernel(
+    body: int,
+    force: wp.vec3,
+    body_f: wp.array[wp.spatial_vector],
+):
+    body_f[body] = wp.spatial_vector(force, wp.vec3(0.0))
+
+
+@wp.kernel
 def _eval_directional_joint_projection_kernel(
     linear_force_out: wp.array[wp.vec3],
     angular_torque_out: wp.array[wp.vec3],
@@ -579,6 +588,137 @@ def _rigid_contact_stick_flags_require_cone_and_small_residual(test, device):
         np.testing.assert_array_equal(stick_flag.numpy(), [0, 0, 0, 0])
 
 
+def _vbd_body_parent_f_static_pendulum_balances_gravity(test, device):
+    builder = newton.ModelBuilder(gravity=-9.81, up_axis=newton.Axis.Z)
+    builder.request_state_attributes("body_parent_f")
+
+    link = builder.add_link(xform=wp.transform(wp.vec3(0.0, 0.0, -1.0), wp.quat_identity()))
+    builder.add_shape_box(link, hx=0.1, hy=0.1, hz=0.1)
+    joint = builder.add_joint_revolute(
+        parent=-1,
+        child=link,
+        parent_xform=wp.transform_identity(),
+        child_xform=wp.transform(wp.vec3(0.0, 0.0, 1.0), wp.quat_identity()),
+        axis=wp.vec3(0.0, 1.0, 0.0),
+    )
+    builder.add_articulation([joint])
+    builder.color()
+
+    model = builder.finalize(device=device)
+    solver = newton.solvers.SolverVBD(model, iterations=64)
+    state_0 = model.state()
+    state_1 = model.state()
+
+    test.assertIsNotNone(state_1.body_parent_f)
+
+    solver.step(state_0, state_1, None, None, 5.0e-3)
+
+    parent_f = state_1.body_parent_f.numpy()[link]
+    mass = model.body_mass.numpy()[link]
+    gravity = model.gravity.numpy()[0]
+    expected_linear = -mass * gravity
+
+    np.testing.assert_allclose(parent_f[:3], expected_linear, rtol=1.0e-3, atol=1.0e-4)
+    np.testing.assert_allclose(parent_f[3:], np.zeros(3), atol=1.0e-4)
+
+
+def _vbd_body_parent_f_double_pendulum_balances_subtree_weight(test, device):
+    builder = newton.ModelBuilder(gravity=-9.81, up_axis=newton.Axis.Z)
+    builder.request_state_attributes("body_parent_f")
+    cfg = newton.ModelBuilder.ShapeConfig()
+    cfg.density = 1000.0
+
+    link_0 = builder.add_link(xform=wp.transform(wp.vec3(0.0, 0.0, -0.5), wp.quat_identity()))
+    builder.add_shape_box(link_0, hx=0.05, hy=0.05, hz=0.5, cfg=cfg)
+    link_1 = builder.add_link(xform=wp.transform(wp.vec3(0.0, 0.0, -1.5), wp.quat_identity()))
+    builder.add_shape_box(link_1, hx=0.05, hy=0.05, hz=0.5, cfg=cfg)
+
+    joint_0 = builder.add_joint_revolute(
+        parent=-1,
+        child=link_0,
+        parent_xform=wp.transform_identity(),
+        child_xform=wp.transform(wp.vec3(0.0, 0.0, 0.5), wp.quat_identity()),
+        axis=wp.vec3(0.0, 1.0, 0.0),
+    )
+    joint_1 = builder.add_joint_revolute(
+        parent=link_0,
+        child=link_1,
+        parent_xform=wp.transform(wp.vec3(0.0, 0.0, -0.5), wp.quat_identity()),
+        child_xform=wp.transform(wp.vec3(0.0, 0.0, 0.5), wp.quat_identity()),
+        axis=wp.vec3(0.0, 1.0, 0.0),
+    )
+    builder.add_articulation([joint_0, joint_1])
+    builder.color()
+
+    model = builder.finalize(device=device)
+    solver = newton.solvers.SolverVBD(model, iterations=64)
+    state_0 = model.state()
+    state_1 = model.state()
+
+    solver.step(state_0, state_1, None, None, 5.0e-3)
+
+    parent_f = state_1.body_parent_f.numpy()
+    masses = model.body_mass.numpy()
+    gravity = model.gravity.numpy()[0]
+    expected_linear = np.zeros((2, 3), dtype=np.float32)
+    expected_linear[link_0] = -(masses[link_0] + masses[link_1]) * gravity
+    expected_linear[link_1] = -masses[link_1] * gravity
+
+    np.testing.assert_allclose(parent_f[:, :3], expected_linear, rtol=5.0e-3, atol=1.0e-3)
+    np.testing.assert_allclose(parent_f[:, 3:], np.zeros((2, 3)), atol=1.0e-3)
+
+
+def _vbd_cable_tension_balances_hanging_load(test, device):
+    for applied_downward_force in (0.0, 5.0):
+        builder = newton.ModelBuilder(gravity=-9.81, up_axis=newton.Axis.Z)
+        builder.request_state_attributes("vbd:cable_tension")
+        cfg = newton.ModelBuilder.ShapeConfig()
+        cfg.density = 1000.0
+
+        body = builder.add_body(xform=wp.transform(wp.vec3(0.0, 0.0, -1.0), wp.quat_identity()))
+        builder.add_shape_box(body, hx=0.05, hy=0.05, hz=0.05, cfg=cfg)
+        joint = builder.add_joint_cable(
+            parent=-1,
+            child=body,
+            parent_xform=wp.transform_identity(),
+            child_xform=wp.transform(wp.vec3(0.0, 0.0, 1.0), wp.quat_identity()),
+            stretch_stiffness=1.0e5,
+            stretch_damping=1.0e-2,
+        )
+        builder.add_articulation([joint])
+        builder.color()
+
+        model = builder.finalize(device=device)
+        solver = newton.solvers.SolverVBD(model, iterations=32)
+        state_0 = model.state()
+        state_1 = model.state()
+        control = model.control()
+
+        test.assertTrue(hasattr(state_0, "vbd"))
+        test.assertIsNotNone(state_0.vbd.cable_tension)
+
+        for _ in range(120):
+            state_0.clear_forces()
+            if applied_downward_force > 0.0:
+                wp.launch(
+                    _set_body_linear_force_kernel,
+                    dim=1,
+                    inputs=[
+                        body,
+                        wp.vec3(0.0, 0.0, -applied_downward_force),
+                    ],
+                    outputs=[state_0.body_f],
+                    device=device,
+                )
+            solver.step(state_0, state_1, control, None, 1.0 / 300.0)
+            state_0, state_1 = state_1, state_0
+
+        tension = float(state_0.vbd.cable_tension.numpy()[joint])
+        mass = float(model.body_mass.numpy()[body])
+        expected = mass * 9.81 + applied_downward_force
+        test.assertAlmostEqual(tension, expected, delta=5.0e-2)
+
+
 class TestSolverVBD(unittest.TestCase):
     pass
 
@@ -629,6 +769,24 @@ add_function_test(
     TestSolverVBD,
     "test_rigid_contact_stick_flags_require_cone_and_small_residual",
     _rigid_contact_stick_flags_require_cone_and_small_residual,
+    devices=devices,
+)
+add_function_test(
+    TestSolverVBD,
+    "test_vbd_body_parent_f_static_pendulum_balances_gravity",
+    _vbd_body_parent_f_static_pendulum_balances_gravity,
+    devices=devices,
+)
+add_function_test(
+    TestSolverVBD,
+    "test_vbd_body_parent_f_double_pendulum_balances_subtree_weight",
+    _vbd_body_parent_f_double_pendulum_balances_subtree_weight,
+    devices=devices,
+)
+add_function_test(
+    TestSolverVBD,
+    "test_vbd_cable_tension_balances_hanging_load",
+    _vbd_cable_tension_balances_hanging_load,
     devices=devices,
 )
 

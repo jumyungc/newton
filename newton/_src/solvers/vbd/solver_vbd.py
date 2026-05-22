@@ -20,7 +20,7 @@ from ...sim import (
 )
 from ..flags import SolverNotifyFlags
 from ..solver import SolverBase
-from ..xpbd.kernels import apply_joint_forces
+from ..xpbd.kernels import apply_joint_forces, convert_joint_impulse_to_parent_f
 from .particle_vbd_kernels import (
     NUM_THREADS_PER_COLLISION_PRIMITIVE,
     TILE_SIZE_TRI_MESH_ELASTICITY_SOLVE,
@@ -61,7 +61,9 @@ from .rigid_vbd_kernels import (
     build_body_body_contact_lists,
     build_body_particle_contact_lists,
     check_contact_overflow,
+    compute_body_parent_f_from_joints,
     compute_cable_dahl_parameters,
+    compute_cable_tension,
     compute_rigid_contact_forces,
     forward_step_rigid_bodies,
     init_body_body_contact_materials,
@@ -101,6 +103,13 @@ class SolverVBD(SolverBase):
     Non-cable structural joint slots default to **hard mode** (augmented Lagrangian
     with persistent lambda and C0 stabilization). Cable stretch and bend default to
     **soft mode**. The hard/soft mode can be changed per slot via :meth:`set_joint_constraint_mode`.
+
+    When requested via ``ModelBuilder.request_state_attributes("body_parent_f")``,
+    VBD reports incoming parent-joint wrenches in ``State.body_parent_f``. Values
+    are expressed in world frame and referenced to each child body's COM.
+    When requested via ``ModelBuilder.request_state_attributes("vbd:cable_tension")``,
+    VBD reports joint-indexed cable stretch tension magnitudes in
+    ``State.vbd.cable_tension``; non-cable joints are reported as zero.
 
     Joint limitations:
         - Supported joint types: BALL, FIXED, FREE, REVOLUTE, PRISMATIC, D6, CABLE.
@@ -650,6 +659,7 @@ class SolverVBD(SolverBase):
 
             # Persistent scratch for joint_f accumulation
             self._body_f_for_integration = wp.zeros(model.body_count, dtype=wp.spatial_vector, device=self.device)
+            self._joint_f_parent_impulse = wp.zeros(model.joint_count, dtype=wp.spatial_vector, device=self.device)
 
             # Hessian blocks (6x6 block structure: angular-angular, angular-linear, linear-linear)
             self.body_hessian_aa = wp.zeros(model.body_count, dtype=wp.mat33, device=self.device)
@@ -1583,12 +1593,17 @@ class SolverVBD(SolverBase):
         if control is None:
             control = self.model.control(clone_variables=False)
 
-        self._initialize_rigid_bodies(state_in, control, contacts, dt, update_rigid)
+        self._initialize_rigid_bodies(
+            state_in, control, contacts, dt, update_rigid, state_out.body_parent_f is not None
+        )
         self._initialize_particles(state_in, state_out, dt)
 
         for iter_num in range(self.iterations):
             self._solve_rigid_body_iteration(state_in, state_out, control, contacts, dt)
             self._solve_particle_iteration(state_in, state_out, contacts, dt, iter_num)
+
+        self._populate_body_parent_f(state_in, state_out, control, dt)
+        self._populate_cable_tension(state_in, state_out, dt)
 
         # Snapshot solved rigid contact state for next-frame warm-start.
         self._snapshot_rigid_contact_history(contacts)
@@ -1596,6 +1611,115 @@ class SolverVBD(SolverBase):
             state_in, state_out, dt, apply_stick_deadzone=contacts is not None and self.rigid_contact_hard
         )
         self._finalize_particles(state_out, dt)
+
+    def _populate_body_parent_f(self, state_in: State, state_out: State, control: Control, dt: float) -> None:
+        """Populate optional parent-joint wrench output for the accepted VBD solve."""
+        body_parent_f = state_out.body_parent_f
+        if body_parent_f is None:
+            return
+
+        body_parent_f.zero_()
+
+        model = self.model
+        if model.body_count == 0 or model.joint_count == 0 or self.integrate_with_external_rigid_solver:
+            return
+
+        wp.launch(
+            kernel=compute_body_parent_f_from_joints,
+            dim=model.joint_count,
+            inputs=[
+                state_in.body_q,
+                self.body_q_prev,
+                model.body_q,
+                model.body_com,
+                model.joint_type,
+                model.joint_enabled,
+                model.joint_parent,
+                model.joint_child,
+                model.joint_X_p,
+                model.joint_X_c,
+                model.joint_axis,
+                model.joint_qd_start,
+                self.joint_constraint_start,
+                self.joint_penalty_k,
+                self.joint_penalty_kd,
+                self.joint_sigma_start,
+                self.joint_C_fric,
+                model.joint_target_ke,
+                model.joint_target_kd,
+                control.joint_target_pos,
+                control.joint_target_vel,
+                model.joint_limit_lower,
+                model.joint_limit_upper,
+                model.joint_limit_ke,
+                model.joint_limit_kd,
+                self.joint_lambda_lin,
+                self.joint_lambda_ang,
+                self.joint_C0_lin,
+                self.joint_C0_ang,
+                self.joint_is_hard,
+                self.rigid_joint_alpha,
+                model.joint_dof_dim,
+                self.joint_rest_angle,
+                dt,
+            ],
+            outputs=[body_parent_f],
+            device=self.device,
+        )
+
+        if control is not None and control.joint_f is not None:
+            wp.launch(
+                kernel=convert_joint_impulse_to_parent_f,
+                dim=model.joint_count,
+                inputs=[
+                    self._joint_f_parent_impulse,
+                    model.joint_enabled,
+                    model.joint_type,
+                    model.joint_child,
+                    dt,
+                ],
+                outputs=[body_parent_f],
+                device=self.device,
+            )
+
+    def _populate_cable_tension(self, state_in: State, state_out: State, dt: float) -> None:
+        """Populate optional VBD cable stretch tension output for the accepted solve."""
+        vbd_state = getattr(state_out, "vbd", None)
+        cable_tension = getattr(vbd_state, "cable_tension", None)
+        if cable_tension is None:
+            return
+
+        cable_tension.zero_()
+
+        model = self.model
+        if model.body_count == 0 or model.joint_count == 0 or self.integrate_with_external_rigid_solver:
+            return
+
+        wp.launch(
+            kernel=compute_cable_tension,
+            dim=model.joint_count,
+            inputs=[
+                state_in.body_q,
+                self.body_q_prev,
+                model.body_com,
+                model.joint_type,
+                model.joint_enabled,
+                model.joint_parent,
+                model.joint_child,
+                model.joint_X_p,
+                model.joint_X_c,
+                self.joint_constraint_start,
+                self.joint_penalty_k,
+                self.joint_penalty_kd,
+                self.joint_lambda_lin,
+                self.joint_C0_lin,
+                self.joint_is_hard,
+                self.rigid_joint_alpha,
+                dt,
+            ],
+            outputs=[cable_tension],
+            device=self.device,
+        )
 
     def _snapshot_rigid_contact_history(self, contacts: Contacts | None):
         """Write solved contact state for next frame's match-index warm-start."""
@@ -1744,6 +1868,7 @@ class SolverVBD(SolverBase):
         contacts: Contacts | None,
         dt: float,
         refresh: bool,
+        record_body_parent_f: bool,
     ) -> None:
         """Initialize rigid body states for AVBD solver (pre-iteration phase).
 
@@ -1933,6 +2058,10 @@ class SolverVBD(SolverBase):
             if model.joint_count > 0 and control is not None and control.joint_f is not None:
                 wp.copy(self._body_f_for_integration, state_in.body_f)
                 body_f_for_integration = self._body_f_for_integration
+                joint_impulse = None
+                if record_body_parent_f:
+                    self._joint_f_parent_impulse.zero_()
+                    joint_impulse = self._joint_f_parent_impulse
                 wp.launch(
                     kernel=apply_joint_forces,
                     dim=model.joint_count,
@@ -1953,7 +2082,7 @@ class SolverVBD(SolverBase):
                     ],
                     outputs=[
                         body_f_for_integration,
-                        None,  # joint_impulse: VBD does not populate body_parent_f
+                        joint_impulse,
                     ],
                     device=self.device,
                 )

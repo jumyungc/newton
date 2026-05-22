@@ -280,6 +280,41 @@ add_example_test(
 )
 add_example_test(
     TestCableExamples,
+    name="cable.example_cable_tension_hanging",
+    devices=test_devices,
+    use_viewer=True,
+    test_options={"num-frames": 40},
+)
+add_example_test(
+    TestCableExamples,
+    name="cable.example_cable_tension_pulley",
+    devices=test_devices,
+    use_viewer=True,
+    test_options={"num-frames": 20},
+)
+add_example_test(
+    TestCableExamples,
+    name="cable.example_cable_tension_capstan",
+    devices=test_devices,
+    use_viewer=True,
+    test_options={"num-frames": 20},
+)
+add_example_test(
+    TestCableExamples,
+    name="cable.example_vbd_joint_reaction_pendulum",
+    devices=test_devices,
+    use_viewer=True,
+    test_options={"num-frames": 20},
+)
+add_example_test(
+    TestCableExamples,
+    name="cable.example_vbd_joint_reaction_double_pendulum",
+    devices=test_devices,
+    use_viewer=True,
+    test_options={"num-frames": 20},
+)
+add_example_test(
+    TestCableExamples,
     name="cable.example_cable_bundle_hysteresis",
     devices=test_devices,
     use_viewer=True,

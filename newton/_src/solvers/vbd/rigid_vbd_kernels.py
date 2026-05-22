@@ -1799,6 +1799,407 @@ def evaluate_joint_force_hessian(
     return _zero_force_hessian()
 
 
+@wp.func
+def _linear_hard_report_correction(
+    X_wp: wp.transform,
+    X_wc: wp.transform,
+    parent_pose: wp.transform,
+    child_pose: wp.transform,
+    parent_com: wp.vec3,
+    child_com: wp.vec3,
+    is_parent: bool,
+    penalty_k: float,
+    P: wp.mat33,
+    C0_lin: wp.vec3,
+    alpha: float,
+):
+    """Remove the extra post-update hard-constraint residual from a linear slot.
+
+    After the dual update, re-evaluating a hard slot gives ``lambda_new + kC``.
+    The accepted reaction is ``lambda_new``; this returns the signed correction
+    that removes the second ``kC`` term while preserving damping/drive terms.
+    """
+    x_p = wp.transform_get_translation(X_wp)
+    x_c = wp.transform_get_translation(X_wc)
+    C_stab = x_c - x_p - alpha * C0_lin
+    correction_attachment = penalty_k * (P * C_stab)
+
+    if is_parent:
+        com_w = wp.transform_point(parent_pose, parent_com)
+        r = x_p - com_w
+        force = -correction_attachment
+    else:
+        com_w = wp.transform_point(child_pose, child_com)
+        r = x_c - com_w
+        force = correction_attachment
+
+    return force, wp.cross(r, force)
+
+
+@wp.func
+def _angular_hard_report_correction(
+    q_wp: wp.quat,
+    q_wc: wp.quat,
+    q_wp_rest: wp.quat,
+    q_wc_rest: wp.quat,
+    is_parent: bool,
+    penalty_k: float,
+    P: wp.mat33,
+    C0_ang: wp.vec3,
+    alpha: float,
+):
+    """Remove the extra post-update hard-constraint residual from an angular slot."""
+    kappa_now_vec, J_world = compute_kappa_and_jacobian(q_wp, q_wc, q_wp_rest, q_wc_rest)
+    kappa_stab = kappa_now_vec - alpha * C0_ang
+    correction_torque = J_world * (penalty_k * (P * kappa_stab))
+    if is_parent:
+        correction_torque = -correction_torque
+    return correction_torque
+
+
+@wp.func
+def compute_hard_joint_report_correction(
+    joint_index: int,
+    body_q: wp.array[wp.transform],
+    body_q_rest: wp.array[wp.transform],
+    body_com: wp.array[wp.vec3],
+    joint_type: wp.array[int],
+    joint_parent: wp.array[int],
+    joint_child: wp.array[int],
+    joint_X_p: wp.array[wp.transform],
+    joint_X_c: wp.array[wp.transform],
+    joint_axis: wp.array[wp.vec3],
+    joint_qd_start: wp.array[int],
+    joint_constraint_start: wp.array[int],
+    joint_penalty_k: wp.array[float],
+    joint_C0_lin: wp.array[wp.vec3],
+    joint_C0_ang: wp.array[wp.vec3],
+    joint_is_hard: wp.array[wp.int32],
+    avbd_alpha: float,
+    joint_dof_dim: wp.array2d[int],
+):
+    """Correction from direct hard-slot re-evaluation to accepted AL reaction.
+
+    ``body_parent_f`` reports the child-side parent-to-child wrench. Soft slots,
+    damping, drive, and limit forces are already correct in the direct evaluator;
+    only hard structural slots need this correction.
+    """
+    jt = joint_type[joint_index]
+    parent_index = joint_parent[joint_index]
+    child_index = joint_child[joint_index]
+
+    X_pj = joint_X_p[joint_index]
+    X_cj = joint_X_c[joint_index]
+
+    if parent_index >= 0:
+        parent_pose = body_q[parent_index]
+        parent_pose_rest = body_q_rest[parent_index]
+        parent_com = body_com[parent_index]
+    else:
+        parent_pose = wp.transform(wp.vec3(0.0), wp.quat_identity())
+        parent_pose_rest = parent_pose
+        parent_com = wp.vec3(0.0)
+
+    child_pose = body_q[child_index]
+    child_pose_rest = body_q_rest[child_index]
+    child_com = body_com[child_index]
+
+    X_wp = parent_pose * X_pj
+    X_wc = child_pose * X_cj
+    X_wp_rest = parent_pose_rest * X_pj
+    X_wc_rest = child_pose_rest * X_cj
+
+    q_wp = wp.transform_get_rotation(X_wp)
+    q_wc = wp.transform_get_rotation(X_wc)
+    q_wp_rest = wp.transform_get_rotation(X_wp_rest)
+    q_wc_rest = wp.transform_get_rotation(X_wc_rest)
+
+    c_start = joint_constraint_start[joint_index]
+    P_I = wp.identity(3, float)
+    P_lin = P_I
+    P_ang = P_I
+    has_linear_slot = False
+    has_angular_slot = False
+
+    if jt == JointType.CABLE or jt == JointType.FIXED:
+        has_linear_slot = True
+        has_angular_slot = True
+    elif jt == JointType.BALL:
+        has_linear_slot = True
+    elif jt == JointType.REVOLUTE:
+        qd_start = joint_qd_start[joint_index]
+        P_lin, P_ang = build_joint_projectors(jt, joint_axis, qd_start, 0, 1, q_wp)
+        has_linear_slot = True
+        has_angular_slot = True
+    elif jt == JointType.PRISMATIC:
+        qd_start = joint_qd_start[joint_index]
+        P_lin, P_ang = build_joint_projectors(jt, joint_axis, qd_start, 1, 0, q_wp)
+        has_linear_slot = True
+        has_angular_slot = True
+    elif jt == JointType.D6:
+        lin_count = joint_dof_dim[joint_index, 0]
+        ang_count = joint_dof_dim[joint_index, 1]
+        qd_start = joint_qd_start[joint_index]
+        P_lin, P_ang = build_joint_projectors(jt, joint_axis, qd_start, lin_count, ang_count, q_wp)
+        has_linear_slot = lin_count < 3
+        has_angular_slot = ang_count < 3
+
+    force = wp.vec3(0.0)
+    torque = wp.vec3(0.0)
+
+    if has_linear_slot and joint_is_hard[c_start] == 1:
+        f_corr, t_corr = _linear_hard_report_correction(
+            X_wp,
+            X_wc,
+            parent_pose,
+            child_pose,
+            parent_com,
+            child_com,
+            False,
+            joint_penalty_k[c_start],
+            P_lin,
+            joint_C0_lin[joint_index],
+            avbd_alpha,
+        )
+        force = force + f_corr
+        torque = torque + t_corr
+
+    if has_angular_slot and joint_is_hard[c_start + 1] == 1:
+        torque = torque + _angular_hard_report_correction(
+            q_wp,
+            q_wc,
+            q_wp_rest,
+            q_wc_rest,
+            False,
+            joint_penalty_k[c_start + 1],
+            P_ang,
+            joint_C0_ang[joint_index],
+            avbd_alpha,
+        )
+
+    return force, torque
+
+
+@wp.kernel
+def compute_body_parent_f_from_joints(
+    body_q: wp.array[wp.transform],
+    body_q_prev: wp.array[wp.transform],
+    body_q_rest: wp.array[wp.transform],
+    body_com: wp.array[wp.vec3],
+    joint_type: wp.array[int],
+    joint_enabled: wp.array[bool],
+    joint_parent: wp.array[int],
+    joint_child: wp.array[int],
+    joint_X_p: wp.array[wp.transform],
+    joint_X_c: wp.array[wp.transform],
+    joint_axis: wp.array[wp.vec3],
+    joint_qd_start: wp.array[int],
+    joint_constraint_start: wp.array[int],
+    joint_penalty_k: wp.array[float],
+    joint_penalty_kd: wp.array[float],
+    joint_sigma_start: wp.array[wp.vec3],
+    joint_C_fric: wp.array[wp.vec3],
+    joint_target_ke: wp.array[float],
+    joint_target_kd: wp.array[float],
+    joint_target_pos: wp.array[float],
+    joint_target_vel: wp.array[float],
+    joint_limit_lower: wp.array[float],
+    joint_limit_upper: wp.array[float],
+    joint_limit_ke: wp.array[float],
+    joint_limit_kd: wp.array[float],
+    joint_lambda_lin: wp.array[wp.vec3],
+    joint_lambda_ang: wp.array[wp.vec3],
+    joint_C0_lin: wp.array[wp.vec3],
+    joint_C0_ang: wp.array[wp.vec3],
+    joint_is_hard: wp.array[wp.int32],
+    avbd_alpha: float,
+    joint_dof_dim: wp.array2d[int],
+    joint_rest_angle: wp.array[float],
+    dt: float,
+    body_parent_f: wp.array[wp.spatial_vector],
+):
+    """Accumulate VBD joint reaction wrenches into ``State.body_parent_f``.
+
+    The output convention matches the rest of Newton: parent-to-child wrench in
+    world frame, referenced to the child body's COM.
+    """
+    joint_index = wp.tid()
+    child_index = joint_child[joint_index]
+    if child_index < 0 or not joint_enabled[joint_index]:
+        return
+
+    force, torque, _H_ll, _H_al, _H_aa = evaluate_joint_force_hessian(
+        child_index,
+        joint_index,
+        body_q,
+        body_q_prev,
+        body_q_rest,
+        body_com,
+        joint_type,
+        joint_enabled,
+        joint_parent,
+        joint_child,
+        joint_X_p,
+        joint_X_c,
+        joint_axis,
+        joint_qd_start,
+        joint_constraint_start,
+        joint_penalty_k,
+        joint_penalty_kd,
+        joint_sigma_start,
+        joint_C_fric,
+        joint_target_ke,
+        joint_target_kd,
+        joint_target_pos,
+        joint_target_vel,
+        joint_limit_lower,
+        joint_limit_upper,
+        joint_limit_ke,
+        joint_limit_kd,
+        joint_lambda_lin,
+        joint_lambda_ang,
+        joint_C0_lin,
+        joint_C0_ang,
+        joint_is_hard,
+        avbd_alpha,
+        joint_dof_dim,
+        joint_rest_angle,
+        dt,
+    )
+
+    force_corr, torque_corr = compute_hard_joint_report_correction(
+        joint_index,
+        body_q,
+        body_q_rest,
+        body_com,
+        joint_type,
+        joint_parent,
+        joint_child,
+        joint_X_p,
+        joint_X_c,
+        joint_axis,
+        joint_qd_start,
+        joint_constraint_start,
+        joint_penalty_k,
+        joint_C0_lin,
+        joint_C0_ang,
+        joint_is_hard,
+        avbd_alpha,
+        joint_dof_dim,
+    )
+    force = force + force_corr
+    torque = torque + torque_corr
+
+    wp.atomic_add(body_parent_f, child_index, wp.spatial_vector(force, torque))
+
+
+@wp.kernel
+def compute_cable_tension(
+    body_q: wp.array[wp.transform],
+    body_q_prev: wp.array[wp.transform],
+    body_com: wp.array[wp.vec3],
+    joint_type: wp.array[int],
+    joint_enabled: wp.array[bool],
+    joint_parent: wp.array[int],
+    joint_child: wp.array[int],
+    joint_X_p: wp.array[wp.transform],
+    joint_X_c: wp.array[wp.transform],
+    joint_constraint_start: wp.array[int],
+    joint_penalty_k: wp.array[float],
+    joint_penalty_kd: wp.array[float],
+    joint_lambda_lin: wp.array[wp.vec3],
+    joint_C0_lin: wp.array[wp.vec3],
+    joint_is_hard: wp.array[wp.int32],
+    avbd_alpha: float,
+    dt: float,
+    cable_tension: wp.array[float],
+):
+    """Write per-joint cable stretch tension magnitude to ``State.vbd.cable_tension``.
+
+    The output is joint-indexed. Non-cable and disabled joints are set to zero.
+    For cable joints the value is the magnitude of the stretch-slot force applied
+    to the child body, in Newtons. Bending/twist torque is intentionally excluded.
+    """
+    j = wp.tid()
+
+    if joint_type[j] != JointType.CABLE or not joint_enabled[j]:
+        cable_tension[j] = 0.0
+        return
+
+    child = joint_child[j]
+    if child < 0:
+        cable_tension[j] = 0.0
+        return
+
+    c_start = joint_constraint_start[j]
+    k_stretch = joint_penalty_k[c_start]
+    if k_stretch <= 0.0:
+        cable_tension[j] = 0.0
+        return
+
+    parent = joint_parent[j]
+    X_pj = joint_X_p[j]
+    X_cj = joint_X_c[j]
+
+    if parent >= 0:
+        parent_pose = body_q[parent]
+        parent_pose_prev = body_q_prev[parent]
+        parent_com = body_com[parent]
+    else:
+        parent_pose = wp.transform(wp.vec3(0.0), wp.quat_identity())
+        parent_pose_prev = parent_pose
+        parent_com = wp.vec3(0.0)
+
+    child_pose = body_q[child]
+    child_pose_prev = body_q_prev[child]
+    child_com = body_com[child]
+
+    lin_lambda = wp.vec3(0.0)
+    lin_C0 = wp.vec3(0.0)
+    lin_alpha = float(0.0)
+    if joint_is_hard[c_start] == 1:
+        lin_lambda = joint_lambda_lin[j]
+        lin_C0 = joint_C0_lin[j]
+        lin_alpha = avbd_alpha
+
+    force, _torque, _H_ll, _H_al, _H_aa = evaluate_linear_constraint_force_hessian(
+        parent_pose * X_pj,
+        child_pose * X_cj,
+        parent_pose_prev * X_pj,
+        child_pose_prev * X_cj,
+        parent_pose,
+        child_pose,
+        parent_com,
+        child_com,
+        False,
+        k_stretch,
+        wp.identity(3, float),
+        lin_lambda,
+        lin_C0,
+        lin_alpha,
+        joint_penalty_kd[c_start],
+        dt,
+    )
+
+    if joint_is_hard[c_start] == 1:
+        force_corr, _torque_corr = _linear_hard_report_correction(
+            parent_pose * X_pj,
+            child_pose * X_cj,
+            parent_pose,
+            child_pose,
+            parent_com,
+            child_com,
+            False,
+            k_stretch,
+            wp.identity(3, float),
+            joint_C0_lin[j],
+            avbd_alpha,
+        )
+        force = force + force_corr
+
+    cable_tension[j] = wp.length(force)
+
+
 # -----------------------------
 # Utility kernels
 # -----------------------------
