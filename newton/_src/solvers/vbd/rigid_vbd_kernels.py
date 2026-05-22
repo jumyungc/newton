@@ -2015,6 +2015,7 @@ def compute_body_parent_f_from_joints(
     avbd_alpha: float,
     joint_dof_dim: wp.array2d[int],
     joint_rest_angle: wp.array[float],
+    joint_friction: wp.array[float],
     dt: float,
     body_parent_f: wp.array[wp.spatial_vector],
 ):
@@ -2064,6 +2065,7 @@ def compute_body_parent_f_from_joints(
         avbd_alpha,
         joint_dof_dim,
         joint_rest_angle,
+        joint_friction,
         dt,
     )
 

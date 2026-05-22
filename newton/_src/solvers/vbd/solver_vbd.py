@@ -1661,6 +1661,7 @@ class SolverVBD(SolverBase):
                 self.rigid_joint_alpha,
                 model.joint_dof_dim,
                 self.joint_rest_angle,
+                model.joint_friction,
                 dt,
             ],
             outputs=[body_parent_f],
