@@ -1917,6 +1917,48 @@ def build_body_body_contact_lists(
 
 
 @wp.kernel
+def sort_body_body_contact_lists(
+    body_contact_buffer_pre_alloc: int,
+    body_contact_counts: wp.array[wp.int32],
+    body_contact_indices: wp.array[wp.int32],
+):
+    """Sort each body-local contact list by global contact id for deterministic traversal."""
+    body = wp.tid()
+    count = body_contact_counts[body]
+    if count > body_contact_buffer_pre_alloc:
+        count = body_contact_buffer_pre_alloc
+
+    base = body * body_contact_buffer_pre_alloc
+    i = wp.int32(1)
+    while i < count:
+        value = body_contact_indices[base + i]
+        j = wp.int32(i - 1)
+        while j >= 0 and body_contact_indices[base + j] > value:
+            body_contact_indices[base + j + 1] = body_contact_indices[base + j]
+            j = j - 1
+        body_contact_indices[base + j + 1] = value
+        i = i + 1
+
+
+@wp.kernel
+def update_body_contact_count_auto_condition(
+    body_contact_counts: wp.array[wp.int32],
+    body_contact_buffer_pre_alloc: int,
+    threshold: int,
+    max_contact_count: wp.array[wp.int32],
+    use_tiled_contacts: wp.array[wp.int32],
+):
+    """Reduce per-body contact counts and mark whether the tiled contact path should run."""
+    body = wp.tid()
+    count = body_contact_counts[body]
+    if count > body_contact_buffer_pre_alloc:
+        count = body_contact_buffer_pre_alloc
+    wp.atomic_max(max_contact_count, 0, count)
+    if count > threshold:
+        wp.atomic_max(use_tiled_contacts, 0, wp.int32(1))
+
+
+@wp.kernel
 def build_body_particle_contact_lists(
     body_particle_contact_count: wp.array[int],
     body_particle_contact_shape: wp.array[int],
@@ -2483,6 +2525,7 @@ def accumulate_body_body_contacts_per_body(
     body_contact_buffer_pre_alloc: int,
     body_contact_counts: wp.array[wp.int32],
     body_contact_indices: wp.array[wp.int32],
+    fused_contact_max: int,
     body_forces: wp.array[wp.vec3],
     body_torques: wp.array[wp.vec3],
     body_hessian_ll: wp.array[wp.mat33],
@@ -2506,6 +2549,11 @@ def accumulate_body_body_contacts_per_body(
     num_contacts = body_contact_counts[body_id]
     if num_contacts > body_contact_buffer_pre_alloc:
         num_contacts = body_contact_buffer_pre_alloc
+
+    if fused_contact_max >= 0 and num_contacts <= fused_contact_max:
+        return
+    if num_contacts <= 0:
+        return
 
     contact_count = rigid_contact_count[0]
 
@@ -2620,6 +2668,537 @@ def accumulate_body_body_contacts_per_body(
     wp.atomic_add(body_hessian_ll, body_id, h_ll_acc)
     wp.atomic_add(body_hessian_al, body_id, h_al_acc)
     wp.atomic_add(body_hessian_aa, body_id, h_aa_acc)
+
+
+@wp.kernel
+def accumulate_body_body_contacts_by_contact_color(
+    dt: float,
+    contact_ids: wp.array[wp.int32],
+    body_q_prev: wp.array[wp.transform],
+    body_q: wp.array[wp.transform],
+    body_com: wp.array[wp.vec3],
+    body_inv_mass: wp.array[float],
+    friction_epsilon: float,
+    contact_penalty_k: wp.array[float],
+    contact_material_kd: wp.array[float],
+    contact_material_mu: wp.array[float],
+    contact_lambda: wp.array[wp.vec3],
+    contact_C0: wp.array[wp.vec3],
+    avbd_alpha: float,
+    hard_contacts: int,
+    rigid_contact_count: wp.array[int],
+    rigid_contact_shape0: wp.array[int],
+    rigid_contact_shape1: wp.array[int],
+    rigid_contact_point0: wp.array[wp.vec3],
+    rigid_contact_point1: wp.array[wp.vec3],
+    rigid_contact_normal: wp.array[wp.vec3],
+    rigid_contact_margin0: wp.array[float],
+    rigid_contact_margin1: wp.array[float],
+    shape_body: wp.array[wp.int32],
+    body_forces: wp.array[wp.vec3],
+    body_torques: wp.array[wp.vec3],
+    body_hessian_ll: wp.array[wp.mat33],
+    body_hessian_al: wp.array[wp.mat33],
+    body_hessian_aa: wp.array[wp.mat33],
+):
+    " Accumulate one conflict-free contact color without atomics."
+    tid = wp.tid()
+    contact_idx = contact_ids[tid]
+    contact_count = rigid_contact_count[0]
+    if contact_idx >= contact_count:
+        return
+
+    s0 = rigid_contact_shape0[contact_idx]
+    s1 = rigid_contact_shape1[contact_idx]
+    b0 = shape_body[s0] if s0 >= 0 else -1
+    b1 = shape_body[s1] if s1 >= 0 else -1
+    if b0 < 0 and b1 < 0:
+        return
+
+    cp0_local = rigid_contact_point0[contact_idx]
+    cp1_local = rigid_contact_point1[contact_idx]
+    contact_normal = rigid_contact_normal[contact_idx]
+    cp0_world = wp.transform_point(body_q[b0], cp0_local) if b0 >= 0 else cp0_local
+    cp1_world = wp.transform_point(body_q[b1], cp1_local) if b1 >= 0 else cp1_local
+    thickness = rigid_contact_margin0[contact_idx] + rigid_contact_margin1[contact_idx]
+    d = cp1_world - cp0_world
+    C_n = thickness - wp.dot(contact_normal, d)
+
+    lam_n = float(0.0)
+    C_eff = C_n
+    lam_vec = wp.vec3(0.0)
+    k = contact_penalty_k[contact_idx]
+    friction_c0 = wp.vec3(0.0)
+
+    if hard_contacts == 1:
+        lam_vec = contact_lambda[contact_idx]
+        lam_n = wp.dot(lam_vec, contact_normal)
+        C0_vec = contact_C0[contact_idx]
+        C0_n = wp.dot(contact_normal, C0_vec)
+        C_eff = C_n - avbd_alpha * C0_n
+        friction_c0 = (1.0 - avbd_alpha) * (C0_vec - contact_normal * C0_n)
+
+    if C_n <= _SMALL_LENGTH_EPS and lam_n <= 0.0:
+        return
+
+    f_n_check = k * C_eff + lam_n
+    if f_n_check <= 0.0 and lam_n <= 0.0:
+        return
+
+    (
+        force_0,
+        torque_0,
+        h_ll_0,
+        h_al_0,
+        h_aa_0,
+        force_1,
+        torque_1,
+        h_ll_1,
+        h_al_1,
+        h_aa_1,
+    ) = evaluate_rigid_contact_from_collision(
+        b0,
+        b1,
+        body_q,
+        body_q_prev,
+        body_com,
+        cp0_local,
+        cp1_local,
+        contact_normal,
+        C_eff,
+        k,
+        k,
+        contact_material_kd[contact_idx],
+        lam_vec,
+        contact_material_mu[contact_idx],
+        friction_epsilon,
+        hard_contacts,
+        dt,
+        friction_c0,
+    )
+
+    if b0 >= 0 and body_inv_mass[b0] > 0.0:
+        body_forces[b0] = body_forces[b0] + force_0
+        body_torques[b0] = body_torques[b0] + torque_0
+        body_hessian_ll[b0] = body_hessian_ll[b0] + h_ll_0
+        body_hessian_al[b0] = body_hessian_al[b0] + h_al_0
+        body_hessian_aa[b0] = body_hessian_aa[b0] + h_aa_0
+
+    if b1 >= 0 and body_inv_mass[b1] > 0.0:
+        body_forces[b1] = body_forces[b1] + force_1
+        body_torques[b1] = body_torques[b1] + torque_1
+        body_hessian_ll[b1] = body_hessian_ll[b1] + h_ll_1
+        body_hessian_al[b1] = body_hessian_al[b1] + h_al_1
+        body_hessian_aa[b1] = body_hessian_aa[b1] + h_aa_1
+
+
+@wp.kernel
+def accumulate_body_body_contacts_per_body_partials(
+    dt: float,
+    color_group: wp.array[wp.int32],
+    body_q_prev: wp.array[wp.transform],
+    body_q: wp.array[wp.transform],
+    body_com: wp.array[wp.vec3],
+    body_inv_mass: wp.array[float],
+    friction_epsilon: float,
+    contact_penalty_k: wp.array[float],
+    contact_material_kd: wp.array[float],
+    contact_material_mu: wp.array[float],
+    contact_lambda: wp.array[wp.vec3],
+    contact_C0: wp.array[wp.vec3],
+    avbd_alpha: float,
+    hard_contacts: int,
+    rigid_contact_count: wp.array[int],
+    rigid_contact_shape0: wp.array[int],
+    rigid_contact_shape1: wp.array[int],
+    rigid_contact_point0: wp.array[wp.vec3],
+    rigid_contact_point1: wp.array[wp.vec3],
+    rigid_contact_normal: wp.array[wp.vec3],
+    rigid_contact_margin0: wp.array[float],
+    rigid_contact_margin1: wp.array[float],
+    shape_body: wp.array[wp.int32],
+    body_contact_buffer_pre_alloc: int,
+    body_contact_counts: wp.array[wp.int32],
+    body_contact_indices: wp.array[wp.int32],
+    fused_contact_max: int,
+    serial_contact_threshold: int,
+    body_forces: wp.array[wp.vec3],
+    body_torques: wp.array[wp.vec3],
+    body_hessian_ll: wp.array[wp.mat33],
+    body_hessian_al: wp.array[wp.mat33],
+    body_hessian_aa: wp.array[wp.mat33],
+):
+    """Write deterministic per-lane body contact partials without atomics."""
+    tid = wp.tid()
+    body_idx_in_group = tid // _NUM_CONTACT_THREADS_PER_BODY
+    thread_id_within_body = tid % _NUM_CONTACT_THREADS_PER_BODY
+
+    if body_idx_in_group >= color_group.shape[0]:
+        return
+
+    body_id = color_group[body_idx_in_group]
+    partial_idx = body_id * _NUM_CONTACT_THREADS_PER_BODY + thread_id_within_body
+    body_forces[partial_idx] = wp.vec3(0.0)
+    body_torques[partial_idx] = wp.vec3(0.0)
+    body_hessian_ll[partial_idx] = wp.mat33(0.0)
+    body_hessian_al[partial_idx] = wp.mat33(0.0)
+    body_hessian_aa[partial_idx] = wp.mat33(0.0)
+
+    if body_inv_mass[body_id] <= 0.0:
+        return
+
+    num_contacts = body_contact_counts[body_id]
+    if num_contacts > body_contact_buffer_pre_alloc:
+        num_contacts = body_contact_buffer_pre_alloc
+
+    if fused_contact_max >= 0 and num_contacts <= fused_contact_max:
+        return
+    if num_contacts <= 0:
+        return
+
+    contact_count = rigid_contact_count[0]
+
+    force_acc = wp.vec3(0.0)
+    torque_acc = wp.vec3(0.0)
+    h_ll_acc = wp.mat33(0.0)
+    h_al_acc = wp.mat33(0.0)
+    h_aa_acc = wp.mat33(0.0)
+
+    stride = _NUM_CONTACT_THREADS_PER_BODY
+    i = thread_id_within_body
+    if serial_contact_threshold >= 0 and num_contacts <= serial_contact_threshold:
+        if thread_id_within_body != 0:
+            return
+        i = 0
+        stride = 1
+
+    while i < num_contacts:
+        contact_idx = body_contact_indices[body_id * body_contact_buffer_pre_alloc + i]
+        if contact_idx >= contact_count:
+            i += stride
+            continue
+
+        s0 = rigid_contact_shape0[contact_idx]
+        s1 = rigid_contact_shape1[contact_idx]
+        b0 = shape_body[s0] if s0 >= 0 else -1
+        b1 = shape_body[s1] if s1 >= 0 else -1
+
+        if b0 != body_id and b1 != body_id:
+            i += stride
+            continue
+
+        cp0_local = rigid_contact_point0[contact_idx]
+        cp1_local = rigid_contact_point1[contact_idx]
+        contact_normal = rigid_contact_normal[contact_idx]
+        cp0_world = wp.transform_point(body_q[b0], cp0_local) if b0 >= 0 else cp0_local
+        cp1_world = wp.transform_point(body_q[b1], cp1_local) if b1 >= 0 else cp1_local
+        thickness = rigid_contact_margin0[contact_idx] + rigid_contact_margin1[contact_idx]
+        d = cp1_world - cp0_world
+        C_n = thickness - wp.dot(contact_normal, d)
+
+        lam_n = float(0.0)
+        C_eff = C_n
+        lam_vec = wp.vec3(0.0)
+        k = contact_penalty_k[contact_idx]
+        friction_c0 = wp.vec3(0.0)
+
+        if hard_contacts == 1:
+            lam_vec = contact_lambda[contact_idx]
+            lam_n = wp.dot(lam_vec, contact_normal)
+            C0_vec = contact_C0[contact_idx]
+            C0_n = wp.dot(contact_normal, C0_vec)
+            # Hard-contact stabilization: normal uses C_n - alpha*C0_n; tangent caches
+            # (1 - alpha)*C0_t for the later tangential update.
+            C_eff = C_n - avbd_alpha * C0_n
+            friction_c0 = (1.0 - avbd_alpha) * (C0_vec - contact_normal * C0_n)
+
+        if C_n <= _SMALL_LENGTH_EPS and lam_n <= 0.0:
+            i += stride
+            continue
+
+        f_n_check = k * C_eff + lam_n
+        if f_n_check <= 0.0 and lam_n <= 0.0:
+            i += stride
+            continue
+
+        contact_kd = contact_material_kd[contact_idx]
+        contact_mu = contact_material_mu[contact_idx]
+
+        (
+            force_0,
+            torque_0,
+            h_ll_0,
+            h_al_0,
+            h_aa_0,
+            force_1,
+            torque_1,
+            h_ll_1,
+            h_al_1,
+            h_aa_1,
+        ) = evaluate_rigid_contact_from_collision(
+            b0,
+            b1,
+            body_q,
+            body_q_prev,
+            body_com,
+            cp0_local,
+            cp1_local,
+            contact_normal,
+            C_eff,
+            k,
+            k,
+            contact_kd,
+            lam_vec,
+            contact_mu,
+            friction_epsilon,
+            hard_contacts,
+            dt,
+            friction_c0,
+        )
+
+        if body_id == b0:
+            force_acc += force_0
+            torque_acc += torque_0
+            h_ll_acc += h_ll_0
+            h_al_acc += h_al_0
+            h_aa_acc += h_aa_0
+        else:
+            force_acc += force_1
+            torque_acc += torque_1
+            h_ll_acc += h_ll_1
+            h_al_acc += h_al_1
+            h_aa_acc += h_aa_1
+
+        i += stride
+
+    body_forces[partial_idx] = force_acc
+    body_torques[partial_idx] = torque_acc
+    body_hessian_ll[partial_idx] = h_ll_acc
+    body_hessian_al[partial_idx] = h_al_acc
+    body_hessian_aa[partial_idx] = h_aa_acc
+
+
+@wp.kernel
+def reduce_body_body_contact_partials(
+    body_inv_mass: wp.array[float],
+    partial_forces: wp.array[wp.vec3],
+    partial_torques: wp.array[wp.vec3],
+    partial_hessian_ll: wp.array[wp.mat33],
+    partial_hessian_al: wp.array[wp.mat33],
+    partial_hessian_aa: wp.array[wp.mat33],
+    body_forces: wp.array[wp.vec3],
+    body_torques: wp.array[wp.vec3],
+    body_hessian_ll: wp.array[wp.mat33],
+    body_hessian_al: wp.array[wp.mat33],
+    body_hessian_aa: wp.array[wp.mat33],
+):
+    body_id = wp.tid()
+    force_acc = wp.vec3(0.0)
+    torque_acc = wp.vec3(0.0)
+    h_ll_acc = wp.mat33(0.0)
+    h_al_acc = wp.mat33(0.0)
+    h_aa_acc = wp.mat33(0.0)
+
+    if body_inv_mass[body_id] > 0.0:
+        for lane in range(_NUM_CONTACT_THREADS_PER_BODY):
+            idx = body_id * _NUM_CONTACT_THREADS_PER_BODY + lane
+            force_acc = force_acc + partial_forces[idx]
+            torque_acc = torque_acc + partial_torques[idx]
+            h_ll_acc = h_ll_acc + partial_hessian_ll[idx]
+            h_al_acc = h_al_acc + partial_hessian_al[idx]
+            h_aa_acc = h_aa_acc + partial_hessian_aa[idx]
+
+    body_forces[body_id] = force_acc
+    body_torques[body_id] = torque_acc
+    body_hessian_ll[body_id] = h_ll_acc
+    body_hessian_al[body_id] = h_al_acc
+    body_hessian_aa[body_id] = h_aa_acc
+
+
+@wp.kernel
+def accumulate_body_body_contacts_per_body_tile(
+    dt: float,
+    color_group: wp.array[wp.int32],
+    body_q_prev: wp.array[wp.transform],
+    body_q: wp.array[wp.transform],
+    body_com: wp.array[wp.vec3],
+    body_inv_mass: wp.array[float],
+    friction_epsilon: float,
+    contact_penalty_k: wp.array[float],
+    contact_material_kd: wp.array[float],
+    contact_material_mu: wp.array[float],
+    contact_lambda: wp.array[wp.vec3],
+    contact_C0: wp.array[wp.vec3],
+    avbd_alpha: float,
+    hard_contacts: int,
+    rigid_contact_count: wp.array[int],
+    rigid_contact_shape0: wp.array[int],
+    rigid_contact_shape1: wp.array[int],
+    rigid_contact_point0: wp.array[wp.vec3],
+    rigid_contact_point1: wp.array[wp.vec3],
+    rigid_contact_normal: wp.array[wp.vec3],
+    rigid_contact_margin0: wp.array[float],
+    rigid_contact_margin1: wp.array[float],
+    shape_body: wp.array[wp.int32],
+    body_contact_buffer_pre_alloc: int,
+    body_contact_counts: wp.array[wp.int32],
+    body_contact_indices: wp.array[wp.int32],
+    fused_contact_max: int,
+    body_forces: wp.array[wp.vec3],
+    body_torques: wp.array[wp.vec3],
+    body_hessian_ll: wp.array[wp.mat33],
+    body_hessian_al: wp.array[wp.mat33],
+    body_hessian_aa: wp.array[wp.mat33],
+):
+    """
+    Per-body contact accumulation using one tile per body and deterministic tile reductions.
+    """
+    tid = wp.tid()
+    body_idx_in_group = tid // _NUM_CONTACT_THREADS_PER_BODY
+    thread_id_within_body = tid % _NUM_CONTACT_THREADS_PER_BODY
+
+    if body_idx_in_group >= color_group.shape[0]:
+        return
+
+    body_id = color_group[body_idx_in_group]
+    if body_inv_mass[body_id] <= 0.0:
+        return
+
+    num_contacts = body_contact_counts[body_id]
+    if num_contacts > body_contact_buffer_pre_alloc:
+        num_contacts = body_contact_buffer_pre_alloc
+
+    if fused_contact_max >= 0 and num_contacts <= fused_contact_max:
+        return
+    if num_contacts <= 0:
+        return
+
+    contact_count = rigid_contact_count[0]
+
+    force_acc = wp.vec3(0.0)
+    torque_acc = wp.vec3(0.0)
+    h_ll_acc = wp.mat33(0.0)
+    h_al_acc = wp.mat33(0.0)
+    h_aa_acc = wp.mat33(0.0)
+
+    i = thread_id_within_body
+    while i < num_contacts:
+        contact_idx = body_contact_indices[body_id * body_contact_buffer_pre_alloc + i]
+        if contact_idx >= contact_count:
+            i += _NUM_CONTACT_THREADS_PER_BODY
+            continue
+
+        s0 = rigid_contact_shape0[contact_idx]
+        s1 = rigid_contact_shape1[contact_idx]
+        b0 = shape_body[s0] if s0 >= 0 else -1
+        b1 = shape_body[s1] if s1 >= 0 else -1
+
+        if b0 != body_id and b1 != body_id:
+            i += _NUM_CONTACT_THREADS_PER_BODY
+            continue
+
+        cp0_local = rigid_contact_point0[contact_idx]
+        cp1_local = rigid_contact_point1[contact_idx]
+        contact_normal = rigid_contact_normal[contact_idx]
+        cp0_world = wp.transform_point(body_q[b0], cp0_local) if b0 >= 0 else cp0_local
+        cp1_world = wp.transform_point(body_q[b1], cp1_local) if b1 >= 0 else cp1_local
+        thickness = rigid_contact_margin0[contact_idx] + rigid_contact_margin1[contact_idx]
+        d = cp1_world - cp0_world
+        C_n = thickness - wp.dot(contact_normal, d)
+
+        lam_n = float(0.0)
+        C_eff = C_n
+        lam_vec = wp.vec3(0.0)
+        k = contact_penalty_k[contact_idx]
+        friction_c0 = wp.vec3(0.0)
+
+        if hard_contacts == 1:
+            lam_vec = contact_lambda[contact_idx]
+            lam_n = wp.dot(lam_vec, contact_normal)
+            C0_vec = contact_C0[contact_idx]
+            C0_n = wp.dot(contact_normal, C0_vec)
+            # Hard-contact stabilization: normal uses C_n - alpha*C0_n; tangent caches
+            # (1 - alpha)*C0_t for the later tangential update.
+            C_eff = C_n - avbd_alpha * C0_n
+            friction_c0 = (1.0 - avbd_alpha) * (C0_vec - contact_normal * C0_n)
+
+        if C_n <= _SMALL_LENGTH_EPS and lam_n <= 0.0:
+            i += _NUM_CONTACT_THREADS_PER_BODY
+            continue
+
+        f_n_check = k * C_eff + lam_n
+        if f_n_check <= 0.0 and lam_n <= 0.0:
+            i += _NUM_CONTACT_THREADS_PER_BODY
+            continue
+
+        contact_kd = contact_material_kd[contact_idx]
+        contact_mu = contact_material_mu[contact_idx]
+
+        (
+            force_0,
+            torque_0,
+            h_ll_0,
+            h_al_0,
+            h_aa_0,
+            force_1,
+            torque_1,
+            h_ll_1,
+            h_al_1,
+            h_aa_1,
+        ) = evaluate_rigid_contact_from_collision(
+            b0,
+            b1,
+            body_q,
+            body_q_prev,
+            body_com,
+            cp0_local,
+            cp1_local,
+            contact_normal,
+            C_eff,
+            k,
+            k,
+            contact_kd,
+            lam_vec,
+            contact_mu,
+            friction_epsilon,
+            hard_contacts,
+            dt,
+            friction_c0,
+        )
+
+        if body_id == b0:
+            force_acc += force_0
+            torque_acc += torque_0
+            h_ll_acc += h_ll_0
+            h_al_acc += h_al_0
+            h_aa_acc += h_aa_0
+        else:
+            force_acc += force_1
+            torque_acc += torque_1
+            h_ll_acc += h_ll_1
+            h_al_acc += h_al_1
+            h_aa_acc += h_aa_1
+
+        i += _NUM_CONTACT_THREADS_PER_BODY
+
+    force_tile = wp.tile(force_acc, preserve_type=True)
+    torque_tile = wp.tile(torque_acc, preserve_type=True)
+    h_ll_tile = wp.tile(h_ll_acc, preserve_type=True)
+    h_al_tile = wp.tile(h_al_acc, preserve_type=True)
+    h_aa_tile = wp.tile(h_aa_acc, preserve_type=True)
+
+    force_total = wp.tile_reduce(wp.add, force_tile)[0]
+    torque_total = wp.tile_reduce(wp.add, torque_tile)[0]
+    h_ll_total = wp.tile_reduce(wp.add, h_ll_tile)[0]
+    h_al_total = wp.tile_reduce(wp.add, h_al_tile)[0]
+    h_aa_total = wp.tile_reduce(wp.add, h_aa_tile)[0]
+
+    if thread_id_within_body == 0:
+        body_forces[body_id] = body_forces[body_id] + force_total
+        body_torques[body_id] = body_torques[body_id] + torque_total
+        body_hessian_ll[body_id] = body_hessian_ll[body_id] + h_ll_total
+        body_hessian_al[body_id] = body_hessian_al[body_id] + h_al_total
+        body_hessian_aa[body_id] = body_hessian_aa[body_id] + h_aa_total
 
 
 @wp.kernel
@@ -2944,6 +3523,315 @@ def solve_rigid_body(
     external_hessian_ll: wp.array[wp.mat33],  # Linear-linear block from rigid contacts
     external_hessian_al: wp.array[wp.mat33],  # Angular-linear coupling block from rigid contacts
     external_hessian_aa: wp.array[wp.mat33],  # Angular-angular block from rigid contacts
+    contact_partial_forces: wp.array[wp.vec3],
+    contact_partial_torques: wp.array[wp.vec3],
+    contact_partial_hessian_ll: wp.array[wp.mat33],
+    contact_partial_hessian_al: wp.array[wp.mat33],
+    contact_partial_hessian_aa: wp.array[wp.mat33],
+    use_contact_partials: int,
+    contact_partial_relaxation: float,
+    # Output
+    body_q_new: wp.array[wp.transform],
+):
+    """
+    AVBD solve step for rigid bodies.
+
+    Assembles inertial, joint, and collision contributions into a 6x6 SPD
+    block system and solves via direct LDL^T.
+
+    Algorithm:
+      1. Compute inertial forces/Hessians
+      2. Accumulate external forces/Hessians from rigid contacts
+      3. Accumulate joint forces/Hessians from adjacent joints
+      4. Solve 6x6 system via LDL^T
+      5. Update pose: rotation from angular increment, position from linear increment
+
+    Args:
+        dt: Time step.
+        body_ids_in_color: Body indices in current color group (for parallel coloring).
+        body_q_prev: Previous body transforms (for damping and friction).
+        body_q_rest: Rest transforms (for joint targets).
+        body_mass: Body masses.
+        body_inv_mass: Inverse masses (0 for kinematic bodies).
+        body_inertia: Inertia tensors (local body frame).
+        body_inertia_q: Inertial target transforms (from forward integration).
+        body_com: Center of mass offsets (local body frame).
+        adjacency: Body-joint adjacency (CSR format).
+        joint_*: Joint configuration arrays.
+        joint_penalty_k: AVBD per-constraint penalty stiffness (one scalar per solver constraint component).
+        joint_sigma_start: Dahl hysteresis state at start of step.
+        joint_C_fric: Dahl friction configuration per joint.
+        external_forces: External linear forces from rigid contacts.
+        external_torques: External angular torques from rigid contacts.
+        external_hessian_ll: Linear-linear Hessian block (3x3) from rigid contacts.
+        external_hessian_al: Angular-linear coupling Hessian block (3x3) from rigid contacts.
+        external_hessian_aa: Angular-angular Hessian block (3x3) from rigid contacts.
+        body_q: Current body transforms (input).
+        body_q_new: Updated body transforms (output) for the current solve sweep.
+
+    Note:
+      - All forces, torques, and Hessian blocks are expressed in the world frame.
+    """
+    tid = wp.tid()
+    body_index = body_ids_in_color[tid]
+
+    q_current = body_q[body_index]
+
+    # Early exit for kinematic bodies
+    if body_inv_mass[body_index] == 0.0:
+        body_q_new[body_index] = q_current
+        return
+
+    # Inertial force and Hessian
+    dt_sqr_reciprocal = 1.0 / (dt * dt)
+
+    # Read body properties
+    q_inertial = body_inertia_q[body_index]
+    body_com_local = body_com[body_index]
+    m = body_mass[body_index]
+    I_body = body_inertia[body_index]
+
+    # Extract poses
+    pos_current = wp.transform_get_translation(q_current)
+    rot_current = wp.transform_get_rotation(q_current)
+    pos_star = wp.transform_get_translation(q_inertial)
+    rot_star = wp.transform_get_rotation(q_inertial)
+
+    # Compute COM positions
+    com_current = pos_current + wp.quat_rotate(rot_current, body_com_local)
+    com_star = pos_star + wp.quat_rotate(rot_star, body_com_local)
+
+    # Linear inertial force and Hessian
+    inertial_coeff = m * dt_sqr_reciprocal
+    f_lin = (com_star - com_current) * inertial_coeff
+
+    # Compute relative rotation via quaternion difference
+    # dq = q_current^-1 * q_star
+    q_delta = wp.mul(wp.quat_inverse(rot_current), rot_star)
+
+    # Enforce shortest path (w > 0) to avoid double-cover ambiguity
+    if q_delta[3] < 0.0:
+        q_delta = wp.quat(-q_delta[0], -q_delta[1], -q_delta[2], -q_delta[3])
+
+    # Rotation vector
+    axis_body, angle_body = wp.quat_to_axis_angle(q_delta)
+    theta_body = axis_body * angle_body
+
+    # Angular inertial torque
+    tau_body = I_body * (theta_body * dt_sqr_reciprocal)
+    tau_world = wp.quat_rotate(rot_current, tau_body)
+
+    # Angular Hessian in world frame: use full inertia (supports off-diagonal products of inertia)
+    R_cur = wp.quat_to_matrix(rot_current)
+    I_world = R_cur * I_body * wp.transpose(R_cur)
+    angular_hessian = dt_sqr_reciprocal * I_world
+
+    # Accumulate external forces (rigid contacts)
+    # Read external contributions
+    ext_torque = external_torques[body_index]
+    ext_force = external_forces[body_index]
+    ext_h_aa = external_hessian_aa[body_index]
+    ext_h_al = external_hessian_al[body_index]
+    ext_h_ll = external_hessian_ll[body_index]
+
+    if use_contact_partials == 1:
+        partial_force = wp.vec3(0.0)
+        partial_torque = wp.vec3(0.0)
+        partial_h_ll = wp.mat33(0.0)
+        partial_h_al = wp.mat33(0.0)
+        partial_h_aa = wp.mat33(0.0)
+        for lane in range(_NUM_CONTACT_THREADS_PER_BODY):
+            partial_idx = body_index * _NUM_CONTACT_THREADS_PER_BODY + lane
+            partial_force = partial_force + contact_partial_forces[partial_idx]
+            partial_torque = partial_torque + contact_partial_torques[partial_idx]
+            partial_h_ll = partial_h_ll + contact_partial_hessian_ll[partial_idx]
+            partial_h_al = partial_h_al + contact_partial_hessian_al[partial_idx]
+            partial_h_aa = partial_h_aa + contact_partial_hessian_aa[partial_idx]
+
+        ext_force = ext_force + partial_force * contact_partial_relaxation
+        ext_torque = ext_torque + partial_torque * contact_partial_relaxation
+        ext_h_ll = ext_h_ll + partial_h_ll * contact_partial_relaxation
+        ext_h_al = ext_h_al + partial_h_al * contact_partial_relaxation
+        ext_h_aa = ext_h_aa + partial_h_aa * contact_partial_relaxation
+
+    f_torque = tau_world + ext_torque
+    f_force = f_lin + ext_force
+
+    h_aa = angular_hessian + ext_h_aa
+    h_al = ext_h_al
+    h_ll = wp.mat33(
+        ext_h_ll[0, 0] + inertial_coeff,
+        ext_h_ll[0, 1],
+        ext_h_ll[0, 2],
+        ext_h_ll[1, 0],
+        ext_h_ll[1, 1] + inertial_coeff,
+        ext_h_ll[1, 2],
+        ext_h_ll[2, 0],
+        ext_h_ll[2, 1],
+        ext_h_ll[2, 2] + inertial_coeff,
+    )
+
+    # Accumulate joint forces (constraints)
+    num_adj_joints = get_body_num_adjacent_joints(adjacency, body_index)
+    for joint_counter in range(num_adj_joints):
+        joint_idx = get_body_adjacent_joint_id(adjacency, body_index, joint_counter)
+
+        joint_force, joint_torque, joint_H_ll, joint_H_al, joint_H_aa = evaluate_joint_force_hessian(
+            body_index,
+            joint_idx,
+            body_q,
+            body_q_prev,
+            body_q_rest,
+            body_com,
+            joint_type,
+            joint_enabled,
+            joint_parent,
+            joint_child,
+            joint_X_p,
+            joint_X_c,
+            joint_axis,
+            joint_qd_start,
+            joint_constraint_start,
+            joint_penalty_k,
+            joint_penalty_kd,
+            joint_sigma_start,
+            joint_C_fric,
+            joint_target_ke,
+            joint_target_kd,
+            joint_target_pos,
+            joint_target_vel,
+            joint_limit_lower,
+            joint_limit_upper,
+            joint_limit_ke,
+            joint_limit_kd,
+            joint_lambda_lin,
+            joint_lambda_ang,
+            joint_C0_lin,
+            joint_C0_ang,
+            joint_is_hard,
+            avbd_alpha,
+            joint_dof_dim,
+            joint_rest_angle,
+            dt,
+        )
+
+        f_force = f_force + joint_force
+        f_torque = f_torque + joint_torque
+
+        h_ll = h_ll + joint_H_ll
+        h_al = h_al + joint_H_al
+        h_aa = h_aa + joint_H_aa
+
+    # Regularize angular Hessian
+    trA = wp.trace(h_aa) / 3.0
+    epsA = 1.0e-9 * (trA + 1.0)
+    h_aa[0, 0] = h_aa[0, 0] + epsA
+    h_aa[1, 1] = h_aa[1, 1] + epsA
+    h_aa[2, 2] = h_aa[2, 2] + epsA
+
+    # Solve 6x6 system via direct LDL^T
+    x_inc, w_world = ldlt6_solve(h_ll, h_aa, h_al, f_force, f_torque)
+
+    # Update pose from increments
+    # Convert angular increment to quaternion
+    if _USE_SMALL_ANGLE_APPROX:
+        half_w = w_world * 0.5
+        dq_world = wp.quat(half_w[0], half_w[1], half_w[2], 1.0)
+        dq_world = wp.normalize(dq_world)
+    else:
+        ang_mag = wp.length(w_world)
+        if ang_mag > _SMALL_ANGLE_EPS:
+            dq_world = wp.quat_from_axis_angle(w_world / ang_mag, ang_mag)
+        else:
+            half_w = w_world * 0.5
+            dq_world = wp.quat(half_w[0], half_w[1], half_w[2], 1.0)
+            dq_world = wp.normalize(dq_world)
+
+    # Apply rotation
+    rot_new = wp.mul(dq_world, rot_current)
+    rot_new = wp.normalize(rot_new)
+
+    # Update position
+    com_new = com_current + x_inc
+    pos_new = com_new - wp.quat_rotate(rot_new, body_com_local)
+
+    body_q_new[body_index] = wp.transform(pos_new, rot_new)
+
+
+@wp.kernel
+def solve_rigid_body_with_contacts(
+    dt: float,
+    body_ids_in_color: wp.array[wp.int32],
+    body_q: wp.array[wp.transform],
+    body_q_prev: wp.array[wp.transform],
+    body_q_rest: wp.array[wp.transform],
+    body_mass: wp.array[float],
+    body_inv_mass: wp.array[float],
+    body_inertia: wp.array[wp.mat33],
+    body_inertia_q: wp.array[wp.transform],
+    body_com: wp.array[wp.vec3],
+    adjacency: RigidForceElementAdjacencyInfo,
+    # Joint data
+    joint_type: wp.array[int],
+    joint_enabled: wp.array[bool],
+    joint_parent: wp.array[int],
+    joint_child: wp.array[int],
+    joint_X_p: wp.array[wp.transform],
+    joint_X_c: wp.array[wp.transform],
+    joint_axis: wp.array[wp.vec3],
+    joint_qd_start: wp.array[int],
+    joint_constraint_start: wp.array[int],
+    # AVBD per-constraint penalty state (scalar constraints indexed via joint_constraint_start)
+    joint_penalty_k: wp.array[float],
+    joint_penalty_kd: wp.array[float],
+    # Dahl hysteresis parameters (frozen for this timestep, component-wise vec3 per joint)
+    joint_sigma_start: wp.array[wp.vec3],
+    joint_C_fric: wp.array[wp.vec3],
+    # Drive parameters (DOF-indexed via joint_qd_start)
+    joint_target_ke: wp.array[float],
+    joint_target_kd: wp.array[float],
+    joint_target_pos: wp.array[float],
+    joint_target_vel: wp.array[float],
+    # Limit parameters (DOF-indexed via joint_qd_start)
+    joint_limit_lower: wp.array[float],
+    joint_limit_upper: wp.array[float],
+    joint_limit_ke: wp.array[float],
+    joint_limit_kd: wp.array[float],
+    joint_lambda_lin: wp.array[wp.vec3],
+    joint_lambda_ang: wp.array[wp.vec3],
+    joint_C0_lin: wp.array[wp.vec3],
+    joint_C0_ang: wp.array[wp.vec3],
+    joint_is_hard: wp.array[wp.int32],
+    avbd_alpha: float,
+    joint_dof_dim: wp.array2d[int],
+    joint_rest_angle: wp.array[float],
+    external_forces: wp.array[wp.vec3],
+    external_torques: wp.array[wp.vec3],
+    external_hessian_ll: wp.array[wp.mat33],  # Linear-linear block from rigid contacts
+    external_hessian_al: wp.array[wp.mat33],  # Angular-linear coupling block from rigid contacts
+    external_hessian_aa: wp.array[wp.mat33],  # Angular-angular block from rigid contacts
+    # Body-body contact data fused into this solve
+    contact_friction_epsilon: float,
+    contact_penalty_k: wp.array[float],
+    contact_material_kd: wp.array[float],
+    contact_material_mu: wp.array[float],
+    contact_lambda: wp.array[wp.vec3],
+    contact_C0: wp.array[wp.vec3],
+    contact_avbd_alpha: float,
+    hard_contacts: int,
+    rigid_contact_count: wp.array[int],
+    rigid_contact_shape0: wp.array[int],
+    rigid_contact_shape1: wp.array[int],
+    rigid_contact_point0: wp.array[wp.vec3],
+    rigid_contact_point1: wp.array[wp.vec3],
+    rigid_contact_normal: wp.array[wp.vec3],
+    rigid_contact_margin0: wp.array[float],
+    rigid_contact_margin1: wp.array[float],
+    shape_body: wp.array[wp.int32],
+    body_contact_buffer_pre_alloc: int,
+    body_contact_counts: wp.array[wp.int32],
+    body_contact_indices: wp.array[wp.int32],
+    fused_contact_max: int,
     # Output
     body_q_new: wp.array[wp.transform],
 ):
@@ -3065,6 +3953,110 @@ def solve_rigid_body(
         ext_h_ll[2, 2] + inertial_coeff,
     )
 
+    # Accumulate body-body contacts directly in the body solve.
+    num_contacts = body_contact_counts[body_index]
+    if num_contacts > body_contact_buffer_pre_alloc:
+        num_contacts = body_contact_buffer_pre_alloc
+
+    if fused_contact_max >= 0 and num_contacts > fused_contact_max:
+        num_contacts = wp.int32(0)
+
+    contact_count = rigid_contact_count[0]
+    contact_counter = wp.int32(0)
+    while contact_counter < num_contacts:
+        contact_idx = body_contact_indices[body_index * body_contact_buffer_pre_alloc + contact_counter]
+        if contact_idx >= contact_count:
+            contact_counter += 1
+            continue
+
+        s0 = rigid_contact_shape0[contact_idx]
+        s1 = rigid_contact_shape1[contact_idx]
+        b0 = shape_body[s0] if s0 >= 0 else -1
+        b1 = shape_body[s1] if s1 >= 0 else -1
+
+        if b0 != body_index and b1 != body_index:
+            contact_counter += 1
+            continue
+
+        cp0_local = rigid_contact_point0[contact_idx]
+        cp1_local = rigid_contact_point1[contact_idx]
+        contact_normal = rigid_contact_normal[contact_idx]
+        cp0_world = wp.transform_point(body_q[b0], cp0_local) if b0 >= 0 else cp0_local
+        cp1_world = wp.transform_point(body_q[b1], cp1_local) if b1 >= 0 else cp1_local
+        thickness = rigid_contact_margin0[contact_idx] + rigid_contact_margin1[contact_idx]
+        d = cp1_world - cp0_world
+        C_n = thickness - wp.dot(contact_normal, d)
+
+        lam_n = float(0.0)
+        C_eff = C_n
+        lam_vec = wp.vec3(0.0)
+        k = contact_penalty_k[contact_idx]
+        friction_c0 = wp.vec3(0.0)
+
+        if hard_contacts == 1:
+            lam_vec = contact_lambda[contact_idx]
+            lam_n = wp.dot(lam_vec, contact_normal)
+            C0_vec = contact_C0[contact_idx]
+            C0_n = wp.dot(contact_normal, C0_vec)
+            C_eff = C_n - contact_avbd_alpha * C0_n
+            friction_c0 = (1.0 - contact_avbd_alpha) * (C0_vec - contact_normal * C0_n)
+
+        if C_n <= _SMALL_LENGTH_EPS and lam_n <= 0.0:
+            contact_counter += 1
+            continue
+
+        f_n_check = k * C_eff + lam_n
+        if f_n_check <= 0.0 and lam_n <= 0.0:
+            contact_counter += 1
+            continue
+
+        (
+            force_0,
+            torque_0,
+            h_ll_0,
+            h_al_0,
+            h_aa_0,
+            force_1,
+            torque_1,
+            h_ll_1,
+            h_al_1,
+            h_aa_1,
+        ) = evaluate_rigid_contact_from_collision(
+            b0,
+            b1,
+            body_q,
+            body_q_prev,
+            body_com,
+            cp0_local,
+            cp1_local,
+            contact_normal,
+            C_eff,
+            k,
+            k,
+            contact_material_kd[contact_idx],
+            lam_vec,
+            contact_material_mu[contact_idx],
+            contact_friction_epsilon,
+            hard_contacts,
+            dt,
+            friction_c0,
+        )
+
+        if body_index == b0:
+            f_force = f_force + force_0
+            f_torque = f_torque + torque_0
+            h_ll = h_ll + h_ll_0
+            h_al = h_al + h_al_0
+            h_aa = h_aa + h_aa_0
+        else:
+            f_force = f_force + force_1
+            f_torque = f_torque + torque_1
+            h_ll = h_ll + h_ll_1
+            h_al = h_al + h_al_1
+            h_aa = h_aa + h_aa_1
+
+        contact_counter += 1
+
     # Accumulate joint forces (constraints)
     num_adj_joints = get_body_num_adjacent_joints(adjacency, body_index)
     for joint_counter in range(num_adj_joints):
@@ -3150,6 +4142,885 @@ def solve_rigid_body(
     pos_new = com_new - wp.quat_rotate(rot_new, body_com_local)
 
     body_q_new[body_index] = wp.transform(pos_new, rot_new)
+
+
+@wp.kernel
+def solve_rigid_body_with_contacts_tile(
+    dt: float,
+    body_ids_in_color: wp.array[wp.int32],
+    body_q: wp.array[wp.transform],
+    body_q_prev: wp.array[wp.transform],
+    body_q_rest: wp.array[wp.transform],
+    body_mass: wp.array[float],
+    body_inv_mass: wp.array[float],
+    body_inertia: wp.array[wp.mat33],
+    body_inertia_q: wp.array[wp.transform],
+    body_com: wp.array[wp.vec3],
+    adjacency: RigidForceElementAdjacencyInfo,
+    # Joint data
+    joint_type: wp.array[int],
+    joint_enabled: wp.array[bool],
+    joint_parent: wp.array[int],
+    joint_child: wp.array[int],
+    joint_X_p: wp.array[wp.transform],
+    joint_X_c: wp.array[wp.transform],
+    joint_axis: wp.array[wp.vec3],
+    joint_qd_start: wp.array[int],
+    joint_constraint_start: wp.array[int],
+    # AVBD per-constraint penalty state (scalar constraints indexed via joint_constraint_start)
+    joint_penalty_k: wp.array[float],
+    joint_penalty_kd: wp.array[float],
+    # Dahl hysteresis parameters (frozen for this timestep, component-wise vec3 per joint)
+    joint_sigma_start: wp.array[wp.vec3],
+    joint_C_fric: wp.array[wp.vec3],
+    # Drive parameters (DOF-indexed via joint_qd_start)
+    joint_target_ke: wp.array[float],
+    joint_target_kd: wp.array[float],
+    joint_target_pos: wp.array[float],
+    joint_target_vel: wp.array[float],
+    # Limit parameters (DOF-indexed via joint_qd_start)
+    joint_limit_lower: wp.array[float],
+    joint_limit_upper: wp.array[float],
+    joint_limit_ke: wp.array[float],
+    joint_limit_kd: wp.array[float],
+    joint_lambda_lin: wp.array[wp.vec3],
+    joint_lambda_ang: wp.array[wp.vec3],
+    joint_C0_lin: wp.array[wp.vec3],
+    joint_C0_ang: wp.array[wp.vec3],
+    joint_is_hard: wp.array[wp.int32],
+    avbd_alpha: float,
+    joint_dof_dim: wp.array2d[int],
+    joint_rest_angle: wp.array[float],
+    external_forces: wp.array[wp.vec3],
+    external_torques: wp.array[wp.vec3],
+    external_hessian_ll: wp.array[wp.mat33],  # Linear-linear block from rigid contacts
+    external_hessian_al: wp.array[wp.mat33],  # Angular-linear coupling block from rigid contacts
+    external_hessian_aa: wp.array[wp.mat33],  # Angular-angular block from rigid contacts
+    # Body-body contact data fused into this solve
+    contact_friction_epsilon: float,
+    contact_penalty_k: wp.array[float],
+    contact_material_kd: wp.array[float],
+    contact_material_mu: wp.array[float],
+    contact_lambda: wp.array[wp.vec3],
+    contact_C0: wp.array[wp.vec3],
+    contact_avbd_alpha: float,
+    hard_contacts: int,
+    rigid_contact_count: wp.array[int],
+    rigid_contact_shape0: wp.array[int],
+    rigid_contact_shape1: wp.array[int],
+    rigid_contact_point0: wp.array[wp.vec3],
+    rigid_contact_point1: wp.array[wp.vec3],
+    rigid_contact_normal: wp.array[wp.vec3],
+    rigid_contact_margin0: wp.array[float],
+    rigid_contact_margin1: wp.array[float],
+    shape_body: wp.array[wp.int32],
+    body_contact_buffer_pre_alloc: int,
+    body_contact_counts: wp.array[wp.int32],
+    body_contact_indices: wp.array[wp.int32],
+    fused_contact_max: int,
+    active_body_color: int,
+    use_body_color_group_count: int,
+    body_color_group_counts: wp.array[wp.int32],
+    body_colors: wp.array[wp.int32],
+    contact_tile_width: int,
+    # Output
+    body_q_new: wp.array[wp.transform],
+):
+    """
+    AVBD solve step for rigid bodies.
+
+    Assembles inertial, joint, and collision contributions into a 6x6 SPD
+    block system and solves via direct LDL^T.
+
+    Algorithm:
+      1. Compute inertial forces/Hessians
+      2. Accumulate external forces/Hessians from rigid contacts
+      3. Accumulate joint forces/Hessians from adjacent joints
+      4. Solve 6x6 system via LDL^T
+      5. Update pose: rotation from angular increment, position from linear increment
+
+    Args:
+        dt: Time step.
+        body_ids_in_color: Body indices in current color group (for parallel coloring).
+        body_q_prev: Previous body transforms (for damping and friction).
+        body_q_rest: Rest transforms (for joint targets).
+        body_mass: Body masses.
+        body_inv_mass: Inverse masses (0 for kinematic bodies).
+        body_inertia: Inertia tensors (local body frame).
+        body_inertia_q: Inertial target transforms (from forward integration).
+        body_com: Center of mass offsets (local body frame).
+        adjacency: Body-joint adjacency (CSR format).
+        joint_*: Joint configuration arrays.
+        joint_penalty_k: AVBD per-constraint penalty stiffness (one scalar per solver constraint component).
+        joint_sigma_start: Dahl hysteresis state at start of step.
+        joint_C_fric: Dahl friction configuration per joint.
+        external_forces: External linear forces from rigid contacts.
+        external_torques: External angular torques from rigid contacts.
+        external_hessian_ll: Linear-linear Hessian block (3x3) from rigid contacts.
+        external_hessian_al: Angular-linear coupling Hessian block (3x3) from rigid contacts.
+        external_hessian_aa: Angular-angular Hessian block (3x3) from rigid contacts.
+        body_q: Current body transforms (input).
+        body_q_new: Updated body transforms (output) for the current solve sweep.
+
+    Note:
+      - All forces, torques, and Hessian blocks are expressed in the world frame.
+    """
+    tid = wp.tid()
+    body_idx_in_group = tid // contact_tile_width
+    thread_id_within_body = tid % contact_tile_width
+
+    if body_idx_in_group >= body_ids_in_color.shape[0]:
+        return
+    if active_body_color >= 0 and use_body_color_group_count == 1:
+        if body_idx_in_group >= body_color_group_counts[active_body_color]:
+            return
+
+    body_index = body_ids_in_color[body_idx_in_group]
+    if body_index < 0:
+        return
+    if active_body_color >= 0 and body_colors[body_index] != active_body_color:
+        return
+
+    q_current = body_q[body_index]
+
+    # Early exit for kinematic bodies
+    if body_inv_mass[body_index] == 0.0:
+        if thread_id_within_body == 0:
+            body_q_new[body_index] = q_current
+        return
+
+    # Accumulate body-body contacts cooperatively: one deterministic tile per body.
+    num_contacts = body_contact_counts[body_index]
+    if num_contacts > body_contact_buffer_pre_alloc:
+        num_contacts = body_contact_buffer_pre_alloc
+
+    if fused_contact_max >= 0 and num_contacts > fused_contact_max:
+        num_contacts = wp.int32(0)
+
+    contact_count = rigid_contact_count[0]
+    force_acc = wp.vec3(0.0)
+    torque_acc = wp.vec3(0.0)
+    h_ll_acc = wp.mat33(0.0)
+    h_al_acc = wp.mat33(0.0)
+    h_aa_acc = wp.mat33(0.0)
+
+    contact_counter = thread_id_within_body
+    while contact_counter < num_contacts:
+        contact_idx = body_contact_indices[body_index * body_contact_buffer_pre_alloc + contact_counter]
+        if contact_idx >= contact_count:
+            contact_counter += contact_tile_width
+            continue
+
+        s0 = rigid_contact_shape0[contact_idx]
+        s1 = rigid_contact_shape1[contact_idx]
+        b0 = shape_body[s0] if s0 >= 0 else -1
+        b1 = shape_body[s1] if s1 >= 0 else -1
+
+        if b0 != body_index and b1 != body_index:
+            contact_counter += contact_tile_width
+            continue
+
+        cp0_local = rigid_contact_point0[contact_idx]
+        cp1_local = rigid_contact_point1[contact_idx]
+        contact_normal = rigid_contact_normal[contact_idx]
+        cp0_world = wp.transform_point(body_q[b0], cp0_local) if b0 >= 0 else cp0_local
+        cp1_world = wp.transform_point(body_q[b1], cp1_local) if b1 >= 0 else cp1_local
+        thickness = rigid_contact_margin0[contact_idx] + rigid_contact_margin1[contact_idx]
+        d = cp1_world - cp0_world
+        C_n = thickness - wp.dot(contact_normal, d)
+
+        lam_n = float(0.0)
+        C_eff = C_n
+        lam_vec = wp.vec3(0.0)
+        k = contact_penalty_k[contact_idx]
+        friction_c0 = wp.vec3(0.0)
+
+        if hard_contacts == 1:
+            lam_vec = contact_lambda[contact_idx]
+            lam_n = wp.dot(lam_vec, contact_normal)
+            C0_vec = contact_C0[contact_idx]
+            C0_n = wp.dot(contact_normal, C0_vec)
+            C_eff = C_n - contact_avbd_alpha * C0_n
+            friction_c0 = (1.0 - contact_avbd_alpha) * (C0_vec - contact_normal * C0_n)
+
+        if C_n <= _SMALL_LENGTH_EPS and lam_n <= 0.0:
+            contact_counter += contact_tile_width
+            continue
+
+        f_n_check = k * C_eff + lam_n
+        if f_n_check <= 0.0 and lam_n <= 0.0:
+            contact_counter += contact_tile_width
+            continue
+
+        (
+            force_0,
+            torque_0,
+            h_ll_0,
+            h_al_0,
+            h_aa_0,
+            force_1,
+            torque_1,
+            h_ll_1,
+            h_al_1,
+            h_aa_1,
+        ) = evaluate_rigid_contact_from_collision(
+            b0,
+            b1,
+            body_q,
+            body_q_prev,
+            body_com,
+            cp0_local,
+            cp1_local,
+            contact_normal,
+            C_eff,
+            k,
+            k,
+            contact_material_kd[contact_idx],
+            lam_vec,
+            contact_material_mu[contact_idx],
+            contact_friction_epsilon,
+            hard_contacts,
+            dt,
+            friction_c0,
+        )
+
+        if body_index == b0:
+            force_acc = force_acc + force_0
+            torque_acc = torque_acc + torque_0
+            h_ll_acc = h_ll_acc + h_ll_0
+            h_al_acc = h_al_acc + h_al_0
+            h_aa_acc = h_aa_acc + h_aa_0
+        else:
+            force_acc = force_acc + force_1
+            torque_acc = torque_acc + torque_1
+            h_ll_acc = h_ll_acc + h_ll_1
+            h_al_acc = h_al_acc + h_al_1
+            h_aa_acc = h_aa_acc + h_aa_1
+
+        contact_counter += contact_tile_width
+
+    force_tile = wp.tile(force_acc, preserve_type=True)
+    torque_tile = wp.tile(torque_acc, preserve_type=True)
+    h_ll_tile = wp.tile(h_ll_acc, preserve_type=True)
+    h_al_tile = wp.tile(h_al_acc, preserve_type=True)
+    h_aa_tile = wp.tile(h_aa_acc, preserve_type=True)
+
+    contact_force_total = wp.tile_reduce(wp.add, force_tile)[0]
+    contact_torque_total = wp.tile_reduce(wp.add, torque_tile)[0]
+    contact_h_ll_total = wp.tile_reduce(wp.add, h_ll_tile)[0]
+    contact_h_al_total = wp.tile_reduce(wp.add, h_al_tile)[0]
+    contact_h_aa_total = wp.tile_reduce(wp.add, h_aa_tile)[0]
+
+    if thread_id_within_body != 0:
+        return
+
+    # Inertial force and Hessian
+    dt_sqr_reciprocal = 1.0 / (dt * dt)
+
+    # Read body properties
+    q_inertial = body_inertia_q[body_index]
+    body_com_local = body_com[body_index]
+    m = body_mass[body_index]
+    I_body = body_inertia[body_index]
+
+    # Extract poses
+    pos_current = wp.transform_get_translation(q_current)
+    rot_current = wp.transform_get_rotation(q_current)
+    pos_star = wp.transform_get_translation(q_inertial)
+    rot_star = wp.transform_get_rotation(q_inertial)
+
+    # Compute COM positions
+    com_current = pos_current + wp.quat_rotate(rot_current, body_com_local)
+    com_star = pos_star + wp.quat_rotate(rot_star, body_com_local)
+
+    # Linear inertial force and Hessian
+    inertial_coeff = m * dt_sqr_reciprocal
+    f_lin = (com_star - com_current) * inertial_coeff
+
+    # Compute relative rotation via quaternion difference
+    # dq = q_current^-1 * q_star
+    q_delta = wp.mul(wp.quat_inverse(rot_current), rot_star)
+
+    # Enforce shortest path (w > 0) to avoid double-cover ambiguity
+    if q_delta[3] < 0.0:
+        q_delta = wp.quat(-q_delta[0], -q_delta[1], -q_delta[2], -q_delta[3])
+
+    # Rotation vector
+    axis_body, angle_body = wp.quat_to_axis_angle(q_delta)
+    theta_body = axis_body * angle_body
+
+    # Angular inertial torque
+    tau_body = I_body * (theta_body * dt_sqr_reciprocal)
+    tau_world = wp.quat_rotate(rot_current, tau_body)
+
+    # Angular Hessian in world frame: use full inertia (supports off-diagonal products of inertia)
+    R_cur = wp.quat_to_matrix(rot_current)
+    I_world = R_cur * I_body * wp.transpose(R_cur)
+    angular_hessian = dt_sqr_reciprocal * I_world
+
+    # Accumulate external forces (rigid contacts)
+    # Read external contributions
+    ext_torque = external_torques[body_index]
+    ext_force = external_forces[body_index]
+    ext_h_aa = external_hessian_aa[body_index]
+    ext_h_al = external_hessian_al[body_index]
+    ext_h_ll = external_hessian_ll[body_index]
+
+    f_torque = tau_world + ext_torque
+    f_force = f_lin + ext_force
+
+    h_aa = angular_hessian + ext_h_aa
+    h_al = ext_h_al
+    h_ll = wp.mat33(
+        ext_h_ll[0, 0] + inertial_coeff,
+        ext_h_ll[0, 1],
+        ext_h_ll[0, 2],
+        ext_h_ll[1, 0],
+        ext_h_ll[1, 1] + inertial_coeff,
+        ext_h_ll[1, 2],
+        ext_h_ll[2, 0],
+        ext_h_ll[2, 1],
+        ext_h_ll[2, 2] + inertial_coeff,
+    )
+
+    # Add deterministic tiled contact totals.
+    f_force = f_force + contact_force_total
+    f_torque = f_torque + contact_torque_total
+    h_ll = h_ll + contact_h_ll_total
+    h_al = h_al + contact_h_al_total
+    h_aa = h_aa + contact_h_aa_total
+
+    # Accumulate joint forces (constraints)
+    num_adj_joints = get_body_num_adjacent_joints(adjacency, body_index)
+    for joint_counter in range(num_adj_joints):
+        joint_idx = get_body_adjacent_joint_id(adjacency, body_index, joint_counter)
+
+        joint_force, joint_torque, joint_H_ll, joint_H_al, joint_H_aa = evaluate_joint_force_hessian(
+            body_index,
+            joint_idx,
+            body_q,
+            body_q_prev,
+            body_q_rest,
+            body_com,
+            joint_type,
+            joint_enabled,
+            joint_parent,
+            joint_child,
+            joint_X_p,
+            joint_X_c,
+            joint_axis,
+            joint_qd_start,
+            joint_constraint_start,
+            joint_penalty_k,
+            joint_penalty_kd,
+            joint_sigma_start,
+            joint_C_fric,
+            joint_target_ke,
+            joint_target_kd,
+            joint_target_pos,
+            joint_target_vel,
+            joint_limit_lower,
+            joint_limit_upper,
+            joint_limit_ke,
+            joint_limit_kd,
+            joint_lambda_lin,
+            joint_lambda_ang,
+            joint_C0_lin,
+            joint_C0_ang,
+            joint_is_hard,
+            avbd_alpha,
+            joint_dof_dim,
+            joint_rest_angle,
+            dt,
+        )
+
+        f_force = f_force + joint_force
+        f_torque = f_torque + joint_torque
+
+        h_ll = h_ll + joint_H_ll
+        h_al = h_al + joint_H_al
+        h_aa = h_aa + joint_H_aa
+
+    # Regularize angular Hessian
+    trA = wp.trace(h_aa) / 3.0
+    epsA = 1.0e-9 * (trA + 1.0)
+    h_aa[0, 0] = h_aa[0, 0] + epsA
+    h_aa[1, 1] = h_aa[1, 1] + epsA
+    h_aa[2, 2] = h_aa[2, 2] + epsA
+
+    # Solve 6x6 system via direct LDL^T
+    x_inc, w_world = ldlt6_solve(h_ll, h_aa, h_al, f_force, f_torque)
+
+    # Update pose from increments
+    # Convert angular increment to quaternion
+    if _USE_SMALL_ANGLE_APPROX:
+        half_w = w_world * 0.5
+        dq_world = wp.quat(half_w[0], half_w[1], half_w[2], 1.0)
+        dq_world = wp.normalize(dq_world)
+    else:
+        ang_mag = wp.length(w_world)
+        if ang_mag > _SMALL_ANGLE_EPS:
+            dq_world = wp.quat_from_axis_angle(w_world / ang_mag, ang_mag)
+        else:
+            half_w = w_world * 0.5
+            dq_world = wp.quat(half_w[0], half_w[1], half_w[2], 1.0)
+            dq_world = wp.normalize(dq_world)
+
+    # Apply rotation
+    rot_new = wp.mul(dq_world, rot_current)
+    rot_new = wp.normalize(rot_new)
+
+    # Update position
+    com_new = com_current + x_inc
+    pos_new = com_new - wp.quat_rotate(rot_new, body_com_local)
+
+    body_q_new[body_index] = wp.transform(pos_new, rot_new)
+
+
+
+
+@wp.kernel
+def solve_rigid_body_with_contacts_jacobi(
+    dt: float,
+    body_ids_in_color: wp.array[wp.int32],
+    body_q: wp.array[wp.transform],
+    body_q_prev: wp.array[wp.transform],
+    contact_body_q: wp.array[wp.transform],
+    body_q_rest: wp.array[wp.transform],
+    body_mass: wp.array[float],
+    body_inv_mass: wp.array[float],
+    body_inertia: wp.array[wp.mat33],
+    body_inertia_q: wp.array[wp.transform],
+    body_com: wp.array[wp.vec3],
+    adjacency: RigidForceElementAdjacencyInfo,
+    # Joint data
+    joint_type: wp.array[int],
+    joint_enabled: wp.array[bool],
+    joint_parent: wp.array[int],
+    joint_child: wp.array[int],
+    joint_X_p: wp.array[wp.transform],
+    joint_X_c: wp.array[wp.transform],
+    joint_axis: wp.array[wp.vec3],
+    joint_qd_start: wp.array[int],
+    joint_constraint_start: wp.array[int],
+    # AVBD per-constraint penalty state (scalar constraints indexed via joint_constraint_start)
+    joint_penalty_k: wp.array[float],
+    joint_penalty_kd: wp.array[float],
+    # Dahl hysteresis parameters (frozen for this timestep, component-wise vec3 per joint)
+    joint_sigma_start: wp.array[wp.vec3],
+    joint_C_fric: wp.array[wp.vec3],
+    # Drive parameters (DOF-indexed via joint_qd_start)
+    joint_target_ke: wp.array[float],
+    joint_target_kd: wp.array[float],
+    joint_target_pos: wp.array[float],
+    joint_target_vel: wp.array[float],
+    # Limit parameters (DOF-indexed via joint_qd_start)
+    joint_limit_lower: wp.array[float],
+    joint_limit_upper: wp.array[float],
+    joint_limit_ke: wp.array[float],
+    joint_limit_kd: wp.array[float],
+    joint_lambda_lin: wp.array[wp.vec3],
+    joint_lambda_ang: wp.array[wp.vec3],
+    joint_C0_lin: wp.array[wp.vec3],
+    joint_C0_ang: wp.array[wp.vec3],
+    joint_is_hard: wp.array[wp.int32],
+    avbd_alpha: float,
+    joint_dof_dim: wp.array2d[int],
+    joint_rest_angle: wp.array[float],
+    external_forces: wp.array[wp.vec3],
+    external_torques: wp.array[wp.vec3],
+    external_hessian_ll: wp.array[wp.mat33],  # Linear-linear block from rigid contacts
+    external_hessian_al: wp.array[wp.mat33],  # Angular-linear coupling block from rigid contacts
+    external_hessian_aa: wp.array[wp.mat33],  # Angular-angular block from rigid contacts
+    # Body-body contact data fused into this solve
+    contact_friction_epsilon: float,
+    contact_penalty_k: wp.array[float],
+    contact_material_kd: wp.array[float],
+    contact_material_mu: wp.array[float],
+    contact_lambda: wp.array[wp.vec3],
+    contact_C0: wp.array[wp.vec3],
+    contact_avbd_alpha: float,
+    hard_contacts: int,
+    rigid_contact_count: wp.array[int],
+    rigid_contact_shape0: wp.array[int],
+    rigid_contact_shape1: wp.array[int],
+    rigid_contact_point0: wp.array[wp.vec3],
+    rigid_contact_point1: wp.array[wp.vec3],
+    rigid_contact_normal: wp.array[wp.vec3],
+    rigid_contact_margin0: wp.array[float],
+    rigid_contact_margin1: wp.array[float],
+    shape_body: wp.array[wp.int32],
+    body_contact_buffer_pre_alloc: int,
+    body_contact_counts: wp.array[wp.int32],
+    body_contact_indices: wp.array[wp.int32],
+    fused_contact_max: int,
+    contact_relaxation: float,
+    # Output
+    body_q_new: wp.array[wp.transform],
+):
+    """
+    AVBD solve step for rigid bodies.
+
+    Assembles inertial, joint, and collision contributions into a 6x6 SPD
+    block system and solves via direct LDL^T.
+
+    Algorithm:
+      1. Compute inertial forces/Hessians
+      2. Accumulate external forces/Hessians from rigid contacts
+      3. Accumulate joint forces/Hessians from adjacent joints
+      4. Solve 6x6 system via LDL^T
+      5. Update pose: rotation from angular increment, position from linear increment
+
+    Args:
+        dt: Time step.
+        body_ids_in_color: Body indices in current color group (for parallel coloring).
+        body_q_prev: Previous body transforms (for damping and friction).
+        body_q_rest: Rest transforms (for joint targets).
+        body_mass: Body masses.
+        body_inv_mass: Inverse masses (0 for kinematic bodies).
+        body_inertia: Inertia tensors (local body frame).
+        body_inertia_q: Inertial target transforms (from forward integration).
+        body_com: Center of mass offsets (local body frame).
+        adjacency: Body-joint adjacency (CSR format).
+        joint_*: Joint configuration arrays.
+        joint_penalty_k: AVBD per-constraint penalty stiffness (one scalar per solver constraint component).
+        joint_sigma_start: Dahl hysteresis state at start of step.
+        joint_C_fric: Dahl friction configuration per joint.
+        external_forces: External linear forces from rigid contacts.
+        external_torques: External angular torques from rigid contacts.
+        external_hessian_ll: Linear-linear Hessian block (3x3) from rigid contacts.
+        external_hessian_al: Angular-linear coupling Hessian block (3x3) from rigid contacts.
+        external_hessian_aa: Angular-angular Hessian block (3x3) from rigid contacts.
+        body_q: Current body transforms (input).
+        body_q_new: Updated body transforms (output) for the current solve sweep.
+
+    Note:
+      - All forces, torques, and Hessian blocks are expressed in the world frame.
+    """
+    tid = wp.tid()
+    body_index = body_ids_in_color[tid]
+
+    q_current = body_q[body_index]
+
+    # Early exit for kinematic bodies
+    if body_inv_mass[body_index] == 0.0:
+        body_q_new[body_index] = q_current
+        return
+
+    # Inertial force and Hessian
+    dt_sqr_reciprocal = 1.0 / (dt * dt)
+
+    # Read body properties
+    q_inertial = body_inertia_q[body_index]
+    body_com_local = body_com[body_index]
+    m = body_mass[body_index]
+    I_body = body_inertia[body_index]
+
+    # Extract poses
+    pos_current = wp.transform_get_translation(q_current)
+    rot_current = wp.transform_get_rotation(q_current)
+    pos_star = wp.transform_get_translation(q_inertial)
+    rot_star = wp.transform_get_rotation(q_inertial)
+
+    # Compute COM positions
+    com_current = pos_current + wp.quat_rotate(rot_current, body_com_local)
+    com_star = pos_star + wp.quat_rotate(rot_star, body_com_local)
+
+    # Linear inertial force and Hessian
+    inertial_coeff = m * dt_sqr_reciprocal
+    f_lin = (com_star - com_current) * inertial_coeff
+
+    # Compute relative rotation via quaternion difference
+    # dq = q_current^-1 * q_star
+    q_delta = wp.mul(wp.quat_inverse(rot_current), rot_star)
+
+    # Enforce shortest path (w > 0) to avoid double-cover ambiguity
+    if q_delta[3] < 0.0:
+        q_delta = wp.quat(-q_delta[0], -q_delta[1], -q_delta[2], -q_delta[3])
+
+    # Rotation vector
+    axis_body, angle_body = wp.quat_to_axis_angle(q_delta)
+    theta_body = axis_body * angle_body
+
+    # Angular inertial torque
+    tau_body = I_body * (theta_body * dt_sqr_reciprocal)
+    tau_world = wp.quat_rotate(rot_current, tau_body)
+
+    # Angular Hessian in world frame: use full inertia (supports off-diagonal products of inertia)
+    R_cur = wp.quat_to_matrix(rot_current)
+    I_world = R_cur * I_body * wp.transpose(R_cur)
+    angular_hessian = dt_sqr_reciprocal * I_world
+
+    # Accumulate external forces (rigid contacts)
+    # Read external contributions
+    ext_torque = external_torques[body_index]
+    ext_force = external_forces[body_index]
+    ext_h_aa = external_hessian_aa[body_index]
+    ext_h_al = external_hessian_al[body_index]
+    ext_h_ll = external_hessian_ll[body_index]
+
+    f_torque = tau_world + ext_torque
+    f_force = f_lin + ext_force
+
+    h_aa = angular_hessian + ext_h_aa
+    h_al = ext_h_al
+    h_ll = wp.mat33(
+        ext_h_ll[0, 0] + inertial_coeff,
+        ext_h_ll[0, 1],
+        ext_h_ll[0, 2],
+        ext_h_ll[1, 0],
+        ext_h_ll[1, 1] + inertial_coeff,
+        ext_h_ll[1, 2],
+        ext_h_ll[2, 0],
+        ext_h_ll[2, 1],
+        ext_h_ll[2, 2] + inertial_coeff,
+    )
+
+    # Accumulate body-body contacts directly in the body solve.
+    num_contacts = body_contact_counts[body_index]
+    if num_contacts > body_contact_buffer_pre_alloc:
+        num_contacts = body_contact_buffer_pre_alloc
+
+    if fused_contact_max >= 0 and num_contacts > fused_contact_max:
+        num_contacts = wp.int32(0)
+
+    contact_count = rigid_contact_count[0]
+    contact_counter = wp.int32(0)
+    while contact_counter < num_contacts:
+        contact_idx = body_contact_indices[body_index * body_contact_buffer_pre_alloc + contact_counter]
+        if contact_idx >= contact_count:
+            contact_counter += 1
+            continue
+
+        s0 = rigid_contact_shape0[contact_idx]
+        s1 = rigid_contact_shape1[contact_idx]
+        b0 = shape_body[s0] if s0 >= 0 else -1
+        b1 = shape_body[s1] if s1 >= 0 else -1
+
+        if b0 != body_index and b1 != body_index:
+            contact_counter += 1
+            continue
+
+        cp0_local = rigid_contact_point0[contact_idx]
+        cp1_local = rigid_contact_point1[contact_idx]
+        contact_normal = rigid_contact_normal[contact_idx]
+        cp0_world = wp.transform_point(contact_body_q[b0], cp0_local) if b0 >= 0 else cp0_local
+        cp1_world = wp.transform_point(contact_body_q[b1], cp1_local) if b1 >= 0 else cp1_local
+        thickness = rigid_contact_margin0[contact_idx] + rigid_contact_margin1[contact_idx]
+        d = cp1_world - cp0_world
+        C_n = thickness - wp.dot(contact_normal, d)
+
+        lam_n = float(0.0)
+        C_eff = C_n
+        lam_vec = wp.vec3(0.0)
+        k = contact_penalty_k[contact_idx]
+        friction_c0 = wp.vec3(0.0)
+
+        if hard_contacts == 1:
+            lam_vec = contact_lambda[contact_idx]
+            lam_n = wp.dot(lam_vec, contact_normal)
+            C0_vec = contact_C0[contact_idx]
+            C0_n = wp.dot(contact_normal, C0_vec)
+            C_eff = C_n - contact_avbd_alpha * C0_n
+            friction_c0 = (1.0 - contact_avbd_alpha) * (C0_vec - contact_normal * C0_n)
+
+        if C_n <= _SMALL_LENGTH_EPS and lam_n <= 0.0:
+            contact_counter += 1
+            continue
+
+        f_n_check = k * C_eff + lam_n
+        if f_n_check <= 0.0 and lam_n <= 0.0:
+            contact_counter += 1
+            continue
+
+        (
+            force_0,
+            torque_0,
+            h_ll_0,
+            h_al_0,
+            h_aa_0,
+            force_1,
+            torque_1,
+            h_ll_1,
+            h_al_1,
+            h_aa_1,
+        ) = evaluate_rigid_contact_from_collision(
+            b0,
+            b1,
+            contact_body_q,
+            body_q_prev,
+            body_com,
+            cp0_local,
+            cp1_local,
+            contact_normal,
+            C_eff,
+            k,
+            k,
+            contact_material_kd[contact_idx],
+            lam_vec,
+            contact_material_mu[contact_idx],
+            contact_friction_epsilon,
+            hard_contacts,
+            dt,
+            friction_c0,
+        )
+
+        if body_index == b0:
+            f_force = f_force + force_0 * contact_relaxation
+            f_torque = f_torque + torque_0 * contact_relaxation
+            h_ll = h_ll + h_ll_0 * contact_relaxation
+            h_al = h_al + h_al_0 * contact_relaxation
+            h_aa = h_aa + h_aa_0 * contact_relaxation
+        else:
+            f_force = f_force + force_1 * contact_relaxation
+            f_torque = f_torque + torque_1 * contact_relaxation
+            h_ll = h_ll + h_ll_1 * contact_relaxation
+            h_al = h_al + h_al_1 * contact_relaxation
+            h_aa = h_aa + h_aa_1 * contact_relaxation
+
+        contact_counter += 1
+
+    # Accumulate joint forces (constraints)
+    num_adj_joints = get_body_num_adjacent_joints(adjacency, body_index)
+    for joint_counter in range(num_adj_joints):
+        joint_idx = get_body_adjacent_joint_id(adjacency, body_index, joint_counter)
+
+        joint_force, joint_torque, joint_H_ll, joint_H_al, joint_H_aa = evaluate_joint_force_hessian(
+            body_index,
+            joint_idx,
+            body_q,
+            body_q_prev,
+            body_q_rest,
+            body_com,
+            joint_type,
+            joint_enabled,
+            joint_parent,
+            joint_child,
+            joint_X_p,
+            joint_X_c,
+            joint_axis,
+            joint_qd_start,
+            joint_constraint_start,
+            joint_penalty_k,
+            joint_penalty_kd,
+            joint_sigma_start,
+            joint_C_fric,
+            joint_target_ke,
+            joint_target_kd,
+            joint_target_pos,
+            joint_target_vel,
+            joint_limit_lower,
+            joint_limit_upper,
+            joint_limit_ke,
+            joint_limit_kd,
+            joint_lambda_lin,
+            joint_lambda_ang,
+            joint_C0_lin,
+            joint_C0_ang,
+            joint_is_hard,
+            avbd_alpha,
+            joint_dof_dim,
+            joint_rest_angle,
+            dt,
+        )
+
+        f_force = f_force + joint_force
+        f_torque = f_torque + joint_torque
+
+        h_ll = h_ll + joint_H_ll
+        h_al = h_al + joint_H_al
+        h_aa = h_aa + joint_H_aa
+
+    # Regularize angular Hessian
+    trA = wp.trace(h_aa) / 3.0
+    epsA = 1.0e-9 * (trA + 1.0)
+    h_aa[0, 0] = h_aa[0, 0] + epsA
+    h_aa[1, 1] = h_aa[1, 1] + epsA
+    h_aa[2, 2] = h_aa[2, 2] + epsA
+
+    # Solve 6x6 system via direct LDL^T
+    x_inc, w_world = ldlt6_solve(h_ll, h_aa, h_al, f_force, f_torque)
+
+    # Update pose from increments
+    # Convert angular increment to quaternion
+    if _USE_SMALL_ANGLE_APPROX:
+        half_w = w_world * 0.5
+        dq_world = wp.quat(half_w[0], half_w[1], half_w[2], 1.0)
+        dq_world = wp.normalize(dq_world)
+    else:
+        ang_mag = wp.length(w_world)
+        if ang_mag > _SMALL_ANGLE_EPS:
+            dq_world = wp.quat_from_axis_angle(w_world / ang_mag, ang_mag)
+        else:
+            half_w = w_world * 0.5
+            dq_world = wp.quat(half_w[0], half_w[1], half_w[2], 1.0)
+            dq_world = wp.normalize(dq_world)
+
+    # Apply rotation
+    rot_new = wp.mul(dq_world, rot_current)
+    rot_new = wp.normalize(rot_new)
+
+    # Update position
+    com_new = com_current + x_inc
+    pos_new = com_new - wp.quat_rotate(rot_new, body_com_local)
+
+    body_q_new[body_index] = wp.transform(pos_new, rot_new)
+
+
+@wp.kernel
+def relax_rigid_body_transforms(
+    body_q_prev_iter: wp.array[wp.transform],
+    body_q_solved: wp.array[wp.transform],
+    body_inv_mass: wp.array[float],
+    relaxation: float,
+    body_q_out: wp.array[wp.transform],
+):
+    body = wp.tid()
+    q_old = body_q_prev_iter[body]
+    q_new = body_q_solved[body]
+
+    if body_inv_mass[body] <= 0.0:
+        body_q_out[body] = q_old
+        return
+
+    p_old = wp.transform_get_translation(q_old)
+    p_new = wp.transform_get_translation(q_new)
+    r_old = wp.transform_get_rotation(q_old)
+    r_new = wp.transform_get_rotation(q_new)
+
+    qdot = r_old[0] * r_new[0] + r_old[1] * r_new[1] + r_old[2] * r_new[2] + r_old[3] * r_new[3]
+    if qdot < 0.0:
+        r_new = wp.quat(-r_new[0], -r_new[1], -r_new[2], -r_new[3])
+
+    one_minus = 1.0 - relaxation
+    p = p_old * one_minus + p_new * relaxation
+    r = wp.normalize(
+        wp.quat(
+            r_old[0] * one_minus + r_new[0] * relaxation,
+            r_old[1] * one_minus + r_new[1] * relaxation,
+            r_old[2] * one_minus + r_new[2] * relaxation,
+            r_old[3] * one_minus + r_new[3] * relaxation,
+        )
+    )
+    body_q_out[body] = wp.transform(p, r)
+
+
+
+@wp.kernel
+def scale_body_spatial_terms(
+    body_forces: wp.array[wp.vec3],
+    body_torques: wp.array[wp.vec3],
+    body_hessian_ll: wp.array[wp.mat33],
+    body_hessian_al: wp.array[wp.mat33],
+    body_hessian_aa: wp.array[wp.mat33],
+    scale: float,
+):
+    body = wp.tid()
+    body_forces[body] = body_forces[body] * scale
+    body_torques[body] = body_torques[body] * scale
+    body_hessian_ll[body] = body_hessian_ll[body] * scale
+    body_hessian_al[body] = body_hessian_al[body] * scale
+    body_hessian_aa[body] = body_hessian_aa[body] * scale
 
 
 @wp.kernel
@@ -3581,6 +5452,7 @@ def update_duals_body_body_contacts(
     body_inv_mass: wp.array[float],
     contact_material_ke: wp.array[float],
     beta: float,
+    dual_relaxation: float,
     # Input/output
     contact_penalty_k: wp.array[float],
     contact_lambda: wp.array[wp.vec3],
@@ -3642,19 +5514,26 @@ def update_duals_body_body_contacts(
             C_stab_n = C_n_raw
 
         lam_n_old = wp.dot(lam_vec, n)
-        lam_n_new = wp.max(lam_n_old + k * C_stab_n, 0.0)
+        lam_n_target = wp.max(lam_n_old + k * C_stab_n, 0.0)
 
         rel_disp = (p0_world - p0_prev) - (p1_world - p1_prev)
         tangential_disp = rel_disp - n * wp.dot(n, rel_disp)
         C0_t_vec = C0_vec - n * C0_n
         lam_t_old = lam_vec - n * lam_n_old
         tangent_residual = tangential_disp + (1.0 - avbd_alpha) * C0_t_vec
-        lam_t_new = lam_t_old + k * tangent_residual
+        lam_t_target = lam_t_old + k * tangent_residual
+        lam_t_target_len = wp.length(lam_t_target)
+        cone_limit_target = mu * lam_n_target
+        if lam_t_target_len > cone_limit_target and lam_t_target_len > 0.0:
+            lam_t_target = lam_t_target * (cone_limit_target / lam_t_target_len)
+
+        lam_target = n * lam_n_target + lam_t_target
+        lam_vec_new = lam_vec + dual_relaxation * (lam_target - lam_vec)
+        lam_n_new = wp.dot(lam_vec_new, n)
+        lam_t_new = lam_vec_new - n * lam_n_new
         lam_t_len = wp.length(lam_t_new)
         cone_limit = mu * lam_n_new
-        if lam_t_len > cone_limit and lam_t_len > 0.0:
-            lam_t_new = lam_t_new * (cone_limit / lam_t_len)
-        contact_lambda[idx] = n * lam_n_new + lam_t_new
+        contact_lambda[idx] = lam_vec_new
 
         has_kinematic = int(0)
         if body_id_0 < 0 or body_id_1 < 0:
