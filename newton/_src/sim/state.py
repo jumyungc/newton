@@ -147,9 +147,6 @@ class State:
             :attr:`body_parent_f` represents incoming joint wrenches in world frame, referenced to the body's center of mass (COM).
         """
 
-        # Optional solver-specific state namespaces such as ``state.vbd`` are
-        # attached by Model.state() when requested.
-
         self.joint_q: wp.array | None = None
         """Generalized joint position coordinates [m or rad, depending on joint type], shape (joint_coord_count,), dtype float."""
 

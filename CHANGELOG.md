@@ -10,6 +10,7 @@
 - Add an optional `kernel_block_dim` argument to `SensorTiledCamera.update()` for tuning the Warp ray-tracer's `render_megakernel` launch shape.
 - Add robotics tutorial notebook covering ModelBuilder, solvers, CUDA graphs, IK, and pick-and-place
 - Add `newton.utils.OnnxRuntime`, a graph-capturable ONNX inference engine backed solely by Warp kernels (no `onnxruntime` or `torch` runtime dependency); used by `ControllerNeuralMLP` and `ControllerNeuralLSTM` to load `.onnx` policies. To migrate a TorchScript policy, run `torch.onnx.export(model, dummy_input, "policy.onnx", opset_version=17)` once and point the controllers at the resulting `.onnx` file. The `onnx` package is now an optional extra (`pip install newton[onnx]`); install it explicitly to use the ONNX runtime.
+- Add per-DOF Coulomb joint friction support to `SolverVBD` for REVOLUTE, PRISMATIC, and D6 joints via `Model.joint_friction` [N or N·m], modeled as a regularized velocity-opposing `tanh(qd / smoothing_velocity)` law.
 - Add `body_parent_f` extended state attribute support to `SolverVBD` for reading parent-joint reaction force and torque in world frame at the child body's COM.
 - Add `vbd:cable_tension` extended state attribute support to `SolverVBD` for reading joint-indexed cable stretch tension magnitudes.
 - Add `cable_tension_hanging` and `cable_tension_pulley` examples demonstrating VBD cable tension readout.
@@ -65,7 +66,6 @@
 - Add frame-to-frame contact matching via `CollisionPipeline(contact_matching=...)` with modes `"latest"` (populates `contacts.rigid_contact_match_index`) and `"sticky"` (experimental; additionally replays previous-frame contact geometry on matched contacts — the sticky update strategy may change without warning). Optional `contact_report=True` exposes new/broken contact index lists on `Contacts`.
 - Add VBD rigid-contact warm-starting via `rigid_contact_history`, backed by `Contacts.rigid_contact_match_index` from `CollisionPipeline(contact_matching="latest")`.
 - Add VBD hard/soft controls for body-body contacts and structural joint slots, including `rigid_contact_hard`, `SolverVBD.set_joint_constraint_mode()`, and `SolverVBD.JointSlot`
-- Add per-DOF Coulomb joint friction support to `SolverVBD` for REVOLUTE, PRISMATIC, and D6 joints via `Model.joint_friction` [N or N·m], modeled as a regularized velocity-opposing `tanh(qd / eps)` law
 - Add AVBD contact/joint alpha overrides and linear/angular beta overrides to `SolverVBD` for stabilization and penalty-ramping control
 - Add `enable_multiccd` parameter to `SolverMuJoCo` for multi-CCD contact generation (up to 4 contact points per geom pair)
 - Warn when `SolverMuJoCo` detects installed `mujoco` or `mujoco-warp` versions that do not satisfy `pyproject.toml` requirements

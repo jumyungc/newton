@@ -47,7 +47,7 @@ _USE_SMALL_ANGLE_APPROX = wp.constant(True)
 _DAHL_KAPPADOT_DEADBAND = wp.constant(1.0e-6)
 """Deadband threshold for hysteresis direction selection"""
 
-_FRICTION_VEL_EPS = wp.constant(1.0e-2)
+_JOINT_FRICTION_SMOOTHING_VEL = wp.constant(1.0e-2)
 """Velocity scale [m/s or rad/s] for the regularized Coulomb (tanh) joint-friction model."""
 
 _NUM_CONTACT_THREADS_PER_BODY = wp.constant(4)
@@ -1419,7 +1419,7 @@ def evaluate_joint_force_hessian(
                     H_scalar = drive_ke + drive_d * inv_dt
 
             if has_friction:
-                inv_eps = 1.0 / _FRICTION_VEL_EPS
+                inv_eps = 1.0 / _JOINT_FRICTION_SMOOTHING_VEL
                 s = wp.tanh(dtheta_dt * inv_eps)
                 f_scalar = f_scalar + mu * s
                 H_scalar = H_scalar + mu * inv_eps * (1.0 - s * s) * inv_dt
@@ -1541,7 +1541,7 @@ def evaluate_joint_force_hessian(
                     H_scalar = drive_ke + drive_d * inv_dt
 
             if has_friction:
-                inv_eps = 1.0 / _FRICTION_VEL_EPS
+                inv_eps = 1.0 / _JOINT_FRICTION_SMOOTHING_VEL
                 s = wp.tanh(dd_dt * inv_eps)
                 f_scalar = f_scalar + mu * s
                 H_scalar = H_scalar + mu * inv_eps * (1.0 - s * s) * inv_dt
@@ -1709,7 +1709,7 @@ def evaluate_joint_force_hessian(
                                 H_scalar = drive_ke + drive_d * inv_dt
 
                         if has_friction:
-                            inv_eps = 1.0 / _FRICTION_VEL_EPS
+                            inv_eps = 1.0 / _JOINT_FRICTION_SMOOTHING_VEL
                             s = wp.tanh(dd_dt * inv_eps)
                             f_scalar = f_scalar + mu * s
                             H_scalar = H_scalar + mu * inv_eps * (1.0 - s * s) * inv_dt
@@ -1783,7 +1783,7 @@ def evaluate_joint_force_hessian(
                                 H_scalar = drive_ke + drive_d * inv_dt
 
                         if has_friction:
-                            inv_eps = 1.0 / _FRICTION_VEL_EPS
+                            inv_eps = 1.0 / _JOINT_FRICTION_SMOOTHING_VEL
                             s = wp.tanh(dtheta_dt * inv_eps)
                             f_scalar = f_scalar + mu * s
                             H_scalar = H_scalar + mu * inv_eps * (1.0 - s * s) * inv_dt

@@ -3,9 +3,10 @@
 
 """Tests for VBD per-DOF Coulomb joint friction.
 
-Friction is modeled as a regularized Coulomb force ``f = -mu * tanh(qd / eps)``
-applied along each free joint DOF. The tests below verify the model against
-closed-form analytic expectations for revolute, prismatic, and multi-DOF cases.
+Friction is modeled as a regularized Coulomb force/torque opposing each free
+joint DOF's velocity, with magnitude ``mu * tanh(abs(qd) / smoothing_velocity)``.
+The tests below verify the model against closed-form analytic expectations for
+revolute, prismatic, and multi-DOF cases.
 """
 
 import unittest
@@ -103,7 +104,7 @@ def test_coast_down_revolute(test, device):
     qd0 = 2.0
     inertia = 1.0
     model = _build_revolute_with_friction(device, mu=mu, qd0=qd0, inertia=inertia)
-    solver = newton.solvers.SolverVBD(model, iterations=10, rigid_avbd_beta=1.0e5)
+    solver = newton.solvers.SolverVBD(model, iterations=10)
 
     # After 1 second of coast-down, expect qd ~= qd0 - mu/I * 1.0 = 1.0
     n_steps_1s = int(round(1.0 / DT))
@@ -146,16 +147,25 @@ def test_static_stick_revolute(test, device):
     builder.add_articulation([joint])
     builder.color()
     model = builder.finalize(device=device)
-    solver = newton.solvers.SolverVBD(model, iterations=15, rigid_avbd_beta=1.0e5)
+    solver = newton.solvers.SolverVBD(model, iterations=15)
 
     state = _step(model, solver, n_steps=int(round(0.5 / DT)))
     q, qd = _read_joint_state(model, state)
 
     # Joint should remain near zero - small creep from regularization is OK
-    test.assertLess(abs(float(q[0])), 0.05,
-                    msg=f"Static stick: q={q[0]:.4f} should be near 0 (subthreshold drive {drive_torque_target} N·m vs friction {mu} N·m)")
-    test.assertLess(abs(float(qd[0])), 0.05,
-                    msg=f"Static stick: qd={qd[0]:.4f} should be near 0")
+    test.assertLess(
+        abs(float(q[0])),
+        0.05,
+        msg=(
+            f"Static stick: q={q[0]:.4f} should be near 0 "
+            f"(subthreshold drive {drive_torque_target} N·m vs friction {mu} N·m)"
+        ),
+    )
+    test.assertLess(
+        abs(float(qd[0])),
+        0.05,
+        msg=f"Static stick: qd={qd[0]:.4f} should be near 0",
+    )
 
 
 # -------------------------------------------------------------
@@ -190,7 +200,7 @@ def test_sliding_revolute(test, device):
     builder.add_articulation([joint])
     builder.color()
     model = builder.finalize(device=device)
-    solver = newton.solvers.SolverVBD(model, iterations=15, rigid_avbd_beta=1.0e5)
+    solver = newton.solvers.SolverVBD(model, iterations=15)
 
     control = model.control()
     control.joint_f = wp.array([drive_torque], dtype=float, device=device)
@@ -213,7 +223,7 @@ def test_coast_down_prismatic(test, device):
     qd0 = 2.0
     mass = 1.0
     model = _build_prismatic_with_friction(device, mu=mu, qd0=qd0, mass=mass)
-    solver = newton.solvers.SolverVBD(model, iterations=10, rigid_avbd_beta=1.0e5)
+    solver = newton.solvers.SolverVBD(model, iterations=10)
 
     n_steps_1s = int(round(1.0 / DT))
     state = _step(model, solver, n_steps=n_steps_1s)
@@ -274,7 +284,7 @@ def test_multi_dof_independence(test, device):
     builder.add_articulation([joint_b])
     builder.color()
     model = builder.finalize(device=device)
-    solver = newton.solvers.SolverVBD(model, iterations=10, rigid_avbd_beta=1.0e5)
+    solver = newton.solvers.SolverVBD(model, iterations=10)
 
     n_steps = int(round(0.5 / DT))
     state = _step(model, solver, n_steps=n_steps)
@@ -298,7 +308,7 @@ def test_energy_dissipation(test, device):
     qd0 = 2.0
     inertia = 1.0
     model = _build_revolute_with_friction(device, mu=mu, qd0=qd0, inertia=inertia)
-    solver = newton.solvers.SolverVBD(model, iterations=10, rigid_avbd_beta=1.0e5)
+    solver = newton.solvers.SolverVBD(model, iterations=10)
 
     state_in = model.state()
     state_out = model.state()
@@ -331,7 +341,7 @@ def test_zero_friction_no_effect(test, device):
     qd0 = 2.0
     inertia = 1.0
     model = _build_revolute_with_friction(device, mu=0.0, qd0=qd0, inertia=inertia)
-    solver = newton.solvers.SolverVBD(model, iterations=10, rigid_avbd_beta=1.0e5)
+    solver = newton.solvers.SolverVBD(model, iterations=10)
 
     n_steps = int(round(0.5 / DT))
     state = _step(model, solver, n_steps=n_steps)

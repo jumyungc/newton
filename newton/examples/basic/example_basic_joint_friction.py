@@ -17,7 +17,7 @@
 # parallel; their angles and velocities are streamed via
 # viewer.log_scalar so you see them overlap in the GL viewer.
 #
-# Command: python -m newton.examples basic_joint_friction
+# Command: uv run -m newton.examples basic_joint_friction
 #
 ###########################################################################
 

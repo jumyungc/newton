@@ -127,8 +127,8 @@ class SolverVBD(SolverBase):
         - :attr:`~newton.Control.joint_f` (feedforward forces) is supported.
         - :attr:`~newton.Model.joint_friction` is supported for REVOLUTE, PRISMATIC, and D6
           joints as a per-DOF Coulomb dry-friction force/torque [N or N·m]. The model is
-          regularized via a smooth ``tanh(qd / eps)`` velocity-opposing law (not an exact LCP
-          stick).
+          regularized via a smooth ``tanh(qd / smoothing_velocity)`` velocity-opposing law
+          (not an exact LCP stick).
         - Not supported: :attr:`~newton.Model.joint_armature`,
           :attr:`~newton.Model.joint_effort_limit`, :attr:`~newton.Model.joint_velocity_limit`,
           :attr:`~newton.Model.joint_target_mode`, equality constraints, mimic constraints.
@@ -1668,7 +1668,7 @@ class SolverVBD(SolverBase):
             device=self.device,
         )
 
-        if control is not None and control.joint_f is not None:
+        if control.joint_f is not None:
             wp.launch(
                 kernel=convert_joint_impulse_to_parent_f,
                 dim=model.joint_count,
@@ -2056,7 +2056,7 @@ class SolverVBD(SolverBase):
 
             # Accumulate joint_f into body wrenches (scratch buffer avoids mutating user state).
             body_f_for_integration = state_in.body_f
-            if model.joint_count > 0 and control is not None and control.joint_f is not None:
+            if model.joint_count > 0 and control.joint_f is not None:
                 wp.copy(self._body_f_for_integration, state_in.body_f)
                 body_f_for_integration = self._body_f_for_integration
                 joint_impulse = None
