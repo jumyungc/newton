@@ -315,6 +315,20 @@ add_example_test(
 )
 add_example_test(
     TestCableExamples,
+    name="cable.example_vbd_joint_reaction_four_bar",
+    devices=test_devices,
+    use_viewer=True,
+    test_options={"num-frames": 20},
+)
+add_example_test(
+    TestCableExamples,
+    name="cable.example_vbd_joint_reaction_closed_cable",
+    devices=test_devices,
+    use_viewer=True,
+    test_options={"num-frames": 20},
+)
+add_example_test(
+    TestCableExamples,
     name="cable.example_cable_bundle_hysteresis",
     devices=test_devices,
     use_viewer=True,

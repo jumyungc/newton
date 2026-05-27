@@ -113,6 +113,11 @@ The canonical list is :attr:`State.EXTENDED_ATTRIBUTES <newton.State.EXTENDED_AT
    * - ``vbd:cable_tension``
      - VBD cable stretch tension magnitudes [N], joint-indexed. Access as ``state.vbd.cable_tension``.
        Only populated by :class:`~newton.solvers.SolverVBD`.
+   * - ``vbd:joint_reaction_f``
+     - VBD parent-to-child joint reaction wrenches [N, N·m], joint-indexed. Access as
+       ``state.vbd.joint_reaction_f``. Values use the same world-frame, child-COM reference
+       convention as :attr:`~newton.State.body_parent_f`, but remain separated per joint.
+       Only populated by :class:`~newton.solvers.SolverVBD`.
    * - ``mujoco:qfrc_actuator``
      - Actuator forces in generalized (joint DOF) coordinates. Access as ``state.mujoco.qfrc_actuator``.
        Only populated by :class:`~newton.solvers.SolverMuJoCo`.
@@ -123,4 +128,4 @@ Notes
 
 - Some components transparently request attributes they need. For example, :class:`~newton.sensors.SensorIMU` requests ``body_qdd`` and :class:`~newton.sensors.SensorContact` requests ``force``.
   Create sensors before allocating State/Contacts for this to work automatically.
-- Solvers populate extended attributes they support. :class:`~newton.solvers.SolverMuJoCo` populates ``body_qdd``, ``body_parent_f``, ``mujoco:qfrc_actuator``, and ``force``. :class:`~newton.solvers.SolverFeatherstone` populates ``body_parent_f`` directly from its RNEA backward pass. :class:`~newton.solvers.SolverXPBD` populates ``body_parent_f`` and ``force``; XPBD's reported wrenches are approximate (it applies relaxation factors to each constraint correction and is not momentum-conserving), so they should be treated as the *applied* constraint reaction rather than an exact analytic value. :class:`~newton.solvers.SolverVBD` populates ``body_parent_f`` and ``vbd:cable_tension`` when those attributes are requested.
+- Solvers populate extended attributes they support. :class:`~newton.solvers.SolverMuJoCo` populates ``body_qdd``, ``body_parent_f``, ``mujoco:qfrc_actuator``, and ``force``. :class:`~newton.solvers.SolverFeatherstone` populates ``body_parent_f`` directly from its RNEA backward pass. :class:`~newton.solvers.SolverXPBD` populates ``body_parent_f`` and ``force``; XPBD's reported wrenches are approximate (it applies relaxation factors to each constraint correction and is not momentum-conserving), so they should be treated as the *applied* constraint reaction rather than an exact analytic value. :class:`~newton.solvers.SolverVBD` populates ``body_parent_f``, ``vbd:joint_reaction_f``, and ``vbd:cable_tension`` when those attributes are requested.

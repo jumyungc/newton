@@ -13,9 +13,12 @@
 - Add `newton.utils.OnnxRuntime`, a graph-capturable ONNX inference engine backed solely by Warp kernels (no `onnxruntime` or `torch` runtime dependency); used by `ControllerNeuralMLP` and `ControllerNeuralLSTM` to load `.onnx` policies. To migrate a TorchScript policy, run `torch.onnx.export(model, dummy_input, "policy.onnx", opset_version=17)` once and point the controllers at the resulting `.onnx` file. The `onnx` package is now an optional extra (`pip install newton[onnx]`); install it explicitly to use the ONNX runtime.
 - Add per-DOF Coulomb joint friction support to `SolverVBD` for REVOLUTE, PRISMATIC, and D6 joints via `Model.joint_friction` [N or N·m], modeled as a regularized velocity-opposing `tanh(qd / smoothing_velocity)` law.
 - Add `body_parent_f` extended state attribute support to `SolverVBD` for reading parent-joint reaction force and torque in world frame at the child body's COM.
+- Add `vbd:joint_reaction_f` extended state attribute support to `SolverVBD` for reading joint-indexed reaction wrenches before per-body accumulation.
 - Add `vbd:cable_tension` extended state attribute support to `SolverVBD` for reading joint-indexed cable stretch tension magnitudes.
 - Add `cable_tension_hanging` and `cable_tension_pulley` examples demonstrating VBD cable tension readout.
 - Add `vbd_joint_reaction_pendulum` and `vbd_joint_reaction_double_pendulum` examples demonstrating VBD parent-joint reaction readout.
+- Add `vbd_joint_reaction_four_bar` example demonstrating VBD per-joint reaction readout in a closed loop.
+- Add `vbd_joint_reaction_closed_cable` example demonstrating VBD per-joint reaction and cable tension readout on a closed cable loop.
 - Add USD parsing for `NewtonSiteAPI` to mark shapes as sites.
 
 ### Changed

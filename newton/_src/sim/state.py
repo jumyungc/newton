@@ -60,6 +60,7 @@ class State:
             "body_qdd",
             "body_parent_f",
             "vbd:cable_tension",
+            "vbd:joint_reaction_f",
             "mujoco:qfrc_actuator",
         )
     )

@@ -2018,11 +2018,14 @@ def compute_body_parent_f_from_joints(
     joint_friction: wp.array[float],
     dt: float,
     body_parent_f: wp.array[wp.spatial_vector],
+    joint_reaction_f: wp.array[wp.spatial_vector],
 ):
-    """Accumulate VBD joint reaction wrenches into ``State.body_parent_f``.
+    """Report VBD joint reaction wrenches.
 
-    The output convention matches the rest of Newton: parent-to-child wrench in
-    world frame, referenced to the child body's COM.
+    The output convention matches ``State.body_parent_f``: parent-to-child
+    wrench in world frame, referenced to the child body's COM.  The optional
+    ``joint_reaction_f`` output keeps one wrench per joint before the optional
+    per-body accumulation into ``body_parent_f``.
     """
     joint_index = wp.tid()
     child_index = joint_child[joint_index]
@@ -2092,7 +2095,42 @@ def compute_body_parent_f_from_joints(
     force = force + force_corr
     torque = torque + torque_corr
 
-    wp.atomic_add(body_parent_f, child_index, wp.spatial_vector(force, torque))
+    wrench = wp.spatial_vector(force, torque)
+    if joint_reaction_f:
+        joint_reaction_f[joint_index] = wrench
+    if body_parent_f:
+        wp.atomic_add(body_parent_f, child_index, wrench)
+
+
+@wp.kernel
+def add_joint_impulse_to_reactions(
+    joint_impulse: wp.array[wp.spatial_vector],
+    joint_enabled: wp.array[bool],
+    joint_type: wp.array[int],
+    joint_child: wp.array[int],
+    dt: float,
+    body_parent_f: wp.array[wp.spatial_vector],
+    joint_reaction_f: wp.array[wp.spatial_vector],
+):
+    """Add direct joint-force impulse contributions to VBD reaction readouts."""
+    joint_index = wp.tid()
+    if not joint_enabled[joint_index]:
+        return
+    if joint_type[joint_index] == JointType.FREE:
+        return
+
+    child_index = joint_child[joint_index]
+    if child_index < 0:
+        return
+
+    inv_dt = 1.0 / dt
+    impulse = joint_impulse[joint_index]
+    wrench = wp.spatial_vector(wp.spatial_top(impulse) * inv_dt, wp.spatial_bottom(impulse) * inv_dt)
+
+    if joint_reaction_f:
+        joint_reaction_f[joint_index] = joint_reaction_f[joint_index] + wrench
+    if body_parent_f:
+        wp.atomic_add(body_parent_f, child_index, wrench)
 
 
 @wp.kernel

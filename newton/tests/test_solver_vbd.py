@@ -668,6 +668,143 @@ def _vbd_body_parent_f_double_pendulum_balances_subtree_weight(test, device):
     np.testing.assert_allclose(parent_f[:, 3:], np.zeros((2, 3)), atol=1.0e-3)
 
 
+def _vbd_joint_reaction_f_static_pendulum_balances_gravity(test, device):
+    builder = newton.ModelBuilder(gravity=-9.81, up_axis=newton.Axis.Z)
+    builder.request_state_attributes("vbd:joint_reaction_f")
+
+    link = builder.add_link(xform=wp.transform(wp.vec3(0.0, 0.0, -1.0), wp.quat_identity()))
+    builder.add_shape_box(link, hx=0.1, hy=0.1, hz=0.1)
+    joint = builder.add_joint_revolute(
+        parent=-1,
+        child=link,
+        parent_xform=wp.transform_identity(),
+        child_xform=wp.transform(wp.vec3(0.0, 0.0, 1.0), wp.quat_identity()),
+        axis=wp.vec3(0.0, 1.0, 0.0),
+    )
+    builder.add_articulation([joint])
+    builder.color()
+
+    model = builder.finalize(device=device)
+    solver = newton.solvers.SolverVBD(model, iterations=64)
+    state_0 = model.state()
+    state_1 = model.state()
+
+    test.assertTrue(hasattr(state_1, "vbd"))
+    test.assertIsNotNone(state_1.vbd.joint_reaction_f)
+    test.assertIsNone(state_1.body_parent_f)
+
+    solver.step(state_0, state_1, None, None, 5.0e-3)
+
+    joint_reaction = state_1.vbd.joint_reaction_f.numpy()[joint]
+    mass = model.body_mass.numpy()[link]
+    gravity = model.gravity.numpy()[0]
+    expected_linear = -mass * gravity
+
+    np.testing.assert_allclose(joint_reaction[:3], expected_linear, rtol=1.0e-3, atol=1.0e-4)
+    np.testing.assert_allclose(joint_reaction[3:], np.zeros(3), atol=1.0e-4)
+
+
+def _fourbar_geometry(theta: float = 0.55):
+    a_link, b_link, c_link, d_link = 0.28, 0.62, 0.48, 0.58
+    point_a = np.array([0.0, 0.0, 0.0], dtype=float)
+    point_d = np.array([d_link, 0.0, 0.0], dtype=float)
+    point_b = point_a + a_link * np.array([np.cos(theta), np.sin(theta), 0.0], dtype=float)
+
+    bd = point_d - point_b
+    dist_bd = float(np.linalg.norm(bd))
+    ex = bd / dist_bd
+    ey = np.array([-ex[1], ex[0], 0.0], dtype=float)
+    x = (b_link * b_link - c_link * c_link + dist_bd * dist_bd) / (2.0 * dist_bd)
+    h = np.sqrt(max(b_link * b_link - x * x, 0.0))
+    point_c = point_b + x * ex + h * ey
+    return (point_a, point_b, point_c, point_d), (a_link, b_link, c_link)
+
+
+def _link_pose(p0: np.ndarray, p1: np.ndarray) -> wp.transform:
+    midpoint = 0.5 * (p0 + p1)
+    angle = float(np.arctan2(p1[1] - p0[1], p1[0] - p0[0]))
+    q = wp.quat_from_axis_angle(wp.vec3(0.0, 0.0, 1.0), angle)
+    return wp.transform(wp.vec3(*midpoint), q)
+
+
+def _vbd_joint_reaction_f_separates_loop_joint_contributions(test, device):
+    builder = newton.ModelBuilder(gravity=0.0, up_axis=newton.Axis.Z)
+    builder.request_state_attributes("body_parent_f", "vbd:joint_reaction_f")
+    cfg = newton.ModelBuilder.ShapeConfig()
+    cfg.density = 1000.0
+
+    (point_a, point_b, point_c, point_d), (a_link, b_link, c_link) = _fourbar_geometry()
+    crank = builder.add_link(xform=_link_pose(point_a, point_b))
+    coupler = builder.add_link(xform=_link_pose(point_b, point_c))
+    rocker = builder.add_link(xform=_link_pose(point_d, point_c))
+    builder.add_shape_box(crank, hx=0.5 * a_link, hy=0.02, hz=0.02, cfg=cfg)
+    builder.add_shape_box(coupler, hx=0.5 * b_link, hy=0.02, hz=0.02, cfg=cfg)
+    builder.add_shape_box(rocker, hx=0.5 * c_link, hy=0.02, hz=0.02, cfg=cfg)
+
+    j_crank = builder.add_joint_revolute(
+        parent=-1,
+        child=crank,
+        parent_xform=wp.transform(wp.vec3(*point_a), wp.quat_identity()),
+        child_xform=wp.transform(wp.vec3(-0.5 * a_link, 0.0, 0.0), wp.quat_identity()),
+        axis=wp.vec3(0.0, 0.0, 1.0),
+    )
+    j_coupler = builder.add_joint_revolute(
+        parent=crank,
+        child=coupler,
+        parent_xform=wp.transform(wp.vec3(0.5 * a_link, 0.0, 0.0), wp.quat_identity()),
+        child_xform=wp.transform(wp.vec3(-0.5 * b_link, 0.0, 0.0), wp.quat_identity()),
+        axis=wp.vec3(0.0, 0.0, 1.0),
+    )
+    j_rocker = builder.add_joint_revolute(
+        parent=coupler,
+        child=rocker,
+        parent_xform=wp.transform(wp.vec3(0.5 * b_link, 0.0, 0.0), wp.quat_identity()),
+        child_xform=wp.transform(wp.vec3(0.5 * c_link, 0.0, 0.0), wp.quat_identity()),
+        axis=wp.vec3(0.0, 0.0, 1.0),
+    )
+    j_loop = builder.add_joint_revolute(
+        parent=-1,
+        child=rocker,
+        parent_xform=wp.transform(wp.vec3(*point_d), wp.quat_identity()),
+        child_xform=wp.transform(wp.vec3(-0.5 * c_link, 0.0, 0.0), wp.quat_identity()),
+        axis=wp.vec3(0.0, 0.0, 1.0),
+    )
+    builder.add_articulation([j_crank, j_coupler, j_rocker])
+    builder.joint_articulation[j_loop] = -1
+    builder.color()
+
+    model = builder.finalize(device=device)
+    solver = newton.solvers.SolverVBD(model, iterations=32)
+    state_0 = model.state()
+    state_1 = model.state()
+    control = model.control()
+
+    joint_f = np.zeros(model.joint_dof_count, dtype=np.float32)
+    joint_f[int(model.joint_qd_start.numpy()[j_crank])] = 0.2
+    control.joint_f.assign(joint_f)
+
+    for _ in range(8):
+        solver.step(state_0, state_1, control, None, 1.0 / 240.0)
+        state_0, state_1 = state_1, state_0
+
+    joint_reaction = state_0.vbd.joint_reaction_f.numpy()
+    body_parent_f = state_0.body_parent_f.numpy()
+    joint_child = model.joint_child.numpy()
+    summed = np.zeros_like(body_parent_f)
+    for joint_index, child in enumerate(joint_child):
+        if child >= 0:
+            summed[child] += joint_reaction[joint_index]
+
+    np.testing.assert_allclose(body_parent_f, summed, rtol=1.0e-5, atol=1.0e-5)
+    test.assertGreater(np.linalg.norm(joint_reaction[j_rocker, :3]), 1.0e-4)
+    test.assertGreater(np.linalg.norm(joint_reaction[j_loop, :3]), 1.0e-4)
+    test.assertGreater(
+        np.linalg.norm(joint_reaction[j_rocker] - joint_reaction[j_loop]),
+        1.0e-4,
+        "Loop-body reactions should remain separated per joint before body_parent_f accumulation.",
+    )
+
+
 def _vbd_cable_tension_balances_hanging_load(test, device):
     for applied_downward_force in (0.0, 5.0):
         builder = newton.ModelBuilder(gravity=-9.81, up_axis=newton.Axis.Z)
@@ -781,6 +918,18 @@ add_function_test(
     TestSolverVBD,
     "test_vbd_body_parent_f_double_pendulum_balances_subtree_weight",
     _vbd_body_parent_f_double_pendulum_balances_subtree_weight,
+    devices=devices,
+)
+add_function_test(
+    TestSolverVBD,
+    "test_vbd_joint_reaction_f_static_pendulum_balances_gravity",
+    _vbd_joint_reaction_f_static_pendulum_balances_gravity,
+    devices=devices,
+)
+add_function_test(
+    TestSolverVBD,
+    "test_vbd_joint_reaction_f_separates_loop_joint_contributions",
+    _vbd_joint_reaction_f_separates_loop_joint_contributions,
     devices=devices,
 )
 add_function_test(

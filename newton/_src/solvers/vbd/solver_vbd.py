@@ -20,7 +20,7 @@ from ...sim import (
 )
 from ..flags import SolverNotifyFlags
 from ..solver import SolverBase
-from ..xpbd.kernels import apply_joint_forces, convert_joint_impulse_to_parent_f
+from ..xpbd.kernels import apply_joint_forces
 from .particle_vbd_kernels import (
     NUM_THREADS_PER_COLLISION_PRIMITIVE,
     TILE_SIZE_TRI_MESH_ELASTICITY_SOLVE,
@@ -56,6 +56,7 @@ from .rigid_vbd_kernels import (
     RigidForceElementAdjacencyInfo,
     _count_num_adjacent_joints,
     _fill_adjacent_joints,
+    add_joint_impulse_to_reactions,
     accumulate_body_body_contacts_per_body,
     accumulate_body_particle_contacts_per_body,
     build_body_body_contact_lists,
@@ -107,6 +108,9 @@ class SolverVBD(SolverBase):
     When requested via ``ModelBuilder.request_state_attributes("body_parent_f")``,
     VBD reports incoming parent-joint wrenches in ``State.body_parent_f``. Values
     are expressed in world frame and referenced to each child body's COM.
+    When requested via ``ModelBuilder.request_state_attributes("vbd:joint_reaction_f")``,
+    VBD reports joint-indexed parent-to-child reaction wrenches in
+    ``State.vbd.joint_reaction_f`` using the same frame and COM reference.
     When requested via ``ModelBuilder.request_state_attributes("vbd:cable_tension")``,
     VBD reports joint-indexed cable stretch tension magnitudes in
     ``State.vbd.cable_tension``; non-cable joints are reported as zero.
@@ -1593,16 +1597,16 @@ class SolverVBD(SolverBase):
         if control is None:
             control = self.model.control(clone_variables=False)
 
-        self._initialize_rigid_bodies(
-            state_in, control, contacts, dt, update_rigid, state_out.body_parent_f is not None
-        )
+        joint_reaction_f = self._get_vbd_joint_reaction_f(state_out)
+        record_joint_reactions = state_out.body_parent_f is not None or joint_reaction_f is not None
+        self._initialize_rigid_bodies(state_in, control, contacts, dt, update_rigid, record_joint_reactions)
         self._initialize_particles(state_in, state_out, dt)
 
         for iter_num in range(self.iterations):
             self._solve_rigid_body_iteration(state_in, state_out, control, contacts, dt)
             self._solve_particle_iteration(state_in, state_out, contacts, dt, iter_num)
 
-        self._populate_body_parent_f(state_in, state_out, control, dt)
+        self._populate_joint_reactions(state_in, state_out, control, dt)
         self._populate_cable_tension(state_in, state_out, dt)
 
         # Snapshot solved rigid contact state for next-frame warm-start.
@@ -1612,13 +1616,21 @@ class SolverVBD(SolverBase):
         )
         self._finalize_particles(state_out, dt)
 
-    def _populate_body_parent_f(self, state_in: State, state_out: State, control: Control, dt: float) -> None:
-        """Populate optional parent-joint wrench output for the accepted VBD solve."""
+    def _get_vbd_joint_reaction_f(self, state: State) -> wp.array | None:
+        vbd_state = getattr(state, "vbd", None)
+        return getattr(vbd_state, "joint_reaction_f", None)
+
+    def _populate_joint_reactions(self, state_in: State, state_out: State, control: Control, dt: float) -> None:
+        """Populate optional joint and body parent wrench outputs for the accepted VBD solve."""
         body_parent_f = state_out.body_parent_f
-        if body_parent_f is None:
+        joint_reaction_f = self._get_vbd_joint_reaction_f(state_out)
+        if body_parent_f is None and joint_reaction_f is None:
             return
 
-        body_parent_f.zero_()
+        if body_parent_f is not None:
+            body_parent_f.zero_()
+        if joint_reaction_f is not None:
+            joint_reaction_f.zero_()
 
         model = self.model
         if model.body_count == 0 or model.joint_count == 0 or self.integrate_with_external_rigid_solver:
@@ -1664,13 +1676,13 @@ class SolverVBD(SolverBase):
                 model.joint_friction,
                 dt,
             ],
-            outputs=[body_parent_f],
+            outputs=[body_parent_f, joint_reaction_f],
             device=self.device,
         )
 
         if control.joint_f is not None:
             wp.launch(
-                kernel=convert_joint_impulse_to_parent_f,
+                kernel=add_joint_impulse_to_reactions,
                 dim=model.joint_count,
                 inputs=[
                     self._joint_f_parent_impulse,
@@ -1679,7 +1691,7 @@ class SolverVBD(SolverBase):
                     model.joint_child,
                     dt,
                 ],
-                outputs=[body_parent_f],
+                outputs=[body_parent_f, joint_reaction_f],
                 device=self.device,
             )
 
