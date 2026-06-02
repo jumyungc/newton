@@ -1897,9 +1897,12 @@ def build_body_body_contact_lists(
     rigid_contact_shape1: wp.array[int],
     shape_body: wp.array[wp.int32],
     body_contact_buffer_pre_alloc: int,
+    auto_contact_threshold: int,
     body_contact_counts: wp.array[wp.int32],
     body_contact_indices: wp.array[wp.int32],
     body_contact_overflow_max: wp.array[wp.int32],
+    auto_max_contact_count: wp.array[wp.int32],
+    auto_use_tiled_contacts: wp.array[wp.int32],
 ):
     """
     Build per-body contact lists for body-centric per-color contact evaluation.
@@ -1916,6 +1919,14 @@ def build_body_body_contact_lists(
 
     if b0 >= 0:
         idx = wp.atomic_add(body_contact_counts, b0, 1)
+        new_count = idx + 1
+        if auto_contact_threshold >= 0:
+            capped_count = new_count
+            if capped_count > body_contact_buffer_pre_alloc:
+                capped_count = body_contact_buffer_pre_alloc
+            wp.atomic_max(auto_max_contact_count, 0, capped_count)
+            if capped_count > auto_contact_threshold:
+                wp.atomic_max(auto_use_tiled_contacts, 0, wp.int32(1))
         if idx < body_contact_buffer_pre_alloc:
             body_contact_indices[b0 * body_contact_buffer_pre_alloc + idx] = t_id
         else:
@@ -1923,6 +1934,14 @@ def build_body_body_contact_lists(
 
     if b1 >= 0:
         idx = wp.atomic_add(body_contact_counts, b1, 1)
+        new_count = idx + 1
+        if auto_contact_threshold >= 0:
+            capped_count = new_count
+            if capped_count > body_contact_buffer_pre_alloc:
+                capped_count = body_contact_buffer_pre_alloc
+            wp.atomic_max(auto_max_contact_count, 0, capped_count)
+            if capped_count > auto_contact_threshold:
+                wp.atomic_max(auto_use_tiled_contacts, 0, wp.int32(1))
         if idx < body_contact_buffer_pre_alloc:
             body_contact_indices[b1 * body_contact_buffer_pre_alloc + idx] = t_id
         else:
@@ -1969,6 +1988,39 @@ def update_body_contact_count_auto_condition(
     wp.atomic_max(max_contact_count, 0, count)
     if count > threshold:
         wp.atomic_max(use_tiled_contacts, 0, wp.int32(1))
+
+
+@wp.kernel
+def update_body_contact_count_auto_condition_contact_density(
+    body_contact_counts: wp.array[wp.int32],
+    body_contact_buffer_pre_alloc: int,
+    rigid_contact_count: wp.array[int],
+    body_count: int,
+    max_threshold: int,
+    mean_threshold: int,
+    max_contact_count: wp.array[wp.int32],
+    use_tiled_contacts: wp.array[wp.int32],
+):
+    """Mark tiled contacts when max/body is high and total contact density is high."""
+    body = wp.tid()
+    count = body_contact_counts[body]
+    if count > body_contact_buffer_pre_alloc:
+        count = body_contact_buffer_pre_alloc
+    wp.atomic_max(max_contact_count, 0, count)
+
+    # Most rigid-rigid contacts contribute to two body contact lists. Static-shape
+    # contacts contribute to one, so this is a conservative density hint.
+    total_body_contact_hint = rigid_contact_count[0] * 2
+    if count > max_threshold and total_body_contact_hint >= mean_threshold * body_count:
+        wp.atomic_max(use_tiled_contacts, 0, wp.int32(1))
+
+
+@wp.kernel
+def reset_body_color_solve_cursor(
+    active_count: wp.array[wp.int32],
+    cursor: wp.array[wp.int32],
+):
+    cursor[0] = active_count[0]
 
 
 @wp.kernel
@@ -3894,6 +3946,12 @@ def solve_rigid_body_with_contacts(
     body_contact_counts: wp.array[wp.int32],
     body_contact_indices: wp.array[wp.int32],
     fused_contact_max: int,
+    contact_filter_min: int,
+    contact_filter_max: int,
+    active_body_color: int,
+    use_body_color_group_count: int,
+    body_color_group_counts: wp.array[wp.int32],
+    body_colors: wp.array[wp.int32],
     # Output
     body_q_new: wp.array[wp.transform],
 ):
@@ -3937,7 +3995,23 @@ def solve_rigid_body_with_contacts(
       - All forces, torques, and Hessian blocks are expressed in the world frame.
     """
     tid = wp.tid()
+    if active_body_color >= 0 and use_body_color_group_count == 1:
+        if tid >= body_color_group_counts[active_body_color]:
+            return
+
     body_index = body_ids_in_color[tid]
+    if body_index < 0:
+        return
+    if active_body_color >= 0 and body_colors[body_index] != active_body_color:
+        return
+
+    num_contacts_for_filter = body_contact_counts[body_index]
+    if num_contacts_for_filter > body_contact_buffer_pre_alloc:
+        num_contacts_for_filter = body_contact_buffer_pre_alloc
+    if contact_filter_min > 0 and num_contacts_for_filter < contact_filter_min:
+        return
+    if contact_filter_max >= 0 and num_contacts_for_filter > contact_filter_max:
+        return
 
     q_current = body_q[body_index]
 
@@ -4282,11 +4356,18 @@ def solve_rigid_body_with_contacts_tile(
     body_contact_counts: wp.array[wp.int32],
     body_contact_indices: wp.array[wp.int32],
     fused_contact_max: int,
+    contact_filter_min: int,
+    contact_filter_max: int,
     active_body_color: int,
     use_body_color_group_count: int,
     body_color_group_counts: wp.array[wp.int32],
     body_colors: wp.array[wp.int32],
     contact_tile_width: int,
+    body_color_group_capacity: int,
+    body_color_active_count: wp.array[wp.int32],
+    body_color_cursor: wp.array[wp.int32],
+    body_color_active_colors: wp.array[wp.int32],
+    use_body_color_cursor: int,
     # Output
     body_q_new: wp.array[wp.transform],
 ):
@@ -4333,16 +4414,40 @@ def solve_rigid_body_with_contacts_tile(
     body_idx_in_group = tid // contact_tile_width
     thread_id_within_body = tid % contact_tile_width
 
-    if body_idx_in_group >= body_ids_in_color.shape[0]:
-        return
-    if active_body_color >= 0 and use_body_color_group_count == 1:
-        if body_idx_in_group >= body_color_group_counts[active_body_color]:
+    cursor_color = active_body_color
+    if use_body_color_cursor == 1:
+        cursor = body_color_cursor[0]
+        if cursor <= 0:
             return
+        active_slot = body_color_active_count[0] - cursor
+        if active_slot < 0 or active_slot >= body_color_active_count[0]:
+            return
+        cursor_color = body_color_active_colors[active_slot]
+        if cursor_color < 0:
+            return
+        if body_idx_in_group >= body_color_group_counts[cursor_color]:
+            return
+        body_index = body_ids_in_color[cursor_color * body_color_group_capacity + body_idx_in_group]
+    else:
+        if body_idx_in_group >= body_ids_in_color.shape[0]:
+            return
+        if active_body_color >= 0 and use_body_color_group_count == 1:
+            if body_idx_in_group >= body_color_group_counts[active_body_color]:
+                return
 
-    body_index = body_ids_in_color[body_idx_in_group]
+        body_index = body_ids_in_color[body_idx_in_group]
+
     if body_index < 0:
         return
-    if active_body_color >= 0 and body_colors[body_index] != active_body_color:
+    if cursor_color >= 0 and body_colors[body_index] != cursor_color:
+        return
+
+    num_contacts_for_filter = body_contact_counts[body_index]
+    if num_contacts_for_filter > body_contact_buffer_pre_alloc:
+        num_contacts_for_filter = body_contact_buffer_pre_alloc
+    if contact_filter_min > 0 and num_contacts_for_filter < contact_filter_min:
+        return
+    if contact_filter_max >= 0 and num_contacts_for_filter > contact_filter_max:
         return
 
     q_current = body_q[body_index]
@@ -4358,8 +4463,9 @@ def solve_rigid_body_with_contacts_tile(
     if num_contacts > body_contact_buffer_pre_alloc:
         num_contacts = body_contact_buffer_pre_alloc
 
-    if fused_contact_max >= 0 and num_contacts > fused_contact_max:
-        num_contacts = wp.int32(0)
+    serial_contact_path = bool(False)
+    if fused_contact_max >= 0 and num_contacts <= fused_contact_max:
+        serial_contact_path = True
 
     contact_count = rigid_contact_count[0]
     force_acc = wp.vec3(0.0)
@@ -4369,10 +4475,17 @@ def solve_rigid_body_with_contacts_tile(
     h_aa_acc = wp.mat33(0.0)
 
     contact_counter = thread_id_within_body
+    contact_stride = contact_tile_width
+    if serial_contact_path:
+        contact_stride = wp.int32(1)
+        if thread_id_within_body == 0:
+            contact_counter = wp.int32(0)
+        else:
+            contact_counter = num_contacts
     while contact_counter < num_contacts:
         contact_idx = body_contact_indices[body_index * body_contact_buffer_pre_alloc + contact_counter]
         if contact_idx >= contact_count:
-            contact_counter += contact_tile_width
+            contact_counter += contact_stride
             continue
 
         s0 = rigid_contact_shape0[contact_idx]
@@ -4381,7 +4494,7 @@ def solve_rigid_body_with_contacts_tile(
         b1 = shape_body[s1] if s1 >= 0 else -1
 
         if b0 != body_index and b1 != body_index:
-            contact_counter += contact_tile_width
+            contact_counter += contact_stride
             continue
 
         cp0_local = rigid_contact_point0[contact_idx]
@@ -4408,12 +4521,12 @@ def solve_rigid_body_with_contacts_tile(
             friction_c0 = (1.0 - contact_avbd_alpha) * (C0_vec - contact_normal * C0_n)
 
         if C_n <= _SMALL_LENGTH_EPS and lam_n <= 0.0:
-            contact_counter += contact_tile_width
+            contact_counter += contact_stride
             continue
 
         f_n_check = k * C_eff + lam_n
         if f_n_check <= 0.0 and lam_n <= 0.0:
-            contact_counter += contact_tile_width
+            contact_counter += contact_stride
             continue
 
         (
@@ -4461,7 +4574,7 @@ def solve_rigid_body_with_contacts_tile(
             h_al_acc = h_al_acc + h_al_1
             h_aa_acc = h_aa_acc + h_aa_1
 
-        contact_counter += contact_tile_width
+        contact_counter += contact_stride
 
     force_tile = wp.tile(force_acc, preserve_type=True)
     torque_tile = wp.tile(torque_acc, preserve_type=True)
@@ -4640,6 +4753,9 @@ def solve_rigid_body_with_contacts_tile(
     pos_new = com_new - wp.quat_rotate(rot_new, body_com_local)
 
     body_q_new[body_index] = wp.transform(pos_new, rot_new)
+
+    if use_body_color_cursor == 1 and tid == 0:
+        body_color_cursor[0] = body_color_cursor[0] - 1
 
 
 

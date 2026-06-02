@@ -71,6 +71,7 @@ from .rigid_vbd_kernels import (
     init_body_body_contact_materials,
     init_body_body_contacts_avbd,
     init_body_particle_contacts,
+    reset_body_color_solve_cursor,
     snapshot_body_body_contact_history,
     solve_rigid_body,
     solve_rigid_body_with_contacts,
@@ -83,6 +84,7 @@ from .rigid_vbd_kernels import (
     step_body_body_contact_C0_lambda,
     step_joint_C0_lambda,
     update_body_contact_count_auto_condition,
+    update_body_contact_count_auto_condition_contact_density,
     update_body_velocity,
     update_cable_dahl_state,
     update_duals_body_body_contacts,
@@ -237,7 +239,7 @@ class SolverVBD(SolverBase):
         # Rigid body - contacts
         rigid_contact_hard: bool = True,  # Body-body contacts: hard=AL duals+C0, soft=penalty only
         rigid_contact_accumulation_mode: str | None = None,  # Internal benchmark override; None selects the production path
-        rigid_contact_fuse_max: int = 4,  # Hybrid modes fuse bodies with at most this many contacts
+        rigid_contact_fuse_max: int = 7,  # Hybrid modes fuse bodies with at most this many contacts
         rigid_contact_tile_width: int = 4,  # Threads per body for fused_tile contact accumulation
         rigid_contact_jacobi_relaxation: float = 1.0,  # Jacobi modes relax primal poses and hard-contact duals
         rigid_contact_history: bool = False,  # Body-body contact warm-start (hard: k+duals+anchors; soft: k)
@@ -639,17 +641,40 @@ class SolverVBD(SolverBase):
         self.rigid_contact_hard = int(rigid_contact_hard)
         if rigid_contact_accumulation_mode is None:
             rigid_contact_accumulation_mode = "auto" if model.device.is_cuda else "fused"
-        elif rigid_contact_accumulation_mode == "auto" and not model.device.is_cuda:
+        elif rigid_contact_accumulation_mode in (
+            "auto",
+            "auto_mean2",
+            "auto_mean4",
+            "auto_mean6",
+            "auto_fused_block32",
+            "auto_fused_block64",
+            "auto_fused_block128",
+        ) and not model.device.is_cuda:
             rigid_contact_accumulation_mode = "fused"
 
         if rigid_contact_accumulation_mode not in (
             "auto",
+            "auto_mean2",
+            "auto_mean4",
+            "auto_mean6",
+            "auto_fused_block32",
+            "auto_fused_block64",
+            "auto_fused_block128",
             "atomic",
             "tile",
             "fused",
+            "fused_block32",
+            "fused_block64",
+            "fused_block128",
+            "fused_block256",
             "fused_tile",
+            "fused_tile_hybrid",
+            "fused_bucket_tile32",
+            "fused_color_compact",
+            "fused_block32_color_compact",
             "fused_tile_color_filter",
             "fused_tile_color_compact",
+            "fused_tile_color_cursor",
             "hybrid_atomic",
             "hybrid_tile",
             "inline_reduce",
@@ -664,14 +689,22 @@ class SolverVBD(SolverBase):
             "jacobi_fused",
         ):
             raise ValueError(
-                f"rigid_contact_accumulation_mode must be auto, atomic, tile, fused, fused_tile, fused_tile_color_filter, fused_tile_color_compact, hybrid_atomic, hybrid_tile, inline_reduce, jacobi, jacobi_tile, body_jacobi, body_jacobi_tile, contact_color, jacobi_reduce, jacobi_reduce_hybrid, jacobi_inline_reduce, or jacobi_fused, got {rigid_contact_accumulation_mode}"
+                f"rigid_contact_accumulation_mode must be auto, auto_mean2, auto_mean4, auto_mean6, auto_fused_block32, auto_fused_block64, auto_fused_block128, atomic, tile, fused, fused_block32, fused_block64, fused_block128, fused_block256, fused_tile, fused_tile_hybrid, fused_bucket_tile32, fused_color_compact, fused_block32_color_compact, fused_tile_color_filter, fused_tile_color_compact, fused_tile_color_cursor, hybrid_atomic, hybrid_tile, inline_reduce, jacobi, jacobi_tile, body_jacobi, body_jacobi_tile, contact_color, jacobi_reduce, jacobi_reduce_hybrid, jacobi_inline_reduce, or jacobi_fused, got {rigid_contact_accumulation_mode}"
             )
         if rigid_contact_jacobi_relaxation <= 0.0:
             raise ValueError(f"rigid_contact_jacobi_relaxation must be > 0, got {rigid_contact_jacobi_relaxation}")
         self.rigid_contact_accumulation_mode = rigid_contact_accumulation_mode
         self.rigid_contact_fuse_max = int(rigid_contact_fuse_max)
         self.rigid_contact_tile_width = max(1, int(rigid_contact_tile_width))
-        if self.rigid_contact_accumulation_mode == "auto":
+        if self.rigid_contact_accumulation_mode in (
+            "auto",
+            "auto_mean2",
+            "auto_mean4",
+            "auto_mean6",
+            "auto_fused_block32",
+            "auto_fused_block64",
+            "auto_fused_block128",
+        ):
             self.rigid_contact_tile_width = 32
         self._rigid_contact_auto_use_tile_host = False
         self.rigid_contact_jacobi_relaxation = float(rigid_contact_jacobi_relaxation)
@@ -885,28 +918,81 @@ class SolverVBD(SolverBase):
             return False
         return self.device.captures.get(self.device.stream) is not None
 
+    def _rigid_contact_auto_density_threshold(self) -> int:
+        if self.rigid_contact_accumulation_mode == "auto_mean2":
+            return 2
+        if self.rigid_contact_accumulation_mode == "auto_mean4":
+            return 4
+        if self.rigid_contact_accumulation_mode == "auto_mean6":
+            return 6
+        return 0
+
+    def _rigid_contact_auto_condition_from_contact_build(self) -> bool:
+        return (
+            self.rigid_contact_accumulation_mode
+            in (
+                "auto",
+                "auto_fused_block32",
+                "auto_fused_block64",
+                "auto_fused_block128",
+            )
+            and self._rigid_contact_auto_use_tile is not None
+        )
+
+    def _finish_rigid_contact_auto_condition_from_contact_build(self) -> None:
+        if not self._is_cuda_graph_capture_active():
+            self._rigid_contact_auto_use_tile_host = bool(int(self._rigid_contact_auto_use_tile.numpy()[0]))
+
     def _update_rigid_contact_auto_condition(self, contacts: Contacts | None) -> None:
         """Update the fused-vs-tiled body-contact branch condition for the default CUDA path."""
-        if self.rigid_contact_accumulation_mode != "auto" or self._rigid_contact_auto_use_tile is None:
+        if self.rigid_contact_accumulation_mode not in (
+            "auto",
+            "auto_mean2",
+            "auto_mean4",
+            "auto_mean6",
+            "auto_fused_block32",
+            "auto_fused_block64",
+            "auto_fused_block128",
+        ) or self._rigid_contact_auto_use_tile is None:
             return
 
         self._rigid_contact_auto_max_contacts.zero_()
         self._rigid_contact_auto_use_tile.zero_()
         if contacts is not None and self.model.body_count > 0 and self.body_body_contact_buffer_pre_alloc > 0:
-            wp.launch(
-                kernel=update_body_contact_count_auto_condition,
-                dim=self.model.body_count,
-                inputs=[
-                    self.body_body_contact_counts,
-                    self.body_body_contact_buffer_pre_alloc,
-                    self.rigid_contact_fuse_max,
-                ],
-                outputs=[
-                    self._rigid_contact_auto_max_contacts,
-                    self._rigid_contact_auto_use_tile,
-                ],
-                device=self.device,
-            )
+            density_threshold = self._rigid_contact_auto_density_threshold()
+            if density_threshold > 0:
+                wp.launch(
+                    kernel=update_body_contact_count_auto_condition_contact_density,
+                    dim=self.model.body_count,
+                    inputs=[
+                        self.body_body_contact_counts,
+                        self.body_body_contact_buffer_pre_alloc,
+                        contacts.rigid_contact_count,
+                        self.model.body_count,
+                        self.rigid_contact_fuse_max,
+                        density_threshold,
+                    ],
+                    outputs=[
+                        self._rigid_contact_auto_max_contacts,
+                        self._rigid_contact_auto_use_tile,
+                    ],
+                    device=self.device,
+                )
+            else:
+                wp.launch(
+                    kernel=update_body_contact_count_auto_condition,
+                    dim=self.model.body_count,
+                    inputs=[
+                        self.body_body_contact_counts,
+                        self.body_body_contact_buffer_pre_alloc,
+                        self.rigid_contact_fuse_max,
+                    ],
+                    outputs=[
+                        self._rigid_contact_auto_max_contacts,
+                        self._rigid_contact_auto_use_tile,
+                    ],
+                    device=self.device,
+                )
 
         if not self._is_cuda_graph_capture_active():
             self._rigid_contact_auto_use_tile_host = bool(int(self._rigid_contact_auto_use_tile.numpy()[0]))
@@ -1718,6 +1804,21 @@ class SolverVBD(SolverBase):
         finally:
             self.rigid_contact_accumulation_mode = previous_mode
 
+    def _auto_low_contact_accumulation_mode(self) -> str:
+        if self.rigid_contact_accumulation_mode in (
+            "auto",
+            "auto_mean2",
+            "auto_mean4",
+            "auto_mean6",
+            "auto_fused_block32",
+        ):
+            return "fused_block32"
+        if self.rigid_contact_accumulation_mode == "auto_fused_block64":
+            return "fused_block64"
+        if self.rigid_contact_accumulation_mode == "auto_fused_block128":
+            return "fused_block128"
+        return "fused"
+
     def _run_auto_vbd_iterations(
         self,
         state_in: State,
@@ -1736,6 +1837,7 @@ class SolverVBD(SolverBase):
             self._run_vbd_iterations_with_rigid_contact_mode("fused", state_in, state_out, control, contacts, dt)
             return
 
+        low_contact_mode = self._auto_low_contact_accumulation_mode()
         if self._is_cuda_graph_capture_active() and wp.is_conditional_graph_supported():
             wp.capture_if(
                 self._rigid_contact_auto_use_tile,
@@ -1743,7 +1845,7 @@ class SolverVBD(SolverBase):
                     "fused_tile", state_in, state_out, control, contacts, dt
                 ),
                 on_false=lambda: self._run_vbd_iterations_with_rigid_contact_mode(
-                    "fused", state_in, state_out, control, contacts, dt
+                    low_contact_mode, state_in, state_out, control, contacts, dt
                 ),
             )
             return
@@ -1753,7 +1855,9 @@ class SolverVBD(SolverBase):
         ):
             self._run_vbd_iterations_with_rigid_contact_mode("fused_tile", state_in, state_out, control, contacts, dt)
         else:
-            self._run_vbd_iterations_with_rigid_contact_mode("fused", state_in, state_out, control, contacts, dt)
+            self._run_vbd_iterations_with_rigid_contact_mode(
+                low_contact_mode, state_in, state_out, control, contacts, dt
+            )
 
     @override
     def step(
@@ -1794,7 +1898,15 @@ class SolverVBD(SolverBase):
         self._initialize_rigid_bodies(state_in, control, contacts, dt, update_rigid)
         self._initialize_particles(state_in, state_out, dt)
 
-        if self.rigid_contact_accumulation_mode == "auto":
+        if self.rigid_contact_accumulation_mode in (
+            "auto",
+            "auto_mean2",
+            "auto_mean4",
+            "auto_mean6",
+            "auto_fused_block32",
+            "auto_fused_block64",
+            "auto_fused_block128",
+        ):
             self._run_auto_vbd_iterations(state_in, state_out, control, contacts, dt)
         else:
             self._run_vbd_iterations(state_in, state_out, control, contacts, dt)
@@ -1978,6 +2090,7 @@ class SolverVBD(SolverBase):
         # Rigid-only initialization
         # ---------------------------
         if model.body_count > 0 and not self.integrate_with_external_rigid_solver:
+            auto_condition_from_contact_build = False
             # Force refresh when contact state is not yet allocated or undersized.
             if (
                 not refresh
@@ -2006,6 +2119,10 @@ class SolverVBD(SolverBase):
                     # Build body-body contact lists
                     self.body_body_contact_counts.zero_()
                     self.body_body_contact_overflow_max.zero_()
+                    auto_condition_from_contact_build = self._rigid_contact_auto_condition_from_contact_build()
+                    if auto_condition_from_contact_build:
+                        self._rigid_contact_auto_max_contacts.zero_()
+                        self._rigid_contact_auto_use_tile.zero_()
                     wp.launch(
                         kernel=build_body_body_contact_lists,
                         dim=contact_launch_dim,
@@ -2015,11 +2132,14 @@ class SolverVBD(SolverBase):
                             contacts.rigid_contact_shape1,
                             model.shape_body,
                             self.body_body_contact_buffer_pre_alloc,
+                            self.rigid_contact_fuse_max if auto_condition_from_contact_build else -1,
                         ],
                         outputs=[
                             self.body_body_contact_counts,
                             self.body_body_contact_indices,
                             self.body_body_contact_overflow_max,
+                            self._rigid_contact_auto_max_contacts,
+                            self._rigid_contact_auto_use_tile,
                         ],
                         device=self.device,
                     )
@@ -2160,7 +2280,10 @@ class SolverVBD(SolverBase):
                 )
                 self.body_body_contact_stick_flag.zero_()
 
-            self._update_rigid_contact_auto_condition(contacts)
+            if auto_condition_from_contact_build:
+                self._finish_rigid_contact_auto_condition_from_contact_build()
+            else:
+                self._update_rigid_contact_auto_condition(contacts)
 
             # Accumulate joint_f into body wrenches (scratch buffer avoids mutating user state).
             body_f_for_integration = state_in.body_f
@@ -2773,6 +2896,122 @@ class SolverVBD(SolverBase):
         else:
             body_color_groups = model.body_color_groups
 
+        if (
+            contacts is not None
+            and self.rigid_contact_accumulation_mode == "fused_tile_color_cursor"
+            and getattr(model, "body_color_group_flat", None) is not None
+            and getattr(model, "body_color_active_count", None) is not None
+            and getattr(model, "body_color_active_cursor", None) is not None
+            and getattr(model, "body_color_active_colors", None) is not None
+            and int(getattr(model, "_vbd_gpu_body_color_group_capacity", 0) or 0) > 0
+        ):
+            capacity = int(model._vbd_gpu_body_color_group_capacity)
+
+            def launch_body_color_cursor_solve():
+                wp.launch(
+                    kernel=solve_rigid_body_with_contacts_tile,
+                    inputs=[
+                    dt,
+                    model.body_color_group_flat,
+                    state_in.body_q,
+                    self.body_q_prev,
+                    model.body_q,
+                    model.body_mass,
+                    self.body_inv_mass_effective,
+                    model.body_inertia,
+                    self.body_inertia_q,
+                    model.body_com,
+                    self.rigid_adjacency,
+                    model.joint_type,
+                    model.joint_enabled,
+                    model.joint_parent,
+                    model.joint_child,
+                    model.joint_X_p,
+                    model.joint_X_c,
+                    model.joint_axis,
+                    model.joint_qd_start,
+                    self.joint_constraint_start,
+                    self.joint_penalty_k,
+                    self.joint_penalty_kd,
+                    self.joint_sigma_start,
+                    self.joint_C_fric,
+                    model.joint_target_ke,
+                    model.joint_target_kd,
+                    control.joint_target_pos,
+                    control.joint_target_vel,
+                    model.joint_limit_lower,
+                    model.joint_limit_upper,
+                    model.joint_limit_ke,
+                    model.joint_limit_kd,
+                    self.joint_lambda_lin,
+                    self.joint_lambda_ang,
+                    self.joint_C0_lin,
+                    self.joint_C0_ang,
+                    self.joint_is_hard,
+                    self.rigid_joint_alpha,
+                    model.joint_dof_dim,
+                    self.joint_rest_angle,
+                    self.body_forces,
+                    self.body_torques,
+                    self.body_hessian_ll,
+                    self.body_hessian_al,
+                    self.body_hessian_aa,
+                    self.friction_epsilon,
+                    self.body_body_contact_penalty_k,
+                    self.body_body_contact_material_kd,
+                    self.body_body_contact_material_mu,
+                    self.body_body_contact_lambda,
+                    self.body_body_contact_C0,
+                    self.rigid_contact_alpha,
+                    self.rigid_contact_hard,
+                    contacts.rigid_contact_count,
+                    contacts.rigid_contact_shape0,
+                    contacts.rigid_contact_shape1,
+                    contacts.rigid_contact_point0,
+                    contacts.rigid_contact_point1,
+                    contacts.rigid_contact_normal,
+                    contacts.rigid_contact_margin0,
+                    contacts.rigid_contact_margin1,
+                    model.shape_body,
+                    self.body_body_contact_buffer_pre_alloc,
+                    self.body_body_contact_counts,
+                    self.body_body_contact_indices,
+                    -1,
+                    0,
+                    -1,
+                    -1,
+                    1,
+                    model.body_color_group_counts,
+                    model.body_colors,
+                    self.rigid_contact_tile_width,
+                    capacity,
+                    model.body_color_active_count,
+                    model.body_color_active_cursor,
+                    model.body_color_active_colors,
+                    1,
+                    ],
+                    outputs=[
+                        state_in.body_q,
+                    ],
+                    dim=capacity * self.rigid_contact_tile_width,
+                    device=self.device,
+                    block_dim=self.rigid_contact_tile_width,
+                )
+
+            wp.launch(
+                kernel=reset_body_color_solve_cursor,
+                dim=1,
+                inputs=[model.body_color_active_count, model.body_color_active_cursor],
+                device=self.device,
+            )
+            with self._profile_timer("rigid_iter.solve_color_fused_tile_cursor"):
+                if self._is_cuda_graph_capture_active() and self.device.is_cuda:
+                    wp.capture_while(model.body_color_active_cursor, launch_body_color_cursor_solve)
+                else:
+                    for _ in range(len(body_color_groups)):
+                        launch_body_color_cursor_solve()
+            body_color_groups = []
+
         # Gauss-Seidel-style per-color updates
         for color in range(len(body_color_groups)):
             color_group = body_color_groups[color]
@@ -2819,10 +3058,10 @@ class SolverVBD(SolverBase):
             # Accumulate body-body (rigid-rigid) contact forces and Hessians on bodies (per-body, per-color)
             contact_fuse_max = (
                 self.rigid_contact_fuse_max
-                if self.rigid_contact_accumulation_mode in ("hybrid_atomic", "hybrid_tile")
+                if self.rigid_contact_accumulation_mode in ("hybrid_atomic", "hybrid_tile", "fused_tile_hybrid", "fused_bucket_tile32")
                 else -1
             )
-            if contacts is not None and self.rigid_contact_accumulation_mode not in ("fused", "fused_tile", "fused_tile_color_filter", "fused_tile_color_compact", "inline_reduce", "jacobi", "jacobi_tile", "contact_color", "jacobi_reduce", "jacobi_reduce_hybrid", "jacobi_inline_reduce", "jacobi_fused"):
+            if contacts is not None and self.rigid_contact_accumulation_mode not in ("fused", "fused_block32", "fused_block64", "fused_block128", "fused_block256", "fused_tile", "fused_tile_hybrid", "fused_bucket_tile32", "fused_color_compact", "fused_block32_color_compact", "fused_tile_color_filter", "fused_tile_color_compact", "fused_tile_color_cursor", "inline_reduce", "jacobi", "jacobi_tile", "contact_color", "jacobi_reduce", "jacobi_reduce_hybrid", "jacobi_inline_reduce", "jacobi_fused"):
                 contact_kernel = (
                     accumulate_body_body_contacts_per_body_tile
                     if self.rigid_contact_accumulation_mode in ("tile", "hybrid_tile")
@@ -3009,7 +3248,183 @@ class SolverVBD(SolverBase):
                         dim=color_group.size,
                         device=self.device,
                     )
-            elif contacts is not None and self.rigid_contact_accumulation_mode in ("fused_tile", "fused_tile_color_filter", "fused_tile_color_compact"):
+            elif contacts is not None and self.rigid_contact_accumulation_mode == "fused_bucket_tile32":
+                bucket_threshold = max(0, contact_fuse_max)
+                with self._profile_timer("rigid_iter.solve_color_fused_bucket_low"):
+                    wp.launch(
+                        kernel=solve_rigid_body_with_contacts,
+                        inputs=[
+                        dt,
+                        color_group,
+                        state_in.body_q,
+                        self.body_q_prev,
+                        model.body_q,
+                        model.body_mass,
+                        self.body_inv_mass_effective,
+                        model.body_inertia,
+                        self.body_inertia_q,
+                        model.body_com,
+                        self.rigid_adjacency,
+                        model.joint_type,
+                        model.joint_enabled,
+                        model.joint_parent,
+                        model.joint_child,
+                        model.joint_X_p,
+                        model.joint_X_c,
+                        model.joint_axis,
+                        model.joint_qd_start,
+                        self.joint_constraint_start,
+                        self.joint_penalty_k,
+                        self.joint_penalty_kd,
+                        self.joint_sigma_start,
+                        self.joint_C_fric,
+                        model.joint_target_ke,
+                        model.joint_target_kd,
+                        control.joint_target_pos,
+                        control.joint_target_vel,
+                        model.joint_limit_lower,
+                        model.joint_limit_upper,
+                        model.joint_limit_ke,
+                        model.joint_limit_kd,
+                        self.joint_lambda_lin,
+                        self.joint_lambda_ang,
+                        self.joint_C0_lin,
+                        self.joint_C0_ang,
+                        self.joint_is_hard,
+                        self.rigid_joint_alpha,
+                        model.joint_dof_dim,
+                        self.joint_rest_angle,
+                        self.body_forces,
+                        self.body_torques,
+                        self.body_hessian_ll,
+                        self.body_hessian_al,
+                        self.body_hessian_aa,
+                        self.friction_epsilon,
+                        self.body_body_contact_penalty_k,
+                        self.body_body_contact_material_kd,
+                        self.body_body_contact_material_mu,
+                        self.body_body_contact_lambda,
+                        self.body_body_contact_C0,
+                        self.rigid_contact_alpha,
+                        self.rigid_contact_hard,
+                        contacts.rigid_contact_count,
+                        contacts.rigid_contact_shape0,
+                        contacts.rigid_contact_shape1,
+                        contacts.rigid_contact_point0,
+                        contacts.rigid_contact_point1,
+                        contacts.rigid_contact_normal,
+                        contacts.rigid_contact_margin0,
+                        contacts.rigid_contact_margin1,
+                        model.shape_body,
+                        self.body_body_contact_buffer_pre_alloc,
+                        self.body_body_contact_counts,
+                        self.body_body_contact_indices,
+                        -1,
+                        0,
+                        bucket_threshold,
+                        -1,
+                        0,
+                        self._empty_body_color_group_counts,
+                        model.body_colors,
+                        ],
+                        outputs=[
+                            state_in.body_q,
+                        ],
+                        dim=color_group.size,
+                        device=self.device,
+                        block_dim=32,
+                    )
+                with self._profile_timer("rigid_iter.solve_color_fused_bucket_tile32"):
+                    wp.launch(
+                        kernel=solve_rigid_body_with_contacts_tile,
+                        inputs=[
+                        dt,
+                        color_group,
+                        state_in.body_q,
+                        self.body_q_prev,
+                        model.body_q,
+                        model.body_mass,
+                        self.body_inv_mass_effective,
+                        model.body_inertia,
+                        self.body_inertia_q,
+                        model.body_com,
+                        self.rigid_adjacency,
+                        model.joint_type,
+                        model.joint_enabled,
+                        model.joint_parent,
+                        model.joint_child,
+                        model.joint_X_p,
+                        model.joint_X_c,
+                        model.joint_axis,
+                        model.joint_qd_start,
+                        self.joint_constraint_start,
+                        self.joint_penalty_k,
+                        self.joint_penalty_kd,
+                        self.joint_sigma_start,
+                        self.joint_C_fric,
+                        model.joint_target_ke,
+                        model.joint_target_kd,
+                        control.joint_target_pos,
+                        control.joint_target_vel,
+                        model.joint_limit_lower,
+                        model.joint_limit_upper,
+                        model.joint_limit_ke,
+                        model.joint_limit_kd,
+                        self.joint_lambda_lin,
+                        self.joint_lambda_ang,
+                        self.joint_C0_lin,
+                        self.joint_C0_ang,
+                        self.joint_is_hard,
+                        self.rigid_joint_alpha,
+                        model.joint_dof_dim,
+                        self.joint_rest_angle,
+                        self.body_forces,
+                        self.body_torques,
+                        self.body_hessian_ll,
+                        self.body_hessian_al,
+                        self.body_hessian_aa,
+                        self.friction_epsilon,
+                        self.body_body_contact_penalty_k,
+                        self.body_body_contact_material_kd,
+                        self.body_body_contact_material_mu,
+                        self.body_body_contact_lambda,
+                        self.body_body_contact_C0,
+                        self.rigid_contact_alpha,
+                        self.rigid_contact_hard,
+                        contacts.rigid_contact_count,
+                        contacts.rigid_contact_shape0,
+                        contacts.rigid_contact_shape1,
+                        contacts.rigid_contact_point0,
+                        contacts.rigid_contact_point1,
+                        contacts.rigid_contact_normal,
+                        contacts.rigid_contact_margin0,
+                        contacts.rigid_contact_margin1,
+                        model.shape_body,
+                        self.body_body_contact_buffer_pre_alloc,
+                        self.body_body_contact_counts,
+                        self.body_body_contact_indices,
+                        -1,
+                        bucket_threshold + 1,
+                        -1,
+                        -1,
+                        0,
+                        self._empty_body_color_group_counts,
+                        model.body_colors,
+                        self.rigid_contact_tile_width,
+                        0,
+                        self._empty_body_color_group_counts,
+                        self._empty_body_color_group_counts,
+                        self._empty_body_color_group_counts,
+                        0,
+                        ],
+                        outputs=[
+                            state_in.body_q,
+                        ],
+                        dim=color_group.size * self.rigid_contact_tile_width,
+                        device=self.device,
+                        block_dim=self.rigid_contact_tile_width,
+                    )
+            elif contacts is not None and self.rigid_contact_accumulation_mode in ("fused_tile", "fused_tile_hybrid", "fused_tile_color_filter", "fused_tile_color_compact"):
                 with self._profile_timer("rigid_iter.solve_color_fused_tile"):
                     wp.launch(
                         kernel=solve_rigid_body_with_contacts_tile,
@@ -3081,11 +3496,18 @@ class SolverVBD(SolverBase):
                         self.body_body_contact_counts,
                         self.body_body_contact_indices,
                         contact_fuse_max,
+                        0,
+                        -1,
                         color if self.rigid_contact_accumulation_mode in ("fused_tile_color_filter", "fused_tile_color_compact") else -1,
                         1 if self.rigid_contact_accumulation_mode == "fused_tile_color_compact" else 0,
                         getattr(model, "body_color_group_counts", self._empty_body_color_group_counts),
                         model.body_colors,
                         self.rigid_contact_tile_width,
+                        0,
+                        self._empty_body_color_group_counts,
+                        self._empty_body_color_group_counts,
+                        self._empty_body_color_group_counts,
+                        0,
                         ],
                         outputs=[
                             state_in.body_q,
@@ -3094,8 +3516,17 @@ class SolverVBD(SolverBase):
                         device=self.device,
                         block_dim=self.rigid_contact_tile_width,
                     )
-            elif contacts is not None and self.rigid_contact_accumulation_mode in ("fused", "hybrid_atomic", "hybrid_tile"):
+            elif contacts is not None and self.rigid_contact_accumulation_mode in ("fused", "fused_block32", "fused_block64", "fused_block128", "fused_block256", "fused_color_compact", "fused_block32_color_compact", "hybrid_atomic", "hybrid_tile"):
                 with self._profile_timer("rigid_iter.solve_color_fused"):
+                    fused_launch_kwargs = {}
+                    if self.rigid_contact_accumulation_mode in ("fused_block32", "fused_block32_color_compact"):
+                        fused_launch_kwargs["block_dim"] = 32
+                    elif self.rigid_contact_accumulation_mode == "fused_block64":
+                        fused_launch_kwargs["block_dim"] = 64
+                    elif self.rigid_contact_accumulation_mode == "fused_block128":
+                        fused_launch_kwargs["block_dim"] = 128
+                    elif self.rigid_contact_accumulation_mode == "fused_block256":
+                        fused_launch_kwargs["block_dim"] = 256
                     wp.launch(
                         kernel=solve_rigid_body_with_contacts,
                         inputs=[
@@ -3166,12 +3597,19 @@ class SolverVBD(SolverBase):
                         self.body_body_contact_counts,
                         self.body_body_contact_indices,
                         contact_fuse_max,
+                        0,
+                        -1,
+                        color if self.rigid_contact_accumulation_mode in ("fused_color_compact", "fused_block32_color_compact") else -1,
+                        1 if self.rigid_contact_accumulation_mode in ("fused_color_compact", "fused_block32_color_compact") else 0,
+                        getattr(model, "body_color_group_counts", self._empty_body_color_group_counts),
+                        model.body_colors,
                         ],
                         outputs=[
                             state_in.body_q,
                         ],
                         dim=color_group.size,
                         device=self.device,
+                        **fused_launch_kwargs,
                     )
             else:
                 with self._profile_timer("rigid_iter.solve_color_plain"):
