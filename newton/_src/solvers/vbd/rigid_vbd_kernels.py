@@ -2790,6 +2790,8 @@ def accumulate_body_body_contacts_by_contact_color(
     rigid_contact_shape1: wp.array[int],
     rigid_contact_point0: wp.array[wp.vec3],
     rigid_contact_point1: wp.array[wp.vec3],
+    rigid_contact_offset0: wp.array[wp.vec3],
+    rigid_contact_offset1: wp.array[wp.vec3],
     rigid_contact_normal: wp.array[wp.vec3],
     rigid_contact_margin0: wp.array[float],
     rigid_contact_margin1: wp.array[float],
@@ -2816,6 +2818,8 @@ def accumulate_body_body_contacts_by_contact_color(
 
     cp0_local = rigid_contact_point0[contact_idx]
     cp1_local = rigid_contact_point1[contact_idx]
+    cp0_offset_local = rigid_contact_offset0[contact_idx]
+    cp1_offset_local = rigid_contact_offset1[contact_idx]
     contact_normal = rigid_contact_normal[contact_idx]
     cp0_world = wp.transform_point(body_q[b0], cp0_local) if b0 >= 0 else cp0_local
     cp1_world = wp.transform_point(body_q[b1], cp1_local) if b1 >= 0 else cp1_local
@@ -2863,6 +2867,8 @@ def accumulate_body_body_contacts_by_contact_color(
         body_com,
         cp0_local,
         cp1_local,
+        cp0_offset_local,
+        cp1_offset_local,
         contact_normal,
         C_eff,
         k,
@@ -2912,6 +2918,8 @@ def accumulate_body_body_contacts_per_body_partials(
     rigid_contact_shape1: wp.array[int],
     rigid_contact_point0: wp.array[wp.vec3],
     rigid_contact_point1: wp.array[wp.vec3],
+    rigid_contact_offset0: wp.array[wp.vec3],
+    rigid_contact_offset1: wp.array[wp.vec3],
     rigid_contact_normal: wp.array[wp.vec3],
     rigid_contact_margin0: wp.array[float],
     rigid_contact_margin1: wp.array[float],
@@ -2988,6 +2996,8 @@ def accumulate_body_body_contacts_per_body_partials(
 
         cp0_local = rigid_contact_point0[contact_idx]
         cp1_local = rigid_contact_point1[contact_idx]
+        cp0_offset_local = rigid_contact_offset0[contact_idx]
+        cp1_offset_local = rigid_contact_offset1[contact_idx]
         contact_normal = rigid_contact_normal[contact_idx]
         cp0_world = wp.transform_point(body_q[b0], cp0_local) if b0 >= 0 else cp0_local
         cp1_world = wp.transform_point(body_q[b1], cp1_local) if b1 >= 0 else cp1_local
@@ -3042,6 +3052,8 @@ def accumulate_body_body_contacts_per_body_partials(
             body_com,
             cp0_local,
             cp1_local,
+            cp0_offset_local,
+            cp1_offset_local,
             contact_normal,
             C_eff,
             k,
@@ -3135,6 +3147,8 @@ def accumulate_body_body_contacts_per_body_tile(
     rigid_contact_shape1: wp.array[int],
     rigid_contact_point0: wp.array[wp.vec3],
     rigid_contact_point1: wp.array[wp.vec3],
+    rigid_contact_offset0: wp.array[wp.vec3],
+    rigid_contact_offset1: wp.array[wp.vec3],
     rigid_contact_normal: wp.array[wp.vec3],
     rigid_contact_margin0: wp.array[float],
     rigid_contact_margin1: wp.array[float],
@@ -3198,6 +3212,8 @@ def accumulate_body_body_contacts_per_body_tile(
 
         cp0_local = rigid_contact_point0[contact_idx]
         cp1_local = rigid_contact_point1[contact_idx]
+        cp0_offset_local = rigid_contact_offset0[contact_idx]
+        cp1_offset_local = rigid_contact_offset1[contact_idx]
         contact_normal = rigid_contact_normal[contact_idx]
         cp0_world = wp.transform_point(body_q[b0], cp0_local) if b0 >= 0 else cp0_local
         cp1_world = wp.transform_point(body_q[b1], cp1_local) if b1 >= 0 else cp1_local
@@ -3252,6 +3268,8 @@ def accumulate_body_body_contacts_per_body_tile(
             body_com,
             cp0_local,
             cp1_local,
+            cp0_offset_local,
+            cp1_offset_local,
             contact_normal,
             C_eff,
             k,
@@ -3938,6 +3956,8 @@ def solve_rigid_body_with_contacts(
     rigid_contact_shape1: wp.array[int],
     rigid_contact_point0: wp.array[wp.vec3],
     rigid_contact_point1: wp.array[wp.vec3],
+    rigid_contact_offset0: wp.array[wp.vec3],
+    rigid_contact_offset1: wp.array[wp.vec3],
     rigid_contact_normal: wp.array[wp.vec3],
     rigid_contact_margin0: wp.array[float],
     rigid_contact_margin1: wp.array[float],
@@ -4116,6 +4136,8 @@ def solve_rigid_body_with_contacts(
 
         cp0_local = rigid_contact_point0[contact_idx]
         cp1_local = rigid_contact_point1[contact_idx]
+        cp0_offset_local = rigid_contact_offset0[contact_idx]
+        cp1_offset_local = rigid_contact_offset1[contact_idx]
         contact_normal = rigid_contact_normal[contact_idx]
         cp0_world = wp.transform_point(body_q[b0], cp0_local) if b0 >= 0 else cp0_local
         cp1_world = wp.transform_point(body_q[b1], cp1_local) if b1 >= 0 else cp1_local
@@ -4165,6 +4187,8 @@ def solve_rigid_body_with_contacts(
             body_com,
             cp0_local,
             cp1_local,
+            cp0_offset_local,
+            cp1_offset_local,
             contact_normal,
             C_eff,
             k,
@@ -4348,6 +4372,8 @@ def solve_rigid_body_with_contacts_tile(
     rigid_contact_shape1: wp.array[int],
     rigid_contact_point0: wp.array[wp.vec3],
     rigid_contact_point1: wp.array[wp.vec3],
+    rigid_contact_offset0: wp.array[wp.vec3],
+    rigid_contact_offset1: wp.array[wp.vec3],
     rigid_contact_normal: wp.array[wp.vec3],
     rigid_contact_margin0: wp.array[float],
     rigid_contact_margin1: wp.array[float],
@@ -4499,6 +4525,8 @@ def solve_rigid_body_with_contacts_tile(
 
         cp0_local = rigid_contact_point0[contact_idx]
         cp1_local = rigid_contact_point1[contact_idx]
+        cp0_offset_local = rigid_contact_offset0[contact_idx]
+        cp1_offset_local = rigid_contact_offset1[contact_idx]
         contact_normal = rigid_contact_normal[contact_idx]
         cp0_world = wp.transform_point(body_q[b0], cp0_local) if b0 >= 0 else cp0_local
         cp1_world = wp.transform_point(body_q[b1], cp1_local) if b1 >= 0 else cp1_local
@@ -4548,6 +4576,8 @@ def solve_rigid_body_with_contacts_tile(
             body_com,
             cp0_local,
             cp1_local,
+            cp0_offset_local,
+            cp1_offset_local,
             contact_normal,
             C_eff,
             k,
@@ -4828,6 +4858,8 @@ def solve_rigid_body_with_contacts_jacobi(
     rigid_contact_shape1: wp.array[int],
     rigid_contact_point0: wp.array[wp.vec3],
     rigid_contact_point1: wp.array[wp.vec3],
+    rigid_contact_offset0: wp.array[wp.vec3],
+    rigid_contact_offset1: wp.array[wp.vec3],
     rigid_contact_normal: wp.array[wp.vec3],
     rigid_contact_margin0: wp.array[float],
     rigid_contact_margin1: wp.array[float],
@@ -4985,6 +5017,8 @@ def solve_rigid_body_with_contacts_jacobi(
 
         cp0_local = rigid_contact_point0[contact_idx]
         cp1_local = rigid_contact_point1[contact_idx]
+        cp0_offset_local = rigid_contact_offset0[contact_idx]
+        cp1_offset_local = rigid_contact_offset1[contact_idx]
         contact_normal = rigid_contact_normal[contact_idx]
         cp0_world = wp.transform_point(contact_body_q[b0], cp0_local) if b0 >= 0 else cp0_local
         cp1_world = wp.transform_point(contact_body_q[b1], cp1_local) if b1 >= 0 else cp1_local
@@ -5034,6 +5068,8 @@ def solve_rigid_body_with_contacts_jacobi(
             body_com,
             cp0_local,
             cp1_local,
+            cp0_offset_local,
+            cp1_offset_local,
             contact_normal,
             C_eff,
             k,
