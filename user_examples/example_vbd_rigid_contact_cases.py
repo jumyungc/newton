@@ -33,11 +33,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import newton
-import newton.examples
-from newton.examples.cable.example_cable_pile import Example as CablePileExample
-from user_examples.example_cable_nv72_tray import Example as NV72Example
-from user_examples.example_cable_nv72_tray import _advance_time, _twist_kinematic_bodies
+import newton  # noqa: E402
+import newton.examples  # noqa: E402
+from newton.examples.cable.example_cable_pile import Example as CablePileExample  # noqa: E402
+from user_examples.example_cable_nv72_tray import Example as NV72Example  # noqa: E402
+from user_examples.example_cable_nv72_tray import _advance_time, _twist_kinematic_bodies  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -52,9 +52,13 @@ RIGID_CASES: dict[str, CaseSpec] = {
         {
             "kind": "stack",
             "boxes": 16,
-            "iterations": 120,
-            "shape_ke": 10000.0,
-            "ground_ke": 30000.0,
+            "iterations": 20,
+            "substeps": 1,
+            "shape_ke": 1.0e4,
+            "ground_ke": 1.0e4,
+            "shape_kd": 0.0,
+            "ground_kd": 0.0,
+            "contact_alpha": 0.0,
             "gap": 0.5,
             "camera": ((4.0, -8.0, 5.5), -18.0, 118.0),
             "hx": 0.25,
@@ -68,9 +72,13 @@ RIGID_CASES: dict[str, CaseSpec] = {
         {
             "kind": "stack",
             "boxes": 16,
-            "iterations": 120,
-            "shape_ke": 10000.0,
-            "ground_ke": 30000.0,
+            "iterations": 20,
+            "substeps": 1,
+            "shape_ke": 1.0e4,
+            "ground_ke": 1.0e4,
+            "shape_kd": 0.0,
+            "ground_kd": 0.0,
+            "contact_alpha": 0.0,
             "gap": 0.1,
             "camera": ((4.0, -8.0, 5.5), -18.0, 118.0),
             "hx": 0.25,
@@ -84,9 +92,12 @@ RIGID_CASES: dict[str, CaseSpec] = {
         {
             "kind": "single_pyramid",
             "rows": 16,
-            "iterations": 120,
-            "shape_ke": 10000.0,
-            "ground_ke": 30000.0,
+            "iterations": 10,
+            "substeps": 5,
+            "shape_ke": 5.0e5,
+            "ground_ke": 5.0e5,
+            "shape_kd": 0.0,
+            "ground_kd": 0.0,
             "gap": 0.5,
             "camera": ((0.0, -24.0, 10.0), -8.0, 90.0),
             "hx": 0.5,
@@ -100,9 +111,12 @@ RIGID_CASES: dict[str, CaseSpec] = {
         {
             "kind": "single_pyramid",
             "rows": 16,
-            "iterations": 120,
-            "shape_ke": 10000.0,
-            "ground_ke": 30000.0,
+            "iterations": 10,
+            "substeps": 5,
+            "shape_ke": 5.0e5,
+            "ground_ke": 5.0e5,
+            "shape_kd": 0.0,
+            "ground_kd": 0.0,
             "gap": 0.1,
             "camera": ((0.0, -24.0, 10.0), -8.0, 90.0),
             "hx": 0.5,
@@ -117,9 +131,12 @@ RIGID_CASES: dict[str, CaseSpec] = {
             "kind": "pyramid_field",
             "rows": 8,
             "field": (2, 2),
-            "iterations": 120,
-            "shape_ke": 10000.0,
-            "ground_ke": 30000.0,
+            "iterations": 10,
+            "substeps": 5,
+            "shape_ke": 5.0e5,
+            "ground_ke": 5.0e5,
+            "shape_kd": 0.0,
+            "ground_kd": 0.0,
             "gap": 0.5,
             "camera": ((7.0, -20.0, 9.0), -12.0, 120.0),
             "hx": 0.5,
@@ -134,9 +151,12 @@ RIGID_CASES: dict[str, CaseSpec] = {
             "kind": "pyramid_field",
             "rows": 8,
             "field": (2, 2),
-            "iterations": 120,
-            "shape_ke": 10000.0,
-            "ground_ke": 30000.0,
+            "iterations": 10,
+            "substeps": 5,
+            "shape_ke": 5.0e5,
+            "ground_ke": 5.0e5,
+            "shape_kd": 0.0,
+            "ground_kd": 0.0,
             "gap": 0.1,
             "camera": ((7.0, -20.0, 9.0), -12.0, 120.0),
             "hx": 0.5,
@@ -177,8 +197,8 @@ NV72_CASES: dict[str, CaseSpec] = {
         "nv72",
         {
             "hold_twist": False,
-            "iterations": 16,
-            "substeps": 2,
+            "iterations": 32,
+            "substeps": 8,
             "cable_limit": 24,
             "bracket_rows": 4,
             "bracket_columns": 6,
@@ -191,8 +211,8 @@ NV72_CASES: dict[str, CaseSpec] = {
         "nv72",
         {
             "hold_twist": True,
-            "iterations": 16,
-            "substeps": 2,
+            "iterations": 32,
+            "substeps": 8,
             "cable_limit": 24,
             "bracket_rows": 4,
             "bracket_columns": 6,
@@ -209,18 +229,8 @@ CASE_SPECS.update(CABLE_CASES)
 CASE_SPECS.update(NV72_CASES)
 
 CONTACT_MODE_CHOICES = (
-    "auto",
     "fused",
-    "fused_block32",
-    "fused_block64",
-    "fused_block128",
-    "fused_tile4",
-    "fused_tile8",
-    "fused_tile16",
-    "fused_tile32",
-    "tile",
-    "atomic",
-    "inline_reduce",
+    "fused_tile",
 )
 
 
@@ -234,22 +244,17 @@ def _substeps(args: argparse.Namespace, default_value: int) -> int:
 
 def _contact_settings(args: argparse.Namespace) -> tuple[str, int]:
     choice = args.contact_mode
-    if choice.startswith("fused_tile"):
-        return "fused_tile", int(choice.removeprefix("fused_tile"))
-    if choice in ("auto", "fused_block32", "fused_block64", "fused_block128"):
-        return choice, 32
-    return choice, max(1, int(args.tile_width))
+    if choice == "fused_tile":
+        return "fused_tile", max(1, int(args.tile_width))
+    return "fused", 1
 
 
 def _solver_contact_kwargs(args: argparse.Namespace) -> dict:
     mode, tile_width = _contact_settings(args)
-    kwargs = {
+    return {
         "rigid_contact_accumulation_mode": mode,
         "rigid_contact_tile_width": tile_width,
     }
-    if args.fuse_max is not None:
-        kwargs["rigid_contact_fuse_max"] = int(args.fuse_max)
-    return kwargs
 
 
 def _configure_camera(viewer, camera) -> None:
@@ -300,14 +305,16 @@ class RigidBenchmarkScene:
         self.fps = 60
         self.frame_dt = 1.0 / self.fps
         self.sim_time = 0.0
-        self.sim_substeps = _substeps(args, 1)
+        self.sim_substeps = _substeps(args, int(self.config.get("substeps", 1)))
         self.sim_dt = self.frame_dt / self.sim_substeps
         self.iterations = _iterations(args, int(self.config["iterations"]))
         self.dynamic_bodies: list[int] = []
         self.cuda_graph = False
 
-        self.shape_ke = float(self.config["shape_ke"])
-        self.ground_ke = float(self.config["ground_ke"])
+        self.shape_ke = float(args.shape_ke if args.shape_ke is not None else self.config["shape_ke"])
+        self.ground_ke = float(args.ground_ke if args.ground_ke is not None else self.config["ground_ke"])
+        self.shape_kd = float(args.shape_kd if args.shape_kd is not None else self.config.get("shape_kd", 0.0))
+        self.ground_kd = float(args.ground_kd if args.ground_kd is not None else self.config.get("ground_kd", 0.0))
         self.gap = float(self.config["gap"])
         self.hx = float(self.config.get("hx", 0.5))
         self.hy = float(self.config.get("hy", 0.25))
@@ -317,10 +324,11 @@ class RigidBenchmarkScene:
         builder.default_shape_cfg.density = float(self.config.get("density", 1.0))
         builder.default_shape_cfg.mu = 0.5
         builder.default_shape_cfg.ke = self.ground_ke
-        builder.default_shape_cfg.kd = 0.0
+        builder.default_shape_cfg.kd = self.ground_kd
         builder.default_shape_cfg.gap = self.gap
         builder.add_ground_plane()
         builder.default_shape_cfg.ke = self.shape_ke
+        builder.default_shape_cfg.kd = self.shape_kd
 
         kind = self.config["kind"]
         if kind == "stack":
@@ -359,13 +367,9 @@ class RigidBenchmarkScene:
         self.solver = newton.solvers.SolverVBD(
             self.model,
             iterations=self.iterations,
-            rigid_contact_hard=True,
+            rigid_contact_hard=args.hard_contact,
             rigid_contact_history=True,
-            rigid_avbd_contact_alpha=0.0,
-            rigid_avbd_linear_beta=0.0,
-            rigid_avbd_angular_beta=0.0,
-            rigid_avbd_gamma=0.999,
-            rigid_contact_k_start=1.0,
+            rigid_avbd_contact_alpha=self.config.get("contact_alpha", None),  # None -> solver default
             rigid_body_contact_buffer_size=512,
             **_solver_contact_kwargs(args),
         )
@@ -482,17 +486,14 @@ class CablePileBenchmarkScene:
         inner.sim_substeps = _substeps(args, int(self.config["substeps"]))
         inner.sim_iterations = _iterations(args, int(self.config["iterations"]))
         inner.sim_dt = inner.frame_dt / inner.sim_substeps
-        inner.contacts = inner.model.contacts(collision_pipeline=newton.CollisionPipeline(inner.model, contact_matching="latest"))
+        inner.contacts = inner.model.contacts(
+            collision_pipeline=newton.CollisionPipeline(inner.model, contact_matching="latest")
+        )
         inner.solver = newton.solvers.SolverVBD(
             inner.model,
             iterations=inner.sim_iterations,
-            rigid_contact_hard=True,
+            rigid_contact_hard=args.hard_contact,
             rigid_contact_history=True,
-            rigid_avbd_contact_alpha=0.0,
-            rigid_avbd_linear_beta=0.0,
-            rigid_avbd_angular_beta=0.0,
-            rigid_avbd_gamma=0.999,
-            rigid_contact_k_start=1.0,
             rigid_body_contact_buffer_size=int(self.config["contact_buffer"]),
             **_solver_contact_kwargs(args),
         )
@@ -576,13 +577,8 @@ class NV72BenchmarkScene:
             inner.model,
             iterations=inner.sim_iterations,
             friction_epsilon=1.0e-4,
-            rigid_contact_hard=True,
+            rigid_contact_hard=args.hard_contact,
             rigid_contact_history=True,
-            rigid_avbd_contact_alpha=0.0,
-            rigid_avbd_linear_beta=0.0,
-            rigid_avbd_angular_beta=0.0,
-            rigid_avbd_gamma=0.999,
-            rigid_contact_k_start=1.0,
             rigid_body_contact_buffer_size=int(self.config["contact_buffer"]),
             **_solver_contact_kwargs(args),
         )
@@ -731,16 +727,37 @@ class Example:
     @staticmethod
     def create_parser() -> argparse.ArgumentParser:
         parser = newton.examples.create_parser()
-        parser.add_argument("--case", default="box_stack_16", choices=sorted(CASE_SPECS), help="Benchmark scene to run.")
+        parser.add_argument(
+            "--case", default="box_stack_16", choices=sorted(CASE_SPECS), help="Benchmark scene to run."
+        )
         parser.add_argument(
             "--contact-mode",
-            default="auto",
+            default="fused_tile",
             choices=CONTACT_MODE_CHOICES,
             help="Rigid contact accumulation mode to use.",
         )
-        parser.add_argument("--tile-width", type=int, default=4, help="Tile width for the generic tile mode.")
-        parser.add_argument("--fuse-max", type=int, default=None, help="Override auto/hybrid fused contact threshold.")
-        parser.add_argument("--iterations", type=int, default=None, help="Override the case's benchmark iteration count.")
+        parser.add_argument("--tile-width", type=int, default=32, help="Tile width for the fused_tile mode.")
+        parser.add_argument(
+            "--hard-contact",
+            action=argparse.BooleanOptionalAction,
+            default=True,
+            help="Use hard (augmented-Lagrangian) body-body contacts; pass --no-hard-contact for penalty-only soft contacts.",
+        )
+        parser.add_argument(
+            "--shape-ke", type=float, default=None, help="Override box-box contact stiffness (rigid cases)."
+        )
+        parser.add_argument(
+            "--ground-ke", type=float, default=None, help="Override ground contact stiffness (rigid cases)."
+        )
+        parser.add_argument(
+            "--shape-kd", type=float, default=None, help="Override box-box contact damping (rigid cases)."
+        )
+        parser.add_argument(
+            "--ground-kd", type=float, default=None, help="Override ground contact damping (rigid cases)."
+        )
+        parser.add_argument(
+            "--iterations", type=int, default=None, help="Override the case's benchmark iteration count."
+        )
         parser.add_argument("--substeps", type=int, default=None, help="Override the case's benchmark substep count.")
         parser.add_argument("--no-cuda-graph", action="store_true", help="Disable CUDA graph capture for this run.")
         parser.add_argument("--perf", action="store_true", help="Run headless timing instead of the viewer loop.")

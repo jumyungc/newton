@@ -17,7 +17,6 @@ import warp as wp
 import newton
 import newton.examples
 
-
 PYRAMID_VARIANTS = {
     "1": {
         "name": "new_alm_finite_large_gap",
@@ -253,8 +252,8 @@ class Example:
         assert np.isfinite(body_q).all(), "Non-finite positions detected"
 
         rows = {}
-        for i, label in enumerate(self.model.body_label):
-            label = str(label)
+        for i, raw_label in enumerate(self.model.body_label):
+            label = str(raw_label)
             if label.startswith("box_"):
                 _prefix, row, _col = label.split("_")
                 rows.setdefault(int(row), []).append(i)

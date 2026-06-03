@@ -42,6 +42,7 @@ def _np_transform_to_wp(row: np.ndarray) -> wp.transform:
         wp.quat(float(row[3]), float(row[4]), float(row[5]), float(row[6])),
     )
 
+
 EXPECTED_HEADER = [
     "Port",
     "L-1",
@@ -253,7 +254,9 @@ def generate_bracket_array_routes(
         target = WaferEndpoint(port="RCV", side="B", position=route_index)
         cable = CableInstance(connection=WaferConnection(source=source, target=target), cable_index=route_index)
         points = tuple(
-            _deduplicate_points(resample_polyline(_bracket_array_route_points(row, column, geometry), geometry.route_segment_length))
+            _deduplicate_points(
+                resample_polyline(_bracket_array_route_points(row, column, geometry), geometry.route_segment_length)
+            )
         )
         radii = tuple(compute_bend_radii(points))
         routes.append(
@@ -744,7 +747,23 @@ def build_vbd_model(
         if bodies:
             builder.body_flags[bodies[0]] = int(newton.BodyFlags.KINEMATIC)
             builder.body_flags[bodies[-1]] = int(newton.BodyFlags.KINEMATIC)
+
+        # Filter near-neighbor self-collision along the cable.  Adjacent (i, i+1)
+        # capsules are already filtered by the cable joint; this adds i+2 to avoid
+        # spurious self-contact from capsule-cap overlap at bends, while leaving
+        # distant pairs collidable so genuine coiling/fold-back still collides.
+        self_filter_window = 2
+        route_shapes = [builder.body_shapes[b][0] for b in bodies if builder.body_shapes.get(b)]
+        for a in range(len(route_shapes)):
+            for b in range(a + 2, min(a + 1 + self_filter_window, len(route_shapes))):
+                builder.add_shape_collision_filter_pair(route_shapes[a], route_shapes[b])
+
         route_bodies.append(bodies)
+
+    # Filter shape pairs that are already penetrating in the initial configuration
+    # (e.g. capsules seated into the bracket) so they do not inject large corrective
+    # impulses on the first step.
+    _filter_initial_penetrating_pairs(builder)
 
     builder.color(balance_colors=False)
     model = builder.finalize()
@@ -752,41 +771,57 @@ def build_vbd_model(
     return model, route_bodies
 
 
-def run_vbd_relaxation(
-    routes: list[CableRoute],
-    *,
-    frames: int = 20,
-    substeps: int = 4,
-    iterations: int = 8,
-) -> dict[str, float | int | bool]:
-    """Run a headless VBD relaxation smoke pass."""
+def _filter_initial_penetrating_pairs(builder: newton.ModelBuilder, penetration_eps: float = 1.0e-6) -> int:
+    """Collide the initial pose and filter shape pairs that start in penetration.
 
-    model, _route_bodies = build_vbd_model(routes)
-    state_0 = model.state()
-    state_1 = model.state()
-    control = model.control()
-    contacts = model.contacts()
-    solver = newton.solvers.SolverVBD(model, iterations=iterations, friction_epsilon=1.0e-4)
-    dt = (1.0 / 60.0) / float(substeps)
+    Detects contacts whose normal constraint ``C_n = thickness - dot(normal, p1 - p0)``
+    is positive (overlapping) in the rest configuration and adds them to the builder's
+    collision filter so they are excluded for the whole simulation. Returns the number
+    of filtered pairs.
+    """
+    probe = builder.finalize()
+    state = probe.state()
+    contacts = probe.contacts()
+    probe.collide(state, contacts)
 
-    for _frame in range(frames):
-        for _substep in range(substeps):
-            state_0.clear_forces()
-            model.collide(state_0, contacts)
-            solver.step(state_0, state_1, control, contacts, dt)
-            state_0, state_1 = state_1, state_0
+    n = int(contacts.rigid_contact_count.numpy()[0])
+    if n == 0:
+        return 0
 
-    body_q = state_0.body_q.numpy() if state_0.body_q is not None else None
-    has_nans = bool(body_q is not None and not np.isfinite(body_q).all())
-    return {
-        "simulated_cable_count": len(routes),
-        "body_count": model.body_count,
-        "joint_count": model.joint_count,
-        "frames": frames,
-        "substeps": substeps,
-        "iterations": iterations,
-        "has_nans": has_nans,
-    }
+    shape0 = contacts.rigid_contact_shape0.numpy()[:n]
+    shape1 = contacts.rigid_contact_shape1.numpy()[:n]
+    p0 = contacts.rigid_contact_point0.numpy()[:n]
+    p1 = contacts.rigid_contact_point1.numpy()[:n]
+    normal = contacts.rigid_contact_normal.numpy()[:n]
+    m0 = contacts.rigid_contact_margin0.numpy()[:n]
+    m1 = contacts.rigid_contact_margin1.numpy()[:n]
+    shape_body = probe.shape_body.numpy()
+    body_q = state.body_q.numpy()
+
+    def xform_point(t, v):
+        pos = t[:3]
+        qx, qy, qz, qw = t[3:7]
+        u = np.array([qx, qy, qz])
+        uv = np.cross(u, v)
+        return pos + v + 2.0 * (qw * uv + np.cross(u, uv))
+
+    filtered: set[tuple[int, int]] = set()
+    for i in range(n):
+        s0 = int(shape0[i])
+        s1 = int(shape1[i])
+        if s0 < 0 or s1 < 0:
+            continue
+        b0 = int(shape_body[s0])
+        b1 = int(shape_body[s1])
+        cp0 = xform_point(body_q[b0], p0[i]) if b0 >= 0 else p0[i]
+        cp1 = xform_point(body_q[b1], p1[i]) if b1 >= 0 else p1[i]
+        c_n = (m0[i] + m1[i]) - float(np.dot(normal[i], cp1 - cp0))
+        if c_n > penetration_eps:
+            filtered.add((min(s0, s1), max(s0, s1)))
+
+    for sa, sb in filtered:
+        builder.add_shape_collision_filter_pair(sa, sb)
+    return len(filtered)
 
 
 def _route_points(
@@ -1237,10 +1272,10 @@ class Example:
             self.routes,
             cable_radius=self.geometry.cable_radius,
             bracket_geometry=self.bracket_geometry,
-            bend_stiffness=float(getattr(args, "bend_stiffness", 100.0)),
-            bend_damping=float(getattr(args, "bend_damping", 1.0e-1)),
-            stretch_stiffness=float(getattr(args, "stretch_stiffness", 1.0e8)),
-            stretch_damping=float(getattr(args, "stretch_damping", 1.0e-2)),
+            bend_stiffness=float(getattr(args, "bend_stiffness", 5.0e5)),
+            bend_damping=float(getattr(args, "bend_damping", 1.0e-4)),
+            stretch_stiffness=float(getattr(args, "stretch_stiffness", 1.0e10)),
+            stretch_damping=float(getattr(args, "stretch_damping", 0.0)),
         )
         contact_budget_per_shape = int(getattr(args, "contact_budget_per_shape", 128))
         self.model.rigid_contact_max = max(1000, self.model.shape_count * contact_budget_per_shape)
@@ -1316,7 +1351,9 @@ class Example:
             )
         z0 = self.geometry.bracket_top_z + self.geometry.cable_radius if self.layout == "bracket-array" else 0.0
         self._source_twist_pivot_np = np.array([0.0, 0.0, z0], dtype=np.float32)
-        self._source_twist_pivot = wp.array([wp.vec3(*self._source_twist_pivot_np)], dtype=wp.vec3, device=self.model.device)
+        self._source_twist_pivot = wp.array(
+            [wp.vec3(*self._source_twist_pivot_np)], dtype=wp.vec3, device=self.model.device
+        )
         self._source_twist_angle = wp.zeros(1, dtype=float, device=self.model.device)
         self._source_twist_angular_speed = wp.zeros(1, dtype=float, device=self.model.device)
         self._graph_drive_time = wp.zeros(1, dtype=float, device=self.model.device)
@@ -1608,8 +1645,7 @@ class Example:
             f"{self.clearance_metrics['closest_self_pair']}"
         )
         assert self.stability_metrics["max_abs_position_m"] < 10.0, (
-            f"NV72 tray body position exceeded tray-scale bounds: "
-            f"{self.stability_metrics['max_abs_position_m']:.6e} m"
+            f"NV72 tray body position exceeded tray-scale bounds: {self.stability_metrics['max_abs_position_m']:.6e} m"
         )
         assert self.stability_metrics["min_body_z_m"] > -0.005, (
             f"NV72 tray cable fell below the tray floor: {self.stability_metrics['min_body_z_m']:.6e} m"
@@ -1678,12 +1714,12 @@ class Example:
         parser.add_argument("--rack-width-mm", type=float, default=600.0, help="Inferred tray/rack width")
         parser.add_argument("--rack-depth-mm", type=float, default=1068.0, help="Inferred tray/rack depth")
         parser.add_argument("--rack-height-mm", type=float, default=2495.0, help="Inferred tray/rack height")
-        parser.add_argument("--substeps", type=int, default=4, help="Simulation substeps per frame")
+        parser.add_argument("--substeps", type=int, default=10, help="Simulation substeps per frame")
         parser.add_argument("--iterations", type=int, default=32, help="SolverVBD iterations")
-        parser.add_argument("--bend-stiffness", type=float, default=1.0e4, help="Rod bend stiffness")
-        parser.add_argument("--bend-damping", type=float, default=1.0e-1, help="Rod bend damping")
-        parser.add_argument("--stretch-stiffness", type=float, default=1.0e8, help="Rod stretch stiffness")
-        parser.add_argument("--stretch-damping", type=float, default=1.0e-6, help="Rod stretch damping")
+        parser.add_argument("--bend-stiffness", type=float, default=5.0e5, help="Rod bend stiffness")
+        parser.add_argument("--bend-damping", type=float, default=1.0e-4, help="Rod bend damping")
+        parser.add_argument("--stretch-stiffness", type=float, default=1.0e10, help="Rod stretch stiffness")
+        parser.add_argument("--stretch-damping", type=float, default=0.0, help="Rod stretch damping")
         parser.add_argument("--friction-epsilon", type=float, default=1.0e-4, help="Solver friction epsilon")
         parser.add_argument("--rigid-body-contact-buffer-size", type=int, default=512)
         parser.add_argument(
