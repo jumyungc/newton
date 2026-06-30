@@ -1819,6 +1819,7 @@ class SolverVBD(SolverBase):
                             contacts.rigid_contact_shape0,
                             contacts.rigid_contact_shape1,
                             model.shape_body,
+                            self.body_inv_mass_effective,
                             self.body_body_contact_buffer_pre_alloc,
                         ],
                         outputs=[
@@ -2090,6 +2091,7 @@ class SolverVBD(SolverBase):
                         contacts.soft_contact_count,
                         contacts.soft_contact_shape,
                         model.shape_body,
+                        self.body_inv_mass_effective,
                         self.body_particle_contact_buffer_pre_alloc,
                     ],
                     outputs=[

@@ -1906,6 +1906,7 @@ def build_body_body_contact_lists(
     rigid_contact_shape0: wp.array[int],
     rigid_contact_shape1: wp.array[int],
     shape_body: wp.array[wp.int32],
+    body_inv_mass_effective: wp.array[float],
     body_contact_buffer_pre_alloc: int,
     body_contact_counts: wp.array[wp.int32],
     body_contact_indices: wp.array[wp.int32],
@@ -1913,6 +1914,8 @@ def build_body_body_contact_lists(
 ):
     """
     Build per-body contact lists for body-centric per-color contact evaluation.
+    Only dynamic bodies need per-body solve lists; static/kinematic bodies are
+    still referenced by the global contact but are not updated by VBD.
     Tracks overflow into body_contact_overflow_max for diagnostics.
     """
     t_id = wp.tid()
@@ -1924,14 +1927,14 @@ def build_body_body_contact_lists(
     b0 = shape_body[s0] if s0 >= 0 else -1
     b1 = shape_body[s1] if s1 >= 0 else -1
 
-    if b0 >= 0:
+    if b0 >= 0 and body_inv_mass_effective[b0] > 0.0:
         idx = wp.atomic_add(body_contact_counts, b0, 1)
         if idx < body_contact_buffer_pre_alloc:
             body_contact_indices[b0 * body_contact_buffer_pre_alloc + idx] = t_id
         else:
             wp.atomic_max(body_contact_overflow_max, 0, idx + 1)
 
-    if b1 >= 0:
+    if b1 >= 0 and body_inv_mass_effective[b1] > 0.0:
         idx = wp.atomic_add(body_contact_counts, b1, 1)
         if idx < body_contact_buffer_pre_alloc:
             body_contact_indices[b1 * body_contact_buffer_pre_alloc + idx] = t_id
@@ -1944,6 +1947,7 @@ def build_body_particle_contact_lists(
     body_particle_contact_count: wp.array[int],
     body_particle_contact_shape: wp.array[int],
     shape_body: wp.array[wp.int32],
+    body_inv_mass_effective: wp.array[float],
     body_particle_contact_buffer_pre_alloc: int,
     body_particle_contact_counts: wp.array[wp.int32],
     body_particle_contact_indices: wp.array[wp.int32],
@@ -1951,6 +1955,8 @@ def build_body_particle_contact_lists(
 ):
     """
     Build per-body contact lists for body-particle contacts.
+    Only dynamic bodies need per-body solve lists; static/kinematic bodies are
+    still referenced by the global contact but are not updated by VBD.
     Tracks overflow into body_particle_contact_overflow_max for diagnostics.
     """
     tid = wp.tid()
@@ -1960,7 +1966,7 @@ def build_body_particle_contact_lists(
     shape = body_particle_contact_shape[tid]
     body = shape_body[shape] if shape >= 0 else -1
 
-    if body < 0:
+    if body < 0 or body_inv_mass_effective[body] == 0.0:
         return
 
     idx = wp.atomic_add(body_particle_contact_counts, body, 1)
