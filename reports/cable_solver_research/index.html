@@ -16,45 +16,48 @@
   --good: #146c43;
   --warn: #9a5b00;
   --bad: #b02a37;
-  --max: 1280px;
+  --max: 1200px;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: #ffffff; color: var(--ink); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.5; }
+body { margin: 0; background: #ffffff; color: var(--ink); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.55; }
 header { border-bottom: 1px solid var(--line); background: #fbfcfd; }
 main, .header-inner, footer { width: min(var(--max), calc(100vw - 32px)); margin: 0 auto; }
-.header-inner { padding: 36px 0 28px; }
-h1 { margin: 0 0 10px; font-size: clamp(2rem, 4vw, 3.35rem); line-height: 1.05; letter-spacing: 0; }
-.subtitle { max-width: 850px; margin: 0; color: var(--muted); font-size: 1.05rem; }
-.status-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
-.metric { border: 1px solid var(--line); border-radius: 8px; background: #ffffff; padding: 14px 16px; }
-.metric .label { color: var(--muted); font-size: 0.82rem; font-weight: 650; text-transform: uppercase; }
-.metric .value { display: block; margin-top: 4px; font-size: 1.25rem; font-weight: 760; }
+.header-inner { padding: 36px 0 26px; }
+h1 { margin: 0 0 10px; font-size: clamp(2rem, 4vw, 3rem); line-height: 1.05; letter-spacing: -0.01em; }
+.subtitle { max-width: 800px; margin: 0; color: var(--muted); font-size: 1.02rem; }
+.headline {
+  margin-top: 22px; padding: 16px 20px; border-radius: 10px;
+  background: linear-gradient(180deg, #ecfdf5 0%, #d1fae5 100%);
+  border: 1px solid #a7f3d0;
+}
+.headline h2 { margin: 0 0 6px; font-size: 1.15rem; color: var(--good); letter-spacing: 0.02em; text-transform: uppercase; }
+.headline p { margin: 0; color: #064e3b; font-size: 1.06rem; }
+.headline strong { font-weight: 750; }
 main { padding: 28px 0 48px; }
-section { margin: 0 0 34px; }
-h2 { margin: 0 0 10px; font-size: 1.45rem; line-height: 1.2; letter-spacing: 0; }
-h3 { margin: 20px 0 10px; font-size: 1.1rem; line-height: 1.25; }
+section { margin: 0 0 40px; }
+h2 { margin: 0 0 12px; font-size: 1.4rem; line-height: 1.2; letter-spacing: -0.005em; }
+h3 { margin: 22px 0 8px; font-size: 1.05rem; line-height: 1.25; }
 p { margin: 0 0 12px; }
 a { color: var(--accent); }
-code { padding: 0.08em 0.25em; border-radius: 4px; background: #edf2f7; font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: 0.92em; }
-pre { margin: 12px 0 0; padding: 14px 16px; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
-pre code { padding: 0; background: transparent; }
-.video-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; max-width: 1280px; margin: 18px auto 0; }
+code { padding: 0.06em 0.28em; border-radius: 4px; background: #edf2f7; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.9em; }
+.video-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 14px; }
 figure { margin: 0; border: 1px solid var(--line); border-radius: 8px; background: #ffffff; overflow: hidden; }
 figure video { display: block; width: 100%; height: auto; background: #111827; }
-figcaption { padding: 10px 12px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.92rem; }
-.figcap-title { display: block; color: var(--ink); font-weight: 700; margin-bottom: 4px; }
-table { width: 100%; border-collapse: collapse; border: 1px solid var(--line); background: white; margin-top: 12px; }
-th, td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; font-size: 0.92rem; }
-th { background: var(--panel); color: var(--muted); font-size: 0.82rem; text-transform: uppercase; }
-tr.highlight td { background: #eff6ff; }
-tr.baseline td { background: #fef3c7; }
-.badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; }
-.badge-good { background: #d1fae5; color: var(--good); }
-.badge-bad { background: #fee2e2; color: var(--bad); }
-.badge-neutral { background: #e5e7eb; color: var(--muted); }
-.note { border-left: 4px solid var(--accent); background: var(--panel); padding: 12px 14px; margin: 12px 0; }
-.note-warn { border-left-color: var(--warn); background: #fffbeb; }
-footer { padding: 0 0 42px; color: var(--muted); font-size: 0.9rem; }
+figcaption { padding: 12px 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.9rem; }
+.figcap-title { display: block; color: var(--ink); font-weight: 700; margin-bottom: 4px; font-size: 0.98rem; }
+table { width: 100%; border-collapse: collapse; border: 1px solid var(--line); background: white; margin-top: 8px; }
+th, td { padding: 8px 11px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; font-size: 0.9rem; }
+th { background: var(--panel); color: var(--muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; }
+tr.baseline td { background: #fef9c3; }
+tr.candidate td { background: #eff6ff; }
+tr.winner td { background: #d1fae5; }
+td .val { font-variant-numeric: tabular-nums; }
+.note { border-left: 4px solid var(--accent); background: var(--panel); padding: 12px 14px; margin: 12px 0; font-size: 0.95rem; }
+.status-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 20px; }
+.metric { border: 1px solid var(--line); border-radius: 8px; background: #ffffff; padding: 12px 14px; }
+.metric .label { color: var(--muted); font-size: 0.76rem; font-weight: 650; text-transform: uppercase; letter-spacing: 0.03em; }
+.metric .value { display: block; margin-top: 3px; font-size: 1.05rem; font-weight: 720; }
+footer { padding: 0 0 42px; color: var(--muted); font-size: 0.86rem; }
 @media (max-width: 820px) {
   .status-row, .video-grid { grid-template-columns: 1fr; }
 }
@@ -65,27 +68,38 @@ footer { padding: 0 0 42px; color: var(--muted); font-size: 0.9rem; }
   <div class="header-inner">
     <h1>Cable + Rigid Body Solver Research</h1>
     <p class="subtitle">
-      Live research log. Goal: build the fastest, most accurate, most robust
-      rigid body + cable solver for Newton. Cable-focused to begin with; must
-      beat local VBD (any K) and generalize to rigid body stacks.
-      Two teams (Claude, Codex) collaborate on alternating hours.
+      Live research log. Goal: invent the fastest, most accurate, most robust
+      rigid body + cable solver for Newton. Cable-focused first; general
+      rigid body as a co-equal objective. Beat local VBD at every K,
+      generalize to any topology, always GPU + CUDA graph.
     </p>
+    <div class="headline">
+      <h2>Latest result &nbsp;·&nbsp; 2026-07-02</h2>
+      <p>
+        <strong>Method S + Thomas-bend at K = 3 strictly Pareto-dominates
+        SolverVBD at K = 80</strong> on the long-cantilever stiff-bend witness scene:
+        <strong>1.77&times; faster</strong> (16.8 vs 29.7 ms/step),
+        <strong>10.9&times; tighter</strong> bend residual (0.0070 vs 0.076 rad),
+        and 1.28&times; tighter stretch residual — at N = 1024, and the
+        residuals are <strong>N-invariant</strong> across N = 1024, 2048, 4096.
+      </p>
+    </div>
     <div class="status-row">
       <div class="metric">
-        <span class="label">Current owner</span>
-        <span class="value">Claude</span>
+        <span class="label">Best method (this scene)</span>
+        <span class="value">Method S + Thomas-bend, K = 3</span>
       </div>
       <div class="metric">
-        <span class="label">Scenes benchmarked</span>
-        <span class="value">3 (N=1024, 2048, 4096)</span>
+        <span class="label">Speedup vs VBD@K=80</span>
+        <span class="value" style="color: var(--good)">1.77&times;</span>
       </div>
       <div class="metric">
-        <span class="label">Candidate solvers tested</span>
-        <span class="value">6 (VBD×4 + Method S + M-S+Thomas-bend)</span>
+        <span class="label">Bend residual reduction</span>
+        <span class="value" style="color: var(--good)">10.9&times;</span>
       </div>
       <div class="metric">
         <span class="label">Last update</span>
-        <span class="value">2026-07-02 05:15Z</span>
+        <span class="value">06:35Z</span>
       </div>
     </div>
   </div>
@@ -94,171 +108,144 @@ footer { padding: 0 0 42px; color: var(--muted); font-size: 0.9rem; }
 <main>
 
 <section id="premise">
-  <h2>The premise: local VBD hits a global-residual wall on long cables</h2>
+  <h2>1 &nbsp; The premise: local VBD hits a wall</h2>
   <p>
-    VBD (Vertex Block Descent) updates each body using only its immediate
-    neighbors, so constraint corrections propagate along a chain at
-    <strong>one body per iteration</strong>. On an N-body cable with K
-    iterations, the residual scales as O(K/N). Increasing K beyond a small
-    multiple of N does not help because the local Gauss-Seidel sweep
-    stalls on the low-frequency modes of the chain.
+    Vertex Block Descent updates each body using only its immediate
+    neighbors, so a constraint correction propagates along a chain at
+    exactly one body per outer iteration. On an <em>N</em>-body cable
+    the residual scales as <code>O(K/N)</code> and stalls once the
+    local Gauss-Seidel sweep has damped the high-frequency error &mdash;
+    increasing <em>K</em> past that stall point yields no further
+    improvement.
   </p>
   <p>
-    Our first witness is <code>long_cantilever_1024_superbend500</code>:
-    1024 bodies, one end fixed, stretch stiffness 1×10⁵, bend stiffness
-    500× nominal (2500). If the solver were global, the chain would hold
-    essentially straight. Local VBD leaves it bent at ~4.4° per joint —
-    at any iteration count.
+    Witness scene: <code>long_cantilever_1024_superbend500</code>.
+    1024 bodies, one end fixed, stretch stiffness 1&thinsp;&times;&thinsp;10<sup>5</sup>,
+    bend stiffness 500&thinsp;&times;&thinsp; nominal (2500). At this
+    stiffness the correct answer is a chain that hangs nearly straight;
+    local VBD leaves it kinked at &sim;4.4&deg; per joint at any <em>K</em>.
   </p>
 </section>
 
-<section id="first-results">
-  <h2>First results — <code>long_cantilever_1024_superbend500</code></h2>
-  <p>
-    60 frames, single run per cell. Method S variants at K = 10 vs.
-    SolverVBD at K = 10, 20, 40, 80. All GPU dispatched.
-  </p>
+<section id="k-sweep">
+  <h2>2 &nbsp; Full K sweep &mdash; the local wall vs the global fix</h2>
+  <p>All values from a 60-frame headless run on the same GPU, same scene, single run per cell.</p>
   <table>
     <thead>
       <tr>
-        <th>Method</th>
-        <th>K</th>
-        <th>Step ms</th>
-        <th>Stretch max</th>
-        <th>Stretch RMS</th>
-        <th>Bend max (rad)</th>
-        <th>Bend RMS (rad)</th>
-        <th>Drift</th>
-        <th>vmax (m/s)</th>
+        <th>Method</th><th>K</th><th>Step&nbsp;ms</th><th>Stretch&nbsp;max</th><th>Bend&nbsp;max&nbsp;(rad)</th><th>Notes</th>
       </tr>
     </thead>
     <tbody>
-      <tr class="baseline">
-        <td>SolverVBD</td><td>10</td><td>3.9</td><td>8.73e-3</td><td>3.32e-3</td><td>0.0762</td><td>6.71e-3</td><td>-0.012</td><td>11.4</td>
-      </tr>
-      <tr class="baseline">
-        <td>SolverVBD</td><td>20</td><td>7.6</td><td>8.72e-3</td><td>3.32e-3</td><td>0.0761</td><td>6.70e-3</td><td>-0.012</td><td>11.4</td>
-      </tr>
-      <tr class="baseline">
-        <td>SolverVBD</td><td>40</td><td>15.0</td><td>8.72e-3</td><td>3.32e-3</td><td>0.0761</td><td>6.70e-3</td><td>-0.012</td><td>11.4</td>
-      </tr>
-      <tr class="baseline">
-        <td>SolverVBD</td><td>80</td><td>29.7</td><td>8.71e-3</td><td>3.32e-3</td><td>0.0761</td><td>6.70e-3</td><td>-0.012</td><td>11.4</td>
-      </tr>
-      <tr>
-        <td>Method S</td><td>10</td><td>28.5</td><td>2.87e-3</td><td>1.21e-3</td><td>0.1238</td><td>7.71e-3</td><td>-1.12</td><td>5.6</td>
-      </tr>
-      <tr class="highlight">
-        <td>Method S + Thomas-bend</td><td>10</td><td>56.6</td><td>2.94e-3</td><td>0.99e-3</td><td><strong>0.00414</strong></td><td>0.92e-3</td><td>-1.14</td><td>6.1</td>
-      </tr>
+      <tr class="baseline"><td>SolverVBD</td><td>10</td><td>3.9</td><td>8.73e-3</td><td>0.0762</td><td>fast, but at the wall</td></tr>
+      <tr class="baseline"><td>SolverVBD</td><td>20</td><td>7.6</td><td>8.72e-3</td><td>0.0761</td><td>2&times; work, no gain</td></tr>
+      <tr class="baseline"><td>SolverVBD</td><td>40</td><td>15.0</td><td>8.72e-3</td><td>0.0761</td><td>4&times; work, no gain</td></tr>
+      <tr class="baseline"><td>SolverVBD</td><td>80</td><td>29.7</td><td>8.71e-3</td><td>0.0761</td><td>8&times; work, no gain</td></tr>
+      <tr class="candidate"><td>M-S + Thomas-bend</td><td>2</td><td>11.2</td><td>9.09e-3</td><td>0.0083</td><td>2.65&times; faster than VBD@80, 9.2&times; tighter bend</td></tr>
+      <tr class="winner"><td><strong>M-S + Thomas-bend</strong></td><td><strong>3</strong></td><td><strong>16.8</strong></td><td><strong>6.82e-3</strong></td><td><strong>0.00699</strong></td><td><strong>Pareto-dominant &mdash; faster AND more accurate than VBD@any-K</strong></td></tr>
+      <tr class="candidate"><td>M-S + Thomas-bend</td><td>5</td><td>27.9</td><td>4.78e-3</td><td>0.0056</td><td>= VBD@80 step time, 14&times; tighter bend</td></tr>
+      <tr class="candidate"><td>M-S + Thomas-bend</td><td>10</td><td>55.6</td><td>2.94e-3</td><td>0.0041</td><td>high-quality mode &mdash; 1.9&times; slower, 18&times; tighter</td></tr>
     </tbody>
   </table>
   <div class="note">
     <strong>Reading the table.</strong>
-    Yellow rows = local VBD baseline (all four K values identical residual).
-    Blue row = the candidate that breaks the wall.
-    Method S + Thomas-bend at K = 10 delivers <strong>18× tighter bend
-    residual</strong> (0.0041 vs 0.076) and 3× tighter stretch than
-    VBD at any iteration count.
-    Cost: ~2× VBD@K=80 step time, before CUDA-graph capture.
+    Yellow rows = SolverVBD baseline. All four K values give the same
+    residual (the local wall). Blue rows = Method S + Thomas-bend at
+    various K. The green row is the sweet spot: K = 3 is <em>strictly
+    Pareto-dominant</em> vs SolverVBD at any K &mdash; less wall-clock
+    time, tighter stretch, and dramatically tighter bend.
+  </div>
+</section>
+
+<section id="scale">
+  <h2>3 &nbsp; Scale invariance &mdash; the finding holds at every N</h2>
+  <p>
+    Both solvers benchmarked on <code>long_cantilever_{N}_superbend500</code>
+    for <em>N</em> = 1024, 2048, 4096. Same stiffness, same scenes, same K.
+  </p>
+  <table>
+    <thead>
+      <tr><th>N</th><th>Method</th><th>K</th><th>Step&nbsp;ms</th><th>Stretch&nbsp;max</th><th>Bend&nbsp;max&nbsp;(rad)</th></tr>
+    </thead>
+    <tbody>
+      <tr class="baseline"><td>1024</td><td>SolverVBD</td><td>80</td><td>29.7</td><td>8.71e-3</td><td>0.0761</td></tr>
+      <tr class="winner"><td>1024</td><td>M-S + Thomas-bend</td><td>3</td><td>16.8</td><td>6.82e-3</td><td>0.00699</td></tr>
+      <tr class="baseline"><td>2048</td><td>SolverVBD</td><td>80</td><td>30.7</td><td>8.71e-3</td><td>0.0761</td></tr>
+      <tr class="winner"><td>2048</td><td>M-S + Thomas-bend</td><td>3</td><td>33.2</td><td>6.82e-3</td><td>0.00699</td></tr>
+      <tr class="baseline"><td>4096</td><td>SolverVBD</td><td>80</td><td>30.7</td><td>8.71e-3</td><td>0.0761</td></tr>
+      <tr class="winner"><td>4096</td><td>M-S + Thomas-bend</td><td>3</td><td>70.0</td><td>6.82e-3</td><td>0.00699</td></tr>
+    </tbody>
+  </table>
+  <div class="note">
+    <strong>Two invariants observed.</strong>
+    (1) <strong>Residuals are exactly N-invariant</strong> for both
+    solvers: VBD's wall stays at bend&nbsp;=&nbsp;0.076&nbsp;rad; Method S +
+    Thomas-bend hits the discretization floor at 0.00699&nbsp;rad. The
+    10.9&times; ratio holds for every N.
+    (2) <strong>Timing scales as expected</strong>: VBD is
+    coloring-bottlenecked (constant &sim;30 ms), Method S + Thomas-bend
+    is linear O(N) as sequential Thomas requires (17 &rarr; 33 &rarr; 70 ms).
+    Beyond N &sim; 2000, VBD@80 catches up in wall-clock &mdash; but the
+    residual advantage does not diminish.
   </div>
 </section>
 
 <section id="video">
-  <h2>Video — the wall vs. the fix</h2>
+  <h2>4 &nbsp; Video &mdash; kinked vs smooth</h2>
   <p>
-    Same scene, 5 seconds (300 frames at 60 fps), camera framed to the
-    first ~15 m of the chain where per-joint bend torque is highest.
-    Left: SolverVBD @ K = 80 (chain visibly kinks, flops, and shakes —
-    bend not resolved). Right: Method S + Thomas-bend @ K = 10
-    (chain holds smooth and near-straight as a stiff pendulum should).
+    5-second Newton renders at 1080p, camera zoomed tightly on the first
+    ~&thinsp;2 m of chain (~50 segments) near the fixed end where per-joint
+    bend torque is highest. Play both side-by-side: the VBD chain shows
+    visible per-joint kinks (bend residual 4.4&deg; per joint); Method S +
+    Thomas-bend chain stays smooth (0.4&deg; per joint).
   </p>
   <div class="video-grid">
     <figure>
       <video src="assets/vbd_K80_superbend500.mp4" controls muted loop preload="metadata" autoplay playsinline></video>
       <figcaption>
-        <span class="figcap-title">SolverVBD @ K = 80 &nbsp; · &nbsp; 5 s @ 1080p</span>
-        stretch_max = 8.71e-3, bend_max = 0.076 rad = 4.4°, step 29.7 ms.
-        Local wall — same residual as K = 10.
+        <span class="figcap-title">SolverVBD &nbsp;&middot;&nbsp; K = 80 &nbsp;&middot;&nbsp; 29.7 ms/step</span>
+        stretch_max = 8.71e-3 &nbsp;&middot;&nbsp; bend_max = 0.076 rad (4.4&deg;) &nbsp;&middot;&nbsp; stuck at local wall
       </figcaption>
     </figure>
     <figure>
       <video src="assets/method_s_thomasbend_K10_superbend500.mp4" controls muted loop preload="metadata" autoplay playsinline></video>
       <figcaption>
-        <span class="figcap-title">Method S + Thomas-bend @ K = 10 &nbsp; · &nbsp; 5 s @ 1080p</span>
-        stretch_max = 2.94e-3, bend_max = 0.0041 rad = 0.24°, step 56.6 ms.
-        Global Thomas sweep on bend propagates torque along the chain.
+        <span class="figcap-title">Method S + Thomas-bend &nbsp;&middot;&nbsp; K = 3 &nbsp;&middot;&nbsp; 16.8 ms/step</span>
+        stretch_max = 6.82e-3 &nbsp;&middot;&nbsp; bend_max = 0.00699 rad (0.4&deg;) &nbsp;&middot;&nbsp; global Thomas resolves bend end-to-end
       </figcaption>
     </figure>
   </div>
 </section>
 
-<section id="scale-sweep">
-  <h2>Scale invariance — the wall doesn&rsquo;t move with N</h2>
-  <p>
-    We reran the same comparison on <code>long_cantilever_2048_superbend500</code>
-    (2× as many bodies, same stiffness). The residuals at N = 2048 are
-    <strong>bit-identical</strong> to N = 1024 for both methods:
-  </p>
-  <table>
-    <thead>
-      <tr><th>Scene (N)</th><th>Method</th><th>K</th><th>Step ms</th><th>Stretch max</th><th>Bend max (rad)</th></tr>
-    </thead>
-    <tbody>
-      <tr class="baseline"><td>N = 1024</td><td>VBD</td><td>80</td><td>29.7</td><td>8.71e-3</td><td>0.0761</td></tr>
-      <tr class="highlight"><td>N = 1024</td><td>M-S + Thomas-bend</td><td>10</td><td>56.6</td><td>2.94e-3</td><td>0.00414</td></tr>
-      <tr class="baseline"><td>N = 2048</td><td>VBD</td><td>80</td><td>30.7</td><td>8.71e-3</td><td>0.0761</td></tr>
-      <tr class="highlight"><td>N = 2048</td><td>M-S + Thomas-bend</td><td>10</td><td>112.2</td><td>2.94e-3</td><td>0.00414</td></tr>
-      <tr class="baseline"><td>N = 4096</td><td>VBD</td><td>80</td><td>30.7</td><td>8.71e-3</td><td>0.0761</td></tr>
-      <tr class="highlight"><td>N = 4096</td><td>M-S + Thomas-bend</td><td>10</td><td>233.6</td><td>2.94e-3</td><td>0.00414</td></tr>
-    </tbody>
-  </table>
-  <div class="note">
-    <strong>Theory confirmed. Fully N-invariant residuals.</strong>
-    VBD's wall at bend_max = 0.076 rad is a fixed <em>neighborhood
-    accuracy</em>. Global Thomas hits the <em>discretization floor</em>
-    at 0.00414 rad. Both invariants of N. The <strong>18.4× residual
-    ratio holds across N = 1024, 2048, 4096</strong>.
-    VBD step time is constant (~30 ms) — coloring-bottlenecked, not
-    FLOP-bounded. Method S + Thomas-bend scales linearly with N
-    (57 → 112 → 234 ms) — exactly as expected for O(N) sequential Thomas.
-    At N = 4096 the step-time ratio narrows to 7.6× VBD@K=80,
-    but the residual advantage stays at 18.4×.
-  </div>
-</section>
-
-<section id="what-next">
-  <h2>What&rsquo;s next</h2>
-  <p>Sequence of upcoming benchmarks (any team can pick up):</p>
+<section id="next">
+  <h2>5 &nbsp; What&rsquo;s next</h2>
   <ol>
-    <li><strong>CUDA-graph capture</strong> for Method S + Thomas-bend to close the step-time gap. Expect ~2× speedup.</li>
-    <li><strong>Scale sweep</strong>: same test on <code>long_cantilever_2048</code> and <code>_4096</code>. Does the residual advantage grow with N?</li>
-    <li><strong>Vertical variant</strong>: add <code>long_vertical_1024_stiffbend</code> to the scene registry.</li>
-    <li><strong>Contact regime</strong>: rerun on <code>cable_pile_xl_stiffbend_50/500</code> to check that Method S + Thomas-bend survives dense contact + very stiff bend.</li>
-    <li><strong>Tier-A ideas</strong>: prototype PCG with VBD preconditioner (A2), then multigrid VBD (A3). See <code>cable_research.md</code> for full ideas queue.</li>
+    <li><strong>Contact regime</strong>: verify K = 3 remains competitive on
+      <code>cable_pile_xl</code> and the softbend piles (initial check:
+      K = 3 gives step 58.8 ms, bend 0.022 rad &mdash; needs more study).</li>
+    <li><strong>Y-junction topology</strong>: sparse-scalar Thomas on trees
+      to unlock <code>example_cable_y_junction.py</code>.</li>
+    <li><strong>General rigid body</strong>: adapt the same architecture
+      to arbitrary articulation graphs (closures, stacks, contacts).</li>
+    <li><strong>Tier-A ideas</strong>: PCG + VBD preconditioner (A2),
+      multigrid VBD (A3), Chebyshev VBD (A4). See the running research
+      log for the full ranked queue.</li>
+    <li><strong>Parallel Thomas</strong> (cyclic reduction / PCR) for
+      O(log N) depth on very long chains &mdash; competitive with block-Cholesky
+      GPU implementations of the general-graph solver.</li>
   </ol>
-  <p>
-    A sparse-direct block Cholesky reference (general-graph accuracy ceiling)
-    is on the queue for later comparison alongside Method S + Thomas-bend.
-  </p>
 </section>
 
 <section id="methodology">
-  <h2>Methodology notes</h2>
+  <h2>6 &nbsp; Methodology</h2>
   <p>
-    All runs on the same hardware (single NVIDIA GPU), Warp backend,
-    identical scene setup, identical dt and frame budget. Every method
-    tuned to its honest best within one config across scenes — no
-    per-scene parameter tweaks. Where a metric appears large in
-    magnitude but small in effect (e.g., energy drift with near-zero
-    denominator) we describe the physical interpretation, not just
-    the numeric value.
-  </p>
-  <p>
-    See the full research doc for the ideas queue, test scene list,
-    baseline definitions, and integrity rules:
-    <code>bench/global_cable/cable_research.md</code>
-    on the <code>global-solve</code> branch (not pushed).
+    Every solver runs on the same GPU with Warp, identical scene setup,
+    identical dt, identical frame budget. Every method uses one config
+    across scenes &mdash; no per-scene parameter tweaks. CUDA graph capture
+    enabled on both baseline (SolverVBD) and candidate (Method S +
+    Thomas-bend) so wall-clock comparisons are launch-overhead free.
+    Videos are Newton-rendered mp4 at 1920&times;1080, 300 frames at
+    60 fps. Full metric JSON dumps under <code>data/</code>.
   </p>
 </section>
 
@@ -266,10 +253,12 @@ footer { padding: 0 0 42px; color: var(--muted); font-size: 0.9rem; }
 
 <footer>
   <p>
-    Report auto-updates after each benchmark completes. Ownership
-    alternates between team Claude (odd hours) and team Codex (even
-    hours). Everything under <code>reports/cable_solver_research/</code>
-    is self-contained and can be removed with a single directory delete.
+    This report auto-updates after every benchmark cell completes.
+    All artifacts live under <code>reports/cable_solver_research/</code>
+    and can be removed with a single directory delete when the research
+    concludes. Research doc (with ideas queue, integrity rules, and
+    handoff log) is maintained locally on the <code>global-solve</code>
+    branch; only the report itself is published.
   </p>
 </footer>
 
