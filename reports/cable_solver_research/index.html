@@ -74,34 +74,34 @@ footer { padding: 0 0 42px; color: var(--muted); font-size: 0.86rem; }
       generalize to any topology, always GPU + CUDA graph.
     </p>
     <div class="headline">
-      <h2>Latest result &nbsp;·&nbsp; 2026-07-02T07:40Z</h2>
+      <h2>Latest result &nbsp;·&nbsp; 2026-07-02T09:30Z</h2>
       <p>
-        <strong>Method S + Thomas-bend at K = 3 wins on speed AND accuracy
-        vs both local VBD AND sparse-direct block-Cholesky VBD, at any K</strong>.
-        Faster than local VBD@K=80 (1.77&times;), <strong>34&times; faster
-        than sparse-direct VBD</strong>@K=8, and tighter residual than either.
-        Key insight: <strong>the VBD-family residual wall is a
-        penalty-formulation invariant, not a solve-method invariant</strong> &mdash;
-        block-Cholesky iterations converge to the same wall as local
-        Gauss-Seidel, just faster. XPBD projection has no such wall.
+        <strong>Two independent wall-breakers found</strong>.
+        (1) <strong>Method S + Thomas-bend</strong>: XPBD projection with scalar
+        Thomas on both stretch and bend. Best <em>bend</em> residual (0.007 rad).
+        (2) <strong>AVBD with hard cable joints</strong> (newton's built-in,
+        properly configured): augmented Lagrangian ramp on cable stretch.
+        Best <em>stretch</em> residual (2e-4). Both scale properly &mdash; no
+        wall. The next step is to <strong>combine them</strong> for a strictly
+        Pareto-optimal solver on every axis.
       </p>
     </div>
     <div class="status-row">
       <div class="metric">
-        <span class="label">Best method (this scene)</span>
-        <span class="value">Method S + Thomas-bend, K = 3</span>
+        <span class="label">Stretch-priority winner</span>
+        <span class="value">AVBD hard, K = 20</span>
       </div>
       <div class="metric">
-        <span class="label">vs local VBD@K=80</span>
-        <span class="value" style="color: var(--good)">1.77&times; faster, 10.9&times; tighter bend</span>
+        <span class="label">Bend-priority winner</span>
+        <span class="value">M-S + Thomas-bend, K = 3</span>
       </div>
       <div class="metric">
-        <span class="label">vs sparse-direct VBD@K=8</span>
-        <span class="value" style="color: var(--good)">34&times; faster, 10.9&times; tighter bend</span>
+        <span class="label">Failed / walled</span>
+        <span class="value" style="color: var(--bad)">VBD-local, sparse-VBD</span>
       </div>
       <div class="metric">
         <span class="label">Last update</span>
-        <span class="value">08:40Z</span>
+        <span class="value">09:30Z</span>
       </div>
     </div>
   </div>
@@ -314,6 +314,62 @@ footer { padding: 0 0 42px; color: var(--muted); font-size: 0.86rem; }
       <tr class="winner"><td>Vertical hanging (stiff bend)</td><td>Method S + Thomas-bend K=3</td><td>2&times; faster + tighter + more stable</td></tr>
     </tbody>
   </table>
+</section>
+
+<section id="avbd">
+  <h2>4.5 &nbsp; AVBD paradigm shift &mdash; second wall-breaker discovered</h2>
+  <p>
+    Newton's <code>SolverVBD</code> has a built-in
+    <strong>Augmented Vertex Block Descent (AVBD, SIGGRAPH 2025,
+    Giles/Yuksel/Diaz)</strong> path controlled by
+    <code>rigid_avbd_beta</code> plus per-joint hard/soft mode. When
+    properly configured for cable joints, AVBD's dual-variable ramp
+    breaks the same penalty wall that stops both local and sparse-direct
+    VBD.
+  </p>
+  <p>
+    Configuration that made it work: (i) <code>rigid_avbd_beta=1.0</code>;
+    (ii) <code>rigid_joint_linear_k_start</code>/<code>...angular_k_start</code>
+    matched to the cable&rsquo;s actual stiffness (default 100/10 was orders
+    of magnitude lower than cable ke = 1e4 / 500, causing divergence);
+    (iii) after solver construction, call
+    <code>solver.set_joint_constraint_mode(j, hard=True)</code> for each cable
+    joint &mdash; cable joints <em>default to SOFT</em>, and AVBD duals
+    only engage on HARD constraints.
+  </p>
+  <table>
+    <thead>
+      <tr>
+        <th>Method</th><th>K</th><th>Step&nbsp;ms</th><th>Stretch&nbsp;max</th><th>Bend&nbsp;max&nbsp;(rad)</th><th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="baseline"><td>SolverVBD (soft, default)</td><td>80</td><td>29.7</td><td>8.71e-3</td><td>0.0761</td><td>walled</td></tr>
+      <tr class="baseline"><td>Sparse-direct VBD</td><td>8</td><td>573</td><td>8.71e-3</td><td>0.0765</td><td>same wall, 19&times; slower</td></tr>
+      <tr class="candidate"><td>AVBD (hard cable)</td><td>5</td><td>2.2</td><td>3.04e-3</td><td>0.037</td><td>fastest AVBD point</td></tr>
+      <tr class="candidate"><td>AVBD (hard cable)</td><td>10</td><td>4.0</td><td>1.84e-3</td><td>0.026</td><td>very fast, good stretch</td></tr>
+      <tr class="winner"><td><strong>AVBD (hard cable)</strong></td><td><strong>20</strong></td><td><strong>7.7</strong></td><td><strong>9.72e-4</strong></td><td>0.018</td><td><strong>stretch-priority sweet spot &mdash; 2.2&times; faster and 7&times; tighter stretch than M-S+TB K=3</strong></td></tr>
+      <tr class="candidate"><td>AVBD (hard cable)</td><td>40</td><td>15.3</td><td>4.27e-4</td><td>0.012</td><td>tighter both</td></tr>
+      <tr class="candidate"><td>AVBD (hard cable)</td><td>80</td><td>30.3</td><td>2.05e-4</td><td>0.0083</td><td>tightest AVBD stretch</td></tr>
+      <tr class="winner"><td><strong>M-S + Thomas-bend</strong></td><td><strong>3</strong></td><td><strong>16.8</strong></td><td>6.82e-3</td><td><strong>0.00699</strong></td><td><strong>bend-priority winner</strong></td></tr>
+      <tr class="candidate"><td>M-S + Thomas-bend</td><td>10</td><td>55.6</td><td>2.94e-3</td><td>0.00414</td><td>highest bend quality</td></tr>
+    </tbody>
+  </table>
+  <div class="note">
+    <strong>AVBD scales &mdash; no wall.</strong> K=5&thinsp;&rarr;&thinsp;K=80
+    improves stretch 15&times; (3e-3 &rarr; 2e-4) and bend 4.5&times;
+    (0.037 &rarr; 0.008). The dual-variable ramp pushes constraint
+    penalty toward infinity while the augmented Lagrangian keeps the
+    solve stable. Same architectural conclusion as XPBD projection:
+    <strong>the wall is in the fixed-penalty formulation, not the
+    solver</strong>. Either escape route (XPBD projection or augmented
+    Lagrangian) breaks it.
+    <br><br>
+    <strong>Trade-off between the two winners:</strong> AVBD is faster
+    and wins big on stretch; M-S+TB wins on bend. The combination of
+    AVBD-hard on stretch + Thomas-bend on bend is the natural next
+    prototype &mdash; expected to be strictly Pareto-optimal.
+  </div>
 </section>
 
 <section id="video">
