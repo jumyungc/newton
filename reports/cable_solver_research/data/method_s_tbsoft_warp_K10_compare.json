@@ -1,0 +1,32 @@
+{
+  "scene": "cable_pile_xl",
+  "method": "method_s_tbsoft_warp_K10_compare",
+  "config": {
+    "iterations": 10,
+    "substep_mult": 1,
+    "avbd_beta": 0.0,
+    "hard": true,
+    "fps": 60,
+    "sim_substeps": 10,
+    "num_frames_requested": 60,
+    "num_frames_completed": 60
+  },
+  "num_frames": 60,
+  "fps": 60,
+  "substeps": 10,
+  "seconds_total": 37.45437669754028,
+  "seconds_step_mean_ms": 99.14360418915749,
+  "seconds_step_p50_ms": 96.24134562909603,
+  "seconds_step_p95_ms": 96.45656738430262,
+  "final_stretch_max": 0.0049365593532961554,
+  "final_stretch_rms": 0.0003014053245168429,
+  "final_bend_max": 0.010698447825989629,
+  "final_bend_rms": 0.0028262598720348183,
+  "energy_drift_rel": -0.8867246743212256,
+  "max_speed_observed": 4.901500672570621,
+  "min_z_observed": 0.0,
+  "visual_path": "/home/horde/JC/newton/bench/_workspace/cable_pile_xl/method_s_tbsoft_warp_K10_compare.mp4",
+  "timeseries_csv": "/home/horde/JC/newton/bench/_workspace/cable_pile_xl/method_s_tbsoft_warp_K10_compare.csv",
+  "notes": "12 layers \u00d7 12 lanes \u00d7 200 segments = 28 800 bodies; bend_ke=5.0 (1.0\u00d7); production scaling stress test.",
+  "error": null
+}

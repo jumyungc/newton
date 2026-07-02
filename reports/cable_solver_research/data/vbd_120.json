@@ -1,0 +1,32 @@
+{
+  "scene": "cable_pile_xl_softbend_0p01",
+  "method": "vbd_120",
+  "config": {
+    "iterations": 120,
+    "substep_mult": 1,
+    "avbd_beta": 0.0,
+    "hard": true,
+    "fps": 60,
+    "sim_substeps": 10,
+    "num_frames_requested": 120,
+    "num_frames_completed": 120
+  },
+  "num_frames": 120,
+  "fps": 60,
+  "substeps": 10,
+  "seconds_total": 87.38033067248762,
+  "seconds_step_mean_ms": 206.6215657008191,
+  "seconds_step_p50_ms": 207.02705532312393,
+  "seconds_step_p95_ms": 207.23120588809252,
+  "final_stretch_max": 0.0037660359753116258,
+  "final_stretch_rms": 0.0007886213021600134,
+  "final_bend_max": 1.696599403875737,
+  "final_bend_rms": 0.2882009099675493,
+  "energy_drift_rel": -0.9209045810278154,
+  "max_speed_observed": 14.069964577368244,
+  "min_z_observed": 0.0,
+  "visual_path": "/home/horde/JC/newton/bench/_workspace/cable_pile_xl_softbend_0p01/vbd_120.mp4",
+  "timeseries_csv": "/home/horde/JC/newton/bench/_workspace/cable_pile_xl_softbend_0p01/vbd_120.csv",
+  "notes": "12 layers \u00d7 12 lanes \u00d7 200 segments = 28 800 bodies; bend_ke=0.05 (0.01\u00d7); near-floppy bend \u2014 stresses non-stretch DOFs and contact tangents.",
+  "error": null
+}

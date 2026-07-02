@@ -1,0 +1,32 @@
+{
+  "scene": "long_vertical_1024_stiffbend",
+  "method": "vbd_K80_verify",
+  "config": {
+    "iterations": 80,
+    "substep_mult": 1,
+    "avbd_beta": 0.0,
+    "hard": true,
+    "fps": 60,
+    "sim_substeps": 10,
+    "num_frames_requested": 60,
+    "num_frames_completed": 60
+  },
+  "num_frames": 60,
+  "fps": 60,
+  "substeps": 10,
+  "seconds_total": 3.2524816747754812,
+  "seconds_step_mean_ms": 35.06855238229036,
+  "seconds_step_p50_ms": 34.45869870483875,
+  "seconds_step_p95_ms": 35.02920167520642,
+  "final_stretch_max": 0.015125274658203125,
+  "final_stretch_rms": 0.006967308763997706,
+  "final_bend_max": 0.0,
+  "final_bend_rms": 0.0,
+  "energy_drift_rel": -0.0008759677347679081,
+  "max_speed_observed": 9.797501564025879,
+  "min_z_observed": -4.783078670501709,
+  "visual_path": "/home/horde/JC/newton/bench/_workspace/long_vertical_1024_stiffbend/vbd_K80_verify.mp4",
+  "timeseries_csv": "/home/horde/JC/newton/bench/_workspace/long_vertical_1024_stiffbend/vbd_K80_verify.csv",
+  "notes": "1024-segment vertical chain; top pinned; stretch_ke=10000.0; bend_ke=500.0.",
+  "error": null
+}

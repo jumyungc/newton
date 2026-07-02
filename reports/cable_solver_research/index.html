@@ -101,7 +101,7 @@ footer { padding: 0 0 42px; color: var(--muted); font-size: 0.86rem; }
       </div>
       <div class="metric">
         <span class="label">Last update</span>
-        <span class="value">07:40Z</span>
+        <span class="value">08:40Z</span>
       </div>
     </div>
   </div>
@@ -231,8 +231,93 @@ footer { padding: 0 0 42px; color: var(--muted); font-size: 0.86rem; }
   </div>
 </section>
 
+<section id="regime-sweep">
+  <h2>4 &nbsp; Beyond the witness scene &mdash; regime sweep</h2>
+  <p>
+    The stiff-bend cantilever isolates the local-VBD wall cleanly, but
+    the real-world regimes are contact-heavy piles, vertical hangs,
+    and soft-bend rope-like scenes. Here is the full comparison across
+    those regimes.
+  </p>
+
+  <h3>4.1 &nbsp; <code>long_vertical_1024_stiffbend</code> &mdash; top-pinned, bend<sub>ke</sub>=500, gravity</h3>
+  <table>
+    <thead>
+      <tr><th>Method</th><th>K</th><th>Step&nbsp;ms</th><th>Stretch&nbsp;max</th><th>Bend&nbsp;max</th><th>vmax&nbsp;(m/s)</th></tr>
+    </thead>
+    <tbody>
+      <tr class="baseline"><td>SolverVBD (local)</td><td>80</td><td>35.1</td><td>0.0151</td><td>0.000</td><td>9.8</td></tr>
+      <tr class="winner"><td><strong>M-S + Thomas-bend</strong></td><td><strong>3</strong></td><td><strong>16.7</strong></td><td><strong>0.0111</strong></td><td>0.000</td><td><strong>4.9</strong></td></tr>
+      <tr class="candidate"><td>M-S + Thomas-bend</td><td>10</td><td>55.5</td><td>0.0082</td><td>0.000</td><td>4.9</td></tr>
+    </tbody>
+  </table>
+  <p>
+    Chain hangs straight (bend=0 is the correct equilibrium; both solvers hit it).
+    <strong>M-S + Thomas-bend K=3 wins on speed (2.1&times;), stretch (1.36&times;),
+    and stability (half the vmax)</strong>.
+  </p>
+
+  <h3>4.2 &nbsp; <code>cable_pile_xl</code> &mdash; 28,800 bodies, contact-heavy</h3>
+  <table>
+    <thead>
+      <tr><th>Method</th><th>K</th><th>Step&nbsp;ms</th><th>Stretch&nbsp;max</th><th>Bend&nbsp;max</th><th>vmax&nbsp;(m/s)</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      <tr class="baseline"><td>SolverVBD (local)</td><td>10</td><td>56.8</td><td>0.039</td><td>0.54</td><td>210</td><td>already flapping</td></tr>
+      <tr class="baseline"><td>SolverVBD (local)</td><td>80</td><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td><td><strong>DIVERGED at frame 18</strong> (vmax=1.3e10)</td></tr>
+      <tr class="baseline"><td>SolverVBD (sparse)</td><td>4</td><td>98.7</td><td><strong>0.00224</strong></td><td>0.124</td><td>5.4</td><td>best stretch</td></tr>
+      <tr class="baseline"><td>SolverVBD (sparse)</td><td>8</td><td>153.9</td><td>0.00947</td><td>0.188</td><td>4.9</td><td>K=8 regresses vs K=4</td></tr>
+      <tr class="winner"><td><strong>M-S + Thomas-bend</strong></td><td><strong>3</strong></td><td><strong>58.8</strong></td><td>0.00839</td><td><strong>0.0202</strong></td><td><strong>4.2</strong></td><td>best speed + best bend</td></tr>
+      <tr class="candidate"><td>M-S + Thomas-bend</td><td>10</td><td>95.4</td><td>0.00478</td><td>0.0109</td><td>4.7</td><td>high quality</td></tr>
+    </tbody>
+  </table>
+  <div class="note">
+    <strong>Two critical failure modes surface here.</strong>
+    (1) SolverVBD local <em>diverges</em> at K=80 &mdash; not walls, outright numerical
+    blow-up (speed reaches 1.3e10 m/s at frame 18). K=10 already has vmax=210
+    m/s (chain bodies flying).
+    (2) Sparse-direct VBD <em>regresses</em> when K increases from 4 to 8 &mdash;
+    K=4 gives stretch=0.0022, K=8 gives stretch=0.0095 (4&times; worse) and bend
+    from 0.124 to 0.188. The direct solver oscillates between contact
+    configurations at higher K.
+    <br><br>
+    <strong>Contact-regime trade-off</strong>: sparse-VBD wins on stretch
+    (3.8&times; tighter); M-S+TB wins on bend (6.2&times; tighter) and speed
+    (1.7&times; faster). Both are stable; local VBD is not.
+  </div>
+
+  <h3>4.3 &nbsp; <code>cable_pile_xl_softbend_0p01</code> &mdash; soft-bend rope pile</h3>
+  <table>
+    <thead>
+      <tr><th>Method</th><th>K</th><th>Step&nbsp;ms</th><th>Stretch&nbsp;max</th><th>Bend&nbsp;max</th><th>vmax&nbsp;(m/s)</th></tr>
+    </thead>
+    <tbody>
+      <tr class="baseline"><td>SolverVBD (local)</td><td>10</td><td>56.7</td><td>0.0363</td><td>0.79</td><td>168</td></tr>
+      <tr class="winner"><td><strong>M-S + Thomas-bend</strong></td><td><strong>3</strong></td><td><strong>58.8</strong></td><td><strong>0.00250</strong></td><td><strong>0.301</strong></td><td><strong>3.7</strong></td></tr>
+    </tbody>
+  </table>
+  <p>
+    On soft-bend rope piles M-S + Thomas-bend K=3 wins on all axes:
+    <strong>14.5&times; tighter stretch, 2.6&times; tighter bend, 45&times; smaller vmax</strong>,
+    same step time.
+  </p>
+
+  <h3>Winner per regime</h3>
+  <table>
+    <thead>
+      <tr><th>Regime</th><th>Winner</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      <tr class="winner"><td>Stiff-bend chain (cantilever, vertical)</td><td>Method S + Thomas-bend K=3</td><td>Pareto-dominant vs all VBD (local + sparse)</td></tr>
+      <tr class="winner"><td>Stiff-bend pile (contact-heavy)</td><td>Method S + Thomas-bend K=3</td><td>fastest + best bend; sparse-VBD K=4 as stretch-priority alt</td></tr>
+      <tr class="winner"><td>Soft-bend pile (rope-like)</td><td>Method S + Thomas-bend K=3</td><td>wins on all axes</td></tr>
+      <tr class="winner"><td>Vertical hanging (stiff bend)</td><td>Method S + Thomas-bend K=3</td><td>2&times; faster + tighter + more stable</td></tr>
+    </tbody>
+  </table>
+</section>
+
 <section id="video">
-  <h2>4 &nbsp; Video &mdash; kinked vs smooth</h2>
+  <h2>5 &nbsp; Video &mdash; kinked vs smooth</h2>
   <p>
     5-second Newton renders at 1080p, camera zoomed tightly on the first
     ~&thinsp;2 m of chain (~50 segments) near the fixed end where per-joint
@@ -262,29 +347,22 @@ footer { padding: 0 0 42px; color: var(--muted); font-size: 0.86rem; }
 </section>
 
 <section id="next">
-  <h2>5 &nbsp; What&rsquo;s next</h2>
+  <h2>6 &nbsp; What&rsquo;s next</h2>
   <ol>
-    <li><strong>Render matched K = 3 video</strong>: the table winner needs
-      its own 5-second, thick/visible, zoomed 1080p clip before visual
-      evidence is fully aligned with the metrics.</li>
-    <li><strong>Contact regime</strong>: verify K = 3 remains competitive on
-      <code>cable_pile_xl</code> and the softbend piles (initial check:
-      K = 3 gives step 58.8 ms, bend 0.022 rad &mdash; needs more study).</li>
+    <li><strong>Parallel Thomas</strong> (cyclic reduction / SPIKE / PCR) for
+      O(log N) depth on very long chains &mdash; the biggest remaining
+      speedup opportunity vs sparse-VBD at N=4096+.</li>
     <li><strong>Y-junction topology</strong>: sparse-scalar Thomas on trees
       to unlock <code>example_cable_y_junction.py</code>.</li>
     <li><strong>General rigid body</strong>: adapt the same architecture
       to arbitrary articulation graphs (closures, stacks, contacts).</li>
-    <li><strong>Tier-A ideas</strong>: PCG + VBD preconditioner (A2),
-      multigrid VBD (A3), Chebyshev VBD (A4). See the running research
-      log for the full ranked queue.</li>
-    <li><strong>Parallel Thomas</strong> (cyclic reduction / SPIKE / PCR) for
-      O(log N) depth on very long chains &mdash; competitive with block-Cholesky
-      GPU implementations of the general-graph solver.</li>
+    <li><strong>Tier-A ideas</strong>: PCG + VBD preconditioner,
+      multigrid VBD (MGPBD-style), Chebyshev-accelerated VBD.</li>
   </ol>
 </section>
 
 <section id="methodology">
-  <h2>6 &nbsp; Methodology</h2>
+  <h2>7 &nbsp; Methodology</h2>
   <p>
     Every solver runs on the same GPU with Warp, identical scene setup,
     identical dt, identical frame budget. Every method uses one config

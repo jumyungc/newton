@@ -1,0 +1,32 @@
+{
+  "scene": "cable_pile_xl",
+  "method": "vbd_K80_pile",
+  "config": {
+    "iterations": 80,
+    "substep_mult": 1,
+    "avbd_beta": 0.0,
+    "hard": true,
+    "fps": 60,
+    "sim_substeps": 10,
+    "num_frames_requested": 60,
+    "num_frames_completed": 18
+  },
+  "num_frames": 18,
+  "fps": 60,
+  "substeps": 10,
+  "seconds_total": 12.155494911596179,
+  "seconds_step_mean_ms": NaN,
+  "seconds_step_p50_ms": NaN,
+  "seconds_step_p95_ms": NaN,
+  "final_stretch_max": 24140328.854234133,
+  "final_stretch_rms": 439079.3144215211,
+  "final_bend_max": 3.1410013605402956,
+  "final_bend_rms": 0.37476020838187696,
+  "energy_drift_rel": 8671941785027204.0,
+  "max_speed_observed": 13484367373.22613,
+  "min_z_observed": -37407716.0,
+  "visual_path": "/home/horde/JC/newton/bench/_workspace/cable_pile_xl/vbd_K80_pile.mp4",
+  "timeseries_csv": "/home/horde/JC/newton/bench/_workspace/cable_pile_xl/vbd_K80_pile.csv",
+  "notes": "12 layers \u00d7 12 lanes \u00d7 200 segments = 28 800 bodies; bend_ke=5.0 (1.0\u00d7); production scaling stress test.",
+  "error": "non-finite or runaway state at frame 18 (speed=13484367373.2)"
+}

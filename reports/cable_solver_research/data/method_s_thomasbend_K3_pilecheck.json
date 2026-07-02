@@ -1,0 +1,32 @@
+{
+  "scene": "cable_pile_xl",
+  "method": "method_s_thomasbend_K3_pilecheck",
+  "config": {
+    "iterations": 3,
+    "substep_mult": 1,
+    "avbd_beta": 0.0,
+    "hard": true,
+    "fps": 60,
+    "sim_substeps": 10,
+    "num_frames_requested": 60,
+    "num_frames_completed": 60
+  },
+  "num_frames": 60,
+  "fps": 60,
+  "substeps": 10,
+  "seconds_total": 35.24823211506009,
+  "seconds_step_mean_ms": 58.84324765453736,
+  "seconds_step_p50_ms": 58.78926441073418,
+  "seconds_step_p95_ms": 58.8894865475595,
+  "final_stretch_max": 0.006681447356547258,
+  "final_stretch_rms": 0.0006944888298710104,
+  "final_bend_max": 0.0215364395998456,
+  "final_bend_rms": 0.004920914386122234,
+  "energy_drift_rel": -0.8820322297852664,
+  "max_speed_observed": 4.295003376169511,
+  "min_z_observed": 0.0,
+  "visual_path": "/home/horde/JC/newton/bench/_workspace/cable_pile_xl/method_s_thomasbend_K3_pilecheck.mp4",
+  "timeseries_csv": "/home/horde/JC/newton/bench/_workspace/cable_pile_xl/method_s_thomasbend_K3_pilecheck.csv",
+  "notes": "12 layers \u00d7 12 lanes \u00d7 200 segments = 28 800 bodies; bend_ke=5.0 (1.0\u00d7); production scaling stress test.",
+  "error": null
+}

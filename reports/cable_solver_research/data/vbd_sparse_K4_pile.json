@@ -1,0 +1,32 @@
+{
+  "scene": "cable_pile_xl",
+  "method": "vbd_sparse_K4_pile",
+  "config": {
+    "iterations": 4,
+    "substep_mult": 1,
+    "avbd_beta": 0.0,
+    "hard": true,
+    "fps": 60,
+    "sim_substeps": 10,
+    "num_frames_requested": 60,
+    "num_frames_completed": 60
+  },
+  "num_frames": 60,
+  "fps": 60,
+  "substeps": 10,
+  "seconds_total": 37.49990923888981,
+  "seconds_step_mean_ms": 98.67171368872125,
+  "seconds_step_p50_ms": 92.75816939771175,
+  "seconds_step_p95_ms": 107.0923451334238,
+  "final_stretch_max": 0.0022412983354856866,
+  "final_stretch_rms": 0.00031087756728332783,
+  "final_bend_max": 0.12440125911036394,
+  "final_bend_rms": 0.021246901406563504,
+  "energy_drift_rel": -0.9119137214956838,
+  "max_speed_observed": 5.355418250352533,
+  "min_z_observed": 0.0,
+  "visual_path": "/home/horde/mmacklin-newton-vbd-sparse-articulation-main/bench/_workspace/cable_pile_xl/vbd_sparse_K4_pile.mp4",
+  "timeseries_csv": "/home/horde/mmacklin-newton-vbd-sparse-articulation-main/bench/_workspace/cable_pile_xl/vbd_sparse_K4_pile.csv",
+  "notes": "12 layers \u00d7 12 lanes \u00d7 200 segments = 28 800 bodies; bend_ke=5.0 (1.0\u00d7); production scaling stress test.",
+  "error": null
+}

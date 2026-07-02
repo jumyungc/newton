@@ -1,0 +1,32 @@
+{
+  "scene": "cable_pile_xl",
+  "method": "method_s_sc_1.0",
+  "config": {
+    "iterations": 10,
+    "substep_mult": 1,
+    "avbd_beta": 0.0,
+    "hard": true,
+    "fps": 60,
+    "sim_substeps": 10,
+    "num_frames_requested": 60,
+    "num_frames_completed": 60
+  },
+  "num_frames": 60,
+  "fps": 60,
+  "substeps": 10,
+  "seconds_total": 36.412239611148834,
+  "seconds_step_mean_ms": 73.71118379135926,
+  "seconds_step_p50_ms": 70.8953132852912,
+  "seconds_step_p95_ms": 71.0882542654872,
+  "final_stretch_max": 0.0006439354089831527,
+  "final_stretch_rms": 0.00010323103943719186,
+  "final_bend_max": 0.04608834676499706,
+  "final_bend_rms": 0.007739904929891751,
+  "energy_drift_rel": -0.8788320974512032,
+  "max_speed_observed": 4.386853685540798,
+  "min_z_observed": 0.0,
+  "visual_path": "/home/horde/JC/newton/bench/_workspace/cable_pile_xl/method_s_sc_1.0.mp4",
+  "timeseries_csv": "/home/horde/JC/newton/bench/_workspace/cable_pile_xl/method_s_sc_1.0.csv",
+  "notes": "12 layers \u00d7 12 lanes \u00d7 200 segments = 28 800 bodies; bend_ke=5.0 (1.0\u00d7); production scaling stress test.",
+  "error": null
+}
