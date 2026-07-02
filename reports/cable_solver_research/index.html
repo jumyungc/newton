@@ -373,30 +373,36 @@ footer { padding: 0 0 42px; color: var(--muted); font-size: 0.86rem; }
 </section>
 
 <section id="video">
-  <h2>5 &nbsp; Video &mdash; kinked vs smooth</h2>
+  <h2>5 &nbsp; Video &mdash; walled VBD, kinked-but-smooth M-S+TB, aligned AVBD</h2>
   <p>
-    5-second Newton renders at 1080p, camera zoomed tightly on the first
-    ~&thinsp;2 m of chain (~50 segments) near the fixed end where per-joint
-    bend torque is highest. Play both side-by-side: the VBD chain shows
-    visible per-joint kinks; Method S + Thomas-bend stays smooth.
-    The metric winner above is K = 3. The currently embedded candidate
-    render is the K = 10 high-quality reference clip; a matching K = 3
-    video still needs to be rendered before the visual section is fully
-    matched to the K-sweep table.
+    5-second Newton renders at 1080p, camera zoomed to the first ~&thinsp;2 m
+    of the chain (~50 segments). Same scene, same 60-frame protocol as the
+    metrics table.
+    <strong>Compare capsule alignment visually.</strong>
+    Cable radius is 12&thinsp;mm; a stretch residual of 8.7&thinsp;mm
+    (VBD wall) leaves visibly separated capsules. AVBD@K=80 at
+    0.2&thinsp;mm stretch keeps capsules aligned.
   </p>
   <div class="video-grid">
     <figure>
       <video src="assets/vbd_K80_superbend500.mp4" controls muted loop preload="metadata" autoplay playsinline></video>
       <figcaption>
-        <span class="figcap-title">SolverVBD &nbsp;&middot;&nbsp; K = 80 &nbsp;&middot;&nbsp; 29.7 ms/step</span>
-        stretch_max = 8.71e-3 &nbsp;&middot;&nbsp; bend_max = 0.076 rad (4.4&deg;) &nbsp;&middot;&nbsp; stuck at local wall
+        <span class="figcap-title">SolverVBD (soft, default) &nbsp;&middot;&nbsp; K = 80 &nbsp;&middot;&nbsp; 29.7 ms/step</span>
+        stretch = 8.71e-3 (8.7&thinsp;mm gap, &sim;0.7 &times; cable radius) &nbsp;&middot;&nbsp; bend = 0.076 rad (4.4&deg;) &nbsp;&middot;&nbsp; stuck at penalty wall &mdash; capsules visibly separated
       </figcaption>
     </figure>
     <figure>
       <video src="assets/method_s_thomasbend_K10_superbend500.mp4" controls muted loop preload="metadata" autoplay playsinline></video>
       <figcaption>
-        <span class="figcap-title">Method S + Thomas-bend &nbsp;&middot;&nbsp; K = 10 reference render &nbsp;&middot;&nbsp; 55.6 ms/step</span>
-        60-frame metrics: stretch_max = 2.94e-3 &nbsp;&middot;&nbsp; bend_max = 0.00414 rad (0.24&deg;) &nbsp;&middot;&nbsp; global Thomas resolves bend end-to-end
+        <span class="figcap-title">Method S + Thomas-bend &nbsp;&middot;&nbsp; K = 3 &nbsp;&middot;&nbsp; 16.8 ms/step</span>
+        stretch = 6.82e-3 (6.8&thinsp;mm gap) &nbsp;&middot;&nbsp; bend = 0.00699 rad (0.4&deg;) &nbsp;&middot;&nbsp; XPBD projection tightens bend but stretch still soft
+      </figcaption>
+    </figure>
+    <figure style="grid-column: span 2; max-width: 720px; margin: 0 auto;">
+      <video src="assets/avbd_K80_superbend500.mp4" controls muted loop preload="metadata" autoplay playsinline></video>
+      <figcaption>
+        <span class="figcap-title">AVBD (hard cable) &nbsp;&middot;&nbsp; K = 80 &nbsp;&middot;&nbsp; 30.3 ms/step</span>
+        stretch = <strong>2.05e-4</strong> (0.2&thinsp;mm gap &mdash; 42&times; tighter than VBD, capsules effectively touching) &nbsp;&middot;&nbsp; bend = 0.00830 rad (0.48&deg;) &nbsp;&middot;&nbsp; augmented-Lagrangian duals push through the wall
       </figcaption>
     </figure>
   </div>
