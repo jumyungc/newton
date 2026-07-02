@@ -23,7 +23,7 @@ body { margin: 0; background: #ffffff; color: var(--ink); font-family: Inter, ui
 header { border-bottom: 1px solid var(--line); background: #fbfcfd; }
 main, .header-inner, footer { width: min(var(--max), calc(100vw - 32px)); margin: 0 auto; }
 .header-inner { padding: 36px 0 26px; }
-h1 { margin: 0 0 10px; font-size: clamp(2rem, 4vw, 3rem); line-height: 1.05; letter-spacing: -0.01em; }
+h1 { margin: 0 0 10px; font-size: clamp(2rem, 4vw, 3rem); line-height: 1.05; letter-spacing: 0; }
 .subtitle { max-width: 800px; margin: 0; color: var(--muted); font-size: 1.02rem; }
 .headline {
   margin-top: 22px; padding: 16px 20px; border-radius: 10px;
@@ -74,14 +74,16 @@ footer { padding: 0 0 42px; color: var(--muted); font-size: 0.86rem; }
       generalize to any topology, always GPU + CUDA graph.
     </p>
     <div class="headline">
-      <h2>Latest result &nbsp;·&nbsp; 2026-07-02</h2>
+      <h2>Latest result &nbsp;·&nbsp; 2026-07-02T07:40Z</h2>
       <p>
-        <strong>Method S + Thomas-bend at K = 3 strictly Pareto-dominates
-        SolverVBD at K = 80</strong> on the long-cantilever stiff-bend witness scene:
-        <strong>1.77&times; faster</strong> (16.8 vs 29.7 ms/step),
-        <strong>10.9&times; tighter</strong> bend residual (0.0070 vs 0.076 rad),
-        and 1.28&times; tighter stretch residual — at N = 1024, and the
-        residuals are <strong>N-invariant</strong> across N = 1024, 2048, 4096.
+        <strong>Method S + Thomas-bend at K = 3 wins on speed AND accuracy
+        vs both local VBD AND sparse-direct block-Cholesky VBD, at any K</strong>.
+        Faster than local VBD@K=80 (1.77&times;), <strong>34&times; faster
+        than sparse-direct VBD</strong>@K=8, and tighter residual than either.
+        Key insight: <strong>the VBD-family residual wall is a
+        penalty-formulation invariant, not a solve-method invariant</strong> &mdash;
+        block-Cholesky iterations converge to the same wall as local
+        Gauss-Seidel, just faster. XPBD projection has no such wall.
       </p>
     </div>
     <div class="status-row">
@@ -90,16 +92,16 @@ footer { padding: 0 0 42px; color: var(--muted); font-size: 0.86rem; }
         <span class="value">Method S + Thomas-bend, K = 3</span>
       </div>
       <div class="metric">
-        <span class="label">Speedup vs VBD@K=80</span>
-        <span class="value" style="color: var(--good)">1.77&times;</span>
+        <span class="label">vs local VBD@K=80</span>
+        <span class="value" style="color: var(--good)">1.77&times; faster, 10.9&times; tighter bend</span>
       </div>
       <div class="metric">
-        <span class="label">Bend residual reduction</span>
-        <span class="value" style="color: var(--good)">10.9&times;</span>
+        <span class="label">vs sparse-direct VBD@K=8</span>
+        <span class="value" style="color: var(--good)">34&times; faster, 10.9&times; tighter bend</span>
       </div>
       <div class="metric">
         <span class="label">Last update</span>
-        <span class="value">06:35Z</span>
+        <span class="value">07:40Z</span>
       </div>
     </div>
   </div>
@@ -157,6 +159,45 @@ footer { padding: 0 0 42px; color: var(--muted); font-size: 0.86rem; }
   </div>
 </section>
 
+<section id="sparse-direct">
+  <h2>2b &nbsp; Sparse-direct block-Cholesky VBD &mdash; reaches the same wall</h2>
+  <p>
+    We also ran <code>SolverVBD(rigid_articulation_solve="block_sparse_joints")</code>
+    &mdash; the general-graph sparse-direct block-Cholesky articulation
+    solver &mdash; on the same witness scene. Same 60-frame protocol,
+    <code>rigid_articulation_relaxation=0.65</code>. It converges much
+    faster in <em>K</em> than local VBD (as any Newton-family direct
+    solver should) but hits the <strong>same residual wall</strong>.
+  </p>
+  <table>
+    <thead>
+      <tr>
+        <th>Method</th><th>K</th><th>Step&nbsp;ms</th><th>Stretch&nbsp;max</th><th>Bend&nbsp;max&nbsp;(rad)</th><th>Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="baseline"><td>SolverVBD (sparse-direct)</td><td>1</td><td>71.9</td><td>1.16e-2</td><td>0.0924</td><td>1 Newton iter &mdash; not yet at wall</td></tr>
+      <tr class="baseline"><td>SolverVBD (sparse-direct)</td><td>2</td><td>143.6</td><td>9.48e-3</td><td>0.0811</td><td>approaching wall</td></tr>
+      <tr class="baseline"><td>SolverVBD (sparse-direct)</td><td>4</td><td>286.8</td><td>8.79e-3</td><td>0.0770</td><td>nearly at wall</td></tr>
+      <tr class="baseline"><td>SolverVBD (sparse-direct)</td><td>8</td><td>573.0</td><td>8.71e-3</td><td>0.0765</td><td><strong>same wall as local VBD@K=80</strong></td></tr>
+      <tr class="winner"><td><strong>M-S + Thomas-bend</strong></td><td><strong>3</strong></td><td><strong>16.8</strong></td><td><strong>6.82e-3</strong></td><td><strong>0.00699</strong></td><td><strong>34&times; faster than sparse-direct, 10.9&times; tighter bend</strong></td></tr>
+    </tbody>
+  </table>
+  <div class="note">
+    <strong>Architectural insight.</strong> Sparse-direct VBD reaches the
+    exact same residual as local VBD (stretch = 8.71e-3, bend = 0.0765).
+    <em>The wall is not a solver limitation &mdash; it is a formulation
+    limitation.</em> Both VBD variants encode cable joints as a penalty
+    <code>k&thinsp;J<sup>T</sup>J</code>, so the achievable residual
+    floor is fixed by the penalty stiffness, independent of how well
+    the linear system is solved. Method S + Thomas-bend uses XPBD
+    projection (constraint manifold projection with compliance
+    <code>&alpha; = 1/(k&Delta;t<sup>2</sup>)</code>) &mdash; there is
+    no penalty floor. That is why it can push through and give a
+    dramatically tighter residual for a fraction of the cost.
+  </div>
+</section>
+
 <section id="scale">
   <h2>3 &nbsp; Scale invariance &mdash; the finding holds at every N</h2>
   <p>
@@ -196,8 +237,11 @@ footer { padding: 0 0 42px; color: var(--muted); font-size: 0.86rem; }
     5-second Newton renders at 1080p, camera zoomed tightly on the first
     ~&thinsp;2 m of chain (~50 segments) near the fixed end where per-joint
     bend torque is highest. Play both side-by-side: the VBD chain shows
-    visible per-joint kinks (bend residual 4.4&deg; per joint); Method S +
-    Thomas-bend chain stays smooth (0.4&deg; per joint).
+    visible per-joint kinks; Method S + Thomas-bend stays smooth.
+    The metric winner above is K = 3. The currently embedded candidate
+    render is the K = 10 high-quality reference clip; a matching K = 3
+    video still needs to be rendered before the visual section is fully
+    matched to the K-sweep table.
   </p>
   <div class="video-grid">
     <figure>
@@ -210,8 +254,8 @@ footer { padding: 0 0 42px; color: var(--muted); font-size: 0.86rem; }
     <figure>
       <video src="assets/method_s_thomasbend_K10_superbend500.mp4" controls muted loop preload="metadata" autoplay playsinline></video>
       <figcaption>
-        <span class="figcap-title">Method S + Thomas-bend &nbsp;&middot;&nbsp; K = 3 &nbsp;&middot;&nbsp; 16.8 ms/step</span>
-        stretch_max = 6.82e-3 &nbsp;&middot;&nbsp; bend_max = 0.00699 rad (0.4&deg;) &nbsp;&middot;&nbsp; global Thomas resolves bend end-to-end
+        <span class="figcap-title">Method S + Thomas-bend &nbsp;&middot;&nbsp; K = 10 reference render &nbsp;&middot;&nbsp; 55.6 ms/step</span>
+        60-frame metrics: stretch_max = 2.94e-3 &nbsp;&middot;&nbsp; bend_max = 0.00414 rad (0.24&deg;) &nbsp;&middot;&nbsp; global Thomas resolves bend end-to-end
       </figcaption>
     </figure>
   </div>
@@ -220,6 +264,9 @@ footer { padding: 0 0 42px; color: var(--muted); font-size: 0.86rem; }
 <section id="next">
   <h2>5 &nbsp; What&rsquo;s next</h2>
   <ol>
+    <li><strong>Render matched K = 3 video</strong>: the table winner needs
+      its own 5-second, thick/visible, zoomed 1080p clip before visual
+      evidence is fully aligned with the metrics.</li>
     <li><strong>Contact regime</strong>: verify K = 3 remains competitive on
       <code>cable_pile_xl</code> and the softbend piles (initial check:
       K = 3 gives step 58.8 ms, bend 0.022 rad &mdash; needs more study).</li>
@@ -230,7 +277,7 @@ footer { padding: 0 0 42px; color: var(--muted); font-size: 0.86rem; }
     <li><strong>Tier-A ideas</strong>: PCG + VBD preconditioner (A2),
       multigrid VBD (A3), Chebyshev VBD (A4). See the running research
       log for the full ranked queue.</li>
-    <li><strong>Parallel Thomas</strong> (cyclic reduction / PCR) for
+    <li><strong>Parallel Thomas</strong> (cyclic reduction / SPIKE / PCR) for
       O(log N) depth on very long chains &mdash; competitive with block-Cholesky
       GPU implementations of the general-graph solver.</li>
   </ol>
@@ -245,7 +292,10 @@ footer { padding: 0 0 42px; color: var(--muted); font-size: 0.86rem; }
     enabled on both baseline (SolverVBD) and candidate (Method S +
     Thomas-bend) so wall-clock comparisons are launch-overhead free.
     Videos are Newton-rendered mp4 at 1920&times;1080, 300 frames at
-    60 fps. Full metric JSON dumps under <code>data/</code>.
+    60 fps. Note that the main K-sweep table uses 60-frame metric runs;
+    the current embedded videos are 300-frame qualitative renders, so
+    final-frame residuals can differ because the cantilever keeps moving.
+    Full metric JSON dumps under <code>data/</code>.
   </p>
 </section>
 

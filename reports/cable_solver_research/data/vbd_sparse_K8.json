@@ -1,0 +1,32 @@
+{
+  "scene": "long_cantilever_1024_superbend500",
+  "method": "vbd_sparse_K8",
+  "config": {
+    "iterations": 8,
+    "substep_mult": 1,
+    "avbd_beta": 0.0,
+    "hard": true,
+    "fps": 60,
+    "sim_substeps": 10,
+    "num_frames_requested": 60,
+    "num_frames_completed": 60
+  },
+  "num_frames": 60,
+  "fps": 60,
+  "substeps": 10,
+  "seconds_total": 35.57545918598771,
+  "seconds_step_mean_ms": 573.03941824163,
+  "seconds_step_p50_ms": 572.8737432509661,
+  "seconds_step_p95_ms": 577.6334597729146,
+  "final_stretch_max": 0.008709382648412492,
+  "final_stretch_rms": 0.003302564492095279,
+  "final_bend_max": 0.07648722087937117,
+  "final_bend_rms": 0.006738952874136067,
+  "energy_drift_rel": -0.012264711603748236,
+  "max_speed_observed": 11.404664059004482,
+  "min_z_observed": -4.108800888061523,
+  "visual_path": "/home/horde/mmacklin-newton-vbd-sparse-articulation-main/bench/_workspace/long_cantilever_1024_superbend500/vbd_sparse_K8.mp4",
+  "timeseries_csv": "/home/horde/mmacklin-newton-vbd-sparse-articulation-main/bench/_workspace/long_cantilever_1024_superbend500/vbd_sparse_K8.csv",
+  "notes": "1024-segment cantilever; pinned at x=0; bend_ke=500.0.",
+  "error": null
+}
