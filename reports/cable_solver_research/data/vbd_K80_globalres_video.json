@@ -1,0 +1,32 @@
+{
+  "scene": "long_cantilever_1024_superbend500",
+  "method": "vbd_K80_globalres_video",
+  "config": {
+    "iterations": 80,
+    "substep_mult": 1,
+    "avbd_beta": 0.0,
+    "hard": true,
+    "fps": 60,
+    "sim_substeps": 10,
+    "num_frames_requested": 60,
+    "num_frames_completed": 60
+  },
+  "num_frames": 60,
+  "fps": 60,
+  "substeps": 10,
+  "seconds_total": 25.361224440857768,
+  "seconds_step_mean_ms": 33.67517180740833,
+  "seconds_step_p50_ms": 29.143442399799824,
+  "seconds_step_p95_ms": 59.51322531327605,
+  "final_stretch_max": 0.008710062837616758,
+  "final_stretch_rms": 0.0033179131787104024,
+  "final_bend_max": 0.07614251720015223,
+  "final_bend_rms": 0.00670254337987372,
+  "energy_drift_rel": -0.012260027457677432,
+  "max_speed_observed": 11.395257319125905,
+  "min_z_observed": -4.106563568115234,
+  "visual_path": "/home/horde/JC/newton/bench/_workspace/long_cantilever_1024_superbend500/vbd_K80_globalres_video.mp4",
+  "timeseries_csv": "/home/horde/JC/newton/bench/_workspace/long_cantilever_1024_superbend500/vbd_K80_globalres_video.csv",
+  "notes": "1024-segment cantilever; pinned at x=0; bend_ke=500.0.",
+  "error": null
+}

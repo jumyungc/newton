@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VBD Two-Heavy-Body Chain Joint-Contact Stress Test</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17202a;
+      --muted: #5f6f82;
+      --line: #d9e0e8;
+      --max: 1120px;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #fff; color: var(--ink); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.5; }
+    header { border-bottom: 1px solid var(--line); background: #fbfcfd; }
+    main, .header-inner, footer { width: min(var(--max), calc(100vw - 32px)); margin: 0 auto; }
+    .header-inner { padding: 36px 0 28px; }
+    h1 { margin: 0 0 10px; font-size: clamp(2rem, 4vw, 3.35rem); line-height: 1.05; letter-spacing: 0; }
+    h2 { margin: 0 0 10px; font-size: 1.45rem; line-height: 1.2; letter-spacing: 0; }
+    p { margin: 0 0 12px; }
+    code { padding: 0.08em 0.25em; border-radius: 4px; background: #edf2f7; font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: 0.92em; }
+    .subtitle { max-width: 880px; margin: 0; color: var(--muted); font-size: 1.05rem; }
+    .metric-row, .takeaways, .plot-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 22px;
+    }
+    .takeaways { margin-top: 14px; }
+    .plot-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 0; }
+    .metric, .takeaway { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 14px 16px; }
+    .metric .label { color: var(--muted); font-size: 0.82rem; font-weight: 650; text-transform: uppercase; }
+    .metric .value { display: block; margin-top: 4px; font-size: 1.28rem; font-weight: 760; }
+    main { padding: 28px 0 48px; }
+    section { margin: 0 0 38px; }
+    .two-col { display: grid; grid-template-columns: minmax(0, 1fr) minmax(360px, 0.82fr); gap: 22px; align-items: start; }
+    figure { margin: 0 0 18px; border: 1px solid var(--line); border-radius: 8px; background: #fff; overflow: hidden; }
+    figure img, video { display: block; width: 100%; height: auto; }
+    video { background: #111827; }
+    figcaption { padding: 10px 12px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.92rem; }
+    .video-main { max-width: 1040px; margin: 14px auto 18px; }
+    .plot-stack { display: grid; grid-template-columns: 1fr; gap: 18px; }
+    footer { padding: 0 0 42px; color: var(--muted); font-size: 0.9rem; }
+    @media (max-width: 860px) {
+      .metric-row, .takeaways, .plot-grid, .two-col { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <h1>VBD Two-Heavy-Body Chain Joint-Contact Stress Test</h1>
+      <p class="subtitle">
+        High-mass-ratio capsule-link chain with two heavy spherical loads and a fixed capsule peg,
+        testing coupled ball joints and rigid contact.
+      </p>
+      <div class="metric-row">
+        <div class="metric"><span class="label">Chain</span><span class="value">100 links</span></div>
+        <div class="metric"><span class="label">Mass Ratio</span><span class="value">50000:1</span></div>
+        <div class="metric"><span class="label">Reference Iterations</span><span class="value">16</span></div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="two-col">
+      <div>
+        <h2>Setup</h2>
+        <p>
+          The chain starts straight and tangent above the fixed peg. A small initial
+          velocity separates the load paths, then gravity and contact produce the wrap.
+        </p>
+        <p>
+          The report compares <code>soft-soft</code>, <code>hard-hard</code>, and
+          <code>hard-hard-history</code>. The primary metrics are ball-joint anchor
+          gap and post-solve normal contact residual.
+        </p>
+      </div>
+      <figure>
+        <img src="assets/scene_overview.png" alt="Two-heavy-body chain setup around fixed capsule peg.">
+        <figcaption>Initial straight-chain setup above the fixed peg.</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2>Comparison Video</h2>
+      <p>
+        The video runs the validation scene at <code>16</code> VBD iterations and
+        compares the three retained mode combinations side by side.
+      </p>
+      <figure class="video-main">
+        <video controls preload="metadata" muted playsinline>
+          <source src="assets/two_heavy_balls_modes_long.mp4" type="video/mp4">
+        </video>
+        <figcaption>
+          Soft constraints show larger final joint drift; hard-history gives the
+          lowest end-frame mean joint residual in the reference run.
+        </figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2>Result At 16 Iterations</h2>
+      <div class="takeaways">
+        <div class="takeaway">
+          <strong>soft-soft</strong>
+          <br>Peak joint gap: <code>12.7 mm</code>
+          <br>Final mean joint gap: <code>5.26 mm</code>
+        </div>
+        <div class="takeaway">
+          <strong>hard-hard</strong>
+          <br>Peak joint gap: <code>6.23 mm</code>
+          <br>Final mean joint gap: <code>0.897 mm</code>
+        </div>
+        <div class="takeaway">
+          <strong>hard-hard-history</strong>
+          <br>Peak joint gap: <code>4.45 mm</code>
+          <br>Final mean joint gap: <code>0.557 mm</code>
+        </div>
+      </div>
+      <p>
+        Lower is better for both values. The hard-history row gives the lowest
+        joint drift in this reference run; contact residual is shown in the
+        residual trace below rather than mixed into the summary cards.
+      </p>
+    </section>
+
+    <section>
+      <h2>Reference Residual Trace</h2>
+      <figure>
+        <img src="assets/two_heavy_balls_joint_gap_trace_iter_16.png" alt="Two-heavy-body joint and contact residual trace at 16 iterations.">
+        <figcaption>
+          Joint anchor separation and post-solve normal contact residual at the reference iteration count.
+        </figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2>Iteration Sweep</h2>
+      <div class="plot-grid">
+        <figure>
+          <img src="assets/two_heavy_balls_joint_gap_trace_iter_08.png" alt="Two-heavy-body residual trace at 8 iterations.">
+          <figcaption>Residual trace at <code>8</code> iterations.</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/two_heavy_balls_joint_gap_trace_iter_32.png" alt="Two-heavy-body residual trace at 32 iterations.">
+          <figcaption>Residual trace at <code>32</code> iterations.</figcaption>
+        </figure>
+      </div>
+      <figure>
+        <img src="assets/two_heavy_balls_iteration_sensitivity.png" alt="Two-heavy-body iteration sensitivity summary.">
+        <figcaption>Summary sensitivity across the retained iteration sweep.</figcaption>
+      </figure>
+    </section>
+  </main>
+
+  <footer>
+    Report payload: this page, one mp4 comparison video, and the PNGs in
+    <code>assets/</code>. Raw CSVs, scripts, and PDFs are intentionally excluded.
+  </footer>
+</body>
+</html>

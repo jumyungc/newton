@@ -1,0 +1,636 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VBD Cable Tension Readout</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #152033;
+        --muted: #5a687b;
+        --line: #d7e0eb;
+        --panel: #f7f9fc;
+        --surface: #ffffff;
+        --wash: #edf3f8;
+        --accent: #2563a6;
+        --green: #78952d;
+        --rust: #ad5a31;
+        --gold: #d5a816;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: var(--ink);
+        background: linear-gradient(180deg, #f5f8fb 0, #ffffff 380px);
+        line-height: 1.55;
+      }
+
+      main {
+        max-width: 1240px;
+        margin: 0 auto;
+        padding: 38px 28px 76px;
+      }
+
+      h1,
+      h2,
+      h3 {
+        line-height: 1.16;
+        margin: 0;
+      }
+
+      h1 {
+        font-size: clamp(2.2rem, 4.2vw, 4rem);
+        letter-spacing: 0;
+      }
+
+      h2 {
+        font-size: clamp(1.55rem, 2vw, 2rem);
+        margin-top: 0;
+      }
+
+      h3 {
+        font-size: 1.2rem;
+        margin-top: 26px;
+      }
+
+      p {
+        color: var(--muted);
+        max-width: 880px;
+      }
+
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+        font-size: 0.94em;
+        background: #eef3f8;
+        border: 1px solid #dbe4ef;
+        padding: 0.1em 0.35em;
+        border-radius: 4px;
+        overflow-wrap: anywhere;
+        white-space: normal;
+      }
+
+      .lede {
+        font-size: clamp(1.08rem, 1.5vw, 1.24rem);
+        margin-top: 18px;
+        max-width: 960px;
+      }
+
+      .note {
+        border-left: 4px solid var(--accent);
+        background: var(--surface);
+        box-shadow: inset 0 0 0 1px var(--line);
+        padding: 16px 18px;
+        margin: 24px 0 0;
+        max-width: 960px;
+        border-radius: 0 8px 8px 0;
+      }
+
+      .report-nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 26px;
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        min-height: 34px;
+        padding: 7px 12px;
+        border: 1px solid #bfd2e7;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.78);
+        color: var(--accent);
+        font-weight: 650;
+        text-decoration: none;
+      }
+
+      .hero {
+        padding: 22px 0 20px;
+      }
+
+      .eyebrow {
+        color: var(--accent);
+        font-size: 0.82rem;
+        font-weight: 800;
+        letter-spacing: 0.12em;
+        margin: 0 0 10px;
+        text-transform: uppercase;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 18px;
+        margin-top: 20px;
+      }
+
+      .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+        margin-top: 30px;
+      }
+
+      .video-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+        gap: 18px;
+        margin-top: 22px;
+      }
+
+      .metric {
+        border: 1px solid var(--line);
+        border-top: 3px solid var(--accent);
+        border-radius: 8px;
+        padding: 18px;
+        background: var(--surface);
+      }
+
+      .metric:nth-child(2) {
+        border-top-color: var(--green);
+      }
+
+      .metric:nth-child(3) {
+        border-top-color: var(--rust);
+      }
+
+      .metric:nth-child(4) {
+        border-top-color: var(--gold);
+      }
+
+      .metric strong {
+        display: block;
+        font-size: clamp(1.45rem, 2vw, 1.85rem);
+        margin-bottom: 4px;
+      }
+
+      .metric span {
+        color: var(--muted);
+      }
+
+      .section {
+        margin-top: 64px;
+      }
+
+      .section-header {
+        display: grid;
+        gap: 8px;
+        margin-bottom: 22px;
+        max-width: 920px;
+      }
+
+      .kicker {
+        color: var(--accent);
+        font-size: 0.78rem;
+        font-weight: 800;
+        letter-spacing: 0.1em;
+        margin: 0;
+        text-transform: uppercase;
+      }
+
+      .section-header p {
+        margin: 0;
+      }
+
+      figure {
+        margin: 28px 0 0;
+      }
+
+      .figure-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 430px), 1fr));
+        gap: 18px;
+        margin-top: 24px;
+      }
+
+      .figure-grid figure {
+        margin: 0;
+      }
+
+      figure img {
+        display: block;
+        width: 100%;
+        height: auto;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+      }
+
+      .media video {
+        display: block;
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #0f1720;
+      }
+
+      figcaption {
+        color: var(--muted);
+        font-size: 0.95rem;
+        margin-top: 8px;
+      }
+
+      .table-wrap {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        margin-top: 18px;
+        overflow-x: auto;
+        background: var(--surface);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        min-width: 620px;
+      }
+
+      th,
+      td {
+        text-align: left;
+        padding: 10px 12px;
+        border-bottom: 1px solid var(--line);
+      }
+
+      th {
+        background: var(--wash);
+        color: #29384c;
+        font-size: 0.92rem;
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      .num {
+        font-variant-numeric: tabular-nums;
+      }
+
+      @media (max-width: 760px) {
+        main {
+          padding: 24px 18px 56px;
+        }
+
+        .summary-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 520px) {
+        .summary-grid,
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header class="hero">
+        <nav class="report-nav" aria-label="report navigation">
+          <a class="button" href="../vbd_validation/index.html">VBD validation overview</a>
+          <a class="button" href="../vbd_tension_reaction/index.html">Joint reaction page</a>
+        </nav>
+        <p class="eyebrow">VBD validation report</p>
+        <h1>VBD Cable Tension Readout</h1>
+        <p class="lede">
+          This report validates an opt-in VBD state output for cable tension. Users request it with
+          <code>ModelBuilder.request_state_attributes("vbd:cable_tension")</code>, and VBD fills
+          <code>state.vbd.cable_tension</code> with a joint-indexed stretch-tension magnitude in Newtons.
+        </p>
+
+        <div class="summary-grid" aria-label="key results">
+          <div class="metric">
+            <strong>0.18%</strong>
+            <span>steady-state top-joint load-balance error in the hanging rod cases</span>
+          </div>
+          <div class="metric">
+            <strong>1.50x</strong>
+            <span>measured max/min tension around one frictional pulley at <code>mu = 0.8</code></span>
+          </div>
+          <div class="metric">
+            <strong>13.560 N</strong>
+            <span>middle-span readout in the two-pulley zero-bend diagnostic at 4.0 s</span>
+          </div>
+          <div class="metric">
+            <strong>default rod stretch</strong>
+            <span>single-pulley diagnostic uses <code>add_rod()</code> defaults for stretch/bend</span>
+          </div>
+        </div>
+
+        <div class="note">
+          The readout is intentionally a nonnegative magnitude for the cable stretch slot. It excludes cable
+          bending/twist torque, reports zero for non-cable joints, and avoids sign conventions that depend on which
+          side of a cable segment is treated as parent or child.
+        </div>
+      </header>
+
+      <section class="section">
+        <div class="section-header">
+          <p class="kicker">Synchronized viewer captures</p>
+          <h2>Newton Rendered Videos</h2>
+          <p>
+            These videos pair a clean <code>ViewerGL</code> scene capture with fixed-scale diagnostic plots generated
+            from the same simulation frames, so the motion and tension traces stay synchronized without the viewer menu.
+            The x-axis is time in seconds. Tension and error plots are in N; the pulley ratio plot is dimensionless.
+            Cable scenes render Newton's rod/cable capsules directly, so the visible cable thickness follows the
+            authored cable radius instead of a hand-drawn overlay.
+          </p>
+        </div>
+        <div class="video-grid">
+          <figure class="media">
+            <video controls muted loop playsinline preload="metadata">
+              <source src="assets/cable_tension_hanging_newton.mp4" type="video/mp4">
+            </video>
+            <figcaption>
+              Hanging rod cable with an added 5 N downward load. The side plot overlays the reported top cable-joint
+              tension [N] and the static load target [N]; the current error is shown as a numeric readout.
+            </figcaption>
+          </figure>
+          <figure class="media">
+            <video controls muted loop playsinline preload="metadata">
+              <source src="assets/cable_tension_pulley_newton.mp4" type="video/mp4">
+            </video>
+            <figcaption>
+              Segmented cable wrapping one frictional pulley. This is a VBD-only tension-gradient diagnostic: the side
+              plot shows min/max cable-joint tension [N] and the measured max/min ratio settling above one after the
+              initial contact transient. The scene renders the actual Newton rod/cable geometry.
+            </figcaption>
+          </figure>
+          <figure class="media">
+            <video controls muted loop playsinline preload="metadata">
+              <source src="assets/cable_tension_capstan_newton.mp4" type="video/mp4">
+            </video>
+            <figcaption>
+              Two-pulley capstan-style cable. The side plot shows the middle-span tension readout [N] against the
+              ideal capstan reference [N].
+            </figcaption>
+          </figure>
+        </div>
+        <div class="note">
+          The single-pulley diagnostic uses the default <code>add_rod()</code> stretch and bend settings. The two-pulley
+          capstan diagnostic keeps explicit stretch/contact <code>ke = 1.0e4</code>, zero damping, and zero bend
+          stiffness. The two-pulley case has a longer transient than the hanging load case, so the video is useful for
+          seeing the middle-span tension settle over the 4.0 s validation window.
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-header">
+          <p class="kicker">Static load balance</p>
+          <h2>Equilibrium Load Cases</h2>
+          <p>
+            The first validation is a visible eight-segment rod cable built with <code>add_rod()</code>. The top segment
+            is kinematic, the bottom segment carries the load, and the readout samples the upper cable joint. At steady
+            state, that top-joint tension should balance the supported rod/load weight. Adding a downward external force
+            shifts the expected value from <code>T = mg</code> to <code>T = mg + F_applied</code>.
+          </p>
+        </div>
+
+        <div class="grid">
+          <div class="metric">
+            <strong>9.830 N</strong>
+            <span>reported tail mean for <code>T = mg</code>, reference 9.817 N</span>
+          </div>
+          <div class="metric">
+            <strong>14.843 N</strong>
+            <span>reported tail mean for <code>T = mg + 5 N</code>, reference 14.817 N</span>
+          </div>
+          <div class="metric">
+            <strong>0.18%</strong>
+            <span>maximum relative error across the steady-state load cases</span>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Case</th>
+                <th>Reference [N]</th>
+                <th>Tail mean [N]</th>
+                <th>Absolute error [N]</th>
+                <th>Relative error</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>T = mg</code></td>
+                <td class="num">9.817</td>
+                <td class="num">9.830</td>
+                <td class="num">0.013</td>
+                <td class="num">0.135%</td>
+              </tr>
+              <tr>
+                <td><code>T = mg + 5 N</code></td>
+                <td class="num">14.817</td>
+                <td class="num">14.843</td>
+                <td class="num">0.026</td>
+                <td class="num">0.176%</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <figure>
+          <img src="assets/hanging_load_tension.png" alt="Hanging rod cable tension compared with static load references" />
+          <figcaption>
+            The top cable-joint tension readout converges to the static load balance for both the supported rod/load
+            weight and the supported rod/load weight plus an extra downward force.
+          </figcaption>
+        </figure>
+      </section>
+
+      <section class="section">
+        <div class="section-header">
+          <p class="kicker">Per-segment tension field</p>
+          <h2>VBD Pulley Diagnostic</h2>
+          <p>
+            The VBD-only diagnostic wraps a segmented cable around one fixed cylinder and applies equal 20 N endpoint
+            loads. Contact friction produces a segment-by-segment tension gradient that can now be inspected directly
+            through <code>state.vbd.cable_tension[joint_ids]</code>.
+          </p>
+        </div>
+        <p>
+          This is not treated as an exact capstan proof: the simulated cable has finite-radius capsule segments,
+          compliant stretch constraints, regularized frictional contact, and transient settling. The purpose here is to
+          verify robust access to the tension field and to confirm that the readout exposes the expected qualitative
+          trend.
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Contact friction</th>
+                <th>Min tension [N]</th>
+                <th>Max tension [N]</th>
+                <th>Measured max/min</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>mu = 0.0</code></td>
+                <td class="num">20.16</td>
+                <td class="num">21.31</td>
+                <td class="num">1.06</td>
+              </tr>
+              <tr>
+                <td><code>mu = 0.3</code></td>
+                <td class="num">19.95</td>
+                <td class="num">24.50</td>
+                <td class="num">1.23</td>
+              </tr>
+              <tr>
+                <td><code>mu = 0.8</code></td>
+                <td class="num">13.01</td>
+                <td class="num">19.55</td>
+                <td class="num">1.50</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <figure>
+          <img src="assets/single_pulley_tension_gradient.png" alt="VBD cable tension gradient around a single pulley" />
+          <figcaption>
+            With the default rod stretch and zero default bend stiffness, the no-friction case stays near-uniform while
+            frictional contact produces a measurable tension spread across the wrapped region.
+          </figcaption>
+        </figure>
+      </section>
+
+      <section class="section">
+        <div class="section-header">
+          <p class="kicker">Frictional two-pulley path</p>
+          <h2>Two-Pulley Capstan Diagnostic</h2>
+          <p>
+            The two-pulley case uses mass-equivalent endpoint loads and a quarter-wrap
+            (<code>theta = pi / 2</code>) over each fixed pulley. For an ideal massless cable, the capstan relation
+            gives <code>T_high / T_low = exp(mu theta)</code>, predicting a middle-span tension between the left and
+            right mass-side loads.
+          </p>
+        </div>
+        <p>
+          The VBD scene is intentionally reported as a diagnostic rather than an exact capstan proof. The simulated
+          cable has finite-radius segments, stretch compliance, zero bend stiffness, and regularized frictional contact;
+          the side loads are prescribed endpoint loads, while the middle value is sampled directly from
+          <code>state.vbd.cable_tension</code> on the span between pulleys. At the 4.0 s validation sample, the
+          middle-span readout is 13.560 N against the ideal-string reference of 13.431 N.
+        </p>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Location</th>
+                <th>Capstan reference [N]</th>
+                <th>Simulation diagnostic [N]</th>
+                <th>Source</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Left mass side</td>
+                <td class="num">9.810</td>
+                <td class="num">9.810</td>
+                <td>endpoint load</td>
+              </tr>
+              <tr>
+                <td>Between pulleys</td>
+                <td class="num">13.431</td>
+                <td class="num">13.560</td>
+                <td><code>state.vbd.cable_tension</code></td>
+              </tr>
+              <tr>
+                <td>Right mass side</td>
+                <td class="num">18.388</td>
+                <td class="num">18.388</td>
+                <td>endpoint load</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="figure-grid">
+          <figure>
+            <img src="assets/capstan_simulated_pulley_system.png" alt="Two-pulley capstan simulation diagnostic" />
+            <figcaption>
+              The simulated diagnostic exposes the middle-span tension in the two-pulley contact scene and compares it
+              with the ideal capstan reference for the same endpoint loads and wrap angle.
+            </figcaption>
+          </figure>
+
+          <figure>
+            <img src="assets/capstan_reference_pulley_system.png" alt="Ideal capstan reference tensions across a two-pulley system" />
+            <figcaption>
+              Ideal capstan reference: left tension is 9.81 N, middle tension is 13.43 N, and right tension is 18.39 N
+              for <code>mu = 0.20</code> and <code>theta = pi / 2</code> per pulley.
+            </figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-header">
+          <p class="kicker">Readout path</p>
+          <h2>Implementation Notes</h2>
+          <p>
+            The solver computes the optional output after the VBD iterations and before finalizing velocities. It reuses
+            the accepted cable stretch constraint state and writes the stretch-force magnitude into a joint-frequency
+            extended state array. This keeps the API cheap when not requested and makes the output easy to align with
+            joint indices returned by <code>add_joint_cable()</code> or <code>add_rod()</code>.
+          </p>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Diagnostic</th>
+                <th>Solver iterations</th>
+                <th>Time step</th>
+                <th>Validation steps</th>
+                <th>Simulated time</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Hanging load balance</td>
+                <td class="num">128</td>
+                <td class="num">1 / 300 s</td>
+                <td class="num">160</td>
+                <td class="num">0.53 s</td>
+              </tr>
+              <tr>
+                <td>Single-pulley tension field</td>
+                <td class="num">32</td>
+                <td class="num">1 / 600 s</td>
+                <td class="num">600</td>
+                <td class="num">1.00 s</td>
+              </tr>
+              <tr>
+                <td>Two-pulley capstan diagnostic</td>
+                <td class="num">32</td>
+                <td class="num">1 / 600 s</td>
+                <td class="num">2400</td>
+                <td class="num">4.00 s</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          The videos are four-second captures at 60 fps. They use the same solver-iteration counts and the same
+          per-substep time steps as the validation runs above.
+        </p>
+      </section>
+    </main>
+  </body>
+</html>

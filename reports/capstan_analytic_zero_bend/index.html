@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Analytical Capstan Sweep</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17202a;
+      --muted: #5f6f82;
+      --line: #d9e0e8;
+      --panel: #f7f9fb;
+      --accent: #1f6f8b;
+      --good: #146c43;
+      --warn: #9a5b00;
+      --max: 1120px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: #ffffff;
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+    }
+
+    header {
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfd;
+    }
+
+    main,
+    .header-inner {
+      width: min(var(--max), calc(100vw - 32px));
+      margin: 0 auto;
+    }
+
+    .header-inner {
+      padding: 36px 0 28px;
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: clamp(2rem, 4vw, 3.35rem);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      max-width: 820px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 1.05rem;
+    }
+
+    .metric-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 22px;
+    }
+
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      padding: 14px 16px;
+    }
+
+    .metric .label {
+      color: var(--muted);
+      font-size: 0.82rem;
+      font-weight: 650;
+      text-transform: uppercase;
+    }
+
+    .metric .value {
+      display: block;
+      margin-top: 4px;
+      font-size: 1.35rem;
+      font-weight: 760;
+    }
+
+    main {
+      padding: 28px 0 48px;
+    }
+
+    section {
+      margin: 0 0 34px;
+    }
+
+    h2 {
+      margin: 0 0 10px;
+      font-size: 1.45rem;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 0 0 10px;
+      font-size: 1rem;
+      line-height: 1.25;
+    }
+
+    p {
+      margin: 0 0 12px;
+    }
+
+    code {
+      padding: 0.08em 0.25em;
+      border-radius: 4px;
+      background: #edf2f7;
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+    }
+
+    pre {
+      margin: 12px 0 0;
+      padding: 14px 16px;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+
+    pre code {
+      padding: 0;
+      background: transparent;
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(320px, 0.85fr);
+      gap: 22px;
+      align-items: start;
+    }
+
+    .plot-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 18px;
+    }
+
+    .video-main {
+      max-width: 960px;
+      margin: 14px auto 18px;
+    }
+
+    figure {
+      margin: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      overflow: hidden;
+    }
+
+    figure img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    video {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: #111827;
+    }
+
+    figcaption {
+      padding: 10px 12px 12px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .compact-figure {
+      width: min(100%, 540px);
+      margin: 0 auto;
+    }
+
+    .note {
+      border-left: 4px solid var(--accent);
+      background: var(--panel);
+      padding: 12px 14px;
+    }
+
+    .takeaways {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .takeaway {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: #ffffff;
+    }
+
+    .takeaway strong {
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    footer {
+      width: min(var(--max), calc(100vw - 32px));
+      margin: 0 auto;
+      padding: 0 0 42px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    @media (max-width: 820px) {
+      .metric-row,
+      .takeaways,
+      .two-col,
+      .plot-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <h1>Analytical Capstan Sweep</h1>
+      <p class="subtitle">
+        Zero-bend sliding-string validation against the analytical capstan relation
+        <code>FL/F0 = exp(mu*pi)</code>.
+      </p>
+      <div class="metric-row">
+        <div class="metric">
+          <span class="label">Cable</span>
+          <span class="value">96 segments</span>
+        </div>
+        <div class="metric">
+          <span class="label">Reference</span>
+          <span class="value">theta = pi</span>
+        </div>
+        <div class="metric">
+          <span class="label">Validation Sweep</span>
+          <span class="value">mu 0.0-0.5</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="two-col">
+      <div>
+        <h2>Setup</h2>
+        <p>
+          The cable is pulled over a half-wrap cylinder with bend stiffness set to zero.
+          The left side carries the known dead load <code>F0</code>; the right side is
+          the measured load-cell side <code>FL</code>.
+        </p>
+        <p>
+          The reported force ratio is averaged over the plateau window after the
+          cylinder has moved <code>10</code> to <code>40 mm</code>.
+        </p>
+      </div>
+      <figure>
+        <img src="assets/scene_overview.png" alt="Capstan validation setup with cable half wrapping the cylinder.">
+        <figcaption>Scene layout used by the validation example.</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2>Result</h2>
+      <div class="takeaways">
+        <div class="takeaway">
+          <strong>Hard contact tracks the analytic curve.</strong>
+          Across <code>mu=0.0</code> to <code>0.5</code>, the hard-contact sweep stays
+          within <code>1.72%</code> of <code>exp(mu*pi)</code>.
+        </div>
+        <div class="takeaway">
+          <strong>Soft contact is consistently high.</strong>
+          At the default multi-<code>mu</code> budget, the soft sweep grows to
+          <code>+9.80%</code> error at <code>mu=0.5</code>.
+        </div>
+        <div class="takeaway">
+          <strong>Solver budget mostly controls noise.</strong>
+          More substeps reduce plateau oscillation, while hard contact already
+          matches the force ratio closely at practical budgets.
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Comparison Videos</h2>
+      <p>
+        The primary comparison video is generated by running the validation
+        example itself in <code>soft</code> and <code>hard</code> contact modes.
+      </p>
+      <figure class="video-main">
+        <video controls preload="metadata" muted playsinline>
+          <source src="assets/capstan_example_soft_hard.mp4" type="video/mp4">
+        </video>
+        <figcaption>
+          Side-by-side example run: actual simulated cable, cylinder, and load
+          motion for <code>soft</code> and <code>hard</code> contact at
+          <code>mu=0.3</code>. The analytical target is
+          <code>FL/F0 = exp(0.3*pi) = 2.5663</code>.
+        </figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2>Multi-Mu Validation</h2>
+      <p>
+        This sweep fixes <code>substeps=8</code> and <code>iterations=8</code>, then
+        varies only the friction coefficient and contact mode.
+      </p>
+      <figure>
+        <img src="assets/capstan_analytic_zero_bend_mu_combined.png" alt="Measured capstan force ratio and percent error across friction coefficients.">
+        <figcaption>Force ratio and relative error against the analytical curve.</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2>Solver Budget</h2>
+      <p>
+        These sweeps use <code>mu=0.3</code>. The top rows show mean
+        <code>FL/F0</code>; the bottom rows show plateau noise,
+        <code>std(FL/F0) / mean(FL/F0)</code>.
+      </p>
+      <div class="plot-grid">
+        <figure>
+          <img src="assets/capstan_analytic_zero_bend_each_substep_mixed.png" alt="Fixed substep sweep varying VBD iterations.">
+          <figcaption>Fixed substep, varying iterations.</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/capstan_analytic_zero_bend_each_iter_mixed.png" alt="Fixed iteration sweep varying substeps.">
+          <figcaption>Fixed iteration count, varying substeps.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section>
+      <h2>Plateau Trace</h2>
+      <p>
+        The plateau trace shows why the report tracks both mean force ratio and
+        plateau noise: the averaged region is close to steady, but it is not a
+        perfectly flat signal.
+      </p>
+      <figure class="compact-figure">
+        <img src="assets/capstan_analytic_zero_bend_plateau_time_history.png" alt="Time history of capstan force ratio with plateau window marked.">
+        <figcaption>Raw force-ratio samples over the measured plateau window.</figcaption>
+      </figure>
+    </section>
+  </main>
+
+  <footer>
+    Report payload: this page and the PNGs in <code>assets/</code>. Raw CSVs,
+    scripts, and PDFs are intentionally excluded from the web upload bundle.
+  </footer>
+</body>
+</html>
