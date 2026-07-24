@@ -1,0 +1,749 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pyramid Stress Test: XPBD vs Hard VBD vs Soft VBD</title>
+  <style>
+:root {
+  color-scheme: light;
+  --ink: #17202a;
+  --muted: #5f6f82;
+  --line: #d9e0e8;
+  --panel: #f7f9fb;
+  --accent: #1f6f8b;
+  --good: #146c43;
+  --warn: #9a5b00;
+  --pending: #6b7280;
+  --max: 1280px;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #ffffff;
+  color: var(--ink);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+header { border-bottom: 1px solid var(--line); background: #fbfcfd; }
+main, .header-inner, footer { width: min(var(--max), calc(100vw - 32px)); margin: 0 auto; }
+.header-inner { padding: 36px 0 28px; }
+h1 { margin: 0 0 10px; font-size: clamp(2rem, 4vw, 3.35rem); line-height: 1.05; letter-spacing: 0; }
+.subtitle { max-width: 850px; margin: 0; color: var(--muted); font-size: 1.05rem; }
+.metric-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
+.metric { border: 1px solid var(--line); border-radius: 8px; background: #ffffff; padding: 14px 16px; }
+.metric .label { color: var(--muted); font-size: 0.82rem; font-weight: 650; text-transform: uppercase; }
+.metric .value { display: block; margin-top: 4px; font-size: 1.25rem; font-weight: 760; }
+.metric .value.good { color: var(--good); }
+.metric .value.warn { color: var(--warn); }
+main { padding: 28px 0 48px; }
+section { margin: 0 0 34px; }
+h2 { margin: 0 0 10px; font-size: 1.45rem; line-height: 1.2; letter-spacing: 0; }
+h3 { margin: 18px 0 10px; font-size: 1.1rem; line-height: 1.25; }
+p { margin: 0 0 12px; }
+a { color: var(--accent); }
+code {
+  padding: 0.08em 0.25em;
+  border-radius: 4px;
+  background: #edf2f7;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+}
+pre { margin: 12px 0 0; padding: 14px 16px; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+pre code { padding: 0; background: transparent; }
+.breadcrumb { margin: 0 0 14px; font-size: 0.92rem; font-weight: 650; }
+.breadcrumb a { color: var(--accent); text-decoration: none; }
+.video-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 18px 0; }
+figure { margin: 0; border: 1px solid var(--line); border-radius: 8px; background: #ffffff; overflow: hidden; }
+figure img, video { display: block; width: 100%; height: auto; }
+video { background: #111827; }
+figcaption {
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 0.92rem;
+  background: var(--panel);
+}
+figcaption strong { display: block; margin-bottom: 4px; font-size: 1rem; }
+table { width: 100%; border-collapse: collapse; border: 1px solid var(--line); background: white; }
+th, td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+th { background: var(--panel); color: var(--muted); font-size: 0.86rem; text-transform: uppercase; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.win { background: #e8f5ee; }
+td.lose { background: #fdecea; color: var(--warn); }
+.note { border-left: 4px solid var(--accent); background: var(--panel); padding: 12px 14px; margin: 12px 0; }
+.track-banner { border-radius: 10px; padding: 16px 18px; margin: 18px 0 14px; border: 1px solid var(--line); }
+.track-banner.A { background: #ecf6fb; border-color: #b8d9e7; }
+.track-banner.B { background: #f3eff7; border-color: #d3c8de; }
+.track-banner .pill { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 0.74rem; font-weight: 760; text-transform: uppercase; letter-spacing: 0.04em; background: var(--accent); color: white; }
+.track-banner.B .pill { background: #6e4e8e; }
+.track-banner h2 { margin: 8px 0 6px; }
+.track-banner p { margin: 0; color: var(--muted); }
+ul.compact { margin: 0; padding-left: 1.15rem; }
+ul.compact li { margin: 0.3rem 0; }
+footer { padding: 0 0 42px; color: var(--muted); font-size: 0.9rem; }
+@media (max-width: 820px) {
+  .metric-row { grid-template-columns: 1fr; }
+  .video-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <p class="breadcrumb"><a href="../">← Reports index</a></p>
+      <h1>Pyramid Stress Test: XPBD vs Hard VBD vs Soft VBD</h1>
+      <p class="subtitle">
+        Side-by-side rigid-body solver comparison on Newton's box-pyramid + wrecking-ball scene.
+        Tuned in two regimes per solver — <strong>Track A: fastest stable</strong> (visual previews where the
+        pile just needs to topple) and <strong>Track B: physics-correct</strong> (heavy-ball momentum preserved).
+        Newton-rendered videos, no matplotlib.
+      </p>
+      <div class="metric-row">
+        <div class="metric"><span class="label">Track A floor (XPBD)</span><span class="value good">0.32 ms (ss=1 it=6)</span></div>
+        <div class="metric"><span class="label">Track A VBD floor</span><span class="value good">0.52 ms (Soft ss=1 it=8)</span></div>
+        <div class="metric"><span class="label">Track B reference</span><span class="value good">1.65 ms (XPBD ss=10)</span></div>
+        <div class="metric"><span class="label">Track B Soft VBD</span><span class="value good">1.71 ms (ss=6 it=1)</span></div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+
+    <section>
+      <h2>What this report is</h2>
+      <p>
+        Newton ships a rigid-body stress test in <code>newton.examples.contacts.example_pyramid</code> —
+        triangular box pyramids that settle under gravity, with an optional wrecking ball on a ramp. It uses
+        <code>SolverXPBD</code> by default. This page brings <code>SolverVBD</code> to the same scene in two
+        modes (hard / soft contacts), and compares all three solvers in <strong>two independent regimes</strong>:
+      </p>
+      <ul class="compact">
+        <li>
+          <strong>Track A — fastest stable:</strong> the lowest per-frame wall budget at which the pile still
+          settles and the ramp/ball stays attached. Heavy-ball momentum transfer is <em>not</em> required.
+          Use case: visual previews, demolition scenes, anywhere only the pile collapse matters.
+        </li>
+        <li>
+          <strong>Track B — physics-correct:</strong> the wrecking ball preserves its kinetic energy on
+          impact (mass ratio 800:1 — XPBD ss=10 plows through at 4.4 m/s). Use case: momentum-conservation
+          reference, contact-rich physics validation.
+        </li>
+      </ul>
+      <p>
+        Each solver is tuned <strong>independently in each regime</strong>: substeps, iterations, and
+        per-shape contact stiffness <code>ke</code>. VBD's stable-<code>ke</code> ceiling scales as
+        <code>~0.1 × m/dt²</code> — so the same solver wants very different <code>ke</code> at ss=1 vs ss=10.
+      </p>
+      <p>
+        <strong>Setup invariants</strong> across all three solvers and both regimes: identical scene
+        (5 pyramids × 8 rows = 180 boxes + ball + ramp), same broad-phase (SAP), same friction
+        (<code>mu=0.6</code>), no contact damping (<code>kd=0</code>), same frame rate (100 fps simulation).
+        Newton's <code>ViewerGL</code> renders each scene headlessly (xvfb) at 1280 × 720; frames are read
+        back via the viewer's PBO/CUDA path and stitched to MP4 via ffmpeg. All wall-clock numbers are
+        captured-mode CUDA graph on an NVIDIA L40.
+      </p>
+    </section>
+
+    <div class="track-banner A">
+      <span class="pill">Track A</span>
+      <h2>Fastest stable — visual previews</h2>
+      <p>
+        Lowest wall-clock per frame at which the pile <strong>settles AND stays settled</strong>: top-cube
+        wobble must remain bounded (≤ baseline + 10%) across a 200-frame quiescence window <em>before</em>
+        the ball arrives. The wrecking ball collides with the first pyramid and stops — physically
+        incorrect (the 800:1 mass ratio should plow through) but visually fine for demolition cinematics.
+      </p>
+    </div>
+
+    <section>
+      <h2>Stability rule — measured before declaring "fastest stable"</h2>
+      <p>
+        A previous draft of this report mis-labelled <code>Soft VBD ss=1, iter=2, ke=5e5</code> as the Track A
+        floor at 0.32 ms. That number was a measurement artifact — top-cube wobble was sampled only over the
+        first 60 frames (early settle), and the pile was actually <strong>still falling apart</strong> at
+        frame 100. By frame 350 the wobble had grown to 6.5 m. The video showed the pile partially
+        disintegrated by the time the ball arrived.
+      </p>
+      <p>
+        The corrected acceptance criterion: pile must reach a steady-state wobble in the <code>frame [150, 350]</code>
+        window (no ball yet) and stay there. Configs that drift through this window are rejected as unstable,
+        regardless of how cheap they look.
+      </p>
+      <h3>Per-config no-ball stability sweep</h3>
+      <table>
+        <tr>
+          <th>Solver</th><th>Config</th>
+          <th class="num">Settle peak (50–150)</th>
+          <th class="num">Rest peak (150–350)</th>
+          <th class="num">Post peak (450–500)</th>
+          <th>Verdict</th>
+        </tr>
+        <tr><td>Soft VBD</td><td>ss=1, iter=2, <code>ke=5e5</code></td><td class="num">525 mm</td><td class="num warn">1458 mm</td><td class="num lose">7069 mm</td><td class="lose">DRIFTING — broken</td></tr>
+        <tr><td>Soft VBD</td><td>ss=1, iter=6, <code>ke=1e6</code></td><td class="num">313 mm</td><td class="num">320 mm</td><td class="num warn">445 mm</td><td>Borderline drift</td></tr>
+        <tr><td>Soft VBD</td><td><strong>ss=1, iter=8, <code>ke=1e6</code></strong></td><td class="num">311 mm</td><td class="num win">304 mm</td><td class="num win">304 mm</td><td class="win">STABLE</td></tr>
+        <tr><td>Soft VBD</td><td>ss=2, iter=1, <code>ke=2e6</code></td><td class="num">316 mm</td><td class="num win">308 mm</td><td class="num win">306 mm</td><td class="win">STABLE</td></tr>
+        <tr><td>Hard VBD</td><td>ss=1, any iter / ke</td><td colspan="3" class="num lose">no stable config — AVBD Lagrangian needs per-step warm-start continuity</td><td class="lose">UNSTABLE</td></tr>
+        <tr><td>Hard VBD</td><td><strong>ss=2, iter=3, <code>ke=2e6</code></strong></td><td class="num">304 mm</td><td class="num win">286 mm</td><td class="num win">286 mm</td><td class="win">STABLE</td></tr>
+        <tr><td>XPBD</td><td>ss=1, iter=2</td><td class="num">605 mm</td><td class="num warn">583 mm</td><td class="num lose">1418 mm</td><td class="lose">DRIFTING</td></tr>
+        <tr><td>XPBD</td><td>ss=1, iter=4</td><td class="num">429 mm</td><td class="num">399 mm</td><td class="num warn">412 mm</td><td>Borderline drift</td></tr>
+        <tr><td>XPBD</td><td><strong>ss=1, iter=6</strong></td><td class="num">379 mm</td><td class="num win">354 mm</td><td class="num win">352 mm</td><td class="win">STABLE</td></tr>
+        <tr><td>XPBD</td><td>ss=2, iter=2</td><td class="num">360 mm</td><td class="num win">340 mm</td><td class="num win">336 mm</td><td class="win">STABLE</td></tr>
+      </table>
+      <p>
+        Two lessons: <strong>(1)</strong> VBD ss=1 is possible, but only for Soft VBD (Hard's Lagrangian
+        needs per-step continuity to warm-start the next step — single-substep mode has no continuity).
+        <strong>(2)</strong> Per-substep iterations have to compensate for the larger dt — XPBD ss=1 needs
+        iter ≥ 6 (vs 2 at ss=2); Soft VBD ss=1 needs iter ≥ 8 (vs 1 at ss=2). The total inner-iteration
+        count is similar (~8) but the per-substep collision-detection overhead is paid only once at ss=1,
+        which can still be a net win.
+      </p>
+    </section>
+
+    <section>
+      <h2>Track A configurations (corrected — pile stays settled until impact)</h2>
+      <table>
+        <tr>
+          <th>Solver</th>
+          <th class="num">Substeps</th>
+          <th class="num">Iterations</th>
+          <th>Cube <code>ke</code> / <code>kd</code> / <code>mu</code></th>
+          <th>Heavy (ball+ramp) <code>ke</code></th>
+          <th class="num">Per-frame</th>
+        </tr>
+        <tr>
+          <td><strong>XPBD</strong></td>
+          <td class="num">1</td>
+          <td class="num">6</td>
+          <td class="num">2500 / 100 / 1.0 (newton defaults)</td>
+          <td class="num">2500</td>
+          <td class="num win">0.32 ms</td>
+        </tr>
+        <tr>
+          <td><strong>Soft VBD</strong> (penalty only)</td>
+          <td class="num">1</td>
+          <td class="num">8</td>
+          <td class="num">1 × 10⁶ / 0 / 0.6</td>
+          <td class="num">5 × 10⁹</td>
+          <td class="num">0.52 ms</td>
+        </tr>
+        <tr>
+          <td><strong>Hard VBD</strong> (AVBD + Lagrangian)</td>
+          <td class="num">2</td>
+          <td class="num">3</td>
+          <td class="num">2 × 10⁶ / 0 / 0.6</td>
+          <td class="num">5 × 10⁹</td>
+          <td class="num">0.74 ms</td>
+        </tr>
+      </table>
+      <p>
+        <strong>XPBD is the fastest stable solver at 0.32 ms.</strong> ss=1 iter=6 — six positional
+        projection passes are enough to hold a 180-box pile static for the 200-frame quiescence window
+        with no contact-stiffness tuning at all.
+      </p>
+      <p>
+        <strong>Soft VBD's actual ss=1 floor is iter=8 ke=1e6 at 0.52 ms.</strong> The single-substep
+        mode <em>does</em> work, but only with enough Gauss-Seidel passes to dissipate the per-step
+        impulses; iter=2 (the broken earlier config) leaves the pile under-constrained and it drifts.
+        At ke=1e6 the penalty is stiff enough to support the pile under gravity but not so stiff that
+        the iter=8 sweep over-corrects.
+      </p>
+      <p>
+        <strong>Hard VBD is locked to ss=2 at 0.74 ms.</strong> AVBD's Lagrangian is built up over
+        per-substep dual updates and carried across substeps via <code>rigid_contact_history</code>.
+        ss=1 leaves no per-substep history to warm-start — every config tested at ss=1 (iter 4/8/16,
+        ke 5e5/1e6/2e6) drifts catastrophically.
+      </p>
+
+      <h3>Track A videos — pile holds, ball arrives and stops at first pyramid</h3>
+      <div class="video-grid">
+        <figure>
+          <video src="assets/xpbd_fast.mp4" autoplay loop muted playsinline controls></video>
+          <figcaption>
+            <strong>XPBD</strong> · ss=1, iter=6 — <strong>0.32 ms / frame</strong>.
+            Newton-default materials. Pile holds steady at 354 mm wobble until ball arrives.
+          </figcaption>
+        </figure>
+        <figure>
+          <video src="assets/vbd_soft.mp4" autoplay loop muted playsinline controls></video>
+          <figcaption>
+            <strong>Soft VBD</strong> · ss=1, iter=8, <code>ke=1e6/5e9</code> — <strong>0.52 ms / frame</strong>.
+            Single-substep mode — 1 collision pass amortized across 8 Gauss-Seidel sweeps. Pile steady at 304 mm.
+          </figcaption>
+        </figure>
+        <figure>
+          <video src="assets/vbd_hard_fast.mp4" autoplay loop muted playsinline controls></video>
+          <figcaption>
+            <strong>Hard VBD</strong> · ss=2, iter=3, <code>ke=2e6/5e9</code> — <strong>0.74 ms / frame</strong>.
+            AVBD Lagrangian + history. Pile steady at 286 mm — tightest pile of the three (lowest wobble baseline).
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <div class="track-banner B">
+      <span class="pill">Track B</span>
+      <h2>Physics-correct — heavy-ball momentum preserved</h2>
+      <p>
+        The 800:1 mass-ratio wrecking ball plows through the pyramid stack and keeps moving, as it
+        physically should. Requires enough substeps for the contact-resolution frequency to handle the
+        impact. Higher wall-clock cost (1.65–2.32 ms), but the ball reaches the back of the scene at
+        ≥ 3.5 m/s in all three solvers.
+      </p>
+    </div>
+
+    <section>
+      <h2>Track B configurations</h2>
+      <table>
+        <tr>
+          <th>Solver</th>
+          <th class="num">Substeps</th>
+          <th class="num">Iterations</th>
+          <th>Cube <code>ke</code> / <code>kd</code> / <code>mu</code></th>
+          <th>Heavy (ball+ramp) <code>ke</code></th>
+          <th class="num">Per-frame</th>
+          <th class="num">Ball speed @ frame 500</th>
+        </tr>
+        <tr>
+          <td><strong>XPBD</strong> (reference)</td>
+          <td class="num">10</td>
+          <td class="num">2</td>
+          <td class="num">2500 / 100 / 1.0 (newton defaults)</td>
+          <td class="num">2500</td>
+          <td class="num win">1.65 ms</td>
+          <td class="num win">4.40 m/s</td>
+        </tr>
+        <tr>
+          <td><strong>Soft VBD</strong> (penalty only)</td>
+          <td class="num">6</td>
+          <td class="num">1</td>
+          <td class="num">2 × 10⁶ / 0 / 0.6</td>
+          <td class="num">5 × 10⁹</td>
+          <td class="num">1.71 ms</td>
+          <td class="num">3.57 m/s</td>
+        </tr>
+        <tr>
+          <td><strong>Hard VBD</strong> (AVBD + Lagrangian)</td>
+          <td class="num">5</td>
+          <td class="num">6</td>
+          <td class="num">2 × 10⁶ / 0 / 0.6</td>
+          <td class="num">5 × 10⁹</td>
+          <td class="num">2.32 ms</td>
+          <td class="num">3.88 m/s</td>
+        </tr>
+      </table>
+      <p>
+        <strong>Soft VBD reaches physics-correct at 1.71 ms — competitive with XPBD's 1.65 ms.</strong>
+        The trick is decoupling substeps from iterations: where Track A wanted ss=1 (max throughput), the
+        ball impact requires enough substeps for the contact frequency to resolve the heavy mass.
+        <code>ss=6, iter=1</code> at <code>ke=2e6</code> hits the sweet spot — 4× more substeps than
+        Track A but the same one Gauss-Seidel sweep per substep, no Lagrangian to manage.
+      </p>
+      <p>
+        Hard VBD needs <code>ss × iter ≈ 30</code> total inner-iteration budget to fully resolve the
+        impact (any split — <code>ss=5×iter=6</code>, <code>ss=10×iter=3</code> — works; <code>ss=2×iter=15</code>
+        fails because contact-evaluation frequency is too low). <code>ss=5 iter=6</code> is the fastest
+        split that still preserves ball momentum.
+      </p>
+
+      <h3>Track B videos — ball plows through, physically correct</h3>
+      <div class="video-grid">
+        <figure>
+          <video src="assets/xpbd.mp4" autoplay loop muted playsinline controls></video>
+          <figcaption>
+            <strong>XPBD</strong> · ss=10, iter=2 — <strong>1.65 ms / frame</strong>.
+            Ball at 4.40 m/s post-impact, having cleared all 5 pyramids. Position-based projection is
+            effectively infinite stiffness → rigid impact, momentum transfers cleanly.
+          </figcaption>
+        </figure>
+        <figure>
+          <video src="assets/vbd_soft_hifi.mp4" autoplay loop muted playsinline controls></video>
+          <figcaption>
+            <strong>Soft VBD</strong> · ss=6, iter=1, <code>ke=2e6/5e9</code> — <strong>1.71 ms / frame</strong>.
+            Ball at 3.57 m/s, 81% of XPBD. Simplest physics-correct VBD config (one iter, no Lagrangian).
+          </figcaption>
+        </figure>
+        <figure>
+          <video src="assets/vbd_hard_hifi.mp4" autoplay loop muted playsinline controls></video>
+          <figcaption>
+            <strong>Hard VBD</strong> · ss=5, iter=6, <code>ke=2e6/5e9</code> — <strong>2.32 ms / frame</strong>.
+            Ball at 3.88 m/s, 88% of XPBD. AVBD Lagrangian + warm-start. 30-iter budget per frame.
+          </figcaption>
+        </figure>
+      </div>
+
+      <h3>Why the ball stops in Track A but plows through in Track B</h3>
+      <p>
+        Independent variation of <code>ss</code> and <code>ke</code>:
+      </p>
+      <table>
+        <tr><th>Held constant</th><th>Variable</th><th class="num">Ball speed @ frame 500</th></tr>
+        <tr><td>ss=10</td><td>ke=5e7 → 2e6 → 5e5</td><td class="num">3.09 → 4.28 → 4.26 m/s</td></tr>
+        <tr><td>ke=2e6</td><td>ss=10 → 5 → 2 → 1</td><td class="num warn">4.27 → 3.09 → 0.05 → 0.04 m/s</td></tr>
+      </table>
+      <p>
+        <strong>Substeps dominate the energy loss, not stiffness.</strong> VBD penalty contacts at any
+        reasonable <code>ke</code> cannot propagate momentum through a heavy ball impact in fewer than
+        ~5 substeps — the contact-evaluation FREQUENCY needs to match the impact time scale, regardless
+        of how stiff or how many iterations the penalty does within each substep.
+      </p>
+    </section>
+
+    <section>
+      <h2>Per-frame wall budget at the video scale (5 × 8 = 180 boxes)</h2>
+      <p>
+        Each solver at its <em>fastest stable</em> substeps × iter config (the same one used for its video).
+        Measurements: NVIDIA L40, captured-mode CUDA graph, 60-frame average after 15-frame warmup.
+      </p>
+      <table>
+        <tr>
+          <th>Solver</th>
+          <th>Config</th>
+          <th class="num">Per-frame</th>
+          <th class="num">vs XPBD ss=10</th>
+          <th class="num">vs solver-ss=10</th>
+          <th>Top-cube wobble</th>
+        </tr>
+        <tr>
+          <td>XPBD</td>
+          <td>ss=10, iter=2</td>
+          <td class="num">1.78 ms</td>
+          <td class="num">1.0×</td>
+          <td class="num">1.0×</td>
+          <td class="num">282 mm</td>
+        </tr>
+        <tr>
+          <td>XPBD</td>
+          <td><strong>ss=5, iter=2</strong> (max-speed)</td>
+          <td class="num win">0.89 ms</td>
+          <td class="num win">0.5×</td>
+          <td class="num">2.0× faster</td>
+          <td class="num">289 mm</td>
+        </tr>
+        <tr>
+          <td>XPBD</td>
+          <td>ss=2, iter=2 (aggressive)</td>
+          <td class="num">0.36 ms</td>
+          <td class="num">0.2×</td>
+          <td class="num">4.9× faster</td>
+          <td class="num">324 mm (mild wobble)</td>
+        </tr>
+        <tr>
+          <td>XPBD</td>
+          <td>ss=1, iter=2 (extreme)</td>
+          <td class="num">0.18 ms</td>
+          <td class="num">0.10×</td>
+          <td class="num">9.9× faster</td>
+          <td class="num warn">490 mm (visible drift)</td>
+        </tr>
+        <tr><td colspan="6" style="background:var(--panel);text-align:center;color:var(--muted);font-size:0.85rem">— soft VBD (single Gauss-Seidel sweep, no Lagrangian) —</td></tr>
+        <tr>
+          <td>Soft VBD</td>
+          <td>ss=6, iter=1, ke=2e6 <em>(Track B)</em></td>
+          <td class="num">1.71 ms</td>
+          <td class="num">0.96×</td>
+          <td class="num">—</td>
+          <td class="num">295 mm rest</td>
+        </tr>
+        <tr>
+          <td>Soft VBD</td>
+          <td>ss=2, iter=1, ke=2e6</td>
+          <td class="num">0.56 ms</td>
+          <td class="num">0.31×</td>
+          <td class="num">3.1× faster</td>
+          <td class="num">308 mm rest</td>
+        </tr>
+        <tr>
+          <td>Soft VBD</td>
+          <td><strong>ss=1, iter=8, ke=1e6</strong> <em>(Track A floor)</em></td>
+          <td class="num win">0.52 ms</td>
+          <td class="num win">0.29×</td>
+          <td class="num win">3.4× faster</td>
+          <td class="num">304 mm rest</td>
+        </tr>
+        <tr>
+          <td>Soft VBD</td>
+          <td>ss=1, iter=2, ke=5e5 (broken)</td>
+          <td class="num">0.32 ms</td>
+          <td colspan="2" class="num lose">pile drifts: 525 → 1458 → 7069 mm</td>
+          <td class="num lose">UNSTABLE</td>
+        </tr>
+        <tr><td colspan="6" style="background:var(--panel);text-align:center;color:var(--muted);font-size:0.85rem">— hard VBD (AVBD Lagrangian + history) —</td></tr>
+        <tr>
+          <td>Hard VBD</td>
+          <td>ss=5, iter=6, ke=2e6 <em>(Track B)</em></td>
+          <td class="num">2.32 ms</td>
+          <td class="num">1.30×</td>
+          <td class="num">—</td>
+          <td class="num">283 mm rest</td>
+        </tr>
+        <tr>
+          <td>Hard VBD</td>
+          <td><strong>ss=2, iter=3, ke=2e6</strong> <em>(Track A floor)</em></td>
+          <td class="num win">0.74 ms</td>
+          <td class="num win">0.41×</td>
+          <td class="num win">3.1× faster</td>
+          <td class="num">286 mm rest</td>
+        </tr>
+        <tr>
+          <td>Hard VBD</td>
+          <td>ss=1, any iter</td>
+          <td colspan="3" class="num lose">explodes (AVBD Lagrangian has no per-step continuity to warm-start)</td>
+          <td class="num lose">unstable</td>
+        </tr>
+      </table>
+
+      <h3>Hard VBD: iter-vs-substeps trade at fixed compute budget (ss × iter = 30)</h3>
+      <p>
+        Same total inner-iteration count, different ss/iter split. Per-substep overhead (init, dual updates,
+        snapshot) is paid once per substep regardless of inner iter count — so <strong>fewer larger
+        substeps amortize that overhead</strong>:
+      </p>
+      <table>
+        <tr><th>ss × iter</th><th>Total inner</th><th class="num">per-frame</th><th>Pile stable?</th><th class="num">Ball speed (frame 500)</th></tr>
+        <tr><td>ss=30, iter=1</td><td class="num">30</td><td class="num">8.50 ms</td><td>✓ 348 mm</td><td class="num">(too slow to matter)</td></tr>
+        <tr><td>ss=10, iter=3</td><td class="num">30</td><td class="num">3.64 ms</td><td>✓ 292 mm</td><td class="num">4.30 m/s ✓</td></tr>
+        <tr><td>ss=5, iter=6</td><td class="num">30</td><td class="num">2.30 ms</td><td>✓ 282 mm</td><td class="num">(tested at iter=10 → 4.03 m/s)</td></tr>
+        <tr><td>ss=3, iter=10</td><td class="num">30</td><td class="num win">1.82 ms</td><td>✓ 282 mm</td><td class="num warn">1.61 m/s ⚠</td></tr>
+        <tr><td>ss=2, iter=15</td><td class="num">30</td><td class="num">1.65 ms</td><td>⚠ 511 mm</td><td class="num lose">0.21 m/s ❌</td></tr>
+      </table>
+      <p>
+        <strong>For stability</strong>, more iter beats more substeps — <code>ss=3 × iter=10</code> at 1.82 ms
+        is 5× faster than <code>ss=30 × iter=1</code> at the same total compute.
+      </p>
+      <p>
+        <strong>For heavy-ball momentum preservation</strong>, substeps are independently required — the
+        AVBD Lagrangian can't propagate momentum through a fast-moving ball in fewer than ~5 substeps no
+        matter how many iterations per step. The contact-evaluation FREQUENCY matters in absolute terms.
+      </p>
+
+      <h3>Per-solver Track A floor vs Track B reference</h3>
+      <table>
+        <tr><th>Solver</th><th class="num">Track A floor (stable)</th><th class="num">Track B reference</th><th>Ratio</th></tr>
+        <tr>
+          <td><strong>XPBD</strong></td>
+          <td class="num win">0.32 ms @ ss=1, iter=6</td>
+          <td class="num">1.65 ms @ ss=10, iter=2</td>
+          <td>5.2× slower for physics-correct</td>
+        </tr>
+        <tr>
+          <td><strong>Soft VBD</strong></td>
+          <td class="num">0.52 ms @ ss=1, iter=8, ke=1e6</td>
+          <td class="num win">1.71 ms @ ss=6, iter=1, ke=2e6</td>
+          <td>3.3× slower for physics-correct</td>
+        </tr>
+        <tr>
+          <td><strong>Hard VBD</strong></td>
+          <td class="num">0.74 ms @ ss=2, iter=3, ke=2e6</td>
+          <td class="num">2.32 ms @ ss=5, iter=6, ke=2e6</td>
+          <td>3.1× slower for physics-correct</td>
+        </tr>
+      </table>
+      <p>
+        <strong>XPBD wins Track A at 0.32 ms</strong> — positional projection with no stiffness tuning at
+        all, ss=1 + iter=6. Soft VBD's <code>ss=1, iter=8</code> reaches 0.52 ms (1.6× XPBD), and Hard
+        VBD is stuck at ss=2 = 0.74 ms (2.3× XPBD) because its Lagrangian can't operate without per-step
+        continuity.
+      </p>
+      <p>
+        <strong>Track B gap is tighter</strong> — Soft VBD reaches 1.71 ms (within 4% of XPBD's
+        physics-correct reference); Hard VBD at 2.32 ms is 1.4× XPBD. Soft VBD's substeps drop from
+        Track A's 1 to Track B's 6 (6× more contact-evaluation frequency), and <code>ke</code> increases
+        from 1e6 to 2e6 — same solver, retuned per regime.
+      </p>
+    </section>
+
+    <section>
+      <h2>Stability comparison (settling, ball-on-ramp)</h2>
+      <p>
+        Two metrics: <em>top-cube max displacement</em> over 60 frames (lower = less wobble in the pile)
+        and <em>ball z</em> (the ramp surface where the ball rests is at about z=9.4; ramp+ball geometry
+        means the ball <em>should</em> settle around z=9.5–9.9. Less drop = less ramp penetration).
+      </p>
+      <table>
+        <tr>
+          <th>Scene</th>
+          <th>Solver</th>
+          <th class="num">Top-cube max disp</th>
+          <th class="num">min body z</th>
+          <th class="num">Ball z (settled)</th>
+        </tr>
+        <tr><td rowspan="3">3 × 5</td><td>XPBD</td><td class="num">161 mm</td><td class="num">0.400</td><td class="num">9.86</td></tr>
+        <tr><td>Hard VBD</td><td class="num win">160 mm</td><td class="num">0.400</td><td class="num">9.89</td></tr>
+        <tr><td>Soft VBD</td><td class="num">161 mm</td><td class="num">0.399</td><td class="num win">10.03</td></tr>
+
+        <tr><td rowspan="3">10 × 15</td><td>XPBD</td><td class="num">569 mm</td><td class="num">0.399</td><td class="num">9.86</td></tr>
+        <tr><td>Hard VBD</td><td class="num">562 mm</td><td class="num">0.400</td><td class="num">9.89</td></tr>
+        <tr><td>Soft VBD</td><td class="num win">506 mm</td><td class="num">0.398</td><td class="num win">10.03</td></tr>
+
+        <tr><td rowspan="3">20 × 20</td><td>XPBD</td><td class="num">779 mm</td><td class="num">0.398</td><td class="num">9.86</td></tr>
+        <tr><td>Hard VBD</td><td class="num lose">848 mm</td><td class="num">0.400</td><td class="num">9.89</td></tr>
+        <tr><td>Soft VBD</td><td class="num win">556 mm</td><td class="num">0.397</td><td class="num win">10.03</td></tr>
+      </table>
+      <p>
+        <strong>Soft VBD beats XPBD on stability at scale.</strong> At 20 × 20 (4200 boxes), Soft VBD's
+        top-cube wobble is 556 mm vs XPBD's 779 mm — about <strong>30% less drift</strong>. Hard VBD with
+        AVBD Lagrangian over many contacts can over-correct, slightly amplifying wobble at the same scale
+        (848 mm). All three solvers prevent the ball from tunneling through the ramp.
+      </p>
+    </section>
+
+    <section>
+      <h2>Final-frame screenshots (frame 500 of 600)</h2>
+      <h3>Track A — ball arrives at stable pile (fastest stable)</h3>
+      <div class="video-grid">
+        <figure>
+          <img src="assets/xpbd_fast_final.png" alt="XPBD Track A final frame">
+          <figcaption><strong>XPBD</strong> ss=1, iter=6 — 0.32 ms. Pile steady at 354 mm wobble pre-impact.</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/vbd_soft_final.png" alt="Soft VBD Track A final frame">
+          <figcaption><strong>Soft VBD</strong> ss=1, iter=8, ke=1e6 — 0.52 ms. Single-substep, 8 Gauss-Seidel passes.</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/vbd_hard_fast_final.png" alt="Hard VBD Track A final frame">
+          <figcaption><strong>Hard VBD</strong> ss=2, iter=3, ke=2e6 — 0.74 ms. AVBD Lagrangian + history.</figcaption>
+        </figure>
+      </div>
+      <h3>Track B — ball plows through pile (physics-correct)</h3>
+      <div class="video-grid">
+        <figure>
+          <img src="assets/xpbd_final.png" alt="XPBD Track B final frame">
+          <figcaption><strong>XPBD</strong> ss=10, iter=2 — 1.65 ms, 4.40 m/s. Ground truth.</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/vbd_soft_hifi_final.png" alt="Soft VBD Track B final frame">
+          <figcaption><strong>Soft VBD</strong> ss=6, iter=1, ke=2e6 — 1.71 ms, 3.57 m/s. 81% of XPBD speed.</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/vbd_hard_hifi_final.png" alt="Hard VBD Track B final frame">
+          <figcaption><strong>Hard VBD</strong> ss=5, iter=6, ke=2e6 — 2.32 ms, 3.88 m/s. 88% of XPBD speed.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section>
+      <h2>Recommended code per solver</h2>
+
+      <h3>XPBD</h3>
+<pre><code># No per-shape stiffness tuning needed — newton defaults work in both tracks.
+# Track A (fastest stable):   ss=1, iter=6      → 0.32 ms / frame
+# Track B (physics-correct):  ss=10, iter=2     → 1.65 ms / frame, ball 4.40 m/s
+
+solver = newton.solvers.SolverXPBD(
+    model,
+    iterations=6,                      # ← 2 for Track B (more substeps amortize the work)
+    rigid_contact_relaxation=0.8,
+)
+sim_substeps = 1                       # ← 10 for Track B</code></pre>
+
+      <h3>Soft VBD — penalty only, no Lagrangian</h3>
+<pre><code># Track A (fastest stable):  ss=1, iter=8, ke=1e6      → 0.52 ms / frame
+# Track B (physics-correct): ss=6, iter=1, ke=2e6      → 1.71 ms / frame, ball 3.57 m/s
+#
+# At ss=1, iter must be ≥ 8 to dissipate per-step impulses — fewer iterations
+# leave the pile under-constrained and it drifts within 200 frames.
+
+builder.default_shape_cfg.ke = 1e6     # ← 2e6 for Track B (ke scales ~ m/dt²)
+builder.default_shape_cfg.mu = 0.6
+heavy_cfg = newton.ModelBuilder.ShapeConfig(
+    density=builder.default_shape_cfg.density * 100,
+    ke=5e9, mu=0.6,                    # heavy ball + ramp keep stiff contact
+)
+builder.color()                        # VBD requires coloring
+
+solver = newton.solvers.SolverVBD(
+    model,
+    iterations=8,                      # ← 1 for Track B (more substeps absorb the work)
+    rigid_contact_hard=False,
+    rigid_contact_history=False,
+)
+sim_substeps = 1                       # ← 6 for Track B</code></pre>
+
+      <h3>Hard VBD — AVBD Lagrangian + history</h3>
+<pre><code># Track A (fastest stable):  ss=2, iter=3, ke=2e6     → 0.74 ms / frame
+# Track B (physics-correct): ss=5, iter=6, ke=2e6     → 2.32 ms / frame, ball 3.88 m/s
+#
+# Hard VBD cannot run at ss=1: AVBD's Lagrangian builds up over per-substep dual
+# updates, and `rigid_contact_history` warm-starts the next substep from the
+# previous one. With only one substep per frame there's no continuity to carry,
+# and every config tested at ss=1 drifts catastrophically.
+
+builder.default_shape_cfg.ke = 2e6     # same ke in both tracks
+builder.default_shape_cfg.mu = 0.6
+heavy_cfg = newton.ModelBuilder.ShapeConfig(
+    density=builder.default_shape_cfg.density * 100,
+    ke=5e9, mu=0.6,
+)
+builder.color()
+
+solver = newton.solvers.SolverVBD(
+    model,
+    iterations=3,                      # ← 6 for Track B (ss × iter ≈ 30 budget)
+    rigid_contact_hard=True,
+    rigid_contact_history=True,        # ← carries Lagrangian across substeps
+)
+pipeline = newton.CollisionPipeline(model, contact_matching="latest")  # required for history
+sim_substeps = 2                       # ← 5 for Track B</code></pre>
+    </section>
+
+    <section>
+      <h2>Headline</h2>
+      <ul class="compact">
+        <li><strong>Two regimes, separately tuned, with measured stability.</strong> Track A (fastest
+          stable) and Track B (physics-correct) are different optimization problems. The stability
+          test is mandatory: pile must hold steady through a 200-frame quiescence window before the
+          ball arrives; configs that drift through that window are rejected even if cheaper.</li>
+        <li><strong>Track A floor — XPBD at 0.32 ms / frame</strong> (ss=1, iter=6, newton defaults).
+          No stiffness tuning, no per-shape <code>ke</code>. Positional projection holds the pile at
+          354 mm steady wobble.</li>
+        <li><strong>Track A — Soft VBD at 0.52 ms</strong> (ss=1, iter=8, <code>ke=1e6</code>). Soft VBD
+          <em>can</em> run at a single substep — there's no Lagrangian to overshoot — but you need
+          iter ≥ 8 to dissipate per-step impulses. The earlier ss=1 iter=2 ke=5e5 config drifted to
+          7 m wobble before the ball arrived; it looked fastest only because we sampled the wobble too
+          early. iter=8 is what actually holds the pile.</li>
+        <li><strong>Track A — Hard VBD is locked to ss=2 at 0.74 ms.</strong> AVBD's Lagrangian needs
+          per-substep continuity to warm-start via <code>rigid_contact_history</code>; ss=1 has no
+          continuity, and every config tested at ss=1 (iter 4/8/16, ke 5e5/1e6/2e6) drifts.</li>
+        <li><strong>Track B reference — XPBD at 1.65 ms</strong> (ss=10, iter=2). Position-based
+          projection ≈ infinite stiffness → rigid impact, ball at 4.40 m/s post-impact.</li>
+        <li><strong>Track B — Soft VBD at 1.71 ms is within 4% of XPBD's reference.</strong>
+          <code>ss=6, iter=1, ke=2e6</code>. Same solver as Track A, retuned: 6× more substeps,
+          2× stiffer contacts.</li>
+        <li><strong>Substeps dominate momentum preservation, not stiffness.</strong> Independent sweep:
+          at ss=10 varying ke from 5e7 to 5e5 changes ball speed by &lt; 30%; at fixed ke=2e6 dropping
+          ss from 10 to 2 crashes ball speed from 4.27 → 0.05 m/s.</li>
+        <li><strong>Measurement-window rule.</strong> "Stable" means the pile holds through
+          <code>frame [150, 350]</code> without drift, not just "doesn't NaN in the first 60 frames."
+          Three of the configs in the previous draft of this report failed this stricter test —
+          this draft replaces them.</li>
+        <li><strong>Sticking-eps defaults are harmless</strong> on this scene. Tested
+          <code>{0, 1e-6, 1e-4, 1e-2}</code> on all three sticking-eps parameters — no measurable effect.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Reproduction</h2>
+      <p>
+        Newton commit: <code>cdadc8a1</code> (tip of <code>vbd-cable-twist-bend-split</code>). GPU: NVIDIA L40.
+        Driver/CUDA: CUDA Toolkit 12.9, driver 12.8. Warp 1.14.0. Render: ViewerGL headless under xvfb at
+        1280×720, frames captured via <code>viewer.get_frame()</code>, encoded with ffmpeg + libx264.
+      </p>
+      <p>
+        Diagnostic driver and the VBD pyramid example live in the working tree on branch <code>vbd-perf</code>
+        (uncommitted; this report site is the only published artifact). Solver code is unmodified from
+        <code>cdadc8a1</code>.
+      </p>
+    </section>
+
+  </main>
+
+  <footer>
+    <p>
+      Companion to <a href="../vbd_perf_robustness/">VBD Rigid + Cable: Perf &amp; Robustness</a>.
+      Both reports published from branch <code>gh-pages</code> at <code>reports/</code>.
+    </p>
+  </footer>
+
+</body>
+</html>

@@ -1,0 +1,623 @@
+{
+  "generated_at": "2026-06-13 19:30:07",
+  "scene": {
+    "contacts_stack": {
+      "num_pyramids": 1,
+      "pyramid_size": 20,
+      "frames": 600
+    },
+    "contacts_impact": {
+      "num_pyramids": 0,
+      "pyramid_size": 20,
+      "frames": 600
+    },
+    "budget": {
+      "substeps": 10,
+      "iterations": 2
+    }
+  },
+  "selected": {
+    "contacts_stack": {
+      "xpbd": {
+        "suite": "contacts_stack",
+        "mode": "xpbd",
+        "title": "XPBD",
+        "config": {
+          "substeps": 10,
+          "xpbd_iterations": 2
+        },
+        "frames": 600,
+        "stable": true,
+        "error": null,
+        "finite": true,
+        "top_xy_drift": 0.007952913641929626,
+        "top_z": 15.587621688842773,
+        "max_box_xy_drift": 0.011629346758127213,
+        "min_z": 0.39839738607406616,
+        "max_abs_pos": 15.587621688842773,
+        "runtime_s": 4.402243549993727
+      },
+      "old_soft": {
+        "suite": "contacts_stack",
+        "mode": "old_soft",
+        "title": "Old VBD soft penalty",
+        "config": {
+          "substeps": 10,
+          "iterations": 2,
+          "alpha": 0.95,
+          "legacy_scale": 0.01
+        },
+        "frames": 600,
+        "stable": true,
+        "error": null,
+        "finite": true,
+        "top_xy_drift": 0.07994870841503143,
+        "top_z": 15.575142860412598,
+        "max_box_xy_drift": 0.13040044903755188,
+        "min_z": 0.3954581022262573,
+        "max_abs_pos": 15.575142860412598,
+        "runtime_s": 5.235863439971581
+      },
+      "old_hard_history": {
+        "suite": "contacts_stack",
+        "mode": "old_hard_history",
+        "title": "Old VBD hard ALM + history",
+        "config": {
+          "substeps": 10,
+          "iterations": 2,
+          "alpha": 0.0,
+          "legacy_scale": 0.01
+        },
+        "frames": 600,
+        "stable": true,
+        "error": null,
+        "finite": true,
+        "top_xy_drift": 0.004850093740969896,
+        "top_z": 15.603524208068848,
+        "max_box_xy_drift": 0.00993467029184103,
+        "min_z": 0.3979368805885315,
+        "max_abs_pos": 15.603524208068848,
+        "runtime_s": 6.198643427982461
+      },
+      "new_alm_no_history_alpha0": {
+        "suite": "contacts_stack",
+        "mode": "new_alm_no_history_alpha0",
+        "title": "New compliant ALM, no history, alpha=0",
+        "config": {
+          "substeps": 10,
+          "iterations": 2,
+          "alpha": 0.0,
+          "ke": 30000000.0
+        },
+        "frames": 600,
+        "stable": true,
+        "error": null,
+        "finite": true,
+        "top_xy_drift": 0.0027289644349366426,
+        "top_z": 15.592201232910156,
+        "max_box_xy_drift": 0.1681545227766037,
+        "min_z": 0.39788371324539185,
+        "max_abs_pos": 15.592201232910156,
+        "runtime_s": 5.319069849967491
+      },
+      "new_alm_no_history_alpha095": {
+        "suite": "contacts_stack",
+        "mode": "new_alm_no_history_alpha095",
+        "title": "New compliant ALM, no history, alpha=0.95",
+        "config": {
+          "substeps": 10,
+          "iterations": 2,
+          "alpha": 0.95,
+          "ke": 3000000.0
+        },
+        "frames": 600,
+        "stable": true,
+        "error": null,
+        "finite": true,
+        "top_xy_drift": 0.011699292808771133,
+        "top_z": 15.452540397644043,
+        "max_box_xy_drift": 0.74821537733078,
+        "min_z": 0.26628467440605164,
+        "max_abs_pos": 15.452540397644043,
+        "runtime_s": 5.312306512030773
+      },
+      "new_alm_history_alpha0": {
+        "suite": "contacts_stack",
+        "mode": "new_alm_history_alpha0",
+        "title": "New compliant ALM + history, alpha=0",
+        "config": {
+          "substeps": 10,
+          "iterations": 2,
+          "alpha": 0.0,
+          "ke": 30000000.0
+        },
+        "frames": 600,
+        "stable": true,
+        "error": null,
+        "finite": true,
+        "top_xy_drift": 0.006539163179695606,
+        "top_z": 15.592129707336426,
+        "max_box_xy_drift": 0.006539163179695606,
+        "min_z": 0.398087739944458,
+        "max_abs_pos": 15.592129707336426,
+        "runtime_s": 6.390314245945774
+      },
+      "new_alm_history_alpha095": {
+        "suite": "contacts_stack",
+        "mode": "new_alm_history_alpha095",
+        "title": "New compliant ALM + history, alpha=0.95",
+        "config": {
+          "substeps": 10,
+          "iterations": 2,
+          "alpha": 0.95,
+          "ke": 10000000.0
+        },
+        "frames": 600,
+        "stable": true,
+        "error": null,
+        "finite": true,
+        "top_xy_drift": 0.014822549186646938,
+        "top_z": 15.47067642211914,
+        "max_box_xy_drift": 0.03892088308930397,
+        "min_z": 0.384285032749176,
+        "max_abs_pos": 15.47067642211914,
+        "runtime_s": 6.390920661040582
+      },
+      "soft_same_ke_no_history_alpha0": {
+        "suite": "contacts_stack",
+        "mode": "soft_same_ke_no_history_alpha0",
+        "title": "Soft penalty, same ke as no-history ALM, alpha=0",
+        "config": {
+          "substeps": 10,
+          "iterations": 2,
+          "alpha": 0.0,
+          "ke": 30000000.0,
+          "box_ke": 30000000.0,
+          "ball_ke": 30000000.0,
+          "static_ke": 30000000.0,
+          "legacy_scale": 0.058593749999999986,
+          "matched_to": "new_alm_no_history_alpha0"
+        },
+        "frames": 600,
+        "stable": true,
+        "error": null,
+        "finite": true,
+        "top_xy_drift": 0.029443716630339622,
+        "top_z": 15.594819068908691,
+        "max_box_xy_drift": 0.029443716630339622,
+        "min_z": 0.3990442156791687,
+        "max_abs_pos": 15.594819068908691,
+        "runtime_s": 5.27891701599583
+      },
+      "soft_same_ke_no_history_alpha095": {
+        "suite": "contacts_stack",
+        "mode": "soft_same_ke_no_history_alpha095",
+        "title": "Soft penalty, same ke as no-history ALM, alpha=0.95",
+        "config": {
+          "substeps": 10,
+          "iterations": 2,
+          "alpha": 0.95,
+          "ke": 3000000.0,
+          "box_ke": 3000000.0,
+          "ball_ke": 3000000.0,
+          "static_ke": 3000000.0,
+          "legacy_scale": 0.005859374999999999,
+          "matched_to": "new_alm_no_history_alpha095"
+        },
+        "frames": 600,
+        "stable": false,
+        "error": null,
+        "finite": true,
+        "top_xy_drift": 1.1557224988937378,
+        "top_z": 15.554274559020996,
+        "max_box_xy_drift": 1.1557224988937378,
+        "min_z": 0.39997604489326477,
+        "max_abs_pos": 15.554274559020996,
+        "runtime_s": 5.26514077297179
+      },
+      "soft_same_ke_history_alpha0": {
+        "suite": "contacts_stack",
+        "mode": "soft_same_ke_history_alpha0",
+        "title": "Soft penalty, same ke as history ALM, alpha=0",
+        "config": {
+          "substeps": 10,
+          "iterations": 2,
+          "alpha": 0.0,
+          "ke": 30000000.0,
+          "box_ke": 30000000.0,
+          "ball_ke": 30000000.0,
+          "static_ke": 30000000.0,
+          "legacy_scale": 0.058593749999999986,
+          "matched_to": "new_alm_history_alpha0"
+        },
+        "frames": 600,
+        "stable": true,
+        "error": null,
+        "finite": true,
+        "top_xy_drift": 0.05040387064218521,
+        "top_z": 15.594861030578613,
+        "max_box_xy_drift": 0.05040387064218521,
+        "min_z": 0.3990480899810791,
+        "max_abs_pos": 15.594861030578613,
+        "runtime_s": 5.260555638989899
+      },
+      "soft_same_ke_history_alpha095": {
+        "suite": "contacts_stack",
+        "mode": "soft_same_ke_history_alpha095",
+        "title": "Soft penalty, same ke as history ALM, alpha=0.95",
+        "config": {
+          "substeps": 10,
+          "iterations": 2,
+          "alpha": 0.95,
+          "ke": 10000000.0,
+          "box_ke": 10000000.0,
+          "ball_ke": 10000000.0,
+          "static_ke": 10000000.0,
+          "legacy_scale": 0.019531249999999997,
+          "matched_to": "new_alm_history_alpha095"
+        },
+        "frames": 600,
+        "stable": true,
+        "error": null,
+        "finite": true,
+        "top_xy_drift": 0.3082220256328583,
+        "top_z": 15.58470344543457,
+        "max_box_xy_drift": 0.3082220256328583,
+        "min_z": 0.39760828018188477,
+        "max_abs_pos": 15.58470344543457,
+        "runtime_s": 5.262988877017051
+      }
+    },
+    "contacts_impact": {
+      "xpbd": {
+        "suite": "contacts_impact",
+        "mode": "xpbd",
+        "title": "XPBD",
+        "config": {
+          "substeps": 10,
+          "xpbd_iterations": 2
+        },
+        "frames": 600,
+        "stable": true,
+        "error": null,
+        "finite": true,
+        "ground_clearance": -3.5762786865234375e-07,
+        "ramp_clearance": -0.031542828330024975,
+        "ramp_samples": 402,
+        "ball_end": [
+          0.0,
+          -6.43024206161499,
+          1.9999996423721313
+        ],
+        "max_abs_pos": 6.43024206161499,
+        "runtime_s": 5.288406030042097
+      },
+      "old_soft": {
+        "suite": "contacts_impact",
+        "mode": "old_soft",
+        "title": "Old VBD soft penalty",
+        "config": {
+          "substeps": 10,
+          "iterations": 2,
+          "alpha": 0.95,
+          "legacy_scale": 10.0
+        },
+        "frames": 600,
+        "stable": false,
+        "error": null,
+        "finite": true,
+        "ground_clearance": -0.14996063709259033,
+        "ramp_clearance": -0.07499288456851927,
+        "ramp_samples": 397,
+        "ball_end": [
+          0.0,
+          -6.237076759338379,
+          2.842355728149414
+        ],
+        "max_abs_pos": 6.237076759338379,
+        "runtime_s": 5.688305624993518
+      },
+      "old_hard_history": {
+        "suite": "contacts_impact",
+        "mode": "old_hard_history",
+        "title": "Old VBD hard ALM + history",
+        "config": {
+          "substeps": 10,
+          "iterations": 2,
+          "alpha": 0.0,
+          "legacy_scale": 1.0
+        },
+        "frames": 600,
+        "stable": false,
+        "error": null,
+        "finite": true,
+        "ground_clearance": -0.4203242063522339,
+        "ramp_clearance": -0.19115522993321976,
+        "ramp_samples": 354,
+        "ball_end": [
+          0.0,
+          -10.495028495788574,
+          4.024507522583008
+        ],
+        "max_abs_pos": 10.495028495788574,
+        "runtime_s": 5.984197450045031
+      },
+      "new_alm_no_history_alpha0": {
+        "suite": "contacts_impact",
+        "mode": "new_alm_no_history_alpha0",
+        "title": "New compliant ALM, no history, alpha=0",
+        "config": {
+          "substeps": 10,
+          "iterations": 2,
+          "alpha": 0.0,
+          "ke": 3000000000000.0
+        },
+        "frames": 600,
+        "stable": true,
+        "error": null,
+        "finite": true,
+        "ground_clearance": -1.3709068298339844e-05,
+        "ramp_clearance": -0.033725002239875845,
+        "ramp_samples": 405,
+        "ball_end": [
+          0.0,
+          -6.013706684112549,
+          1.9999866485595703
+        ],
+        "max_abs_pos": 6.013706684112549,
+        "runtime_s": 5.279670076968614
+      },
+      "new_alm_no_history_alpha095": {
+        "suite": "contacts_impact",
+        "mode": "new_alm_no_history_alpha095",
+        "title": "New compliant ALM, no history, alpha=0.95",
+        "config": {
+          "substeps": 10,
+          "iterations": 2,
+          "alpha": 0.95,
+          "ke": 3000000000000.0
+        },
+        "frames": 600,
+        "stable": true,
+        "error": null,
+        "finite": true,
+        "ground_clearance": -0.006121635437011719,
+        "ramp_clearance": -0.03301880722116568,
+        "ramp_samples": 403,
+        "ball_end": [
+          0.0,
+          -5.877571105957031,
+          1.9997321367263794
+        ],
+        "max_abs_pos": 5.877571105957031,
+        "runtime_s": 5.296396504971199
+      },
+      "new_alm_history_alpha0": {
+        "suite": "contacts_impact",
+        "mode": "new_alm_history_alpha0",
+        "title": "New compliant ALM + history, alpha=0",
+        "config": {
+          "substeps": 10,
+          "iterations": 2,
+          "alpha": 0.0,
+          "ke": 3000000000000.0
+        },
+        "frames": 600,
+        "stable": true,
+        "error": null,
+        "finite": true,
+        "ground_clearance": -1.3709068298339844e-05,
+        "ramp_clearance": -0.033725002239875845,
+        "ramp_samples": 405,
+        "ball_end": [
+          0.0,
+          -6.013706684112549,
+          1.9999866485595703
+        ],
+        "max_abs_pos": 6.013706684112549,
+        "runtime_s": 6.270860484975856
+      },
+      "new_alm_history_alpha095": {
+        "suite": "contacts_impact",
+        "mode": "new_alm_history_alpha095",
+        "title": "New compliant ALM + history, alpha=0.95",
+        "config": {
+          "substeps": 10,
+          "iterations": 2,
+          "alpha": 0.95,
+          "ke": 3000000000000.0
+        },
+        "frames": 600,
+        "stable": true,
+        "error": null,
+        "finite": true,
+        "ground_clearance": -0.006121635437011719,
+        "ramp_clearance": -0.03301880722116568,
+        "ramp_samples": 403,
+        "ball_end": [
+          0.0,
+          -5.877571105957031,
+          1.9997321367263794
+        ],
+        "max_abs_pos": 5.877571105957031,
+        "runtime_s": 6.251686950970907
+      },
+      "soft_same_ke_no_history_alpha0": {
+        "suite": "contacts_impact",
+        "mode": "soft_same_ke_no_history_alpha0",
+        "title": "Soft penalty, same ke as no-history ALM, alpha=0",
+        "config": {
+          "substeps": 10,
+          "iterations": 2,
+          "alpha": 0.0,
+          "ke": 3000000000000.0,
+          "box_ke": 3000000000000.0,
+          "ball_ke": 3000000000000.0,
+          "static_ke": 3000000000000.0,
+          "legacy_scale": 5859.374999999999,
+          "matched_to": "new_alm_no_history_alpha0"
+        },
+        "frames": 600,
+        "stable": true,
+        "error": null,
+        "finite": true,
+        "ground_clearance": -0.0019363164901733398,
+        "ramp_clearance": -0.03201525165987551,
+        "ramp_samples": 408,
+        "ball_end": [
+          0.0,
+          -5.553009033203125,
+          1.9999890327453613
+        ],
+        "max_abs_pos": 5.553009033203125,
+        "runtime_s": 5.224881724047009
+      },
+      "soft_same_ke_no_history_alpha095": {
+        "suite": "contacts_impact",
+        "mode": "soft_same_ke_no_history_alpha095",
+        "title": "Soft penalty, same ke as no-history ALM, alpha=0.95",
+        "config": {
+          "substeps": 10,
+          "iterations": 2,
+          "alpha": 0.95,
+          "ke": 3000000000000.0,
+          "box_ke": 3000000000000.0,
+          "ball_ke": 3000000000000.0,
+          "static_ke": 3000000000000.0,
+          "legacy_scale": 5859.374999999999,
+          "matched_to": "new_alm_no_history_alpha095"
+        },
+        "frames": 600,
+        "stable": true,
+        "error": null,
+        "finite": true,
+        "ground_clearance": -0.0019363164901733398,
+        "ramp_clearance": -0.03201525165987551,
+        "ramp_samples": 408,
+        "ball_end": [
+          0.0,
+          -5.553009033203125,
+          1.9999890327453613
+        ],
+        "max_abs_pos": 5.553009033203125,
+        "runtime_s": 5.211354086990468
+      },
+      "soft_same_ke_history_alpha0": {
+        "suite": "contacts_impact",
+        "mode": "soft_same_ke_history_alpha0",
+        "title": "Soft penalty, same ke as history ALM, alpha=0",
+        "config": {
+          "substeps": 10,
+          "iterations": 2,
+          "alpha": 0.0,
+          "ke": 3000000000000.0,
+          "box_ke": 3000000000000.0,
+          "ball_ke": 3000000000000.0,
+          "static_ke": 3000000000000.0,
+          "legacy_scale": 5859.374999999999,
+          "matched_to": "new_alm_history_alpha0"
+        },
+        "frames": 600,
+        "stable": true,
+        "error": null,
+        "finite": true,
+        "ground_clearance": -0.0019363164901733398,
+        "ramp_clearance": -0.03201525165987551,
+        "ramp_samples": 408,
+        "ball_end": [
+          0.0,
+          -5.553009033203125,
+          1.9999890327453613
+        ],
+        "max_abs_pos": 5.553009033203125,
+        "runtime_s": 5.232912420004141
+      },
+      "soft_same_ke_history_alpha095": {
+        "suite": "contacts_impact",
+        "mode": "soft_same_ke_history_alpha095",
+        "title": "Soft penalty, same ke as history ALM, alpha=0.95",
+        "config": {
+          "substeps": 10,
+          "iterations": 2,
+          "alpha": 0.95,
+          "ke": 3000000000000.0,
+          "box_ke": 3000000000000.0,
+          "ball_ke": 3000000000000.0,
+          "static_ke": 3000000000000.0,
+          "legacy_scale": 5859.374999999999,
+          "matched_to": "new_alm_history_alpha095"
+        },
+        "frames": 600,
+        "stable": true,
+        "error": null,
+        "finite": true,
+        "ground_clearance": -0.0019363164901733398,
+        "ramp_clearance": -0.03201525165987551,
+        "ramp_samples": 408,
+        "ball_end": [
+          0.0,
+          -5.553009033203125,
+          1.9999890327453613
+        ],
+        "max_abs_pos": 5.553009033203125,
+        "runtime_s": 5.231187860947102
+      }
+    }
+  },
+  "stable_counts": {
+    "contacts_stack": {
+      "xpbd": 1,
+      "old_soft": 1,
+      "old_hard_history": 2,
+      "new_alm_no_history_alpha0": 2,
+      "new_alm_no_history_alpha095": 3,
+      "new_alm_history_alpha0": 3,
+      "new_alm_history_alpha095": 3,
+      "soft_same_ke_no_history_alpha0": 1,
+      "soft_same_ke_no_history_alpha095": 0,
+      "soft_same_ke_history_alpha0": 1,
+      "soft_same_ke_history_alpha095": 1
+    },
+    "contacts_impact": {
+      "xpbd": 1,
+      "old_soft": 0,
+      "old_hard_history": 0,
+      "new_alm_no_history_alpha0": 4,
+      "new_alm_no_history_alpha095": 3,
+      "new_alm_history_alpha0": 4,
+      "new_alm_history_alpha095": 3,
+      "soft_same_ke_no_history_alpha0": 1,
+      "soft_same_ke_no_history_alpha095": 1,
+      "soft_same_ke_history_alpha0": 1,
+      "soft_same_ke_history_alpha095": 1
+    }
+  },
+  "total_counts": {
+    "contacts_stack": {
+      "xpbd": 1,
+      "old_soft": 5,
+      "old_hard_history": 5,
+      "new_alm_no_history_alpha0": 7,
+      "new_alm_no_history_alpha095": 7,
+      "new_alm_history_alpha0": 7,
+      "new_alm_history_alpha095": 7,
+      "soft_same_ke_no_history_alpha0": 1,
+      "soft_same_ke_no_history_alpha095": 1,
+      "soft_same_ke_history_alpha0": 1,
+      "soft_same_ke_history_alpha095": 1
+    },
+    "contacts_impact": {
+      "xpbd": 1,
+      "old_soft": 5,
+      "old_hard_history": 1,
+      "new_alm_no_history_alpha0": 7,
+      "new_alm_no_history_alpha095": 7,
+      "new_alm_history_alpha0": 7,
+      "new_alm_history_alpha095": 7,
+      "soft_same_ke_no_history_alpha0": 1,
+      "soft_same_ke_no_history_alpha095": 1,
+      "soft_same_ke_history_alpha0": 1,
+      "soft_same_ke_history_alpha095": 1
+    }
+  }
+}

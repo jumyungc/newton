@@ -1,0 +1,185 @@
+{
+  "frames": 61,
+  "generated_utc": "20260709T084148Z",
+  "hostname": "jumyungc-spock",
+  "owner_line_start": "OWNER: Team Fable (claimed 2026-07-09T08:40:23Z \u2014 round 8: spectral trigger (coarse-residual fraction) + futility cooldown + 1e7 escalation (r16/two-sweep); adaptive best-of framework; experiment-driven)",
+  "pid": 2318341,
+  "results": {
+    "n1024_s1e4_b2500": {
+      "etc_r16_c1_f30_sw2": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 598,
+        "corrections_attempted": 600,
+        "energy_rejects": 6,
+        "energy_shrinks": 0,
+        "final_max_bend_rad": 0.016947787255048752,
+        "final_max_stretch_m": 0.004686600062996149,
+        "guard_trips": 0,
+        "last_diag": {
+          "alpha": 1.0000000000068674,
+          "alpha_star": 1.0000000000068674,
+          "dE": -0.5623380005607714,
+          "delta_max_m": 5.244572800431212e-06,
+          "delta_max_rad": 1.0756210859202454e-05,
+          "e_before": 264.9487188577,
+          "merit_after": 22.255790406600134,
+          "merit_before": 22.255816649561012
+        },
+        "max_bend_rad": 0.016947787255048752,
+        "max_stretch_m": 0.004686600062996149,
+        "n_substeps": 600,
+        "reject_worse_merit": 2,
+        "substep_ms_p50": 26.658293791115284,
+        "trigger_fires": 0,
+        "wall_s": 18.656171321868896
+      },
+      "etc_r32_c1_f30_sp_cd20": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 130,
+        "corrections_attempted": 207,
+        "energy_rejects": 231,
+        "energy_shrinks": 0,
+        "final_max_bend_rad": 0.025786492973566055,
+        "final_max_stretch_m": 0.006845210213214159,
+        "guard_trips": 0,
+        "last_diag": {
+          "alpha": 1.0000000008577725,
+          "alpha_star": 1.0000000008577725,
+          "dE": -0.5976554666585798,
+          "delta_max_m": 1.3323347605450188e-05,
+          "delta_max_rad": 0.0014887837681244961,
+          "e_before": 322.218170413453,
+          "merit_after": 45.1257371491678,
+          "merit_before": 45.127760789170765
+        },
+        "max_bend_rad": 0.025786492973566055,
+        "max_stretch_m": 0.006845210213214159,
+        "n_substeps": 600,
+        "reject_worse_merit": 77,
+        "substep_ms_p50": 0.694645568728447,
+        "trigger_fires": 207,
+        "wall_s": 13.15497899055481
+      }
+    },
+    "n1024_s1e6_b2500": {
+      "etc_r16_c1_f30_sw2": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 600,
+        "corrections_attempted": 600,
+        "energy_rejects": 0,
+        "energy_shrinks": 0,
+        "final_max_bend_rad": 0.021443210542201996,
+        "final_max_stretch_m": 0.00014234133413992822,
+        "guard_trips": 0,
+        "last_diag": {
+          "alpha": 1.0000000000082887,
+          "alpha_star": 1.0000000000082887,
+          "dE": -0.6489745820341568,
+          "delta_max_m": 1.7571082248437273e-05,
+          "delta_max_rad": 8.64767413645277e-06,
+          "e_before": 253.5630558631251,
+          "merit_after": 9.900796260119677,
+          "merit_before": 9.902078569897308
+        },
+        "max_bend_rad": 0.021443210542201996,
+        "max_stretch_m": 0.00014234133413992822,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 26.782709173858166,
+        "trigger_fires": 0,
+        "wall_s": 18.6933650970459
+      },
+      "etc_r32_c1_f30_sp_cd20": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 585,
+        "corrections_attempted": 587,
+        "energy_rejects": 6,
+        "energy_shrinks": 0,
+        "final_max_bend_rad": 0.013265733607113361,
+        "final_max_stretch_m": 0.0001343708427157253,
+        "guard_trips": 0,
+        "last_diag": {
+          "alpha": 1.000000000004843,
+          "alpha_star": 1.000000000004843,
+          "dE": -0.6424816485108522,
+          "delta_max_m": 1.7735174891393626e-05,
+          "delta_max_rad": 1.0395397935767423e-05,
+          "e_before": 248.8526274908844,
+          "merit_after": 6.959012296229812,
+          "merit_before": 6.960219355709829
+        },
+        "max_bend_rad": 0.013265733607113361,
+        "max_stretch_m": 0.0001343708427157253,
+        "n_substeps": 600,
+        "reject_worse_merit": 2,
+        "substep_ms_p50": 27.436953969299793,
+        "trigger_fires": 587,
+        "wall_s": 18.797667980194092
+      }
+    },
+    "n1024_s1e7_b2500": {
+      "etc_r16_c1_f30_sw2": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 599,
+        "corrections_attempted": 600,
+        "energy_rejects": 0,
+        "energy_shrinks": 0,
+        "final_max_bend_rad": 0.11005732417106628,
+        "final_max_stretch_m": 0.00028435152489691973,
+        "guard_trips": 0,
+        "last_diag": {
+          "alpha": 1.0000000001826557,
+          "alpha_star": 1.0000000001826557,
+          "dE": -2.022573183373197,
+          "delta_max_m": 0.0011328743193511647,
+          "delta_max_rad": 0.0017262339281295441,
+          "e_before": 1025.8050148297216,
+          "merit_after": 758.1952797723667,
+          "merit_before": 758.8274779503616
+        },
+        "max_bend_rad": 0.11005732417106628,
+        "max_stretch_m": 0.00028435152489691973,
+        "n_substeps": 600,
+        "reject_worse_merit": 1,
+        "substep_ms_p50": 26.95013489574194,
+        "trigger_fires": 0,
+        "wall_s": 18.893840074539185
+      },
+      "etc_r32_c1_f30_sp_cd20": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 511,
+        "corrections_attempted": 511,
+        "energy_rejects": 0,
+        "energy_shrinks": 0,
+        "final_max_bend_rad": 0.1627139300107956,
+        "final_max_stretch_m": 0.0007076695328578353,
+        "guard_trips": 0,
+        "last_diag": {
+          "alpha": 1.000000000036947,
+          "alpha_star": 1.000000000036947,
+          "dE": -4.199660658575112,
+          "delta_max_m": 0.0008042566004625122,
+          "delta_max_rad": 0.0007774682951569957,
+          "e_before": 1561.2853884159833,
+          "merit_after": 1266.7352389994644,
+          "merit_before": 1267.8505086027496
+        },
+        "max_bend_rad": 0.1627139300107956,
+        "max_stretch_m": 0.0007076695328578353,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 27.54001785069704,
+        "trigger_fires": 511,
+        "wall_s": 16.789721727371216
+      }
+    }
+  },
+  "schema": "fable-mg-vbd-ladder/v1",
+  "semantics": "mg_rR_cK = requested-VBD2 smoother + certificate-gated coarse-companion BGN correction every K substeps at coarsening R; lra = known-art long-range attachment clamp witness; Track-B; descriptive timings",
+  "sources": {
+    "codex_bgn_global.py": "e20f2bbd65a5058b06c1c569405a9bc6333b950e02fc5d9bc0b79168b1190d93",
+    "fable_fast_step.py": "27ac986b6d82cabc3424905733c297b5653a2342099d2dde51504d1674041d8b",
+    "fable_ladder.py": "745327eed04050e7117c9c302924c71dd9c64fcbe92a3fe1286dfa0e3a86b4ca",
+    "fable_mg.py": "036b771a9e404e3be68e26fce04f59861b684af633da256c5fa8c974896e6d35"
+  }
+}

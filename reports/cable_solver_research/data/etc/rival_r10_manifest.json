@@ -1,0 +1,900 @@
+{
+  "generated_utc": "20260712T063909Z",
+  "owner_line_start": "OWNER: Team Fable (claimed 2026-07-12T06:27:32Z \u2014 round 10: rival head-to-head vs Macklin sparse VBD articulation solver (branch horde/vbd-sparse-articulation-main, SolverVBD rigid_articulation_solve=block_sparse_joints): clone as separate repo, run chain registry + stiffness ladder under its own build with our recorder at iterations 2/4/8 + its local-VBD control; report max stretch/bend + closure RMS + cost-vs-N; hash policy: verify vs r4, else self-consistent within-build with honest note; maintainer-requested comparison; single push at end)",
+  "r4_baseline_manifest_sha256": "557339dd10bbd26b30ac9e3276e2c7400b5eed61f4697119326fd52f1a18a535",
+  "results": {
+    "horiz_cantilever_stretch": {
+      "local_2": {
+        "device": "cuda:0",
+        "initial_state_hash": "5d28fd8ed57c69a72a63f2044412bb1752795c31c35a64d966daf36da211e026",
+        "metrics": {
+          "closure_rms_m": 0.003998480136441811,
+          "final_closure_rms_m": 0.00188232989568547,
+          "final_max_stretch_m": 0.0032903053797781467,
+          "max_bend_rad": 3.118062973022461,
+          "max_stretch_m": 0.020994246006011963,
+          "n_substeps": 3000,
+          "substep_ms_mean": 0.6292565936843554,
+          "substep_ms_p50": 0.6087059155106544,
+          "wall_s": 3.4057483673095703
+        },
+        "n_bodies": 128,
+        "npz_sha256": "482ee8823980d0f1ffad643dd782f81ba1ad8b6b11ebe855310bbc5bbabe6c19",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_",
+          "SolverVBD damping behavior changed in Newton 1.4.0:\n  - Damping coefficients are interpreted as absolute physical coefficients, not stiffness-relative multiplie"
+        ]
+      },
+      "sparse_2": {
+        "device": "cpu",
+        "initial_state_hash": "5d28fd8ed57c69a72a63f2044412bb1752795c31c35a64d966daf36da211e026",
+        "metrics": {
+          "closure_rms_m": 0.003349493820837555,
+          "final_closure_rms_m": 0.0023633977965831893,
+          "final_max_stretch_m": 0.0034253131598234177,
+          "max_bend_rad": 2.9200379848480225,
+          "max_stretch_m": 0.020173262804746628,
+          "n_substeps": 3000,
+          "substep_ms_mean": 1.2467452387015026,
+          "substep_ms_p50": 1.2047374621033669,
+          "wall_s": 4.845081329345703
+        },
+        "n_bodies": 128,
+        "npz_sha256": "a229d05040a8176368af8dedc0694f23e4eb502e0ac29bcea10170e7d85376a2",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      },
+      "sparse_4": {
+        "device": "cpu",
+        "initial_state_hash": "5d28fd8ed57c69a72a63f2044412bb1752795c31c35a64d966daf36da211e026",
+        "metrics": {
+          "closure_rms_m": 0.002991398846173621,
+          "final_closure_rms_m": 0.0017608744736067672,
+          "final_max_stretch_m": 0.00326584093272686,
+          "max_bend_rad": 3.109435558319092,
+          "max_stretch_m": 0.015605462715029716,
+          "n_substeps": 3000,
+          "substep_ms_mean": 2.3108584781487784,
+          "substep_ms_p50": 2.2561494261026382,
+          "wall_s": 8.023014307022095
+        },
+        "n_bodies": 128,
+        "npz_sha256": "f8e81a2949054836ccf73e3a31b3fe50afdea841bd928d49df23ad105d56365d",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      },
+      "sparse_8": {
+        "device": "cpu",
+        "initial_state_hash": "5d28fd8ed57c69a72a63f2044412bb1752795c31c35a64d966daf36da211e026",
+        "metrics": {
+          "closure_rms_m": 0.0029485490424380795,
+          "final_closure_rms_m": 0.001754506682781682,
+          "final_max_stretch_m": 0.0031484549399465322,
+          "max_bend_rad": 3.115208148956299,
+          "max_stretch_m": 0.015368171036243439,
+          "n_substeps": 3000,
+          "substep_ms_mean": 4.39522988970081,
+          "substep_ms_p50": 4.344618879258633,
+          "wall_s": 14.316437244415283
+        },
+        "n_bodies": 128,
+        "npz_sha256": "a0daac9498b17edd1dfcf23db4fcf28b13b53ce682e4fd384d82a427e774ad24",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      }
+    },
+    "horiz_cantilever_stretch_bend": {
+      "local_2": {
+        "device": "cuda:0",
+        "initial_state_hash": "5d28fd8ed57c69a72a63f2044412bb1752795c31c35a64d966daf36da211e026",
+        "metrics": {
+          "closure_rms_m": 0.00399662805156269,
+          "final_closure_rms_m": 0.002395964835141854,
+          "final_max_stretch_m": 0.0032796214800328016,
+          "max_bend_rad": 1.1013555526733398,
+          "max_stretch_m": 0.020336052402853966,
+          "n_substeps": 3000,
+          "substep_ms_mean": 0.6151569609840711,
+          "substep_ms_p50": 0.600108876824379,
+          "wall_s": 2.9056642055511475
+        },
+        "n_bodies": 128,
+        "npz_sha256": "8a72eaf02dec5a1facd4642b5556192375b7c31146bd0c5bf3511f8aaea38429",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      },
+      "sparse_2": {
+        "device": "cpu",
+        "initial_state_hash": "5d28fd8ed57c69a72a63f2044412bb1752795c31c35a64d966daf36da211e026",
+        "metrics": {
+          "closure_rms_m": 0.0033253086866147225,
+          "final_closure_rms_m": 0.0029655429390319506,
+          "final_max_stretch_m": 0.003832378890365362,
+          "max_bend_rad": 1.0540180206298828,
+          "max_stretch_m": 0.018292590975761414,
+          "n_substeps": 3000,
+          "substep_ms_mean": 1.3290954877932866,
+          "substep_ms_p50": 1.2924913316965103,
+          "wall_s": 5.037373304367065
+        },
+        "n_bodies": 128,
+        "npz_sha256": "a12019d7ffe47177e6a986be08e2240ddec7947b46ef80b8bd6e830043f1a3b3",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      },
+      "sparse_4": {
+        "device": "cpu",
+        "initial_state_hash": "5d28fd8ed57c69a72a63f2044412bb1752795c31c35a64d966daf36da211e026",
+        "metrics": {
+          "closure_rms_m": 0.0030226706520218903,
+          "final_closure_rms_m": 0.004317603398897184,
+          "final_max_stretch_m": 0.007468243595212698,
+          "max_bend_rad": 1.0253920555114746,
+          "max_stretch_m": 0.01656973361968994,
+          "n_substeps": 3000,
+          "substep_ms_mean": 2.4821194478621087,
+          "substep_ms_p50": 2.428276464343071,
+          "wall_s": 8.534342765808105
+        },
+        "n_bodies": 128,
+        "npz_sha256": "7912251df521e7708783be7f9a3a416028dafda4696a5f25e594e349474a498b",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      },
+      "sparse_8": {
+        "device": "cpu",
+        "initial_state_hash": "5d28fd8ed57c69a72a63f2044412bb1752795c31c35a64d966daf36da211e026",
+        "metrics": {
+          "closure_rms_m": 0.0029879477479891788,
+          "final_closure_rms_m": 0.004305544446089378,
+          "final_max_stretch_m": 0.00818229652941227,
+          "max_bend_rad": 1.021763801574707,
+          "max_stretch_m": 0.01620848849415779,
+          "n_substeps": 3000,
+          "substep_ms_mean": 4.753235110392173,
+          "substep_ms_p50": 4.70326654613018,
+          "wall_s": 15.387675285339355
+        },
+        "n_bodies": 128,
+        "npz_sha256": "bad9dec9da07a652c14922cfa3c03e1e7f5721457279ca170605b0a67a364b4e",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      }
+    },
+    "horiz_pinned_both": {
+      "local_2": {
+        "device": "cuda:0",
+        "initial_state_hash": "5d28fd8ed57c69a72a63f2044412bb1752795c31c35a64d966daf36da211e026",
+        "metrics": {
+          "closure_rms_m": 0.003643544578968841,
+          "final_closure_rms_m": 0.00235911732356096,
+          "final_max_stretch_m": 0.002717128023505211,
+          "max_bend_rad": 0.9029439687728882,
+          "max_stretch_m": 0.009903018362820148,
+          "n_substeps": 3000,
+          "substep_ms_mean": 0.6134840200344721,
+          "substep_ms_p50": 0.6012646481394768,
+          "wall_s": 2.89664626121521
+        },
+        "n_bodies": 128,
+        "npz_sha256": "0f4987cc45418caf84651c9ed722edd050d41a90796c1b95733a40175788520c",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      },
+      "sparse_2": {
+        "device": "cpu",
+        "initial_state_hash": "5d28fd8ed57c69a72a63f2044412bb1752795c31c35a64d966daf36da211e026",
+        "metrics": {
+          "closure_rms_m": 0.0032039801732085854,
+          "final_closure_rms_m": 0.0048694710021755586,
+          "final_max_stretch_m": 0.005167899653315544,
+          "max_bend_rad": 0.9075555205345154,
+          "max_stretch_m": 0.00850408710539341,
+          "n_substeps": 3000,
+          "substep_ms_mean": 1.224547582368056,
+          "substep_ms_p50": 1.1954298242926598,
+          "wall_s": 4.711623907089233
+        },
+        "n_bodies": 128,
+        "npz_sha256": "f9f49f37a1d614c3f54f69e03ba1eac83577a537008b30d3923fad550bd884f6",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      },
+      "sparse_4": {
+        "device": "cpu",
+        "initial_state_hash": "5d28fd8ed57c69a72a63f2044412bb1752795c31c35a64d966daf36da211e026",
+        "metrics": {
+          "closure_rms_m": 0.0030178574172140386,
+          "final_closure_rms_m": 0.005060450475747563,
+          "final_max_stretch_m": 0.00644622603431344,
+          "max_bend_rad": 0.9710493683815002,
+          "max_stretch_m": 0.007773739751428366,
+          "n_substeps": 3000,
+          "substep_ms_mean": 2.2884943541139364,
+          "substep_ms_p50": 2.246059477329254,
+          "wall_s": 7.936554193496704
+        },
+        "n_bodies": 128,
+        "npz_sha256": "04c26689feaa2b7e1ee02853ded9af2c09b518c2ff7964f347a7916bde53964f",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      },
+      "sparse_8": {
+        "device": "cpu",
+        "initial_state_hash": "5d28fd8ed57c69a72a63f2044412bb1752795c31c35a64d966daf36da211e026",
+        "metrics": {
+          "closure_rms_m": 0.0029943557860079885,
+          "final_closure_rms_m": 0.004910558987602565,
+          "final_max_stretch_m": 0.005972725339233875,
+          "max_bend_rad": 0.9616916179656982,
+          "max_stretch_m": 0.007658276706933975,
+          "n_substeps": 3000,
+          "substep_ms_mean": 4.375698018198212,
+          "substep_ms_p50": 4.338321276009083,
+          "wall_s": 14.24042558670044
+        },
+        "n_bodies": 128,
+        "npz_sha256": "2a0d2e014b0288321b50af0bcc68aff854eebf5c859ab251b04bdbc29178b2b1",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      }
+    },
+    "long_cantilever_1024_superbend500": {
+      "local_2": {
+        "device": "cuda:0",
+        "initial_state_hash": "413d90e0a0f9c7e6ddabec5c2df58de01012925f23408d48574badc54c1fc505",
+        "metrics": {
+          "closure_rms_m": 0.02841422713635595,
+          "final_closure_rms_m": 0.05189159302805828,
+          "final_max_stretch_m": 0.07415948063135147,
+          "max_bend_rad": 0.30867376923561096,
+          "max_stretch_m": 0.07415948063135147,
+          "n_substeps": 3000,
+          "substep_ms_mean": 0.6131556474914154,
+          "substep_ms_p50": 0.6033023819327354,
+          "wall_s": 9.250460863113403
+        },
+        "n_bodies": 1024,
+        "npz_sha256": "43180bcc0b69a2aef44454231316f10292e3b64fe43a9a364f2a2e136b29bcd4",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      },
+      "sparse_2": {
+        "device": "cpu",
+        "initial_state_hash": "413d90e0a0f9c7e6ddabec5c2df58de01012925f23408d48574badc54c1fc505",
+        "metrics": {
+          "closure_rms_m": 0.025179947199206913,
+          "final_closure_rms_m": 0.043635843622676564,
+          "final_max_stretch_m": 0.06688373535871506,
+          "max_bend_rad": 0.3064425587654114,
+          "max_stretch_m": 0.06688373535871506,
+          "n_substeps": 3000,
+          "substep_ms_mean": 34.39324530959129,
+          "substep_ms_p50": 34.33701116591692,
+          "wall_s": 111.65029239654541
+        },
+        "n_bodies": 1024,
+        "npz_sha256": "b8de3f1843737f28c09b1be2fea39ae82e8d8c78d84b0c49fb70863e2728167d",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      },
+      "sparse_4": {
+        "device": "cpu",
+        "initial_state_hash": "413d90e0a0f9c7e6ddabec5c2df58de01012925f23408d48574badc54c1fc505",
+        "metrics": {
+          "closure_rms_m": 0.02330701328973398,
+          "final_closure_rms_m": 0.03901530646574711,
+          "final_max_stretch_m": 0.06421075761318207,
+          "max_bend_rad": 0.30525311827659607,
+          "max_stretch_m": 0.06421075761318207,
+          "n_substeps": 3000,
+          "substep_ms_mean": 68.51323638421793,
+          "substep_ms_p50": 68.39569937437773,
+          "wall_s": 214.76423907279968
+        },
+        "n_bodies": 1024,
+        "npz_sha256": "838464ceec730c9ec615f917209f453502e5227bc1853e46225630ea8e33e332",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      },
+      "sparse_8": {
+        "device": "cpu",
+        "initial_state_hash": "413d90e0a0f9c7e6ddabec5c2df58de01012925f23408d48574badc54c1fc505",
+        "metrics": {
+          "closure_rms_m": 0.02317701556169724,
+          "final_closure_rms_m": 0.03866671253889016,
+          "final_max_stretch_m": 0.06382329016923904,
+          "max_bend_rad": 0.30444103479385376,
+          "max_stretch_m": 0.06382329016923904,
+          "n_substeps": 3000,
+          "substep_ms_mean": 136.66300416675708,
+          "substep_ms_p50": 136.4631438627839,
+          "wall_s": 420.6114161014557
+        },
+        "n_bodies": 1024,
+        "npz_sha256": "9c089613f448fc4261860a4c850c5bf6faa9f55fbc897206c6d446b402fd220c",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      }
+    },
+    "long_cantilever_2048_superbend500": {
+      "local_2": {
+        "device": "cuda:0",
+        "initial_state_hash": "374ac7ffd147a6066b8a04fb0470a8e91ad7ca7536a7ac3437ee7cf38491a53c",
+        "metrics": {
+          "closure_rms_m": 0.023302857062085618,
+          "final_closure_rms_m": 0.04843197961808132,
+          "final_max_stretch_m": 0.07785645872354507,
+          "max_bend_rad": 0.285907506942749,
+          "max_stretch_m": 0.07785645872354507,
+          "n_substeps": 3000,
+          "substep_ms_mean": 0.6207136623561382,
+          "substep_ms_p50": 0.6066411733627319,
+          "wall_s": 17.718148469924927
+        },
+        "n_bodies": 2048,
+        "npz_sha256": "cc7494fc03f2ea447f83cf8f1ebbc15581a6932604398a6b1955fbe8400d2dfc",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      },
+      "sparse_2": {
+        "device": "cpu",
+        "initial_state_hash": "374ac7ffd147a6066b8a04fb0470a8e91ad7ca7536a7ac3437ee7cf38491a53c",
+        "metrics": {
+          "closure_rms_m": 0.021281487026605227,
+          "final_closure_rms_m": 0.04408932506966117,
+          "final_max_stretch_m": 0.06877556443214417,
+          "max_bend_rad": 0.27330735325813293,
+          "max_stretch_m": 0.06877556443214417,
+          "n_substeps": 3000,
+          "substep_ms_mean": 131.9220487115284,
+          "substep_ms_p50": 131.04758597910404,
+          "wall_s": 415.6759147644043
+        },
+        "n_bodies": 2048,
+        "npz_sha256": "9787ef1d05a9ca770a952c9e16be8e03c3c6c58169ba4f9aafcbb3674b08f3a3",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      },
+      "sparse_4": {
+        "device": "cpu",
+        "initial_state_hash": "374ac7ffd147a6066b8a04fb0470a8e91ad7ca7536a7ac3437ee7cf38491a53c",
+        "metrics": {
+          "closure_rms_m": 0.020406502978338577,
+          "final_closure_rms_m": 0.04199292527355907,
+          "final_max_stretch_m": 0.06497161835432053,
+          "max_bend_rad": 0.26335054636001587,
+          "max_stretch_m": 0.06497161835432053,
+          "n_substeps": 3000,
+          "substep_ms_mean": 261.7148790117353,
+          "substep_ms_p50": 261.24636363238096,
+          "wall_s": 807.7241287231445
+        },
+        "n_bodies": 2048,
+        "npz_sha256": "5774b5d0e930c3a561ca84bd40a1ce800f50ac6d8ec2150db46cd78e3d7d0982",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      },
+      "sparse_8": {
+        "device": "cpu",
+        "initial_state_hash": "374ac7ffd147a6066b8a04fb0470a8e91ad7ca7536a7ac3437ee7cf38491a53c",
+        "metrics": {
+          "projected_wall_s": 1579.920201284811,
+          "substep_ms_smoke_mean": 524.8904323205352,
+          "wall_s": 13.894445896148682
+        },
+        "n_bodies": 2048,
+        "r4_hash_match": true,
+        "status": "skipped_budget",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      }
+    },
+    "long_cantilever_4096_superbend500": {
+      "local_2": {
+        "device": "cuda:0",
+        "initial_state_hash": "e18b3a73b5e39ca524b1fca4d10340c899429061303c8bd412f60d47db88bb1d",
+        "metrics": {
+          "closure_rms_m": 0.016713119975188703,
+          "final_closure_rms_m": 0.03469750260493053,
+          "final_max_stretch_m": 0.07768595218658447,
+          "max_bend_rad": 0.2864544093608856,
+          "max_stretch_m": 0.07768595218658447,
+          "n_substeps": 3000,
+          "substep_ms_mean": 0.6358512168129286,
+          "substep_ms_p50": 0.6097601726651192,
+          "wall_s": 37.74441862106323
+        },
+        "n_bodies": 4096,
+        "npz_sha256": "811b405ad07958af8f2564e9f9e89c9430104fdd4e817d314a91c9b484771552",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      },
+      "sparse_2": {
+        "device": "cpu",
+        "initial_state_hash": "e18b3a73b5e39ca524b1fca4d10340c899429061303c8bd412f60d47db88bb1d",
+        "metrics": {
+          "projected_wall_s": 1546.609634000808,
+          "substep_ms_smoke_mean": 513.8237986713648,
+          "wall_s": 20.459028959274292
+        },
+        "n_bodies": 4096,
+        "r4_hash_match": true,
+        "status": "skipped_budget",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      },
+      "sparse_4": {
+        "device": "cpu",
+        "initial_state_hash": "e18b3a73b5e39ca524b1fca4d10340c899429061303c8bd412f60d47db88bb1d",
+        "metrics": {
+          "projected_wall_s": 3104.7086285063997,
+          "substep_ms_smoke_mean": 1031.4646606333554,
+          "wall_s": 31.195168256759644
+        },
+        "n_bodies": 4096,
+        "r4_hash_match": true,
+        "status": "skipped_budget",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      },
+      "sparse_8": {
+        "device": "cpu",
+        "initial_state_hash": "e18b3a73b5e39ca524b1fca4d10340c899429061303c8bd412f60d47db88bb1d",
+        "metrics": {
+          "projected_wall_s": 6184.281436261721,
+          "substep_ms_smoke_mean": 2054.5785502530634,
+          "wall_s": 51.445579290390015
+        },
+        "n_bodies": 4096,
+        "r4_hash_match": true,
+        "status": "skipped_budget",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      }
+    },
+    "long_cantilever_512_bend": {
+      "local_2": {
+        "device": "cuda:0",
+        "initial_state_hash": "f7bcac7e27bbf60210e83424a05993a467c7df748aa3cda2b3a40f65d343eead",
+        "metrics": {
+          "closure_rms_m": 0.016458987540040174,
+          "final_closure_rms_m": 0.002925156340899787,
+          "final_max_stretch_m": 0.00459766760468483,
+          "max_bend_rad": 1.8675479888916016,
+          "max_stretch_m": 0.06247631460428238,
+          "n_substeps": 3000,
+          "substep_ms_mean": 0.6165434196591377,
+          "substep_ms_p50": 0.606597401201725,
+          "wall_s": 5.530573129653931
+        },
+        "n_bodies": 512,
+        "npz_sha256": "24bc824b1821c9dfbbeede2dc29325faa271eafc88cc0026048c6ebb7b38bf23",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      },
+      "sparse_2": {
+        "device": "cpu",
+        "initial_state_hash": "f7bcac7e27bbf60210e83424a05993a467c7df748aa3cda2b3a40f65d343eead",
+        "metrics": {
+          "closure_rms_m": 0.013492975834246091,
+          "final_closure_rms_m": 0.0018891383031175693,
+          "final_max_stretch_m": 0.0038996164221316576,
+          "max_bend_rad": 1.6403952836990356,
+          "max_stretch_m": 0.04976431652903557,
+          "n_substeps": 3000,
+          "substep_ms_mean": 9.647114423414072,
+          "substep_ms_p50": 9.606895968317986,
+          "wall_s": 32.87249827384949
+        },
+        "n_bodies": 512,
+        "npz_sha256": "0c437cb71f64d22bbd13629341f48d31262d4f32aabc31cb3964aaa70c96f6e3",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      },
+      "sparse_4": {
+        "device": "cpu",
+        "initial_state_hash": "f7bcac7e27bbf60210e83424a05993a467c7df748aa3cda2b3a40f65d343eead",
+        "metrics": {
+          "closure_rms_m": 0.011974938867853951,
+          "final_closure_rms_m": 0.0017674470978212775,
+          "final_max_stretch_m": 0.004755228757858276,
+          "max_bend_rad": 1.6033936738967896,
+          "max_stretch_m": 0.045056797564029694,
+          "n_substeps": 3000,
+          "substep_ms_mean": 19.02278318752845,
+          "substep_ms_p50": 18.97380780428648,
+          "wall_s": 61.21545934677124
+        },
+        "n_bodies": 512,
+        "npz_sha256": "111711639dd519a576074accebc99fa25b6ca0dc09c9636cc52033857aaa7755",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      },
+      "sparse_8": {
+        "device": "cpu",
+        "initial_state_hash": "f7bcac7e27bbf60210e83424a05993a467c7df748aa3cda2b3a40f65d343eead",
+        "metrics": {
+          "closure_rms_m": 0.01182834407718366,
+          "final_closure_rms_m": 0.0014925551065035317,
+          "final_max_stretch_m": 0.0029923836700618267,
+          "max_bend_rad": 1.6006770133972168,
+          "max_stretch_m": 0.044256288558244705,
+          "n_substeps": 3000,
+          "substep_ms_mean": 37.78036936558783,
+          "substep_ms_p50": 37.69688494503498,
+          "wall_s": 118.07471585273743
+        },
+        "n_bodies": 512,
+        "npz_sha256": "f7a838b26e6daf77ee42ee3aaa9667b6d1b86f8489ca24b66bc802bf67922079",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      }
+    },
+    "long_vertical_1024_stiffbend": {
+      "local_2": {
+        "device": "cuda:0",
+        "initial_state_hash": "f23ec67a84ad997bb4764eee2aa2f5ae0f637e2f1f5734d95005882c2a4f4bd3",
+        "metrics": {
+          "closure_rms_m": 0.02808282228256871,
+          "final_closure_rms_m": 0.03130558646434512,
+          "final_max_stretch_m": 0.048175811767578125,
+          "max_bend_rad": 1.8144696412036865e-08,
+          "max_stretch_m": 0.06792068481445312,
+          "n_substeps": 3000,
+          "substep_ms_mean": 0.6162306852638721,
+          "substep_ms_p50": 0.6059193983674049,
+          "wall_s": 9.271379470825195
+        },
+        "n_bodies": 1024,
+        "npz_sha256": "d6363910050b2a3e86f7ad98d756c508683c8e9049c2456608e7cd9434697b9b",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      },
+      "sparse_2": {
+        "device": "cpu",
+        "initial_state_hash": "f23ec67a84ad997bb4764eee2aa2f5ae0f637e2f1f5734d95005882c2a4f4bd3",
+        "metrics": {
+          "closure_rms_m": 0.023191822064735034,
+          "final_closure_rms_m": 0.01980435837100603,
+          "final_max_stretch_m": 0.03203582763671875,
+          "max_bend_rad": 1.6675890890383016e-08,
+          "max_stretch_m": 0.0562286376953125,
+          "n_substeps": 3000,
+          "substep_ms_mean": 34.56140253754953,
+          "substep_ms_p50": 34.48100760579109,
+          "wall_s": 112.12822556495667
+        },
+        "n_bodies": 1024,
+        "npz_sha256": "06abcadcf594788437c6acf55d11bc864c731b184675f62a6d7c5ee1eac9bd7c",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      },
+      "sparse_4": {
+        "device": "cpu",
+        "initial_state_hash": "f23ec67a84ad997bb4764eee2aa2f5ae0f637e2f1f5734d95005882c2a4f4bd3",
+        "metrics": {
+          "closure_rms_m": 0.020443681262730527,
+          "final_closure_rms_m": 0.013766358853394068,
+          "final_max_stretch_m": 0.02416229248046875,
+          "max_bend_rad": 1.586131759268028e-08,
+          "max_stretch_m": 0.05029296875,
+          "n_substeps": 3000,
+          "substep_ms_mean": 68.78797607744734,
+          "substep_ms_p50": 68.64368543028831,
+          "wall_s": 215.76032972335815
+        },
+        "n_bodies": 1024,
+        "npz_sha256": "bf37958a2e092e7f54292879e2511b68245796b4968099723e2a909210d52340",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      },
+      "sparse_8": {
+        "device": "cpu",
+        "initial_state_hash": "f23ec67a84ad997bb4764eee2aa2f5ae0f637e2f1f5734d95005882c2a4f4bd3",
+        "metrics": {
+          "closure_rms_m": 0.02027215102475921,
+          "final_closure_rms_m": 0.01336952317195563,
+          "final_max_stretch_m": 0.023662567138671875,
+          "max_bend_rad": 1.5812844367246726e-08,
+          "max_stretch_m": 0.04994964599609375,
+          "n_substeps": 3000,
+          "substep_ms_mean": 137.82570562449595,
+          "substep_ms_p50": 137.04036083072424,
+          "wall_s": 424.11912989616394
+        },
+        "n_bodies": 1024,
+        "npz_sha256": "54b33cb5841fdc67aac3ac0e5e28e19ec5392b80fc5bc50267bd24f1586fe37f",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      }
+    },
+    "ring_chord": {
+      "local_2": {
+        "error": "KeyError('ring_chord')",
+        "status": "error"
+      },
+      "sparse_2": {
+        "error": "KeyError('ring_chord')",
+        "status": "error"
+      },
+      "sparse_4": {
+        "error": "KeyError('ring_chord')",
+        "status": "error"
+      },
+      "sparse_8": {
+        "error": "KeyError('ring_chord')",
+        "status": "error"
+      }
+    },
+    "vertical_hanging": {
+      "local_2": {
+        "device": "cuda:0",
+        "initial_state_hash": "3cf876dd56af0c2bc440225bc09e03409b16b908bea8f84680fe775be06b80ea",
+        "metrics": {
+          "closure_rms_m": 0.0029430289644193993,
+          "final_closure_rms_m": 0.0024936791086056713,
+          "final_max_stretch_m": 0.004299640655517578,
+          "max_bend_rad": 4.89871467834746e-08,
+          "max_stretch_m": 0.00826883316040039,
+          "n_substeps": 3000,
+          "substep_ms_mean": 0.6123299226164818,
+          "substep_ms_p50": 0.6002131849527359,
+          "wall_s": 2.8920199871063232
+        },
+        "n_bodies": 128,
+        "npz_sha256": "4c2a37b0785935677e83c10b16129245d173ed6526fce4c84127e1cc983f52df",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      },
+      "sparse_2": {
+        "device": "cpu",
+        "initial_state_hash": "3cf876dd56af0c2bc440225bc09e03409b16b908bea8f84680fe775be06b80ea",
+        "metrics": {
+          "closure_rms_m": 0.0024991416632783978,
+          "final_closure_rms_m": 0.0018916286338053656,
+          "final_max_stretch_m": 0.0033273696899414062,
+          "max_bend_rad": 4.5390553538027234e-08,
+          "max_stretch_m": 0.006836414337158203,
+          "n_substeps": 3000,
+          "substep_ms_mean": 1.3000210126241047,
+          "substep_ms_p50": 1.269322820007801,
+          "wall_s": 4.942010164260864
+        },
+        "n_bodies": 128,
+        "npz_sha256": "42739d87c68476e1da84c9528eafa58150b8fb5a7ad8137bcb48de90aa9259a3",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      },
+      "sparse_4": {
+        "device": "cpu",
+        "initial_state_hash": "3cf876dd56af0c2bc440225bc09e03409b16b908bea8f84680fe775be06b80ea",
+        "metrics": {
+          "closure_rms_m": 0.0021683728800384124,
+          "final_closure_rms_m": 0.0007999729751301808,
+          "final_max_stretch_m": 0.0016884803771972656,
+          "max_bend_rad": 4.500351025171767e-08,
+          "max_stretch_m": 0.006062984466552734,
+          "n_substeps": 3000,
+          "substep_ms_mean": 2.4158766443530717,
+          "substep_ms_p50": 2.3837704211473465,
+          "wall_s": 8.311100244522095
+        },
+        "n_bodies": 128,
+        "npz_sha256": "18f8bbad56e0660fd8683d5e401df9b27b1bfc6312e225b374664c2ee3edbc91",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      },
+      "sparse_8": {
+        "device": "cpu",
+        "initial_state_hash": "3cf876dd56af0c2bc440225bc09e03409b16b908bea8f84680fe775be06b80ea",
+        "metrics": {
+          "closure_rms_m": 0.002132252969763889,
+          "final_closure_rms_m": 0.0010901741960517078,
+          "final_max_stretch_m": 0.0021162033081054688,
+          "max_bend_rad": 4.493660199500482e-08,
+          "max_stretch_m": 0.00598907470703125,
+          "n_substeps": 3000,
+          "substep_ms_mean": 4.641064734508594,
+          "substep_ms_p50": 4.604686051607132,
+          "wall_s": 15.037059783935547
+        },
+        "n_bodies": 128,
+        "npz_sha256": "922b3090f9b0a63d8bdecbf47c726a24a654bc230f6be64f022bd763b33b92ca",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": [
+          "Omitting body_frame_origin when creating cable rods is deprecated because the implicit default will change from 'start' to 'com' in a future release. Pass body_"
+        ]
+      }
+    },
+    "y_junction": {
+      "local_2": {
+        "device": "cuda:0",
+        "initial_state_hash": "3b62d53eac639d1709ad2e10bbbd8707fd5ce1c2a6ad0aa4b9af094ca0d413f0",
+        "metrics": {
+          "closure_rms_m": 0.00044755999471256117,
+          "final_closure_rms_m": 0.00039756613627089856,
+          "final_max_stretch_m": 0.0007694342057220638,
+          "max_bend_rad": 0.3023422360420227,
+          "max_stretch_m": 0.0013639595126733184,
+          "n_substeps": 3000,
+          "substep_ms_mean": 0.6101099954297146,
+          "substep_ms_p50": 0.5971314385533333,
+          "wall_s": 2.440680503845215
+        },
+        "n_bodies": 60,
+        "npz_sha256": "f1a6344f44d134c8032dbcf2950912048736eb7f4263036107fd6ecf8361c37f",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": []
+      },
+      "sparse_2": {
+        "device": "cpu",
+        "initial_state_hash": "3b62d53eac639d1709ad2e10bbbd8707fd5ce1c2a6ad0aa4b9af094ca0d413f0",
+        "metrics": {
+          "closure_rms_m": 7.61391661102958e-07,
+          "final_closure_rms_m": 7.623497072560638e-07,
+          "final_max_stretch_m": 4.756143880513264e-06,
+          "max_bend_rad": 0.0005173946847207844,
+          "max_stretch_m": 4.823710696655326e-06,
+          "n_substeps": 3000,
+          "substep_ms_mean": 0.7559684198349714,
+          "substep_ms_p50": 0.7257843390107155,
+          "wall_s": 2.8461930751800537
+        },
+        "n_bodies": 60,
+        "npz_sha256": "a21ce03d0c5f06f310e70fc1b78b1d2d6f5b788e6d6603e67b9b6358177e9986",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": []
+      },
+      "sparse_4": {
+        "device": "cpu",
+        "initial_state_hash": "3b62d53eac639d1709ad2e10bbbd8707fd5ce1c2a6ad0aa4b9af094ca0d413f0",
+        "metrics": {
+          "closure_rms_m": 4.2299855497305505e-07,
+          "final_closure_rms_m": 4.2213367422105916e-07,
+          "final_max_stretch_m": 1.2054438229824882e-06,
+          "max_bend_rad": 0.0004600750107783824,
+          "max_stretch_m": 1.2499381227826234e-06,
+          "n_substeps": 3000,
+          "substep_ms_mean": 1.3558048096795876,
+          "substep_ms_p50": 1.3196934014558792,
+          "wall_s": 4.6641130447387695
+        },
+        "n_bodies": 60,
+        "npz_sha256": "9c6ed80ae933d779aa9a9b6790cf2dc31d8061ffaee5c124a1c3ba82e8e5a30a",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": []
+      },
+      "sparse_8": {
+        "device": "cpu",
+        "initial_state_hash": "3b62d53eac639d1709ad2e10bbbd8707fd5ce1c2a6ad0aa4b9af094ca0d413f0",
+        "metrics": {
+          "closure_rms_m": 4.0386467716086933e-07,
+          "final_closure_rms_m": 4.0300767822637226e-07,
+          "final_max_stretch_m": 8.835590961098205e-07,
+          "max_bend_rad": 0.0004536686756182462,
+          "max_stretch_m": 9.2154448338988e-07,
+          "n_substeps": 3000,
+          "substep_ms_mean": 2.547309430936972,
+          "substep_ms_p50": 2.481226809322834,
+          "wall_s": 8.278324604034424
+        },
+        "n_bodies": 60,
+        "npz_sha256": "38ad9acadd17f40585ec1d295ede343383b944977acec3cb164f9b3d03afc2ab",
+        "r4_hash_match": true,
+        "status": "complete",
+        "warnings": []
+      }
+    }
+  },
+  "rival": {
+    "branch": "horde/vbd-sparse-articulation-main",
+    "commit": "faf8da4ea62ff5672c19015f0227fd1565214ab9",
+    "repo": "https://github.com/mmacklin/newton"
+  },
+  "schema": "fable-rival-registry/v1",
+  "semantics": "cross-build achieved-error comparison: rival runs its own production-VBD semantics under its own newton build; our r4/r9 rows ran under our build; initial-state hash match recorded per config; timings descriptive, synchronized wall per substep, GPU device",
+  "sources": {
+    "fable_rival_cov.py": "fb334a23b231359b6fa71eb5797f7a090fce9940c3841918cf5e3a6857cd5b9f"
+  }
+}

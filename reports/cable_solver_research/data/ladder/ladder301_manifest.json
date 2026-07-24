@@ -1,0 +1,153 @@
+{
+  "device": "cuda:0",
+  "generated_utc": "20260706T032752Z",
+  "hostname": "jumyungc-spock",
+  "owner_line_start": "OWNER: Team Fable (claimed 2026-07-06T02:53:29Z \u2014 round 5, invention: GPU-resident global step (Warp assembly + captured forest-CR) + stiffness-ladder truth, complementing CCDSN; prior Codex-Remote lock cleared by explicit maintainer authorization 2026-07-06: their round work was complete and report-pushed 2026-07-05T13:00Z but the release line was never written)",
+  "pid": 2012697,
+  "platform": "Linux-5.15.0-113-generic-x86_64-with-glibc2.35",
+  "python": "3.12.13 (main, Jun 11 2026, 04:03:26) [Clang 22.1.3 ]",
+  "rungs": {
+    "n1024_s1e+07_b2500": {
+      "bend_ke": 2500.0,
+      "methods": {
+        "global_fast": {
+          "finite": true,
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_bend_rad": 0.14578689634799957,
+            "final_max_stretch_m": 3.322898191981949e-05,
+            "max_bend_rad": 0.16191203892230988,
+            "max_stretch_m": 9.891331137623638e-05,
+            "n_substeps": 3000,
+            "substep_ms_p50": 119.01937983930111
+          },
+          "npz_sha256": "7fae22fde93d0d2c931850d5a1751142f7032474b0814c9e2341fe9cfa901146",
+          "wall_s": 371.9327483177185
+        },
+        "vbd_10": {
+          "finite": true,
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_bend_rad": 1.417306661605835,
+            "final_max_stretch_m": 0.005119504872709513,
+            "max_bend_rad": 1.439264178276062,
+            "max_stretch_m": 0.011151717975735664,
+            "n_substeps": 3000,
+            "substep_ms_p50": 2.4161282926797867
+          },
+          "npz_sha256": "246928ce410c88f0ef2a3b6c989f2521aa7e666484dea50e51fedad03232fc69",
+          "wall_s": 13.622041463851929
+        },
+        "vbd_2": {
+          "finite": true,
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_bend_rad": 1.5512582063674927,
+            "final_max_stretch_m": 0.025564344599843025,
+            "max_bend_rad": 1.9640320539474487,
+            "max_stretch_m": 0.058522213250398636,
+            "n_substeps": 3000,
+            "substep_ms_p50": 0.6123688071966171
+          },
+          "npz_sha256": "76593cfe30bf2ca2752e41ca7c8324e8dc20b3900485d275a0e9ff78943517d4",
+          "wall_s": 8.189819097518921
+        },
+        "vbd_80": {
+          "finite": true,
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_bend_rad": 0.6935557126998901,
+            "final_max_stretch_m": 0.0011634306283667684,
+            "max_bend_rad": 0.7349435687065125,
+            "max_stretch_m": 0.0020156812388449907,
+            "n_substeps": 3000,
+            "substep_ms_p50": 18.23299005627632
+          },
+          "npz_sha256": "eb323107e2ec51cdc51baccccc102765c5cbeea4f5824ee0d1109df15972a29d",
+          "wall_s": 61.27637243270874
+        }
+      },
+      "segments": 1024,
+      "status": "complete",
+      "stretch_ke": 10000000.0
+    },
+    "n1024_s1e+07_b5": {
+      "bend_ke": 5.0,
+      "methods": {
+        "global_fast": {
+          "finite": true,
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_bend_rad": 1.9682284593582153,
+            "final_max_stretch_m": 1.9644994608825073e-05,
+            "max_bend_rad": 2.0729029178619385,
+            "max_stretch_m": 0.00012861948926001787,
+            "n_substeps": 3000,
+            "substep_ms_p50": 163.204999640584
+          },
+          "npz_sha256": "016c934a20f490af554b95f8d13fb01ad0fe372579737090632a23c4e6a8359b",
+          "wall_s": 464.5274395942688
+        },
+        "vbd_10": {
+          "finite": true,
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_bend_rad": 2.549011468887329,
+            "final_max_stretch_m": 0.00488158967345953,
+            "max_bend_rad": 2.549011468887329,
+            "max_stretch_m": 0.01103487703949213,
+            "n_substeps": 3000,
+            "substep_ms_p50": 2.413359470665455
+          },
+          "npz_sha256": "9164eb85bbb291c01ada710822063ebc17f95f4f3654801c187053f12f0428ce",
+          "wall_s": 13.622668981552124
+        },
+        "vbd_2": {
+          "finite": true,
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_bend_rad": 2.1620922088623047,
+            "final_max_stretch_m": 0.01912405528128147,
+            "max_bend_rad": 2.5162198543548584,
+            "max_stretch_m": 0.06744358688592911,
+            "n_substeps": 3000,
+            "substep_ms_p50": 0.6115986034274101
+          },
+          "npz_sha256": "803f9237a2483c662aa83b7a85ed606813b31f76cf910331a41840f23ee95056",
+          "wall_s": 10.610677003860474
+        },
+        "vbd_80": {
+          "finite": true,
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_bend_rad": 2.1919960975646973,
+            "final_max_stretch_m": 0.0013394069392234087,
+            "max_bend_rad": 2.1919960975646973,
+            "max_stretch_m": 0.0019433643901720643,
+            "n_substeps": 3000,
+            "substep_ms_p50": 18.226382322609425
+          },
+          "npz_sha256": "2bd409439b0c5b12ebb9bf7d9d80aed7c0641f50aed0e5158c57af6f518982e9",
+          "wall_s": 61.28320050239563
+        }
+      },
+      "segments": 1024,
+      "status": "complete",
+      "stretch_ke": 10000000.0
+    }
+  },
+  "schema": "fable-stiffness-ladder/v1",
+  "semantics": "global_fast = frozen compact BGN via parity-gated fable_fast_step (audit substeps unpatched); Track-B vs production VBD; descriptive timings; stretch AND bend violations recorded",
+  "simulation": {
+    "bgn_max_iters": 5,
+    "dt": 0.0016666666666666668,
+    "frames": 301,
+    "substeps": 10
+  },
+  "sources": {
+    "codex_bgn_global.py": "e20f2bbd65a5058b06c1c569405a9bc6333b950e02fc5d9bc0b79168b1190d93",
+    "fable_fast_step.py": "27ac986b6d82cabc3424905733c297b5653a2342099d2dde51504d1674041d8b",
+    "fable_ladder.py": "745327eed04050e7117c9c302924c71dd9c64fcbe92a3fe1286dfa0e3a86b4ca",
+    "scenes.py": "ce20b03e74f20996ec7304ca920ee1017e1452d38f161ab11ae234bd748c45cd"
+  }
+}

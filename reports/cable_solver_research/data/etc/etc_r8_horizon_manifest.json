@@ -1,0 +1,73 @@
+{
+  "frames": 301,
+  "generated_utc": "20260709T084441Z",
+  "hostname": "jumyungc-spock",
+  "owner_line_start": "OWNER: Team Fable (claimed 2026-07-09T08:40:23Z \u2014 round 8: spectral trigger (coarse-residual fraction) + futility cooldown + 1e7 escalation (r16/two-sweep); adaptive best-of framework; experiment-driven)",
+  "pid": 2318632,
+  "results": {
+    "n1024_s1e7_b2500": {
+      "etc_r16_c1_f30_sw2": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 2977,
+        "corrections_attempted": 3000,
+        "energy_rejects": 63,
+        "energy_shrinks": 199,
+        "final_max_bend_rad": 0.718066394329071,
+        "final_max_stretch_m": 0.004739894066005945,
+        "guard_trips": 0,
+        "last_diag": {
+          "alpha": 0.5000000000218826,
+          "alpha_star": 1.0000000000437652,
+          "dE": -55.834624039998744,
+          "delta_max_m": 0.008179665948779006,
+          "delta_max_rad": 0.012248598128508936,
+          "e_before": 155481.7400129473,
+          "merit_after": 155265.20959241907,
+          "merit_before": 155374.22997830607
+        },
+        "max_bend_rad": 0.7877965569496155,
+        "max_stretch_m": 0.007086595986038446,
+        "n_substeps": 3000,
+        "reject_worse_merit": 23,
+        "substep_ms_p50": 27.38442737609148,
+        "trigger_fires": 0,
+        "wall_s": 99.23433589935303
+      },
+      "etc_r32_c1_f30_sp_cd20": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 2593,
+        "corrections_attempted": 2594,
+        "energy_rejects": 5,
+        "energy_shrinks": 10,
+        "final_max_bend_rad": 0.9795963764190674,
+        "final_max_stretch_m": 0.004497440066188574,
+        "guard_trips": 0,
+        "last_diag": {
+          "alpha": 1.000000000025151,
+          "alpha_star": 1.000000000025151,
+          "dE": -364.97543539165054,
+          "delta_max_m": 0.00860653847920779,
+          "delta_max_rad": 0.006380548734309951,
+          "e_before": 67905.98326204665,
+          "merit_after": 61997.39664717513,
+          "merit_before": 62119.66978089473
+        },
+        "max_bend_rad": 1.327039361000061,
+        "max_stretch_m": 0.011914897710084915,
+        "n_substeps": 3000,
+        "reject_worse_merit": 1,
+        "substep_ms_p50": 27.87194401025772,
+        "trigger_fires": 2594,
+        "wall_s": 81.48984479904175
+      }
+    }
+  },
+  "schema": "fable-mg-vbd-ladder/v1",
+  "semantics": "mg_rR_cK = requested-VBD2 smoother + certificate-gated coarse-companion BGN correction every K substeps at coarsening R; lra = known-art long-range attachment clamp witness; Track-B; descriptive timings",
+  "sources": {
+    "codex_bgn_global.py": "e20f2bbd65a5058b06c1c569405a9bc6333b950e02fc5d9bc0b79168b1190d93",
+    "fable_fast_step.py": "27ac986b6d82cabc3424905733c297b5653a2342099d2dde51504d1674041d8b",
+    "fable_ladder.py": "745327eed04050e7117c9c302924c71dd9c64fcbe92a3fe1286dfa0e3a86b4ca",
+    "fable_mg.py": "036b771a9e404e3be68e26fce04f59861b684af633da256c5fa8c974896e6d35"
+  }
+}
