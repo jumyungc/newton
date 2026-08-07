@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cable DER-Inspired Routed Twist Behavior Demo</title>
+  <style>
+:root {
+  color-scheme: light;
+  --ink: #17202a;
+  --muted: #5f6f82;
+  --line: #d9e0e8;
+  --panel: #f7f9fb;
+  --accent: #1f6f8b;
+  --good: #146c43;
+  --warn: #9a5b00;
+  --max: 1280px;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #ffffff;
+  color: var(--ink);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+header { border-bottom: 1px solid var(--line); background: #fbfcfd; }
+main, .header-inner, footer { width: min(var(--max), calc(100vw - 32px)); margin: 0 auto; }
+.header-inner { padding: 36px 0 28px; }
+h1 { margin: 0 0 10px; font-size: clamp(2rem, 4vw, 3.35rem); line-height: 1.05; letter-spacing: 0; }
+.subtitle { max-width: 850px; margin: 0; color: var(--muted); font-size: 1.05rem; }
+.metric-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
+.metric { border: 1px solid var(--line); border-radius: 8px; background: #ffffff; padding: 14px 16px; }
+.metric .label { color: var(--muted); font-size: 0.82rem; font-weight: 650; text-transform: uppercase; }
+.metric .value { display: block; margin-top: 4px; font-size: 1.25rem; font-weight: 760; }
+main { padding: 28px 0 48px; }
+section { margin: 0 0 34px; }
+h2 { margin: 0 0 10px; font-size: 1.45rem; line-height: 1.2; letter-spacing: 0; }
+h3 { margin: 0 0 10px; font-size: 1rem; line-height: 1.25; }
+p { margin: 0 0 12px; }
+a { color: var(--accent); }
+code {
+  padding: 0.08em 0.25em;
+  border-radius: 4px;
+  background: #edf2f7;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+}
+pre { margin: 12px 0 0; padding: 14px 16px; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+pre code { padding: 0; background: transparent; }
+.two-col { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr); gap: 22px; align-items: start; }
+.plot-grid { display: grid; grid-template-columns: 1fr; gap: 18px; }
+.plot-block { margin-top: 18px; }
+.plot-block:first-child { margin-top: 0; }
+.breadcrumb { margin: 0 0 14px; font-size: 0.92rem; font-weight: 650; }
+.breadcrumb a { color: var(--accent); text-decoration: none; }
+.breadcrumb a:hover { text-decoration: underline; }
+.video-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; max-width: 1120px; margin: 18px auto 0; }
+.video-grid-single { grid-template-columns: minmax(0, 1fr); max-width: 1280px; }
+.video-main { max-width: 820px; margin: 14px auto 18px; }
+figure { margin: 0; border: 1px solid var(--line); border-radius: 8px; background: #ffffff; overflow: hidden; }
+figure img, video { display: block; width: 100%; height: auto; }
+video { background: #111827; }
+figcaption { padding: 10px 12px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.92rem; }
+.takeaways, .card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+.takeaway, .card { border: 1px solid var(--line); border-radius: 8px; padding: 14px; background: #ffffff; }
+.card { display: block; color: inherit; text-decoration: none; }
+.takeaway strong, .card strong { display: block; margin-bottom: 6px; }
+.check-list { margin: 0; padding-left: 1.15rem; }
+.check-list li { margin: 0.35rem 0; }
+.note { border-left: 4px solid var(--accent); background: var(--panel); padding: 12px 14px; }
+table { width: 100%; border-collapse: collapse; border: 1px solid var(--line); background: white; }
+th, td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+th { background: var(--panel); color: var(--muted); font-size: 0.86rem; text-transform: uppercase; }
+footer { padding: 0 0 42px; color: var(--muted); font-size: 0.9rem; }
+@media (max-width: 820px) {
+  .metric-row, .takeaways, .two-col, .plot-grid, .video-grid, .card-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <nav class="breadcrumb"><a href="../cable_bend_twist_verification/">&larr; Cable Bend/Twist Verification</a></nav>
+      <h1>Cable DER-Inspired Routed Twist Behavior Demo</h1>
+      <p class="subtitle">Straight, V-kink, and semicircular paths demonstrate tangent-axis twist transfer through routed geometry.</p>
+      <div class="metric-row">
+        <div class="metric"><span class="label">Straight profile RMS</span><span class="value">0.0073 deg</span></div>
+<div class="metric"><span class="label">V-kink tip-side twist</span><span class="value">43.69 deg</span></div>
+<div class="metric"><span class="label">Semicircle tip-side twist</span><span class="value">43.91 deg</span></div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="two-col">
+      <div>
+        <h2>Verification Target</h2>
+        <p>Three endpoint-held paths receive the same 90-degree kinematic root rotation: a straight line, a sharp V-kink, and a smooth semicircle. The tip stays fixed, so the measurement is how much material-frame twist reaches the middle and tip side of each routed path. Gravity is disabled; the scene isolates twist transfer through the prescribed route. No external torque is applied.</p>
+        <p class="note">The straight analytic torsion tests do not exercise path routing. This behavior demo shows whether the same tangent-axis twist variable behaves differently on straight, sharply kinked, and smoothly curved geometry. It is inspired by the Discrete Elastic Rods Figure 5 asymmetry-of-twist example, but it is not a reproduction of that experiment and should not be read as a quantitative DER validation.</p>
+      </div>
+      <div>
+        <h2>Key Metrics</h2>
+        <table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody><tr><td>Straight profile RMS</td><td>0.0073 deg</td></tr>
+<tr><td>V-kink tip-side twist</td><td>43.69 deg</td></tr>
+<tr><td>Semicircle tip-side twist</td><td>43.91 deg</td></tr>
+<tr><td>Max shape motion</td><td>0.09% L</td></tr></tbody></table>
+      </div>
+    </section>
+
+    <section>
+      <h2>Simulation Setup</h2>
+      <table><thead><tr><th>Setting</th><th>Value</th></tr></thead><tbody><tr><td>Solver fps</td><td>60 Hz</td></tr>
+<tr><td>Solver timestep</td><td>1/600 s (10 substeps per frame)</td></tr>
+<tr><td>VBD iterations</td><td>16 per substep</td></tr>
+<tr><td>Segments / radius</td><td>32 segments per path, r = 0.012 m</td></tr>
+<tr><td>Cable stiffness</td><td>stretch = 1.0e6 N/m, bend = 5.0e3 N m, twist = 2.0e2 N m</td></tr>
+<tr><td>Gravity</td><td>off</td></tr>
+<tr><td>Kinematic root rotation</td><td>90 deg about local tangent, 2 s ramp + 4 s hold</td></tr>
+<tr><td>Paths</td><td>straight, V-kink, semicircle</td></tr>
+<tr><td>Report video</td><td>30 fps render, 390 solver frames, stride 2</td></tr></tbody></table>
+    </section>
+
+    <section>
+      <h2>Video Checks</h2>
+      <p>The video shows the three routed paths under the same prescribed root rotation. The side plots are behavior metrics, not analytical error curves: they track straight-path distribution, routed-path tip-side transfer, and shape motion.</p>
+
+      <figure class="video-main">
+        <video controls preload="metadata" muted playsinline>
+          <source src="assets/cable_der_twist_transfer.mp4?v=1779848741-236539" type="video/mp4">
+        </video>
+        <figcaption>The straight path distributes twist toward the middle. With the current geometric bend/twist split, both routed paths also carry twist past the midpoint while keeping centerline motion bounded.</figcaption>
+      </figure>
+
+
+
+      <h3>Video Metric Plots</h3>
+      <table><thead><tr><th>Plot</th><th>Meaning</th></tr></thead><tbody><tr><td>straight mid twist</td><td>Twist angle at the middle body of the straight path; it should rise toward about half the prescribed root rotation.</td></tr>
+<tr><td>V-kink tip-side twist</td><td>Largest twist after the bend; nonzero values show transfer past the sharp bend.</td></tr>
+<tr><td>semicircle tip-side twist</td><td>Largest twist after the midpoint; nonzero values show transfer through smooth curvature.</td></tr>
+<tr><td>max shape motion</td><td>Largest body displacement from its starting path, normalized by path length.</td></tr></tbody></table>
+
+    </section>
+
+
+    <section>
+      <h2>Acceptance Criteria</h2>
+      <div class="card-grid">
+
+        <div class="card">
+          <h3>Passes When</h3>
+          <ul class="check-list"><li>Straight row: twist follows the straight-cable reference.</li><li>V-kink row: twist reaches the tip side of the sharp bend.</li><li>Semicircle row: twist reaches the tip side of the smooth curve.</li><li>All paths keep their overall shape recognizable.</li></ul>
+        </div>
+
+        <div class="card">
+          <h3>Watch For</h3>
+          <ul class="check-list"><li>V-kink or semicircle twist stalls near the root</li><li>semicircle fails to carry twist around the arc</li><li>paths move so much that the route is no longer recognizable</li></ul>
+        </div>
+
+        <div class="card">
+          <h3>Validated Behavior</h3>
+          <ul class="check-list"><li>the straight path matches its analytical linear twist profile</li><li>sharp and smooth paths transfer tangent-axis twist through routed geometry</li><li>shape motion stays bounded during routed twist</li></ul>
+        </div>
+
+      </div>
+    </section>
+
+
+
+    <section>
+      <h2>Plot Checks</h2>
+
+        <div class="plot-block">
+          <h3>Routed Twist Profiles</h3>
+          <p>The black dashed line is the exact straight-cable solution for the prescribed root and fixed tip orientations. The cyan straight cable should overlap it. The orange and green routed curves do not have a simple closed-form reference in this report; they are behavior checks. In the current geometric split, both routed profiles should carry twist past the midpoint while keeping the route shape stable. This follows the qualitative idea of DER Figure 5, where V-shaped and semi-circular reference rods show non-uniform twist when one end is rotated. The scalar amounts are listed in Key Metrics.</p>
+          <div class="plot-grid">
+
+        <figure>
+          <img src="assets/twist_transfer_profiles.png?v=1779943468-85982" alt="Cable DER-Inspired Routed Twist Behavior Demo plot twist_transfer_profiles.png">
+          <figcaption>Measured twist profiles for straight, sharp-kink, and smooth-curve routes. Only the straight path has the analytical reference shown here; the routed paths are compared as behavior checks.</figcaption>
+        </figure>
+
+          </div>
+        </div>
+
+    </section>
+
+
+    <section>
+      <h2>Reproduce</h2>
+      <pre><code>uv run --extra examples python -m newton.examples cable_der_twist_transfer --test --viewer null</code></pre>
+    </section>
+  </main>
+
+  <footer>
+    Report payload: this page, Newton-rendered MP4 video(s), and selected PNG plots in <code>assets/</code>.
+    Parent hub: <a href="../cable_bend_twist_verification/">Cable Bend/Twist Verification</a>.
+  </footer>
+</body>
+</html>

@@ -1,0 +1,152 @@
+{
+  "generated_at": "2026-06-14 01:37:00",
+  "notes": [
+    "Extra high-budget probes after the seed-only strict settlement run.",
+    "XPBD found settled candidates above the original max-cost 24 seed set.",
+    "Old soft penalty remained unstable or drifted far from the stack even with higher substep counts."
+  ],
+  "thresholds": {
+    "max_drift": 1.0,
+    "max_top_drift": 0.5,
+    "max_sample_displacement": 0.1,
+    "max_top_z_range": 0.08
+  },
+  "selected": {
+    "xpbd": {
+      "suite": "contacts_stack_settlement_extra",
+      "mode": "xpbd",
+      "title": "XPBD",
+      "config": {
+        "substeps": 4,
+        "xpbd_iterations": 8
+      },
+      "frames": 2400,
+      "sample_stride": 60,
+      "settlement_window": 600,
+      "stable": true,
+      "settled": true,
+      "max_box_xy_drift": 0.051967889070510864,
+      "top_xy_drift": 0.015611124224960804,
+      "last_window_max_sample_displacement": 0.0009509066585451365,
+      "last_window_top_z_range": 0.00004100799560546875,
+      "runtime_s": 12.498779018991627,
+      "budget_cost": 32
+    }
+  },
+  "extra_results": {
+    "xpbd": [
+      {
+        "config": {"substeps": 4, "xpbd_iterations": 8},
+        "budget_cost": 32,
+        "stable": true,
+        "settled": true,
+        "max_box_xy_drift": 0.051967889070510864,
+        "top_xy_drift": 0.015611124224960804,
+        "last_window_max_sample_displacement": 0.0009509066585451365,
+        "last_window_top_z_range": 0.00004100799560546875,
+        "runtime_s": 12.498779018991627
+      },
+      {
+        "config": {"substeps": 8, "xpbd_iterations": 4},
+        "budget_cost": 32,
+        "stable": true,
+        "settled": true,
+        "max_box_xy_drift": 0.0262796301394701,
+        "top_xy_drift": 0.0262796301394701,
+        "last_window_max_sample_displacement": 0.0006341925472952425,
+        "last_window_top_z_range": 0.000644683837890625,
+        "runtime_s": 21.48491215897957
+      },
+      {
+        "config": {"substeps": 4, "xpbd_iterations": 10},
+        "budget_cost": 40,
+        "stable": true,
+        "settled": true,
+        "max_box_xy_drift": 0.026705965399742126,
+        "top_xy_drift": 0.000973022950347513,
+        "last_window_max_sample_displacement": 0.0005382815725170076,
+        "last_window_top_z_range": 0.00044155120849609375,
+        "runtime_s": 16.651070619001985
+      },
+      {
+        "config": {"substeps": 10, "xpbd_iterations": 4},
+        "budget_cost": 40,
+        "stable": true,
+        "settled": true,
+        "max_box_xy_drift": 0.02180040068924427,
+        "top_xy_drift": 0.0005765280220657587,
+        "last_window_max_sample_displacement": 0.00047401548363268375,
+        "last_window_top_z_range": 0.000026702880859375,
+        "runtime_s": 26.79050752503099
+      },
+      {
+        "config": {"substeps": 8, "xpbd_iterations": 8},
+        "budget_cost": 64,
+        "stable": true,
+        "settled": true,
+        "max_box_xy_drift": 0.016001656651496887,
+        "top_xy_drift": 0.007006379310041666,
+        "last_window_max_sample_displacement": 0.00036245639785192907,
+        "last_window_top_z_range": 0.00014495849609375,
+        "runtime_s": 29.091631879040506
+      }
+    ],
+    "old_soft": [
+      {
+        "config": {"substeps": 16, "iterations": 1, "alpha": 0.95, "legacy_scale": 0.03},
+        "budget_cost": 16,
+        "stable": false,
+        "settled": false,
+        "max_box_xy_drift": 86.35551452636719,
+        "top_xy_drift": 40.929954528808594,
+        "last_window_max_sample_displacement": 4.137096405029297,
+        "last_window_top_z_range": 0.49349677562713623,
+        "runtime_s": 44.79546183597995
+      },
+      {
+        "config": {"substeps": 16, "iterations": 1, "alpha": 0.95, "legacy_scale": 0.1},
+        "budget_cost": 16,
+        "stable": false,
+        "settled": false,
+        "max_box_xy_drift": 58.33095169067383,
+        "top_xy_drift": 15.675017356872559,
+        "last_window_max_sample_displacement": 0.2403029501438141,
+        "last_window_top_z_range": 0.0000015497207641601562,
+        "runtime_s": 44.025210906984285
+      },
+      {
+        "config": {"substeps": 16, "iterations": 1, "alpha": 0.95, "legacy_scale": 0.3},
+        "budget_cost": 16,
+        "stable": false,
+        "settled": false,
+        "max_box_xy_drift": 2753.4677734375,
+        "top_xy_drift": 2753.4677734375,
+        "last_window_max_sample_displacement": 105.10803985595703,
+        "last_window_top_z_range": 786.1875,
+        "runtime_s": 30.353534761990886
+      },
+      {
+        "config": {"substeps": 24, "iterations": 1, "alpha": 0.95, "legacy_scale": 0.1},
+        "budget_cost": 24,
+        "stable": false,
+        "settled": false,
+        "max_box_xy_drift": 44.94335174560547,
+        "top_xy_drift": 28.36380958557129,
+        "last_window_max_sample_displacement": 0.21613572537899017,
+        "last_window_top_z_range": 0.000006705522537231445,
+        "runtime_s": 41.31368072400801
+      },
+      {
+        "config": {"substeps": 32, "iterations": 1, "alpha": 0.95, "legacy_scale": 0.1},
+        "budget_cost": 32,
+        "stable": false,
+        "settled": false,
+        "max_box_xy_drift": 45.65789031982422,
+        "top_xy_drift": 44.96539306640625,
+        "last_window_max_sample_displacement": 0.02135431207716465,
+        "last_window_top_z_range": 0.0,
+        "runtime_s": 54.794719684985466
+      }
+    ]
+  }
+}

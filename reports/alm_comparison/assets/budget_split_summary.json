@@ -1,0 +1,2557 @@
+{
+  "generated_at": "2026-06-13 23:16:15",
+  "source_summary": "low_budget_summary.json",
+  "frames": {
+    "search": 600,
+    "confirmation": 1200
+  },
+  "budget_splits": [
+    [
+      1,
+      3
+    ],
+    [
+      3,
+      1
+    ],
+    [
+      1,
+      4
+    ],
+    [
+      2,
+      2
+    ],
+    [
+      4,
+      1
+    ],
+    [
+      1,
+      5
+    ],
+    [
+      5,
+      1
+    ],
+    [
+      1,
+      6
+    ],
+    [
+      2,
+      3
+    ],
+    [
+      3,
+      2
+    ],
+    [
+      6,
+      1
+    ],
+    [
+      1,
+      8
+    ],
+    [
+      2,
+      4
+    ],
+    [
+      4,
+      2
+    ],
+    [
+      8,
+      1
+    ]
+  ],
+  "selected": {
+    "xpbd": {
+      "suite": "contacts_stack",
+      "mode": "xpbd",
+      "title": "XPBD",
+      "config": {
+        "substeps": 8,
+        "xpbd_iterations": 1
+      },
+      "frames": 600,
+      "stable": true,
+      "error": null,
+      "finite": true,
+      "top_xy_drift": 0.06431867182254791,
+      "top_z": 15.559089660644531,
+      "max_box_xy_drift": 0.06431867182254791,
+      "min_z": 0.394738107919693,
+      "max_abs_pos": 15.559089660644531,
+      "runtime_s": 3.0344803810003214,
+      "budget_cost": 8,
+      "confirmation": {
+        "suite": "contacts_stack",
+        "mode": "xpbd",
+        "title": "XPBD",
+        "config": {
+          "substeps": 8,
+          "xpbd_iterations": 1
+        },
+        "frames": 1200,
+        "stable": true,
+        "error": null,
+        "finite": true,
+        "top_xy_drift": 0.12296480685472488,
+        "top_z": 15.558480262756348,
+        "max_box_xy_drift": 0.15727560222148895,
+        "min_z": 0.3946661055088043,
+        "max_abs_pos": 15.558480262756348,
+        "runtime_s": 5.818806891038548,
+        "budget_cost": 8
+      },
+      "confirmed_stable": true,
+      "selection_basis": "confirmed"
+    },
+    "old_soft": {
+      "suite": "contacts_stack",
+      "mode": "old_soft",
+      "title": "Old VBD soft penalty",
+      "config": {
+        "substeps": 8,
+        "iterations": 1,
+        "alpha": 0.95,
+        "legacy_scale": 0.1
+      },
+      "frames": 600,
+      "stable": true,
+      "error": null,
+      "finite": true,
+      "top_xy_drift": 0.16209903359413147,
+      "top_z": 15.590230941772461,
+      "max_box_xy_drift": 0.16209903359413147,
+      "min_z": 0.39827197790145874,
+      "max_abs_pos": 15.590230941772461,
+      "runtime_s": 3.6772068600403145,
+      "budget_cost": 8,
+      "confirmation": {
+        "suite": "contacts_stack",
+        "mode": "old_soft",
+        "title": "Old VBD soft penalty",
+        "config": {
+          "substeps": 8,
+          "iterations": 1,
+          "alpha": 0.95,
+          "legacy_scale": 0.1
+        },
+        "frames": 1200,
+        "stable": true,
+        "error": null,
+        "finite": true,
+        "top_xy_drift": 0.047437746077775955,
+        "top_z": 15.590753555297852,
+        "max_box_xy_drift": 0.047437746077775955,
+        "min_z": 0.3982624411582947,
+        "max_abs_pos": 15.590753555297852,
+        "runtime_s": 6.968058123951778,
+        "budget_cost": 8
+      },
+      "confirmed_stable": true,
+      "selection_basis": "confirmed"
+    },
+    "old_hard_history": {
+      "suite": "contacts_stack",
+      "mode": "old_hard_history",
+      "title": "Old VBD hard ALM + history",
+      "config": {
+        "substeps": 4,
+        "iterations": 1,
+        "alpha": 0.0,
+        "legacy_scale": 0.1
+      },
+      "frames": 600,
+      "stable": true,
+      "error": null,
+      "finite": true,
+      "top_xy_drift": 0.007341202348470688,
+      "top_z": 15.572033882141113,
+      "max_box_xy_drift": 0.06837373971939087,
+      "min_z": 0.39410966634750366,
+      "max_abs_pos": 15.572033882141113,
+      "runtime_s": 2.433305868995376,
+      "budget_cost": 4,
+      "confirmation": {
+        "suite": "contacts_stack",
+        "mode": "old_hard_history",
+        "title": "Old VBD hard ALM + history",
+        "config": {
+          "substeps": 4,
+          "iterations": 1,
+          "alpha": 0.0,
+          "legacy_scale": 0.1
+        },
+        "frames": 1200,
+        "stable": true,
+        "error": null,
+        "finite": true,
+        "top_xy_drift": 0.007341202348470688,
+        "top_z": 15.572033882141113,
+        "max_box_xy_drift": 0.06837373971939087,
+        "min_z": 0.39410966634750366,
+        "max_abs_pos": 15.572033882141113,
+        "runtime_s": 4.520196115016006,
+        "budget_cost": 4
+      },
+      "confirmed_stable": true,
+      "selection_basis": "confirmed"
+    },
+    "new_alm_no_history_alpha0": {
+      "suite": "contacts_stack",
+      "mode": "new_alm_no_history_alpha0",
+      "title": "New compliant ALM, no history, alpha=0",
+      "config": {
+        "substeps": 4,
+        "iterations": 1,
+        "alpha": 0.0,
+        "ke": 3000000.0
+      },
+      "frames": 600,
+      "stable": true,
+      "error": null,
+      "finite": true,
+      "top_xy_drift": 0.012704539112746716,
+      "top_z": 15.562933921813965,
+      "max_box_xy_drift": 0.07391282171010971,
+      "min_z": 0.39045247435569763,
+      "max_abs_pos": 15.562933921813965,
+      "runtime_s": 2.024292250047438,
+      "budget_cost": 4,
+      "confirmation": {
+        "suite": "contacts_stack",
+        "mode": "new_alm_no_history_alpha0",
+        "title": "New compliant ALM, no history, alpha=0",
+        "config": {
+          "substeps": 4,
+          "iterations": 1,
+          "alpha": 0.0,
+          "ke": 3000000.0
+        },
+        "frames": 1200,
+        "stable": true,
+        "error": null,
+        "finite": true,
+        "top_xy_drift": 0.024592790752649307,
+        "top_z": 15.563227653503418,
+        "max_box_xy_drift": 0.07180885970592499,
+        "min_z": 0.3898267149925232,
+        "max_abs_pos": 15.563227653503418,
+        "runtime_s": 3.7380896600079723,
+        "budget_cost": 4
+      },
+      "confirmed_stable": true,
+      "selection_basis": "default-rho confirmed"
+    },
+    "new_alm_no_history_alpha095": {
+      "suite": "contacts_stack",
+      "mode": "new_alm_no_history_alpha095",
+      "title": "New compliant ALM, no history, alpha=0.95",
+      "config": {
+        "substeps": 4,
+        "iterations": 1,
+        "alpha": 0.95,
+        "ke": 30000000.0
+      },
+      "frames": 600,
+      "stable": true,
+      "error": null,
+      "finite": true,
+      "top_xy_drift": 0.0177058856934309,
+      "top_z": 15.276150703430176,
+      "max_box_xy_drift": 0.16929389536380768,
+      "min_z": 0.3042725920677185,
+      "max_abs_pos": 15.276150703430176,
+      "runtime_s": 2.027588462049607,
+      "budget_cost": 4,
+      "confirmation": {
+        "suite": "contacts_stack",
+        "mode": "new_alm_no_history_alpha095",
+        "title": "New compliant ALM, no history, alpha=0.95",
+        "config": {
+          "substeps": 4,
+          "iterations": 1,
+          "alpha": 0.95,
+          "ke": 30000000.0
+        },
+        "frames": 1200,
+        "stable": true,
+        "error": null,
+        "finite": true,
+        "top_xy_drift": 0.014073746278882027,
+        "top_z": 15.275019645690918,
+        "max_box_xy_drift": 0.22635145485401154,
+        "min_z": 0.3014853596687317,
+        "max_abs_pos": 15.275019645690918,
+        "runtime_s": 3.758482123957947,
+        "budget_cost": 4
+      },
+      "confirmed_stable": true,
+      "selection_basis": "default-rho confirmed"
+    },
+    "new_alm_history_alpha0": {
+      "suite": "contacts_stack",
+      "mode": "new_alm_history_alpha0",
+      "title": "New compliant ALM + history, alpha=0",
+      "config": {
+        "substeps": 3,
+        "iterations": 1,
+        "alpha": 0.0,
+        "ke": 3000000.0
+      },
+      "frames": 600,
+      "stable": true,
+      "error": null,
+      "finite": true,
+      "top_xy_drift": 0.4040393531322479,
+      "top_z": 15.514419555664062,
+      "max_box_xy_drift": 0.4040393531322479,
+      "min_z": 0.383244127035141,
+      "max_abs_pos": 15.514419555664062,
+      "runtime_s": 1.921161717036739,
+      "budget_cost": 3,
+      "confirmation": {
+        "suite": "contacts_stack",
+        "mode": "new_alm_history_alpha0",
+        "title": "New compliant ALM + history, alpha=0",
+        "config": {
+          "substeps": 3,
+          "iterations": 1,
+          "alpha": 0.0,
+          "ke": 3000000.0
+        },
+        "frames": 1200,
+        "stable": true,
+        "error": null,
+        "finite": true,
+        "top_xy_drift": 0.4040565490722656,
+        "top_z": 15.51448917388916,
+        "max_box_xy_drift": 0.4883429706096649,
+        "min_z": 0.38441094756126404,
+        "max_abs_pos": 15.51448917388916,
+        "runtime_s": 3.615817927988246,
+        "budget_cost": 3
+      },
+      "confirmed_stable": true,
+      "selection_basis": "default-rho confirmed"
+    },
+    "new_alm_history_alpha095": {
+      "suite": "contacts_stack",
+      "mode": "new_alm_history_alpha095",
+      "title": "New compliant ALM + history, alpha=0.95",
+      "config": {
+        "substeps": 4,
+        "iterations": 1,
+        "alpha": 0.95,
+        "ke": 10000000.0
+      },
+      "frames": 600,
+      "stable": true,
+      "error": null,
+      "finite": true,
+      "top_xy_drift": 0.009205958805978298,
+      "top_z": 15.263762474060059,
+      "max_box_xy_drift": 0.2113240659236908,
+      "min_z": 0.2842597961425781,
+      "max_abs_pos": 15.263762474060059,
+      "runtime_s": 2.4678674989845604,
+      "budget_cost": 4,
+      "confirmation": {
+        "suite": "contacts_stack",
+        "mode": "new_alm_history_alpha095",
+        "title": "New compliant ALM + history, alpha=0.95",
+        "config": {
+          "substeps": 4,
+          "iterations": 1,
+          "alpha": 0.95,
+          "ke": 10000000.0
+        },
+        "frames": 1200,
+        "stable": true,
+        "error": null,
+        "finite": true,
+        "top_xy_drift": 0.009205958805978298,
+        "top_z": 15.263762474060059,
+        "max_box_xy_drift": 0.27550482749938965,
+        "min_z": 0.2828220725059509,
+        "max_abs_pos": 15.263762474060059,
+        "runtime_s": 4.623286506044678,
+        "budget_cost": 4
+      },
+      "confirmed_stable": true,
+      "selection_basis": "default-rho confirmed"
+    }
+  },
+  "splits": {
+    "xpbd": {
+      "1x3": {
+        "candidate_count": 1,
+        "stable_600_count": 0,
+        "short_best": null,
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "3x1": {
+        "candidate_count": 1,
+        "stable_600_count": 1,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "xpbd",
+          "title": "XPBD",
+          "config": {
+            "substeps": 3,
+            "xpbd_iterations": 1
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.027273716405034065,
+          "top_z": 15.288273811340332,
+          "max_box_xy_drift": 0.8111096620559692,
+          "min_z": 0.34984999895095825,
+          "max_abs_pos": 15.288273811340332,
+          "runtime_s": 1.3463259199634194,
+          "budget_cost": 3,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "xpbd",
+            "title": "XPBD",
+            "config": {
+              "substeps": 3,
+              "xpbd_iterations": 1
+            },
+            "frames": 1200,
+            "stable": false,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 12.719162940979004,
+            "top_z": 0.39779406785964966,
+            "max_box_xy_drift": 21.266986846923828,
+            "min_z": 0.3936592936515808,
+            "max_abs_pos": 34.348716735839844,
+            "runtime_s": 2.3732554599992,
+            "budget_cost": 3
+          },
+          "confirmed_stable": false
+        },
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "1x4": {
+        "candidate_count": 1,
+        "stable_600_count": 0,
+        "short_best": null,
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "2x2": {
+        "candidate_count": 1,
+        "stable_600_count": 0,
+        "short_best": null,
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "4x1": {
+        "candidate_count": 1,
+        "stable_600_count": 1,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "xpbd",
+          "title": "XPBD",
+          "config": {
+            "substeps": 4,
+            "xpbd_iterations": 1
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.06782923638820648,
+          "top_z": 15.46937370300293,
+          "max_box_xy_drift": 0.34849998354911804,
+          "min_z": 0.3790026605129242,
+          "max_abs_pos": 15.46937370300293,
+          "runtime_s": 1.6713838769937865,
+          "budget_cost": 4,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "xpbd",
+            "title": "XPBD",
+            "config": {
+              "substeps": 4,
+              "xpbd_iterations": 1
+            },
+            "frames": 1200,
+            "stable": false,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 5.978634357452393,
+            "top_z": 10.282753944396973,
+            "max_box_xy_drift": 5.978634357452393,
+            "min_z": 0.343428373336792,
+            "max_abs_pos": 17.8315486907959,
+            "runtime_s": 3.0919507440412417,
+            "budget_cost": 4
+          },
+          "confirmed_stable": false
+        },
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "1x5": {
+        "candidate_count": 1,
+        "stable_600_count": 0,
+        "short_best": null,
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "5x1": {
+        "candidate_count": 1,
+        "stable_600_count": 1,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "xpbd",
+          "title": "XPBD",
+          "config": {
+            "substeps": 5,
+            "xpbd_iterations": 1
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.02622707188129425,
+          "top_z": 15.487618446350098,
+          "max_box_xy_drift": 0.2082594931125641,
+          "min_z": 0.3834705948829651,
+          "max_abs_pos": 15.487618446350098,
+          "runtime_s": 2.0339503260329366,
+          "budget_cost": 5,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "xpbd",
+            "title": "XPBD",
+            "config": {
+              "substeps": 5,
+              "xpbd_iterations": 1
+            },
+            "frames": 1200,
+            "stable": false,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 1.5984309911727905,
+            "top_z": 15.359298706054688,
+            "max_box_xy_drift": 1.5984309911727905,
+            "min_z": 0.38246771693229675,
+            "max_abs_pos": 15.47711181640625,
+            "runtime_s": 3.7733790350030176,
+            "budget_cost": 5
+          },
+          "confirmed_stable": false
+        },
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "1x6": {
+        "candidate_count": 1,
+        "stable_600_count": 0,
+        "short_best": null,
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "2x3": {
+        "candidate_count": 1,
+        "stable_600_count": 1,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "xpbd",
+          "title": "XPBD",
+          "config": {
+            "substeps": 2,
+            "xpbd_iterations": 3
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.09107677638530731,
+          "top_z": 15.323588371276855,
+          "max_box_xy_drift": 0.4807731509208679,
+          "min_z": 0.3593784272670746,
+          "max_abs_pos": 15.467989921569824,
+          "runtime_s": 1.1942863879958168,
+          "budget_cost": 6,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "xpbd",
+            "title": "XPBD",
+            "config": {
+              "substeps": 2,
+              "xpbd_iterations": 3
+            },
+            "frames": 1200,
+            "stable": false,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 29.211870193481445,
+            "top_z": 0.5648349523544312,
+            "max_box_xy_drift": 29.211870193481445,
+            "min_z": 0.39298215508461,
+            "max_abs_pos": 42.135372161865234,
+            "runtime_s": 2.089996251044795,
+            "budget_cost": 6
+          },
+          "confirmed_stable": false
+        },
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "3x2": {
+        "candidate_count": 1,
+        "stable_600_count": 1,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "xpbd",
+          "title": "XPBD",
+          "config": {
+            "substeps": 3,
+            "xpbd_iterations": 2
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.05163175240159035,
+          "top_z": 15.437445640563965,
+          "max_box_xy_drift": 0.2210657149553299,
+          "min_z": 0.3747236728668213,
+          "max_abs_pos": 15.437445640563965,
+          "runtime_s": 1.5116450330242515,
+          "budget_cost": 6,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "xpbd",
+            "title": "XPBD",
+            "config": {
+              "substeps": 3,
+              "xpbd_iterations": 2
+            },
+            "frames": 1200,
+            "stable": false,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 13.689376831054688,
+            "top_z": 4.336162090301514,
+            "max_box_xy_drift": 13.689376831054688,
+            "min_z": 0.3941953480243683,
+            "max_abs_pos": 28.67973518371582,
+            "runtime_s": 2.6695210119942203,
+            "budget_cost": 6
+          },
+          "confirmed_stable": false
+        },
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "6x1": {
+        "candidate_count": 1,
+        "stable_600_count": 1,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "xpbd",
+          "title": "XPBD",
+          "config": {
+            "substeps": 6,
+            "xpbd_iterations": 1
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.059268463402986526,
+          "top_z": 15.526921272277832,
+          "max_box_xy_drift": 0.13069240748882294,
+          "min_z": 0.38944166898727417,
+          "max_abs_pos": 15.526921272277832,
+          "runtime_s": 2.367509756993968,
+          "budget_cost": 6,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "xpbd",
+            "title": "XPBD",
+            "config": {
+              "substeps": 6,
+              "xpbd_iterations": 1
+            },
+            "frames": 1200,
+            "stable": false,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 0.8260586261749268,
+            "top_z": 15.505755424499512,
+            "max_box_xy_drift": 0.8306670784950256,
+            "min_z": 0.38882991671562195,
+            "max_abs_pos": 15.83066177368164,
+            "runtime_s": 4.388683921017218,
+            "budget_cost": 6
+          },
+          "confirmed_stable": false
+        },
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "1x8": {
+        "candidate_count": 1,
+        "stable_600_count": 0,
+        "short_best": null,
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "2x4": {
+        "candidate_count": 1,
+        "stable_600_count": 1,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "xpbd",
+          "title": "XPBD",
+          "config": {
+            "substeps": 2,
+            "xpbd_iterations": 4
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.11024860292673111,
+          "top_z": 15.44109058380127,
+          "max_box_xy_drift": 0.19275309145450592,
+          "min_z": 0.37494704127311707,
+          "max_abs_pos": 15.44109058380127,
+          "runtime_s": 1.3045633769943379,
+          "budget_cost": 8,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "xpbd",
+            "title": "XPBD",
+            "config": {
+              "substeps": 2,
+              "xpbd_iterations": 4
+            },
+            "frames": 1200,
+            "stable": false,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 11.091854095458984,
+            "top_z": 1.0989584922790527,
+            "max_box_xy_drift": 21.32049560546875,
+            "min_z": 0.39456450939178467,
+            "max_abs_pos": 22.583860397338867,
+            "runtime_s": 2.449442181037739,
+            "budget_cost": 8
+          },
+          "confirmed_stable": false
+        },
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "4x2": {
+        "candidate_count": 1,
+        "stable_600_count": 1,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "xpbd",
+          "title": "XPBD",
+          "config": {
+            "substeps": 4,
+            "xpbd_iterations": 2
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.011235487647354603,
+          "top_z": 15.523548126220703,
+          "max_box_xy_drift": 0.12487410753965378,
+          "min_z": 0.3891220986843109,
+          "max_abs_pos": 15.523548126220703,
+          "runtime_s": 1.8831917709903792,
+          "budget_cost": 8,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "xpbd",
+            "title": "XPBD",
+            "config": {
+              "substeps": 4,
+              "xpbd_iterations": 2
+            },
+            "frames": 1200,
+            "stable": false,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 1.4360601902008057,
+            "top_z": 15.438987731933594,
+            "max_box_xy_drift": 1.4360601902008057,
+            "min_z": 0.3867095708847046,
+            "max_abs_pos": 15.438987731933594,
+            "runtime_s": 3.427224965998903,
+            "budget_cost": 8
+          },
+          "confirmed_stable": false
+        },
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "8x1": {
+        "candidate_count": 1,
+        "stable_600_count": 1,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "xpbd",
+          "title": "XPBD",
+          "config": {
+            "substeps": 8,
+            "xpbd_iterations": 1
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.06431867182254791,
+          "top_z": 15.559089660644531,
+          "max_box_xy_drift": 0.06431867182254791,
+          "min_z": 0.394738107919693,
+          "max_abs_pos": 15.559089660644531,
+          "runtime_s": 3.0344803810003214,
+          "budget_cost": 8,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "xpbd",
+            "title": "XPBD",
+            "config": {
+              "substeps": 8,
+              "xpbd_iterations": 1
+            },
+            "frames": 1200,
+            "stable": true,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 0.12296480685472488,
+            "top_z": 15.558480262756348,
+            "max_box_xy_drift": 0.15727560222148895,
+            "min_z": 0.3946661055088043,
+            "max_abs_pos": 15.558480262756348,
+            "runtime_s": 5.818806891038548,
+            "budget_cost": 8
+          },
+          "confirmed_stable": true
+        },
+        "confirmed_best": {
+          "suite": "contacts_stack",
+          "mode": "xpbd",
+          "title": "XPBD",
+          "config": {
+            "substeps": 8,
+            "xpbd_iterations": 1
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.06431867182254791,
+          "top_z": 15.559089660644531,
+          "max_box_xy_drift": 0.06431867182254791,
+          "min_z": 0.394738107919693,
+          "max_abs_pos": 15.559089660644531,
+          "runtime_s": 3.0344803810003214,
+          "budget_cost": 8,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "xpbd",
+            "title": "XPBD",
+            "config": {
+              "substeps": 8,
+              "xpbd_iterations": 1
+            },
+            "frames": 1200,
+            "stable": true,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 0.12296480685472488,
+            "top_z": 15.558480262756348,
+            "max_box_xy_drift": 0.15727560222148895,
+            "min_z": 0.3946661055088043,
+            "max_abs_pos": 15.558480262756348,
+            "runtime_s": 5.818806891038548,
+            "budget_cost": 8
+          },
+          "confirmed_stable": true,
+          "selection_basis": "confirmed"
+        },
+        "default_rho_confirmed_best": null
+      }
+    },
+    "old_soft": {
+      "1x3": {
+        "candidate_count": 13,
+        "stable_600_count": 1,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "old_soft",
+          "title": "Old VBD soft penalty",
+          "config": {
+            "substeps": 1,
+            "iterations": 3,
+            "alpha": 0.95,
+            "legacy_scale": 3e-05
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.11703566461801529,
+          "top_z": 4.864687919616699,
+          "max_box_xy_drift": 0.5602521300315857,
+          "min_z": 0.030029989778995514,
+          "max_abs_pos": 15.050086975097656,
+          "runtime_s": 1.2271324009634554,
+          "budget_cost": 3,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "old_soft",
+            "title": "Old VBD soft penalty",
+            "config": {
+              "substeps": 1,
+              "iterations": 3,
+              "alpha": 0.95,
+              "legacy_scale": 3e-05
+            },
+            "frames": 1200,
+            "stable": false,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 0.16672977805137634,
+            "top_z": 0.07451685518026352,
+            "max_box_xy_drift": 3.076279401779175,
+            "min_z": -0.7654299736022949,
+            "max_abs_pos": 15.733824729919434,
+            "runtime_s": 2.114955588011071,
+            "budget_cost": 3
+          },
+          "confirmed_stable": false
+        },
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "3x1": {
+        "candidate_count": 13,
+        "stable_600_count": 0,
+        "short_best": null,
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "1x4": {
+        "candidate_count": 13,
+        "stable_600_count": 1,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "old_soft",
+          "title": "Old VBD soft penalty",
+          "config": {
+            "substeps": 1,
+            "iterations": 4,
+            "alpha": 0.95,
+            "legacy_scale": 3e-05
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.14960633218288422,
+          "top_z": 5.310772895812988,
+          "max_box_xy_drift": 0.4852937161922455,
+          "min_z": 0.18084892630577087,
+          "max_abs_pos": 15.064711570739746,
+          "runtime_s": 1.3558044789824635,
+          "budget_cost": 4,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "old_soft",
+            "title": "Old VBD soft penalty",
+            "config": {
+              "substeps": 1,
+              "iterations": 4,
+              "alpha": 0.95,
+              "legacy_scale": 3e-05
+            },
+            "frames": 1200,
+            "stable": false,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 1.5712960958480835,
+            "top_z": -0.5538427829742432,
+            "max_box_xy_drift": 2.248537302017212,
+            "min_z": -1.1600066423416138,
+            "max_abs_pos": 15.73475170135498,
+            "runtime_s": 1.6411087819724344,
+            "budget_cost": 4
+          },
+          "confirmed_stable": false
+        },
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "2x2": {
+        "candidate_count": 13,
+        "stable_600_count": 0,
+        "short_best": null,
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "4x1": {
+        "candidate_count": 13,
+        "stable_600_count": 0,
+        "short_best": null,
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "1x5": {
+        "candidate_count": 13,
+        "stable_600_count": 1,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "old_soft",
+          "title": "Old VBD soft penalty",
+          "config": {
+            "substeps": 1,
+            "iterations": 5,
+            "alpha": 0.95,
+            "legacy_scale": 3e-05
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.07847587019205093,
+          "top_z": 5.44240665435791,
+          "max_box_xy_drift": 0.5172712802886963,
+          "min_z": 0.21775953471660614,
+          "max_abs_pos": 15.141422271728516,
+          "runtime_s": 1.0897894939989783,
+          "budget_cost": 5,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "old_soft",
+            "title": "Old VBD soft penalty",
+            "config": {
+              "substeps": 1,
+              "iterations": 5,
+              "alpha": 0.95,
+              "legacy_scale": 3e-05
+            },
+            "frames": 1200,
+            "stable": false,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 0.08211766183376312,
+            "top_z": -1.5018389225006104,
+            "max_box_xy_drift": 2.333282470703125,
+            "min_z": -2.0242555141448975,
+            "max_abs_pos": 15.816237449645996,
+            "runtime_s": 1.8136154009844176,
+            "budget_cost": 5
+          },
+          "confirmed_stable": false
+        },
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "5x1": {
+        "candidate_count": 13,
+        "stable_600_count": 0,
+        "short_best": null,
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "1x6": {
+        "candidate_count": 13,
+        "stable_600_count": 1,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "old_soft",
+          "title": "Old VBD soft penalty",
+          "config": {
+            "substeps": 1,
+            "iterations": 6,
+            "alpha": 0.95,
+            "legacy_scale": 3e-05
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.10528894513845444,
+          "top_z": 5.748849391937256,
+          "max_box_xy_drift": 0.47265496850013733,
+          "min_z": 0.13426131010055542,
+          "max_abs_pos": 15.057778358459473,
+          "runtime_s": 1.1675136759877205,
+          "budget_cost": 6,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "old_soft",
+            "title": "Old VBD soft penalty",
+            "config": {
+              "substeps": 1,
+              "iterations": 6,
+              "alpha": 0.95,
+              "legacy_scale": 3e-05
+            },
+            "frames": 1200,
+            "stable": false,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 0.46563634276390076,
+            "top_z": -0.07778676599264145,
+            "max_box_xy_drift": 2.222691297531128,
+            "min_z": -1.061253547668457,
+            "max_abs_pos": 15.263518333435059,
+            "runtime_s": 2.6076638919766992,
+            "budget_cost": 6
+          },
+          "confirmed_stable": false
+        },
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "2x3": {
+        "candidate_count": 13,
+        "stable_600_count": 0,
+        "short_best": null,
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "3x2": {
+        "candidate_count": 13,
+        "stable_600_count": 0,
+        "short_best": null,
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "6x1": {
+        "candidate_count": 13,
+        "stable_600_count": 0,
+        "short_best": null,
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "1x8": {
+        "candidate_count": 13,
+        "stable_600_count": 1,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "old_soft",
+          "title": "Old VBD soft penalty",
+          "config": {
+            "substeps": 1,
+            "iterations": 8,
+            "alpha": 0.95,
+            "legacy_scale": 3e-05
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.19138967990875244,
+          "top_z": 6.035146713256836,
+          "max_box_xy_drift": 0.452999085187912,
+          "min_z": 0.1806475967168808,
+          "max_abs_pos": 15.067779541015625,
+          "runtime_s": 1.8620118140242994,
+          "budget_cost": 8,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "old_soft",
+            "title": "Old VBD soft penalty",
+            "config": {
+              "substeps": 1,
+              "iterations": 8,
+              "alpha": 0.95,
+              "legacy_scale": 3e-05
+            },
+            "frames": 1200,
+            "stable": false,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 0.013862608931958675,
+            "top_z": 0.18545624613761902,
+            "max_box_xy_drift": 2.4712975025177,
+            "min_z": -1.0984492301940918,
+            "max_abs_pos": 15.25891399383545,
+            "runtime_s": 3.0661231039557606,
+            "budget_cost": 8
+          },
+          "confirmed_stable": false
+        },
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "2x4": {
+        "candidate_count": 13,
+        "stable_600_count": 0,
+        "short_best": null,
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "4x2": {
+        "candidate_count": 13,
+        "stable_600_count": 0,
+        "short_best": null,
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "8x1": {
+        "candidate_count": 13,
+        "stable_600_count": 1,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "old_soft",
+          "title": "Old VBD soft penalty",
+          "config": {
+            "substeps": 8,
+            "iterations": 1,
+            "alpha": 0.95,
+            "legacy_scale": 0.1
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.16209903359413147,
+          "top_z": 15.590230941772461,
+          "max_box_xy_drift": 0.16209903359413147,
+          "min_z": 0.39827197790145874,
+          "max_abs_pos": 15.590230941772461,
+          "runtime_s": 3.6772068600403145,
+          "budget_cost": 8,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "old_soft",
+            "title": "Old VBD soft penalty",
+            "config": {
+              "substeps": 8,
+              "iterations": 1,
+              "alpha": 0.95,
+              "legacy_scale": 0.1
+            },
+            "frames": 1200,
+            "stable": true,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 0.047437746077775955,
+            "top_z": 15.590753555297852,
+            "max_box_xy_drift": 0.047437746077775955,
+            "min_z": 0.3982624411582947,
+            "max_abs_pos": 15.590753555297852,
+            "runtime_s": 6.968058123951778,
+            "budget_cost": 8
+          },
+          "confirmed_stable": true
+        },
+        "confirmed_best": {
+          "suite": "contacts_stack",
+          "mode": "old_soft",
+          "title": "Old VBD soft penalty",
+          "config": {
+            "substeps": 8,
+            "iterations": 1,
+            "alpha": 0.95,
+            "legacy_scale": 0.1
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.16209903359413147,
+          "top_z": 15.590230941772461,
+          "max_box_xy_drift": 0.16209903359413147,
+          "min_z": 0.39827197790145874,
+          "max_abs_pos": 15.590230941772461,
+          "runtime_s": 3.6772068600403145,
+          "budget_cost": 8,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "old_soft",
+            "title": "Old VBD soft penalty",
+            "config": {
+              "substeps": 8,
+              "iterations": 1,
+              "alpha": 0.95,
+              "legacy_scale": 0.1
+            },
+            "frames": 1200,
+            "stable": true,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 0.047437746077775955,
+            "top_z": 15.590753555297852,
+            "max_box_xy_drift": 0.047437746077775955,
+            "min_z": 0.3982624411582947,
+            "max_abs_pos": 15.590753555297852,
+            "runtime_s": 6.968058123951778,
+            "budget_cost": 8
+          },
+          "confirmed_stable": true,
+          "selection_basis": "confirmed"
+        },
+        "default_rho_confirmed_best": null
+      }
+    },
+    "old_hard_history": {
+      "1x3": {
+        "candidate_count": 11,
+        "stable_600_count": 0,
+        "short_best": null,
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "3x1": {
+        "candidate_count": 11,
+        "stable_600_count": 1,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "old_hard_history",
+          "title": "Old VBD hard ALM + history",
+          "config": {
+            "substeps": 3,
+            "iterations": 1,
+            "alpha": 0.0,
+            "legacy_scale": 0.03
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.1826692819595337,
+          "top_z": 15.47912883758545,
+          "max_box_xy_drift": 0.4511357843875885,
+          "min_z": 0.37406858801841736,
+          "max_abs_pos": 15.47912883758545,
+          "runtime_s": 1.894953267998062,
+          "budget_cost": 3,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "old_hard_history",
+            "title": "Old VBD hard ALM + history",
+            "config": {
+              "substeps": 3,
+              "iterations": 1,
+              "alpha": 0.0,
+              "legacy_scale": 0.03
+            },
+            "frames": 1200,
+            "stable": false,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 3.5101418495178223,
+            "top_z": 1.106735348701477,
+            "max_box_xy_drift": 27.49454116821289,
+            "min_z": 0.39335328340530396,
+            "max_abs_pos": 16.547428131103516,
+            "runtime_s": 3.4718333979835734,
+            "budget_cost": 3
+          },
+          "confirmed_stable": false
+        },
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "1x4": {
+        "candidate_count": 11,
+        "stable_600_count": 1,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "old_hard_history",
+          "title": "Old VBD hard ALM + history",
+          "config": {
+            "substeps": 1,
+            "iterations": 4,
+            "alpha": 0.0,
+            "legacy_scale": 0.03
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.48103106021881104,
+          "top_z": 15.391532897949219,
+          "max_box_xy_drift": 0.48103106021881104,
+          "min_z": 0.35664162039756775,
+          "max_abs_pos": 15.391532897949219,
+          "runtime_s": 1.0944389659562148,
+          "budget_cost": 4,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "old_hard_history",
+            "title": "Old VBD hard ALM + history",
+            "config": {
+              "substeps": 1,
+              "iterations": 4,
+              "alpha": 0.0,
+              "legacy_scale": 0.03
+            },
+            "frames": 1200,
+            "stable": false,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 37.65104293823242,
+            "top_z": 0.58440101146698,
+            "max_box_xy_drift": 37.65104293823242,
+            "min_z": 0.38895753026008606,
+            "max_abs_pos": 32.22172546386719,
+            "runtime_s": 1.846090078994166,
+            "budget_cost": 4
+          },
+          "confirmed_stable": false
+        },
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "2x2": {
+        "candidate_count": 11,
+        "stable_600_count": 2,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "old_hard_history",
+          "title": "Old VBD hard ALM + history",
+          "config": {
+            "substeps": 2,
+            "iterations": 2,
+            "alpha": 0.0,
+            "legacy_scale": 0.03
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.14197562634944916,
+          "top_z": 15.490629196166992,
+          "max_box_xy_drift": 0.22241495549678802,
+          "min_z": 0.37621912360191345,
+          "max_abs_pos": 15.490629196166992,
+          "runtime_s": 1.5422899310360663,
+          "budget_cost": 4,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "old_hard_history",
+            "title": "Old VBD hard ALM + history",
+            "config": {
+              "substeps": 2,
+              "iterations": 2,
+              "alpha": 0.0,
+              "legacy_scale": 0.03
+            },
+            "frames": 1200,
+            "stable": false,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 17.142135620117188,
+            "top_z": 3.3968923091888428,
+            "max_box_xy_drift": 17.466650009155273,
+            "min_z": 0.3923734724521637,
+            "max_abs_pos": 32.4476203918457,
+            "runtime_s": 2.713183367974125,
+            "budget_cost": 4
+          },
+          "confirmed_stable": false
+        },
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "4x1": {
+        "candidate_count": 11,
+        "stable_600_count": 3,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "old_hard_history",
+          "title": "Old VBD hard ALM + history",
+          "config": {
+            "substeps": 4,
+            "iterations": 1,
+            "alpha": 0.0,
+            "legacy_scale": 0.1
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.007341202348470688,
+          "top_z": 15.572033882141113,
+          "max_box_xy_drift": 0.06837373971939087,
+          "min_z": 0.39410966634750366,
+          "max_abs_pos": 15.572033882141113,
+          "runtime_s": 2.433305868995376,
+          "budget_cost": 4,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "old_hard_history",
+            "title": "Old VBD hard ALM + history",
+            "config": {
+              "substeps": 4,
+              "iterations": 1,
+              "alpha": 0.0,
+              "legacy_scale": 0.1
+            },
+            "frames": 1200,
+            "stable": true,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 0.007341202348470688,
+            "top_z": 15.572033882141113,
+            "max_box_xy_drift": 0.06837373971939087,
+            "min_z": 0.39410966634750366,
+            "max_abs_pos": 15.572033882141113,
+            "runtime_s": 4.520196115016006,
+            "budget_cost": 4
+          },
+          "confirmed_stable": true
+        },
+        "confirmed_best": {
+          "suite": "contacts_stack",
+          "mode": "old_hard_history",
+          "title": "Old VBD hard ALM + history",
+          "config": {
+            "substeps": 4,
+            "iterations": 1,
+            "alpha": 0.0,
+            "legacy_scale": 0.1
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.007341202348470688,
+          "top_z": 15.572033882141113,
+          "max_box_xy_drift": 0.06837373971939087,
+          "min_z": 0.39410966634750366,
+          "max_abs_pos": 15.572033882141113,
+          "runtime_s": 2.433305868995376,
+          "budget_cost": 4,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "old_hard_history",
+            "title": "Old VBD hard ALM + history",
+            "config": {
+              "substeps": 4,
+              "iterations": 1,
+              "alpha": 0.0,
+              "legacy_scale": 0.1
+            },
+            "frames": 1200,
+            "stable": true,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 0.007341202348470688,
+            "top_z": 15.572033882141113,
+            "max_box_xy_drift": 0.06837373971939087,
+            "min_z": 0.39410966634750366,
+            "max_abs_pos": 15.572033882141113,
+            "runtime_s": 4.520196115016006,
+            "budget_cost": 4
+          },
+          "confirmed_stable": true,
+          "selection_basis": "confirmed"
+        },
+        "default_rho_confirmed_best": null
+      }
+    },
+    "new_alm_no_history_alpha0": {
+      "1x3": {
+        "candidate_count": 28,
+        "stable_600_count": 0,
+        "short_best": null,
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "3x1": {
+        "candidate_count": 28,
+        "stable_600_count": 7,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "new_alm_no_history_alpha0",
+          "title": "New compliant ALM, no history, alpha=0",
+          "config": {
+            "substeps": 3,
+            "iterations": 1,
+            "alpha": 0.0,
+            "ke": 100000000.0,
+            "rho": 1000000.0
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.2640509605407715,
+          "top_z": 15.445015907287598,
+          "max_box_xy_drift": 0.36079880595207214,
+          "min_z": 0.3665454387664795,
+          "max_abs_pos": 15.445015907287598,
+          "runtime_s": 1.6034049380104989,
+          "budget_cost": 3,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "new_alm_no_history_alpha0",
+            "title": "New compliant ALM, no history, alpha=0",
+            "config": {
+              "substeps": 3,
+              "iterations": 1,
+              "alpha": 0.0,
+              "ke": 100000000.0,
+              "rho": 1000000.0
+            },
+            "frames": 1200,
+            "stable": false,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 15.670367240905762,
+            "top_z": 0.5021070241928101,
+            "max_box_xy_drift": 16.859821319580078,
+            "min_z": 0.39170804619789124,
+            "max_abs_pos": 18.330217361450195,
+            "runtime_s": 2.8834287579520606,
+            "budget_cost": 3
+          },
+          "confirmed_stable": false
+        },
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "1x4": {
+        "candidate_count": 28,
+        "stable_600_count": 8,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "new_alm_no_history_alpha0",
+          "title": "New compliant ALM, no history, alpha=0",
+          "config": {
+            "substeps": 1,
+            "iterations": 4,
+            "alpha": 0.0,
+            "ke": 1000000.0,
+            "rho": 1000000.0
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.12318626046180725,
+          "top_z": 15.447028160095215,
+          "max_box_xy_drift": 0.21299372613430023,
+          "min_z": 0.3662680983543396,
+          "max_abs_pos": 15.447028160095215,
+          "runtime_s": 0.9902364130248316,
+          "budget_cost": 4,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "new_alm_no_history_alpha0",
+            "title": "New compliant ALM, no history, alpha=0",
+            "config": {
+              "substeps": 1,
+              "iterations": 4,
+              "alpha": 0.0,
+              "ke": 1000000.0,
+              "rho": 1000000.0
+            },
+            "frames": 1200,
+            "stable": false,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 7.738186836242676,
+            "top_z": 12.644598007202148,
+            "max_box_xy_drift": 7.738186836242676,
+            "min_z": 0.38765278458595276,
+            "max_abs_pos": 16.206010818481445,
+            "runtime_s": 1.6394063119660132,
+            "budget_cost": 4
+          },
+          "confirmed_stable": false
+        },
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "2x2": {
+        "candidate_count": 28,
+        "stable_600_count": 14,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "new_alm_no_history_alpha0",
+          "title": "New compliant ALM, no history, alpha=0",
+          "config": {
+            "substeps": 2,
+            "iterations": 2,
+            "alpha": 0.0,
+            "ke": 100000000.0,
+            "rho": 1000000.0
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.010933189652860165,
+          "top_z": 15.517643928527832,
+          "max_box_xy_drift": 0.09131421148777008,
+          "min_z": 0.38356220722198486,
+          "max_abs_pos": 15.517643928527832,
+          "runtime_s": 1.351290163001977,
+          "budget_cost": 4,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "new_alm_no_history_alpha0",
+            "title": "New compliant ALM, no history, alpha=0",
+            "config": {
+              "substeps": 2,
+              "iterations": 2,
+              "alpha": 0.0,
+              "ke": 100000000.0,
+              "rho": 1000000.0
+            },
+            "frames": 1200,
+            "stable": false,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 4.082467555999756,
+            "top_z": 14.940664291381836,
+            "max_box_xy_drift": 4.082467555999756,
+            "min_z": 0.38864776492118835,
+            "max_abs_pos": 15.344313621520996,
+            "runtime_s": 2.3356365070212632,
+            "budget_cost": 4
+          },
+          "confirmed_stable": false
+        },
+        "confirmed_best": {
+          "suite": "contacts_stack",
+          "mode": "new_alm_no_history_alpha0",
+          "title": "New compliant ALM, no history, alpha=0",
+          "config": {
+            "substeps": 2,
+            "iterations": 2,
+            "alpha": 0.0,
+            "ke": 300000000.0,
+            "rho": 1000000.0
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.30096206068992615,
+          "top_z": 15.51793384552002,
+          "max_box_xy_drift": 0.33513084053993225,
+          "min_z": 0.38262736797332764,
+          "max_abs_pos": 15.51793384552002,
+          "runtime_s": 1.3497573389904574,
+          "budget_cost": 4,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "new_alm_no_history_alpha0",
+            "title": "New compliant ALM, no history, alpha=0",
+            "config": {
+              "substeps": 2,
+              "iterations": 2,
+              "alpha": 0.0,
+              "ke": 300000000.0,
+              "rho": 1000000.0
+            },
+            "frames": 1200,
+            "stable": true,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 0.17993833124637604,
+            "top_z": 15.515497207641602,
+            "max_box_xy_drift": 0.2799108624458313,
+            "min_z": 0.38272637128829956,
+            "max_abs_pos": 15.515497207641602,
+            "runtime_s": 2.3276296500116587,
+            "budget_cost": 4
+          },
+          "confirmed_stable": true
+        },
+        "default_rho_confirmed_best": null
+      },
+      "4x1": {
+        "candidate_count": 28,
+        "stable_600_count": 6,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "new_alm_no_history_alpha0",
+          "title": "New compliant ALM, no history, alpha=0",
+          "config": {
+            "substeps": 4,
+            "iterations": 1,
+            "alpha": 0.0,
+            "ke": 3000000.0
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.012704539112746716,
+          "top_z": 15.562933921813965,
+          "max_box_xy_drift": 0.07391282171010971,
+          "min_z": 0.39045247435569763,
+          "max_abs_pos": 15.562933921813965,
+          "runtime_s": 2.024292250047438,
+          "budget_cost": 4,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "new_alm_no_history_alpha0",
+            "title": "New compliant ALM, no history, alpha=0",
+            "config": {
+              "substeps": 4,
+              "iterations": 1,
+              "alpha": 0.0,
+              "ke": 3000000.0
+            },
+            "frames": 1200,
+            "stable": true,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 0.024592790752649307,
+            "top_z": 15.563227653503418,
+            "max_box_xy_drift": 0.07180885970592499,
+            "min_z": 0.3898267149925232,
+            "max_abs_pos": 15.563227653503418,
+            "runtime_s": 3.7380896600079723,
+            "budget_cost": 4
+          },
+          "confirmed_stable": true
+        },
+        "confirmed_best": {
+          "suite": "contacts_stack",
+          "mode": "new_alm_no_history_alpha0",
+          "title": "New compliant ALM, no history, alpha=0",
+          "config": {
+            "substeps": 4,
+            "iterations": 1,
+            "alpha": 0.0,
+            "ke": 3000000.0
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.012704539112746716,
+          "top_z": 15.562933921813965,
+          "max_box_xy_drift": 0.07391282171010971,
+          "min_z": 0.39045247435569763,
+          "max_abs_pos": 15.562933921813965,
+          "runtime_s": 2.024292250047438,
+          "budget_cost": 4,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "new_alm_no_history_alpha0",
+            "title": "New compliant ALM, no history, alpha=0",
+            "config": {
+              "substeps": 4,
+              "iterations": 1,
+              "alpha": 0.0,
+              "ke": 3000000.0
+            },
+            "frames": 1200,
+            "stable": true,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 0.024592790752649307,
+            "top_z": 15.563227653503418,
+            "max_box_xy_drift": 0.07180885970592499,
+            "min_z": 0.3898267149925232,
+            "max_abs_pos": 15.563227653503418,
+            "runtime_s": 3.7380896600079723,
+            "budget_cost": 4
+          },
+          "confirmed_stable": true
+        },
+        "default_rho_confirmed_best": {
+          "suite": "contacts_stack",
+          "mode": "new_alm_no_history_alpha0",
+          "title": "New compliant ALM, no history, alpha=0",
+          "config": {
+            "substeps": 4,
+            "iterations": 1,
+            "alpha": 0.0,
+            "ke": 3000000.0
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.012704539112746716,
+          "top_z": 15.562933921813965,
+          "max_box_xy_drift": 0.07391282171010971,
+          "min_z": 0.39045247435569763,
+          "max_abs_pos": 15.562933921813965,
+          "runtime_s": 2.024292250047438,
+          "budget_cost": 4,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "new_alm_no_history_alpha0",
+            "title": "New compliant ALM, no history, alpha=0",
+            "config": {
+              "substeps": 4,
+              "iterations": 1,
+              "alpha": 0.0,
+              "ke": 3000000.0
+            },
+            "frames": 1200,
+            "stable": true,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 0.024592790752649307,
+            "top_z": 15.563227653503418,
+            "max_box_xy_drift": 0.07180885970592499,
+            "min_z": 0.3898267149925232,
+            "max_abs_pos": 15.563227653503418,
+            "runtime_s": 3.7380896600079723,
+            "budget_cost": 4
+          },
+          "confirmed_stable": true,
+          "selection_basis": "default-rho confirmed"
+        }
+      }
+    },
+    "new_alm_no_history_alpha095": {
+      "1x3": {
+        "candidate_count": 28,
+        "stable_600_count": 0,
+        "short_best": null,
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "3x1": {
+        "candidate_count": 28,
+        "stable_600_count": 0,
+        "short_best": null,
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "1x4": {
+        "candidate_count": 28,
+        "stable_600_count": 0,
+        "short_best": null,
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "2x2": {
+        "candidate_count": 28,
+        "stable_600_count": 0,
+        "short_best": null,
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "4x1": {
+        "candidate_count": 28,
+        "stable_600_count": 3,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "new_alm_no_history_alpha095",
+          "title": "New compliant ALM, no history, alpha=0.95",
+          "config": {
+            "substeps": 4,
+            "iterations": 1,
+            "alpha": 0.95,
+            "ke": 30000000.0
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.0177058856934309,
+          "top_z": 15.276150703430176,
+          "max_box_xy_drift": 0.16929389536380768,
+          "min_z": 0.3042725920677185,
+          "max_abs_pos": 15.276150703430176,
+          "runtime_s": 2.027588462049607,
+          "budget_cost": 4,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "new_alm_no_history_alpha095",
+            "title": "New compliant ALM, no history, alpha=0.95",
+            "config": {
+              "substeps": 4,
+              "iterations": 1,
+              "alpha": 0.95,
+              "ke": 30000000.0
+            },
+            "frames": 1200,
+            "stable": true,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 0.014073746278882027,
+            "top_z": 15.275019645690918,
+            "max_box_xy_drift": 0.22635145485401154,
+            "min_z": 0.3014853596687317,
+            "max_abs_pos": 15.275019645690918,
+            "runtime_s": 3.758482123957947,
+            "budget_cost": 4
+          },
+          "confirmed_stable": true
+        },
+        "confirmed_best": {
+          "suite": "contacts_stack",
+          "mode": "new_alm_no_history_alpha095",
+          "title": "New compliant ALM, no history, alpha=0.95",
+          "config": {
+            "substeps": 4,
+            "iterations": 1,
+            "alpha": 0.95,
+            "ke": 30000000.0
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.0177058856934309,
+          "top_z": 15.276150703430176,
+          "max_box_xy_drift": 0.16929389536380768,
+          "min_z": 0.3042725920677185,
+          "max_abs_pos": 15.276150703430176,
+          "runtime_s": 2.027588462049607,
+          "budget_cost": 4,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "new_alm_no_history_alpha095",
+            "title": "New compliant ALM, no history, alpha=0.95",
+            "config": {
+              "substeps": 4,
+              "iterations": 1,
+              "alpha": 0.95,
+              "ke": 30000000.0
+            },
+            "frames": 1200,
+            "stable": true,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 0.014073746278882027,
+            "top_z": 15.275019645690918,
+            "max_box_xy_drift": 0.22635145485401154,
+            "min_z": 0.3014853596687317,
+            "max_abs_pos": 15.275019645690918,
+            "runtime_s": 3.758482123957947,
+            "budget_cost": 4
+          },
+          "confirmed_stable": true
+        },
+        "default_rho_confirmed_best": {
+          "suite": "contacts_stack",
+          "mode": "new_alm_no_history_alpha095",
+          "title": "New compliant ALM, no history, alpha=0.95",
+          "config": {
+            "substeps": 4,
+            "iterations": 1,
+            "alpha": 0.95,
+            "ke": 30000000.0
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.0177058856934309,
+          "top_z": 15.276150703430176,
+          "max_box_xy_drift": 0.16929389536380768,
+          "min_z": 0.3042725920677185,
+          "max_abs_pos": 15.276150703430176,
+          "runtime_s": 2.027588462049607,
+          "budget_cost": 4,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "new_alm_no_history_alpha095",
+            "title": "New compliant ALM, no history, alpha=0.95",
+            "config": {
+              "substeps": 4,
+              "iterations": 1,
+              "alpha": 0.95,
+              "ke": 30000000.0
+            },
+            "frames": 1200,
+            "stable": true,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 0.014073746278882027,
+            "top_z": 15.275019645690918,
+            "max_box_xy_drift": 0.22635145485401154,
+            "min_z": 0.3014853596687317,
+            "max_abs_pos": 15.275019645690918,
+            "runtime_s": 3.758482123957947,
+            "budget_cost": 4
+          },
+          "confirmed_stable": true,
+          "selection_basis": "default-rho confirmed"
+        }
+      }
+    },
+    "new_alm_history_alpha0": {
+      "1x3": {
+        "candidate_count": 28,
+        "stable_600_count": 1,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "new_alm_history_alpha0",
+          "title": "New compliant ALM + history, alpha=0",
+          "config": {
+            "substeps": 1,
+            "iterations": 3,
+            "alpha": 0.0,
+            "ke": 1000000.0,
+            "rho": 300000.0
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.05860085040330887,
+          "top_z": 15.304759979248047,
+          "max_box_xy_drift": 0.7761228680610657,
+          "min_z": 0.34762662649154663,
+          "max_abs_pos": 15.304759979248047,
+          "runtime_s": 1.008404153981246,
+          "budget_cost": 3,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "new_alm_history_alpha0",
+            "title": "New compliant ALM + history, alpha=0",
+            "config": {
+              "substeps": 1,
+              "iterations": 3,
+              "alpha": 0.0,
+              "ke": 1000000.0,
+              "rho": 300000.0
+            },
+            "frames": 1200,
+            "stable": false,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 30.352943420410156,
+            "top_z": 0.7920660972595215,
+            "max_box_xy_drift": 30.352943420410156,
+            "min_z": 0.3857867419719696,
+            "max_abs_pos": 44.75837326049805,
+            "runtime_s": 1.7090024500503205,
+            "budget_cost": 3
+          },
+          "confirmed_stable": false
+        },
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "3x1": {
+        "candidate_count": 28,
+        "stable_600_count": 7,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "new_alm_history_alpha0",
+          "title": "New compliant ALM + history, alpha=0",
+          "config": {
+            "substeps": 3,
+            "iterations": 1,
+            "alpha": 0.0,
+            "ke": 300000000.0,
+            "rho": 1000000.0
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.010676381178200245,
+          "top_z": 15.453213691711426,
+          "max_box_xy_drift": 0.255702406167984,
+          "min_z": 0.36644890904426575,
+          "max_abs_pos": 15.453213691711426,
+          "runtime_s": 1.9326853840029798,
+          "budget_cost": 3,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "new_alm_history_alpha0",
+            "title": "New compliant ALM + history, alpha=0",
+            "config": {
+              "substeps": 3,
+              "iterations": 1,
+              "alpha": 0.0,
+              "ke": 300000000.0,
+              "rho": 1000000.0
+            },
+            "frames": 1200,
+            "stable": true,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 0.014378618448972702,
+            "top_z": 15.447686195373535,
+            "max_box_xy_drift": 0.82121741771698,
+            "min_z": 0.37072640657424927,
+            "max_abs_pos": 15.815154075622559,
+            "runtime_s": 3.531636141007766,
+            "budget_cost": 3
+          },
+          "confirmed_stable": true
+        },
+        "confirmed_best": {
+          "suite": "contacts_stack",
+          "mode": "new_alm_history_alpha0",
+          "title": "New compliant ALM + history, alpha=0",
+          "config": {
+            "substeps": 3,
+            "iterations": 1,
+            "alpha": 0.0,
+            "ke": 300000000.0,
+            "rho": 1000000.0
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.010676381178200245,
+          "top_z": 15.453213691711426,
+          "max_box_xy_drift": 0.255702406167984,
+          "min_z": 0.36644890904426575,
+          "max_abs_pos": 15.453213691711426,
+          "runtime_s": 1.9326853840029798,
+          "budget_cost": 3,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "new_alm_history_alpha0",
+            "title": "New compliant ALM + history, alpha=0",
+            "config": {
+              "substeps": 3,
+              "iterations": 1,
+              "alpha": 0.0,
+              "ke": 300000000.0,
+              "rho": 1000000.0
+            },
+            "frames": 1200,
+            "stable": true,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 0.014378618448972702,
+            "top_z": 15.447686195373535,
+            "max_box_xy_drift": 0.82121741771698,
+            "min_z": 0.37072640657424927,
+            "max_abs_pos": 15.815154075622559,
+            "runtime_s": 3.531636141007766,
+            "budget_cost": 3
+          },
+          "confirmed_stable": true
+        },
+        "default_rho_confirmed_best": {
+          "suite": "contacts_stack",
+          "mode": "new_alm_history_alpha0",
+          "title": "New compliant ALM + history, alpha=0",
+          "config": {
+            "substeps": 3,
+            "iterations": 1,
+            "alpha": 0.0,
+            "ke": 3000000.0
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.4040393531322479,
+          "top_z": 15.514419555664062,
+          "max_box_xy_drift": 0.4040393531322479,
+          "min_z": 0.383244127035141,
+          "max_abs_pos": 15.514419555664062,
+          "runtime_s": 1.921161717036739,
+          "budget_cost": 3,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "new_alm_history_alpha0",
+            "title": "New compliant ALM + history, alpha=0",
+            "config": {
+              "substeps": 3,
+              "iterations": 1,
+              "alpha": 0.0,
+              "ke": 3000000.0
+            },
+            "frames": 1200,
+            "stable": true,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 0.4040565490722656,
+            "top_z": 15.51448917388916,
+            "max_box_xy_drift": 0.4883429706096649,
+            "min_z": 0.38441094756126404,
+            "max_abs_pos": 15.51448917388916,
+            "runtime_s": 3.615817927988246,
+            "budget_cost": 3
+          },
+          "confirmed_stable": true,
+          "selection_basis": "default-rho confirmed"
+        }
+      }
+    },
+    "new_alm_history_alpha095": {
+      "1x3": {
+        "candidate_count": 28,
+        "stable_600_count": 0,
+        "short_best": null,
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "3x1": {
+        "candidate_count": 28,
+        "stable_600_count": 1,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "new_alm_history_alpha095",
+          "title": "New compliant ALM + history, alpha=0.95",
+          "config": {
+            "substeps": 3,
+            "iterations": 1,
+            "alpha": 0.95,
+            "ke": 10000000.0
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.09619741886854172,
+          "top_z": 14.793535232543945,
+          "max_box_xy_drift": 0.34693071246147156,
+          "min_z": 0.23485223948955536,
+          "max_abs_pos": 15.279668807983398,
+          "runtime_s": 1.9313537750276737,
+          "budget_cost": 3,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "new_alm_history_alpha095",
+            "title": "New compliant ALM + history, alpha=0.95",
+            "config": {
+              "substeps": 3,
+              "iterations": 1,
+              "alpha": 0.95,
+              "ke": 10000000.0
+            },
+            "frames": 1200,
+            "stable": false,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 14.083575248718262,
+            "top_z": 0.6581941246986389,
+            "max_box_xy_drift": 14.083575248718262,
+            "min_z": 0.38159847259521484,
+            "max_abs_pos": 25.43105697631836,
+            "runtime_s": 3.5433267490006983,
+            "budget_cost": 3
+          },
+          "confirmed_stable": false
+        },
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "1x4": {
+        "candidate_count": 28,
+        "stable_600_count": 0,
+        "short_best": null,
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "2x2": {
+        "candidate_count": 28,
+        "stable_600_count": 1,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "new_alm_history_alpha095",
+          "title": "New compliant ALM + history, alpha=0.95",
+          "config": {
+            "substeps": 2,
+            "iterations": 2,
+            "alpha": 0.95,
+            "ke": 10000000.0,
+            "rho": 1000000.0
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.4859873652458191,
+          "top_z": 13.915142059326172,
+          "max_box_xy_drift": 0.8440106511116028,
+          "min_z": 0.04062143713235855,
+          "max_abs_pos": 15.420467376708984,
+          "runtime_s": 1.551704558019992,
+          "budget_cost": 4,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "new_alm_history_alpha095",
+            "title": "New compliant ALM + history, alpha=0.95",
+            "config": {
+              "substeps": 2,
+              "iterations": 2,
+              "alpha": 0.95,
+              "ke": 10000000.0,
+              "rho": 1000000.0
+            },
+            "frames": 1200,
+            "stable": false,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 18.757476806640625,
+            "top_z": 0.3960917294025421,
+            "max_box_xy_drift": 18.757476806640625,
+            "min_z": 0.3894883394241333,
+            "max_abs_pos": 25.37352752685547,
+            "runtime_s": 2.77762523497222,
+            "budget_cost": 4
+          },
+          "confirmed_stable": false
+        },
+        "confirmed_best": null,
+        "default_rho_confirmed_best": null
+      },
+      "4x1": {
+        "candidate_count": 28,
+        "stable_600_count": 2,
+        "short_best": {
+          "suite": "contacts_stack",
+          "mode": "new_alm_history_alpha095",
+          "title": "New compliant ALM + history, alpha=0.95",
+          "config": {
+            "substeps": 4,
+            "iterations": 1,
+            "alpha": 0.95,
+            "ke": 10000000.0
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.009205958805978298,
+          "top_z": 15.263762474060059,
+          "max_box_xy_drift": 0.2113240659236908,
+          "min_z": 0.2842597961425781,
+          "max_abs_pos": 15.263762474060059,
+          "runtime_s": 2.4678674989845604,
+          "budget_cost": 4,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "new_alm_history_alpha095",
+            "title": "New compliant ALM + history, alpha=0.95",
+            "config": {
+              "substeps": 4,
+              "iterations": 1,
+              "alpha": 0.95,
+              "ke": 10000000.0
+            },
+            "frames": 1200,
+            "stable": true,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 0.009205958805978298,
+            "top_z": 15.263762474060059,
+            "max_box_xy_drift": 0.27550482749938965,
+            "min_z": 0.2828220725059509,
+            "max_abs_pos": 15.263762474060059,
+            "runtime_s": 4.623286506044678,
+            "budget_cost": 4
+          },
+          "confirmed_stable": true
+        },
+        "confirmed_best": {
+          "suite": "contacts_stack",
+          "mode": "new_alm_history_alpha095",
+          "title": "New compliant ALM + history, alpha=0.95",
+          "config": {
+            "substeps": 4,
+            "iterations": 1,
+            "alpha": 0.95,
+            "ke": 10000000.0
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.009205958805978298,
+          "top_z": 15.263762474060059,
+          "max_box_xy_drift": 0.2113240659236908,
+          "min_z": 0.2842597961425781,
+          "max_abs_pos": 15.263762474060059,
+          "runtime_s": 2.4678674989845604,
+          "budget_cost": 4,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "new_alm_history_alpha095",
+            "title": "New compliant ALM + history, alpha=0.95",
+            "config": {
+              "substeps": 4,
+              "iterations": 1,
+              "alpha": 0.95,
+              "ke": 10000000.0
+            },
+            "frames": 1200,
+            "stable": true,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 0.009205958805978298,
+            "top_z": 15.263762474060059,
+            "max_box_xy_drift": 0.27550482749938965,
+            "min_z": 0.2828220725059509,
+            "max_abs_pos": 15.263762474060059,
+            "runtime_s": 4.623286506044678,
+            "budget_cost": 4
+          },
+          "confirmed_stable": true
+        },
+        "default_rho_confirmed_best": {
+          "suite": "contacts_stack",
+          "mode": "new_alm_history_alpha095",
+          "title": "New compliant ALM + history, alpha=0.95",
+          "config": {
+            "substeps": 4,
+            "iterations": 1,
+            "alpha": 0.95,
+            "ke": 10000000.0
+          },
+          "frames": 600,
+          "stable": true,
+          "error": null,
+          "finite": true,
+          "top_xy_drift": 0.009205958805978298,
+          "top_z": 15.263762474060059,
+          "max_box_xy_drift": 0.2113240659236908,
+          "min_z": 0.2842597961425781,
+          "max_abs_pos": 15.263762474060059,
+          "runtime_s": 2.4678674989845604,
+          "budget_cost": 4,
+          "confirmation": {
+            "suite": "contacts_stack",
+            "mode": "new_alm_history_alpha095",
+            "title": "New compliant ALM + history, alpha=0.95",
+            "config": {
+              "substeps": 4,
+              "iterations": 1,
+              "alpha": 0.95,
+              "ke": 10000000.0
+            },
+            "frames": 1200,
+            "stable": true,
+            "error": null,
+            "finite": true,
+            "top_xy_drift": 0.009205958805978298,
+            "top_z": 15.263762474060059,
+            "max_box_xy_drift": 0.27550482749938965,
+            "min_z": 0.2828220725059509,
+            "max_abs_pos": 15.263762474060059,
+            "runtime_s": 4.623286506044678,
+            "budget_cost": 4
+          },
+          "confirmed_stable": true,
+          "selection_basis": "default-rho confirmed"
+        }
+      }
+    }
+  }
+}
