@@ -1,0 +1,1027 @@
+{
+  "claim_boundary": "same-semantics hard K2/K5 vs hard K12 parity; N512 gated 600-step then frame193 scale trajectory; finite/VBD rows context only; diagnostic timing; no contact, N1024, production, novelty, or universal winner claim",
+  "device": "cuda:0",
+  "frozen_k2_artifact": "bench/_workspace/codex_hard_kkt_trajectory/run_20260705T121845Z_1924599/result.json",
+  "frozen_k2_artifact_sha256": "597305e713f3f0ac24b3829126d3d9c2fd61168c530acf35c8a0f68120e3be56",
+  "generated_utc": "2026-07-05T12:24:37Z",
+  "hostname": "jumyungc-spock",
+  "n1024_admission_gate": false,
+  "n1024_executed": false,
+  "n128": {
+    "context_note": "different finite-compliance material context; never bend truth",
+    "finite_vbd_context": [
+      {
+        "axial_abs_m": {
+          "final_joint_rms": 0.005486921259122292,
+          "final_max": 0.007673841144014491,
+          "trajectory_max": 0.007673841144014491,
+          "trajectory_rms_of_joint_rms": 0.0028329180768883553
+        },
+        "bend_rest_angle_rad": {
+          "final_joint_rms": 0.06835050837057331,
+          "final_max": 0.62826476159398,
+          "trajectory_max": 0.62826476159398,
+          "trajectory_rms_of_joint_rms": 0.040193794751463854
+        },
+        "completed_render_frames": 60,
+        "completed_substeps": 600,
+        "duration_s": 1.0,
+        "energy_work": {
+          "change_minus_gravity_work_J": -83.32196813249999,
+          "final": {
+            "elastic_bend_J": 1.483293958258771,
+            "elastic_stretch_J": 19.363265514941954,
+            "kinetic_angular_J": 0.007113651983139965,
+            "kinetic_linear_J": 69.47500755446752,
+            "mechanical_total_J": 35.06598298704213,
+            "potential_gravity_J": -55.26269769260926
+          },
+          "gravity_work_J": 86.82532440607567,
+          "initial": {
+            "elastic_bend_J": 0.0,
+            "elastic_stretch_J": 2.407412430484045e-31,
+            "kinetic_angular_J": 0.0,
+            "kinetic_linear_J": 0.0,
+            "mechanical_total_J": 31.562626713466464,
+            "potential_gravity_J": 31.562626713466464
+          },
+          "mechanical_energy_change_J": 3.503356273575669,
+          "note": "negative balance includes authored damping and implicit-integration loss; this is a diagnostic, not a conservation claim"
+        },
+        "failure": null,
+        "gap_3d_m": {
+          "final_joint_rms": 0.005522076739741456,
+          "final_max": 0.007803057687054569,
+          "trajectory_max": 0.007803057687054569,
+          "trajectory_rms_of_joint_rms": 0.0028520988765822356
+        },
+        "method": "requested_vbd_2",
+        "pass": true,
+        "quaternion_norm_max_error": 1.3176647883916814e-07,
+        "requested_render_frames": 60,
+        "requested_substeps": 600,
+        "semantics": "authored finite stretch/bend penalty; requested local VBD baseline",
+        "state_finite_all_steps": true,
+        "timing_descriptive": {
+          "setup_ms_total": 0.0,
+          "solve_ms_total": 454.576058,
+          "stage_ms_p50": 0.6869045,
+          "stage_ms_p95": 0.7920805999999999,
+          "stage_ms_total": 454.576058
+        },
+        "transverse_m": {
+          "final_joint_rms": 0.0006221146323512025,
+          "final_max": 0.005845801279315119,
+          "trajectory_max": 0.005845801279315119,
+          "trajectory_rms_of_joint_rms": 0.00033021685517373644
+        }
+      },
+      {
+        "axial_abs_m": {
+          "final_joint_rms": 0.0043815561476071106,
+          "final_max": 0.0061240846818935765,
+          "trajectory_max": 0.0061240846818935765,
+          "trajectory_rms_of_joint_rms": 0.0021340678897038474
+        },
+        "bend_rest_angle_rad": {
+          "final_joint_rms": 0.06468236826194032,
+          "final_max": 0.5817891084362182,
+          "trajectory_max": 0.5817891084362182,
+          "trajectory_rms_of_joint_rms": 0.037494677262819465
+        },
+        "completed_render_frames": 60,
+        "completed_substeps": 600,
+        "duration_s": 1.0,
+        "energy_work": {
+          "change_minus_gravity_work_J": -87.70630849451994,
+          "final": {
+            "elastic_bend_J": 1.3283592825615116,
+            "elastic_stretch_J": 12.380479821588459,
+            "kinetic_angular_J": 0.009783267075958193,
+            "kinetic_linear_J": 69.2367810523827,
+            "mechanical_total_J": 29.187174178010803,
+            "potential_gravity_J": -53.76822924559782
+          },
+          "gravity_work_J": 85.33085595906428,
+          "initial": {
+            "elastic_bend_J": 0.0,
+            "elastic_stretch_J": 2.407412430484045e-31,
+            "kinetic_angular_J": 0.0,
+            "kinetic_linear_J": 0.0,
+            "mechanical_total_J": 31.562626713466464,
+            "potential_gravity_J": 31.562626713466464
+          },
+          "mechanical_energy_change_J": -2.3754525354556613,
+          "note": "negative balance includes authored damping and implicit-integration loss; this is a diagnostic, not a conservation claim"
+        },
+        "failure": null,
+        "gap_3d_m": {
+          "final_joint_rms": 0.004415520197742814,
+          "final_max": 0.0062390268622609015,
+          "trajectory_max": 0.0062390268622609015,
+          "trajectory_rms_of_joint_rms": 0.002151645492595449
+        },
+        "method": "requested_vbd_10",
+        "pass": true,
+        "quaternion_norm_max_error": 1.3199364512495038e-07,
+        "requested_render_frames": 60,
+        "requested_substeps": 600,
+        "semantics": "authored finite stretch/bend penalty; requested local VBD baseline",
+        "state_finite_all_steps": true,
+        "timing_descriptive": {
+          "setup_ms_total": 0.0,
+          "solve_ms_total": 1482.65125,
+          "stage_ms_p50": 2.4623295,
+          "stage_ms_p95": 2.58520825,
+          "stage_ms_total": 1482.65125
+        },
+        "transverse_m": {
+          "final_joint_rms": 0.0005466116921920664,
+          "final_max": 0.0049679559349009045,
+          "trajectory_max": 0.0049679559349009045,
+          "trajectory_rms_of_joint_rms": 0.0002744677903530388
+        }
+      },
+      {
+        "axial_abs_m": {
+          "final_joint_rms": 0.004380913508684105,
+          "final_max": 0.006126681644768182,
+          "trajectory_max": 0.006126681644768182,
+          "trajectory_rms_of_joint_rms": 0.002132571488764052
+        },
+        "bend_rest_angle_rad": {
+          "final_joint_rms": 0.06444755022501672,
+          "final_max": 0.5818175931057392,
+          "trajectory_max": 0.5818175931057392,
+          "trajectory_rms_of_joint_rms": 0.037494065992197866
+        },
+        "completed_render_frames": 60,
+        "completed_substeps": 600,
+        "duration_s": 1.0,
+        "energy_work": {
+          "change_minus_gravity_work_J": -87.58390922582774,
+          "final": {
+            "elastic_bend_J": 1.3187320367769217,
+            "elastic_stretch_J": 12.37678149414757,
+            "kinetic_angular_J": 0.010413847524942158,
+            "kinetic_linear_J": 69.42657828020084,
+            "mechanical_total_J": 29.336924929877725,
+            "potential_gravity_J": -53.795580728772556
+          },
+          "gravity_work_J": 85.35820744223899,
+          "initial": {
+            "elastic_bend_J": 0.0,
+            "elastic_stretch_J": 2.407412430484045e-31,
+            "kinetic_angular_J": 0.0,
+            "kinetic_linear_J": 0.0,
+            "mechanical_total_J": 31.562626713466464,
+            "potential_gravity_J": 31.562626713466464
+          },
+          "mechanical_energy_change_J": -2.2257017835887396,
+          "note": "negative balance includes authored damping and implicit-integration loss; this is a diagnostic, not a conservation claim"
+        },
+        "failure": null,
+        "gap_3d_m": {
+          "final_joint_rms": 0.004414860640945822,
+          "final_max": 0.006241979163508678,
+          "trajectory_max": 0.006241979163508678,
+          "trajectory_rms_of_joint_rms": 0.0021501609425284805
+        },
+        "method": "requested_vbd_80",
+        "pass": true,
+        "quaternion_norm_max_error": 1.3222239503285493e-07,
+        "requested_render_frames": 60,
+        "requested_substeps": 600,
+        "semantics": "authored finite stretch/bend penalty; requested local VBD baseline",
+        "state_finite_all_steps": true,
+        "timing_descriptive": {
+          "setup_ms_total": 0.0,
+          "solve_ms_total": 10793.880773,
+          "stage_ms_p50": 17.9565515,
+          "stage_ms_p95": 18.1977108,
+          "stage_ms_total": 10793.880773
+        },
+        "transverse_m": {
+          "final_joint_rms": 0.000546435090748821,
+          "final_max": 0.0049694302651457755,
+          "trajectory_max": 0.0049694302651457755,
+          "trajectory_rms_of_joint_rms": 0.00027446479571274535
+        }
+      },
+      {
+        "axial_abs_m": {
+          "final_joint_rms": 0.00438525612163154,
+          "final_max": 0.006130222701715507,
+          "trajectory_max": 0.006130222701715507,
+          "trajectory_rms_of_joint_rms": 0.0021323638418288045
+        },
+        "bend_rest_angle_rad": {
+          "final_joint_rms": 0.06450489864227892,
+          "final_max": 0.5823930462420411,
+          "trajectory_max": 0.5823930462420411,
+          "trajectory_rms_of_joint_rms": 0.03753755227271404
+        },
+        "completed_render_frames": 60,
+        "completed_substeps": 600,
+        "duration_s": 1.0,
+        "energy_work": {
+          "change_minus_gravity_work_J": -87.54989982432258,
+          "final": {
+            "elastic_bend_J": 1.3210800187600895,
+            "elastic_stretch_J": 12.401287742200157,
+            "kinetic_angular_J": 0.010466907865325854,
+            "kinetic_linear_J": 69.4985932008639,
+            "mechanical_total_J": 29.403390736149937,
+            "potential_gravity_J": -53.828037133539524
+          },
+          "gravity_work_J": 85.39066384700605,
+          "initial": {
+            "elastic_bend_J": 0.0,
+            "elastic_stretch_J": 2.407412430484045e-31,
+            "kinetic_angular_J": 0.0,
+            "kinetic_linear_J": 0.0,
+            "mechanical_total_J": 31.562626713466464,
+            "potential_gravity_J": 31.562626713466464
+          },
+          "mechanical_energy_change_J": -2.159235977316527,
+          "note": "negative balance includes authored damping and implicit-integration loss; this is a diagnostic, not a conservation claim"
+        },
+        "failure": null,
+        "gap_3d_m": {
+          "final_joint_rms": 0.004419229230939578,
+          "final_max": 0.006245419703156625,
+          "trajectory_max": 0.006245419703156625,
+          "trajectory_rms_of_joint_rms": 0.002149991763502948
+        },
+        "method": "finite_compact_bgn_k5",
+        "pass": true,
+        "quaternion_norm_max_error": 4.210504211954458e-08,
+        "requested_render_frames": 60,
+        "requested_substeps": 600,
+        "semantics": "same authored finite compliance; compact global Track-B solver path",
+        "state_finite_all_steps": true,
+        "timing_descriptive": {
+          "setup_ms_total": 106.156155,
+          "solve_ms_total": 25276.282701999997,
+          "stage_ms_p50": 42.1920995,
+          "stage_ms_p95": 44.042017449999996,
+          "stage_ms_total": 25382.438857
+        },
+        "transverse_m": {
+          "final_joint_rms": 0.0005469147495578341,
+          "final_max": 0.004974193019039253,
+          "trajectory_max": 0.004974193019039253,
+          "trajectory_rms_of_joint_rms": 0.00027475266912555733
+        }
+      }
+    ],
+    "k12_reference": {
+      "axial_abs_m": {
+        "final_joint_rms": 6.451479829020756e-08,
+        "final_max": 2.0922238681726973e-07,
+        "trajectory_max": 4.761601122517602e-07,
+        "trajectory_rms_of_joint_rms": 6.198214240889946e-08
+      },
+      "bend_rest_angle_rad": {
+        "final_joint_rms": 0.07055601318006334,
+        "final_max": 0.6713441544086098,
+        "trajectory_max": 0.6713441544086098,
+        "trajectory_rms_of_joint_rms": 0.03975892330038958
+      },
+      "completed_render_frames": 60,
+      "completed_substeps": 600,
+      "duration_s": 1.0,
+      "energy_work": {
+        "change_minus_gravity_work_J": -81.00020170925066,
+        "final": {
+          "elastic_bend_J": 1.5805629411872242,
+          "elastic_stretch_J": 3.056841609265025e-09,
+          "kinetic_angular_J": 0.017597474541463123,
+          "kinetic_linear_J": 73.66787231459985,
+          "mechanical_total_J": 28.695542225533814,
+          "potential_gravity_J": -46.57049050785156
+        },
+        "gravity_work_J": 78.133117221318,
+        "initial": {
+          "elastic_bend_J": 0.0,
+          "elastic_stretch_J": 2.407412430484045e-31,
+          "kinetic_angular_J": 0.0,
+          "kinetic_linear_J": 0.0,
+          "mechanical_total_J": 31.562626713466464,
+          "potential_gravity_J": 31.562626713466464
+        },
+        "mechanical_energy_change_J": -2.867084487932651,
+        "note": "negative balance includes authored damping and implicit-integration loss; this is a diagnostic, not a conservation claim"
+      },
+      "failure": null,
+      "gap_3d_m": {
+        "final_joint_rms": 6.938244586434058e-08,
+        "final_max": 2.2026139140627073e-07,
+        "trajectory_max": 4.7678174334024226e-07,
+        "trajectory_rms_of_joint_rms": 7.002691512728433e-08
+      },
+      "hard_kkt_worst": {
+        "caller_state_unchanged_all": true,
+        "constraint_max_m": 8.95090418262362e-16,
+        "internal_time_substeps_max": 0,
+        "linear_original_kkt_residual": 1.9516895260725937e-14,
+        "physical_advances_max": 1,
+        "physical_advances_min": 1,
+        "predictor_evaluations_max": 1,
+        "predictor_evaluations_min": 1,
+        "stationarity_relative": 6.092524602120074e-07,
+        "translation_restoration_max_m": 0.0005215410683976566
+      },
+      "method": "hard_equality_kkt_k12",
+      "pass": true,
+      "quaternion_norm_max_error": 4.184686108743563e-08,
+      "requested_render_frames": 60,
+      "requested_substeps": 600,
+      "semantics": "Track B hard/inextensible stretch from feasible hard state",
+      "state_finite_all_steps": true,
+      "timing_descriptive": {
+        "setup_ms_total": 107.133651,
+        "solve_ms_total": 36189.274866,
+        "stage_ms_p50": 55.030922,
+        "stage_ms_p95": 99.93698724999997,
+        "stage_ms_total": 36296.408516999996
+      },
+      "transverse_m": {
+        "final_joint_rms": 2.552968068135558e-08,
+        "final_max": 9.942515358389879e-08,
+        "trajectory_max": 2.5804532960331924e-07,
+        "trajectory_rms_of_joint_rms": 3.2588078566352935e-08
+      }
+    },
+    "k2": {
+      "axial_abs_m": {
+        "final_joint_rms": 6.45685561689417e-08,
+        "final_max": 2.1052700635281168e-07,
+        "trajectory_max": 4.766641924196445e-07,
+        "trajectory_rms_of_joint_rms": 6.196544999486387e-08
+      },
+      "bend_rest_angle_rad": {
+        "final_joint_rms": 0.07055602989550191,
+        "final_max": 0.6713442617644698,
+        "trajectory_max": 0.6713442617644698,
+        "trajectory_rms_of_joint_rms": 0.039758922591354225
+      },
+      "completed_render_frames": 60,
+      "completed_substeps": 600,
+      "duration_s": 1.0,
+      "energy_work": {
+        "change_minus_gravity_work_J": -81.00018058332759,
+        "final": {
+          "elastic_bend_J": 1.5805636900902502,
+          "elastic_stretch_J": 2.9597922583761182e-09,
+          "kinetic_angular_J": 0.01759760114143456,
+          "kinetic_linear_J": 73.66789456670256,
+          "mechanical_total_J": 28.695564352249708,
+          "potential_gravity_J": -46.570491508644324
+        },
+        "gravity_work_J": 78.13311822211084,
+        "initial": {
+          "elastic_bend_J": 0.0,
+          "elastic_stretch_J": 2.407412430484045e-31,
+          "kinetic_angular_J": 0.0,
+          "kinetic_linear_J": 0.0,
+          "mechanical_total_J": 31.562626713466464,
+          "potential_gravity_J": 31.562626713466464
+        },
+        "mechanical_energy_change_J": -2.8670623612167567,
+        "note": "negative balance includes authored damping and implicit-integration loss; this is a diagnostic, not a conservation claim"
+      },
+      "failure": null,
+      "gap_3d_m": {
+        "final_joint_rms": 6.827217713440118e-08,
+        "final_max": 2.188223005373674e-07,
+        "trajectory_max": 4.768154092846391e-07,
+        "trajectory_rms_of_joint_rms": 7.003001648765428e-08
+      },
+      "hard_kkt_worst": {
+        "caller_state_unchanged_all": true,
+        "constraint_max_m": 8.882055243408597e-16,
+        "internal_time_substeps_max": 0,
+        "linear_original_kkt_residual": 1.8762474033468844e-14,
+        "physical_advances_max": 1,
+        "physical_advances_min": 1,
+        "predictor_evaluations_max": 1,
+        "predictor_evaluations_min": 1,
+        "stationarity_relative": 6.190887259826093e-07,
+        "translation_restoration_max_m": 0.0005213949795874754
+      },
+      "method": "hard_equality_kkt_k2",
+      "pass": true,
+      "quaternion_norm_max_error": 4.160360500549132e-08,
+      "requested_render_frames": 60,
+      "requested_substeps": 600,
+      "semantics": "Track B hard/inextensible stretch from feasible authored rest state",
+      "state_finite_all_steps": true,
+      "timing_descriptive": {
+        "setup_ms_total": 107.622286,
+        "solve_ms_total": 28356.327142,
+        "stage_ms_p50": 47.2497445,
+        "stage_ms_p95": 48.25619759999999,
+        "stage_ms_total": 28463.949428
+      },
+      "transverse_m": {
+        "final_joint_rms": 2.21808864775345e-08,
+        "final_max": 5.967896454018894e-08,
+        "trajectory_max": 2.4503292958276455e-07,
+        "trajectory_rms_of_joint_rms": 3.262646496626863e-08
+      }
+    },
+    "k2_vs_k12": {
+      "bend_absolute_differences_rad": {
+        "final_joint_rms": 1.671543857495461e-08,
+        "final_max": 1.073558599795632e-07,
+        "trajectory_max": 1.073558599795632e-07,
+        "trajectory_rms_of_joint_rms": 7.09035358203991e-10
+      },
+      "bend_relative_differences": {
+        "final_joint_rms": 2.3691019123055848e-07,
+        "final_max": 1.599118116610898e-07,
+        "trajectory_max": 1.599118116610898e-07,
+        "trajectory_rms_of_joint_rms": 1.7833364169523257e-08
+      },
+      "complete_gate": true,
+      "curvature_absolute_gate": true,
+      "curvature_relative_gate": true,
+      "energy_gate": true,
+      "final_energy_absolute_difference_J": 2.2126715894188465e-05,
+      "final_energy_relative_difference": 7.710854780259113e-07,
+      "finite_state_gate": true,
+      "full_state": {
+        "full_state_relative_l2": 8.999593878649365e-06,
+        "position_max_m": 7.539457464619588e-07,
+        "position_rms_m": 6.974982707865251e-08,
+        "rotation_max_rad": 0.0008047965840387363,
+        "rotation_rms_rad": 0.00032700568518270176,
+        "velocity_max": 0.000659895251618804,
+        "velocity_relative_l2": 1.0291786669018557e-05
+      },
+      "full_state_relative_gate": true,
+      "gravity_work_absolute_difference_J": 1.0007928352706585e-06,
+      "gravity_work_relative_difference": 1.2808817449786838e-08,
+      "hard_feasibility_gate": true,
+      "hard_stationarity_gate": true,
+      "linear_original_kkt_gate": true,
+      "one_dt_gate": true,
+      "pass": true,
+      "position_gate": true,
+      "rotation_gate": true,
+      "velocity_gate": true,
+      "work_gate": true
+    },
+    "k5": {
+      "axial_abs_m": {
+        "final_joint_rms": 6.451479829020756e-08,
+        "final_max": 2.0922238681726973e-07,
+        "trajectory_max": 4.761601122517602e-07,
+        "trajectory_rms_of_joint_rms": 6.198214240889946e-08
+      },
+      "bend_rest_angle_rad": {
+        "final_joint_rms": 0.07055601318006334,
+        "final_max": 0.6713441544086098,
+        "trajectory_max": 0.6713441544086098,
+        "trajectory_rms_of_joint_rms": 0.03975892330038958
+      },
+      "completed_render_frames": 60,
+      "completed_substeps": 600,
+      "duration_s": 1.0,
+      "energy_work": {
+        "change_minus_gravity_work_J": -81.00020170925066,
+        "final": {
+          "elastic_bend_J": 1.5805629411872242,
+          "elastic_stretch_J": 3.056841609265025e-09,
+          "kinetic_angular_J": 0.017597474541463123,
+          "kinetic_linear_J": 73.66787231459985,
+          "mechanical_total_J": 28.695542225533814,
+          "potential_gravity_J": -46.57049050785156
+        },
+        "gravity_work_J": 78.133117221318,
+        "initial": {
+          "elastic_bend_J": 0.0,
+          "elastic_stretch_J": 2.407412430484045e-31,
+          "kinetic_angular_J": 0.0,
+          "kinetic_linear_J": 0.0,
+          "mechanical_total_J": 31.562626713466464,
+          "potential_gravity_J": 31.562626713466464
+        },
+        "mechanical_energy_change_J": -2.867084487932651,
+        "note": "negative balance includes authored damping and implicit-integration loss; this is a diagnostic, not a conservation claim"
+      },
+      "failure": null,
+      "gap_3d_m": {
+        "final_joint_rms": 6.938244586434058e-08,
+        "final_max": 2.2026139140627073e-07,
+        "trajectory_max": 4.7678174334024226e-07,
+        "trajectory_rms_of_joint_rms": 7.002691512728433e-08
+      },
+      "hard_kkt_worst": {
+        "caller_state_unchanged_all": true,
+        "constraint_max_m": 8.95090418262362e-16,
+        "internal_time_substeps_max": 0,
+        "linear_original_kkt_residual": 1.9516895260725937e-14,
+        "physical_advances_max": 1,
+        "physical_advances_min": 1,
+        "predictor_evaluations_max": 1,
+        "predictor_evaluations_min": 1,
+        "stationarity_relative": 6.092524602120074e-07,
+        "translation_restoration_max_m": 0.0005215410683976566
+      },
+      "method": "hard_equality_kkt_k5",
+      "pass": true,
+      "quaternion_norm_max_error": 4.184686108743563e-08,
+      "requested_render_frames": 60,
+      "requested_substeps": 600,
+      "semantics": "Track B hard/inextensible stretch from feasible hard state",
+      "state_finite_all_steps": true,
+      "timing_descriptive": {
+        "setup_ms_total": 106.053249,
+        "solve_ms_total": 34731.58718,
+        "stage_ms_p50": 54.9866945,
+        "stage_ms_p95": 87.73780955000001,
+        "stage_ms_total": 34837.640429
+      },
+      "transverse_m": {
+        "final_joint_rms": 2.552968068135558e-08,
+        "final_max": 9.942515358389879e-08,
+        "trajectory_max": 2.5804532960331924e-07,
+        "trajectory_rms_of_joint_rms": 3.2588078566352935e-08
+      }
+    },
+    "k5_vs_k12": {
+      "bend_absolute_differences_rad": {
+        "final_joint_rms": 0.0,
+        "final_max": 0.0,
+        "trajectory_max": 0.0,
+        "trajectory_rms_of_joint_rms": 0.0
+      },
+      "bend_relative_differences": {
+        "final_joint_rms": 0.0,
+        "final_max": 0.0,
+        "trajectory_max": 0.0,
+        "trajectory_rms_of_joint_rms": 0.0
+      },
+      "complete_gate": true,
+      "curvature_absolute_gate": true,
+      "curvature_relative_gate": true,
+      "energy_gate": true,
+      "final_energy_absolute_difference_J": 0.0,
+      "final_energy_relative_difference": 0.0,
+      "finite_state_gate": true,
+      "full_state": {
+        "full_state_relative_l2": 0.0,
+        "position_max_m": 0.0,
+        "position_rms_m": 0.0,
+        "rotation_max_rad": 0.0008080767211341148,
+        "rotation_rms_rad": 0.00035769777518032935,
+        "velocity_max": 0.0,
+        "velocity_relative_l2": 0.0
+      },
+      "full_state_relative_gate": true,
+      "gravity_work_absolute_difference_J": 0.0,
+      "gravity_work_relative_difference": 0.0,
+      "hard_feasibility_gate": true,
+      "hard_stationarity_gate": true,
+      "linear_original_kkt_gate": true,
+      "one_dt_gate": true,
+      "pass": true,
+      "position_gate": true,
+      "rotation_gate": true,
+      "velocity_gate": true,
+      "work_gate": true
+    },
+    "pass": true
+  },
+  "n512": {
+    "context_note": "different finite-compliance material context; never bend truth",
+    "executed": true,
+    "finite_context": [
+      {
+        "duration_s": 3.216666666666667,
+        "gap_3d_m": {
+          "final_joint_rms": 0.027785618221028197,
+          "final_max": 0.04459812864661217,
+          "trajectory_max": 0.04459812864661217,
+          "trajectory_rms_of_joint_rms": 0.016360760424460923
+        },
+        "limitation": "round-4 NPZ stores positions/gaps, not orientation or energy",
+        "method": "vbd_2",
+        "npz_sha256": "51efef1482d11cf85c52cc743eae866fe854058f604ed05b1fa800d7662aa43a",
+        "semantics": "authored finite penalty requested VBD",
+        "source_bound": true,
+        "substep_ms_p50_descriptive": 0.6098514422774315
+      },
+      {
+        "duration_s": 3.216666666666667,
+        "gap_3d_m": {
+          "final_joint_rms": 0.019287346696256497,
+          "final_max": 0.04411018639802933,
+          "trajectory_max": 0.04411018639802933,
+          "trajectory_rms_of_joint_rms": 0.012794962936196023
+        },
+        "limitation": "round-4 NPZ stores positions/gaps, not orientation or energy",
+        "method": "vbd_10",
+        "npz_sha256": "ba1054bdef1e06f8e478d318f06ab69bd340ed947827b7e3849363cfabfb9628",
+        "semantics": "authored finite penalty requested VBD",
+        "source_bound": true,
+        "substep_ms_p50_descriptive": 2.41007748991251
+      },
+      {
+        "duration_s": 3.216666666666667,
+        "gap_3d_m": {
+          "final_joint_rms": 0.019291434282738197,
+          "final_max": 0.04414277896285057,
+          "trajectory_max": 0.04414277896285057,
+          "trajectory_rms_of_joint_rms": 0.012786087473984159
+        },
+        "limitation": "round-4 NPZ stores positions/gaps, not orientation or energy",
+        "method": "vbd_80",
+        "npz_sha256": "a341c1b0c4f2692eea7f58faa024489566e454773533844fa3bd80250d66c2d9",
+        "semantics": "authored finite penalty requested VBD",
+        "source_bound": true,
+        "substep_ms_p50_descriptive": 18.12231633812189
+      },
+      {
+        "duration_s": 3.216666666666667,
+        "gap_3d_m": {
+          "final_joint_rms": 0.019444650185150264,
+          "final_max": 0.04461030289530754,
+          "trajectory_max": 0.04461030289530754,
+          "trajectory_rms_of_joint_rms": 0.012787666225300387
+        },
+        "limitation": "round-4 NPZ stores positions/gaps, not orientation or energy",
+        "method": "global_bgn",
+        "npz_sha256": "234c670eec3779ec0d5d3410b0c24beb4029af25fa26db58d601a55e740c8b01",
+        "semantics": "same authored finite compliance; compact global Track-B path",
+        "source_bound": true,
+        "substep_ms_p50_descriptive": 160.60351580381393
+      }
+    ],
+    "full_gate": false,
+    "phase1_600_steps": {
+      "gate": false,
+      "summary": {
+        "axial_abs_m": {
+          "final_joint_rms": 3.101822834753989e-08,
+          "final_max": 2.1766169405614921e-07,
+          "trajectory_max": 9.5367431640625e-07,
+          "trajectory_rms_of_joint_rms": 3.8758184097021286e-08
+        },
+        "bend_rest_angle_rad": {
+          "final_joint_rms": 0.011692264337232024,
+          "final_max": 0.22063613730353313,
+          "trajectory_max": 0.22063613730353313,
+          "trajectory_rms_of_joint_rms": 0.007153921054284287
+        },
+        "completed_render_frames": 23,
+        "completed_substeps": 232,
+        "duration_s": 0.3866666666666667,
+        "energy_work": {
+          "change_minus_gravity_work_J": -90.00400170317467,
+          "final": {
+            "elastic_bend_J": 0.173408188117234,
+            "elastic_stretch_J": 7.931349709319524e-09,
+            "kinetic_angular_J": 0.0005868014516477806,
+            "kinetic_linear_J": 88.20587897058236,
+            "mechanical_total_J": 126.55400613570147,
+            "potential_gravity_J": 38.17413216761887
+          },
+          "gravity_work_J": 89.56192679759448,
+          "initial": {
+            "elastic_bend_J": 0.0,
+            "elastic_stretch_J": 2.407412430484045e-31,
+            "kinetic_angular_J": 0.0,
+            "kinetic_linear_J": 0.0,
+            "mechanical_total_J": 126.99608104128166,
+            "potential_gravity_J": 126.99608104128166
+          },
+          "mechanical_energy_change_J": -0.4420749055801849,
+          "note": "negative balance includes authored damping and implicit-integration loss; this is a diagnostic, not a conservation claim"
+        },
+        "failure": {
+          "certificate": {
+            "constraint": {
+              "max_m": 1.7763568394002505e-15,
+              "mean_m": 3.910766035861608e-18,
+              "rms_m": 7.881128278506402e-17
+            },
+            "finite": true,
+            "linear_original_kkt": {
+              "backend": "symmetrically scaled sparse hard KKT -> FP64 splu",
+              "constraint_rows": 1533,
+              "constraint_scale_max": 171.79407231366218,
+              "constraint_scale_min": 85.79980744243238,
+              "elapsed_ms_descriptive": 5.381777,
+              "matrix_shape": [
+                4599,
+                4599
+              ],
+              "nnz": 31140,
+              "original_feasibility_inf": 7.954463194909195e-19,
+              "original_feasibility_relative": 7.954463194909195e-19,
+              "original_kkt_residual": 1.7631729409828267e-14,
+              "original_stationarity_inf": 1.7631729409828267e-14,
+              "original_stationarity_relative": 1.7631729409828267e-14,
+              "pivot_ratio_scaled": 0.00674581732158778,
+              "primal_dofs": 3066,
+              "primal_scale_max": 0.4218576610175903,
+              "primal_scale_min": 0.005742924664977947
+            },
+            "multiplier_max_N": 52.29258277821836,
+            "newton_correction_rotation_max_rad": 2.148265995240917e-07,
+            "newton_correction_translation_max_m": 6.813111537179783e-09,
+            "stationarity_inf": 5.5177414579388184e-05,
+            "stationarity_relative": 5.5177414579388184e-05
+          },
+          "method_pass": false,
+          "metrics": {
+            "axial_abs_m": {
+              "max": 2.1766169405614921e-07,
+              "rms": 3.101822834753989e-08
+            },
+            "axial_abs_over_segment": {
+              "max": 5.44154235140373e-06,
+              "rms": 7.754557086884973e-07
+            },
+            "bend_rest_angle_rad": {
+              "max": 0.22063613730353313,
+              "rms": 0.011692264337232024
+            },
+            "gap_3d_m": {
+              "max": 2.1785733480440716e-07,
+              "rms": 3.2576106069381475e-08
+            },
+            "gap_3d_over_segment": {
+              "max": 5.446433370110179e-06,
+              "rms": 8.144026517345369e-07
+            },
+            "joint_count": 511,
+            "quaternion_norm_max_error": 3.78996396488418e-08,
+            "state_finite": true,
+            "transverse_m": {
+              "max": 5.240261359621877e-08,
+              "rms": 9.953501736748994e-09
+            },
+            "transverse_over_segment": {
+              "max": 1.3100653399054692e-06,
+              "rms": 2.4883754341872484e-07
+            },
+            "worst_bend_joint": 0,
+            "worst_gap_joint": 67
+          },
+          "substep": 233,
+          "time_s": 0.38833333333333336
+        },
+        "gap_3d_m": {
+          "final_joint_rms": 3.2576106069381475e-08,
+          "final_max": 2.1785733480440716e-07,
+          "trajectory_max": 9.5367431640625e-07,
+          "trajectory_rms_of_joint_rms": 4.0046953565051275e-08
+        },
+        "hard_kkt_worst": {
+          "caller_state_unchanged_all": true,
+          "constraint_max_m": 3.552713678800501e-15,
+          "internal_time_substeps_max": 0,
+          "linear_original_kkt_residual": 2.7131075164277263e-14,
+          "physical_advances_max": 1,
+          "physical_advances_min": 1,
+          "predictor_evaluations_max": 1,
+          "predictor_evaluations_min": 1,
+          "stationarity_relative": 5.5177414579388184e-05,
+          "translation_restoration_max_m": 3.530996581277459e-05
+        },
+        "method": "hard_equality_kkt_k2",
+        "pass": false,
+        "quaternion_norm_max_error": 4.206126025252388e-08,
+        "requested_render_frames": 60,
+        "requested_substeps": 600,
+        "semantics": "Track B hard/inextensible stretch from feasible hard state",
+        "state_finite_all_steps": true,
+        "timing_descriptive": {
+          "setup_ms_total": 40.467113,
+          "solve_ms_total": 25933.434591,
+          "stage_ms_p50": 111.599707,
+          "stage_ms_p95": 113.54130079999999,
+          "stage_ms_total": 25973.901704
+        },
+        "transverse_m": {
+          "final_joint_rms": 9.953501736748994e-09,
+          "final_max": 5.240261359621877e-08,
+          "trajectory_max": 7.089301994458662e-08,
+          "trajectory_rms_of_joint_rms": 1.0077780278552387e-08
+        }
+      }
+    },
+    "phase2_to_frame193": null
+  },
+  "n64_dt_refinement": {
+    "claim_boundary": "descriptive first-order timestep refinement; no convergence-order claim",
+    "coarse": {
+      "axial_abs_m": {
+        "final_joint_rms": 2.465176434238102e-08,
+        "final_max": 7.49911685581164e-08,
+        "trajectory_max": 1.1927007856872362e-07,
+        "trajectory_rms_of_joint_rms": 1.8171710606981764e-08
+      },
+      "bend_rest_angle_rad": {
+        "final_joint_rms": 0.012163064389705493,
+        "final_max": 0.06114462425981053,
+        "trajectory_max": 0.06114462425981053,
+        "trajectory_rms_of_joint_rms": 0.006668725344036405
+      },
+      "completed_render_frames": 6,
+      "completed_substeps": 60,
+      "duration_s": 0.1,
+      "energy_work": {
+        "change_minus_gravity_work_J": -0.7331067029873125,
+        "final": {
+          "elastic_bend_J": 0.023300571317329193,
+          "elastic_stretch_J": 3.9126268635745945e-10,
+          "kinetic_angular_J": 0.00021615345465035888,
+          "kinetic_linear_J": 0.6844178513862652,
+          "mechanical_total_J": 15.644464928945014,
+          "potential_gravity_J": 14.936530352395508
+        },
+        "gravity_work_J": 0.7205206397684097,
+        "initial": {
+          "elastic_bend_J": 0.0,
+          "elastic_stretch_J": 2.407412430484045e-31,
+          "kinetic_angular_J": 0.0,
+          "kinetic_linear_J": 0.0,
+          "mechanical_total_J": 15.657050992163917,
+          "potential_gravity_J": 15.657050992163917
+        },
+        "mechanical_energy_change_J": -0.012586063218902765,
+        "note": "negative balance includes authored damping and implicit-integration loss; this is a diagnostic, not a conservation claim"
+      },
+      "failure": null,
+      "gap_3d_m": {
+        "final_joint_rms": 3.5243492537121755e-08,
+        "final_max": 8.453304024049323e-08,
+        "trajectory_max": 1.2875888006693134e-07,
+        "trajectory_rms_of_joint_rms": 2.6973408576282542e-08
+      },
+      "hard_kkt_worst": {
+        "caller_state_unchanged_all": true,
+        "constraint_max_m": 4.440892098500626e-16,
+        "internal_time_substeps_max": 0,
+        "linear_original_kkt_residual": 1.5265566588595902e-15,
+        "physical_advances_max": 1,
+        "physical_advances_min": 1,
+        "predictor_evaluations_max": 1,
+        "predictor_evaluations_min": 1,
+        "stationarity_relative": 1.0616162374188498e-07,
+        "translation_restoration_max_m": 2.8562746873223354e-05
+      },
+      "method": "hard_equality_kkt_k2",
+      "pass": true,
+      "quaternion_norm_max_error": 4.103169626290537e-08,
+      "requested_render_frames": 6,
+      "requested_substeps": 60,
+      "semantics": "Track B hard/inextensible stretch from feasible hard state",
+      "state_finite_all_steps": true,
+      "timing_descriptive": {
+        "setup_ms_total": 10.346902,
+        "solve_ms_total": 1938.8573189999997,
+        "stage_ms_p50": 32.4845755,
+        "stage_ms_p95": 32.7652703,
+        "stage_ms_total": 1949.204221
+      },
+      "transverse_m": {
+        "final_joint_rms": 2.518718485702339e-08,
+        "final_max": 5.283389074020392e-08,
+        "trajectory_max": 5.9604644775345004e-08,
+        "trajectory_rms_of_joint_rms": 1.9933732812475914e-08
+      }
+    },
+    "final_state_coarse_vs_fine": {
+      "full_state_relative_l2": 0.013594212956721693,
+      "position_max_m": 0.0005671668847244864,
+      "position_rms_m": 0.00021621221926685093,
+      "rotation_max_rad": 0.0013171472780076684,
+      "rotation_rms_rad": 0.0006254398809868834,
+      "velocity_max": 0.07643164955619892,
+      "velocity_relative_l2": 0.02476284399348378
+    },
+    "fine": {
+      "axial_abs_m": {
+        "final_joint_rms": 2.733527878165756e-08,
+        "final_max": 1.1824832912492708e-07,
+        "trajectory_max": 1.1979879584821887e-07,
+        "trajectory_rms_of_joint_rms": 1.908479540733187e-08
+      },
+      "bend_rest_angle_rad": {
+        "final_joint_rms": 0.012193527884711756,
+        "final_max": 0.061133660893296624,
+        "trajectory_max": 0.061133660893296624,
+        "trajectory_rms_of_joint_rms": 0.006642269860061894
+      },
+      "completed_render_frames": 6,
+      "completed_substeps": 120,
+      "duration_s": 0.1,
+      "energy_work": {
+        "change_minus_gravity_work_J": -0.7214482572100617,
+        "final": {
+          "elastic_bend_J": 0.023417434258350796,
+          "elastic_stretch_J": 4.4112684942912847e-10,
+          "kinetic_angular_J": 0.00022031441605385575,
+          "kinetic_linear_J": 0.685129937794795,
+          "mechanical_total_J": 15.65071070701405,
+          "potential_gravity_J": 14.941943020103723
+        },
+        "gravity_work_J": 0.7151079720601937,
+        "initial": {
+          "elastic_bend_J": 0.0,
+          "elastic_stretch_J": 2.407412430484045e-31,
+          "kinetic_angular_J": 0.0,
+          "kinetic_linear_J": 0.0,
+          "mechanical_total_J": 15.657050992163917,
+          "potential_gravity_J": 15.657050992163917
+        },
+        "mechanical_energy_change_J": -0.0063402851498679524,
+        "note": "negative balance includes authored damping and implicit-integration loss; this is a diagnostic, not a conservation claim"
+      },
+      "failure": null,
+      "gap_3d_m": {
+        "final_joint_rms": 3.742195474050504e-08,
+        "final_max": 1.2431134458061238e-07,
+        "trajectory_max": 1.2886101925641685e-07,
+        "trajectory_rms_of_joint_rms": 2.8105583987107196e-08
+      },
+      "hard_kkt_worst": {
+        "caller_state_unchanged_all": true,
+        "constraint_max_m": 4.440892098500626e-16,
+        "internal_time_substeps_max": 0,
+        "linear_original_kkt_residual": 1.4988010832439613e-15,
+        "physical_advances_max": 1,
+        "physical_advances_min": 1,
+        "predictor_evaluations_max": 1,
+        "predictor_evaluations_min": 1,
+        "stationarity_relative": 2.1104364555241117e-07,
+        "translation_restoration_max_m": 7.207958904398233e-06
+      },
+      "method": "hard_equality_kkt_k2",
+      "pass": true,
+      "quaternion_norm_max_error": 4.171246725803712e-08,
+      "requested_render_frames": 6,
+      "requested_substeps": 120,
+      "semantics": "Track B hard/inextensible stretch from feasible hard state",
+      "state_finite_all_steps": true,
+      "timing_descriptive": {
+        "setup_ms_total": 20.786054,
+        "solve_ms_total": 3884.7304369999997,
+        "stage_ms_p50": 32.441236,
+        "stage_ms_p95": 33.066713899999996,
+        "stage_ms_total": 3905.516491
+      },
+      "transverse_m": {
+        "final_joint_rms": 2.5557488736757174e-08,
+        "final_max": 4.911193113272661e-08,
+        "trajectory_max": 6.016200234691804e-08,
+        "trajectory_rms_of_joint_rms": 2.06323637888784e-08
+      }
+    },
+    "pass": true,
+    "physical_horizon_s": 0.1
+  },
+  "owner_line_end": "OWNER: Team Codex-Remote \u2014 2026-07-05T11:40Z \u2014 coupled long-chain/contact solver invention round",
+  "owner_line_start": "OWNER: Team Codex-Remote \u2014 2026-07-05T11:40Z \u2014 coupled long-chain/contact solver invention round",
+  "pid": 1928744,
+  "platform": "Linux-5.15.0-113-generic-x86_64-with-glibc2.35",
+  "schema": "codex-hard-kkt-same-semantics-parity/v1",
+  "snapshot_files": {
+    "n128_k12_render_states.npz": {
+      "bytes": 203637,
+      "sha256": "82395b51380e977345e274f428461d963b9fd1dbc651f5d933dd3af4c7302f4b"
+    },
+    "n128_k5_render_states.npz": {
+      "bytes": 203637,
+      "sha256": "82395b51380e977345e274f428461d963b9fd1dbc651f5d933dd3af4c7302f4b"
+    },
+    "n512_k2_render_states.npz": {
+      "bytes": 104243,
+      "sha256": "49d2384f07fdaa23a288363e9045fc179f04aebc10ae41884ea78dd2b971013a"
+    }
+  },
+  "sources": {
+    "codex_hard_kkt_bgn.py": "0e6d848c483ce146b558efcb1d3078db88347a70dca6798c50b58e1f8afae604",
+    "codex_hard_kkt_parity.py": "40c4dbf9c17982dc728f1d94a31d4ab1d6889930aa6a7f10cb159850e9da47a4",
+    "codex_hard_kkt_trajectory.py": "d0904f2babb5fec06efc35652035e0c89b6b92ac36fb92ccf0f3613ace35f8b5"
+  },
+  "thresholds": {
+    "curvature_absolute_rad": 0.001,
+    "curvature_relative": 0.01,
+    "energy_relative": 0.01,
+    "full_state_relative_l2": 0.001,
+    "hard_feasibility_m": 0.0001,
+    "hard_stationarity": 5e-05,
+    "linear_original_kkt": 1e-10,
+    "position_rms_m": 0.001,
+    "rotation_rms_rad": 0.001,
+    "velocity_relative_l2": 0.01,
+    "work_relative": 0.01
+  }
+}
