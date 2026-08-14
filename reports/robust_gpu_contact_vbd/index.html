@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Horde measurements and rendered comparisons for ACM-inspired rigid contact in Newton VBD.">
+  <link rel="icon" href="data:,">
+  <title>Robust GPU Contact for VBD</title>
+  <style>
+:root {
+  color-scheme: light;
+  --ink: #17202a;
+  --muted: #5f6f82;
+  --line: #d9e0e8;
+  --panel: #f7f9fb;
+  --accent: #1f6f8b;
+  --good: #16845b;
+  --warn: #a76000;
+  --bad: #b83243;
+  --max: 1280px;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: #fff;
+  color: var(--ink);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.55;
+}
+header { border-bottom: 1px solid var(--line); background: linear-gradient(135deg, #f8fbfd 0%, #fff 62%); }
+main, .header-inner, footer { width: min(var(--max), calc(100vw - 32px)); margin: 0 auto; }
+.header-inner { padding: 38px 0 30px; }
+.breadcrumb { margin: 0 0 14px; font-size: 0.92rem; font-weight: 700; }
+.breadcrumb a { color: var(--accent); text-decoration: none; }
+h1 { margin: 0 0 10px; font-size: clamp(2.1rem, 4.5vw, 3.7rem); line-height: 1.02; letter-spacing: -0.035em; }
+.subtitle { max-width: 930px; margin: 0; color: var(--muted); font-size: 1.08rem; }
+.metric-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 24px; }
+.metric { border: 1px solid var(--line); border-radius: 10px; background: #fff; padding: 14px 16px; }
+.metric .label { color: var(--muted); font-size: 0.78rem; font-weight: 750; text-transform: uppercase; letter-spacing: .04em; }
+.metric .value { display: block; margin-top: 4px; font-size: 1.18rem; font-weight: 780; }
+.metric .good { color: var(--good); }
+.metric .warn { color: var(--warn); }
+main { padding: 30px 0 52px; }
+section { margin: 0 0 42px; scroll-margin-top: 18px; }
+h2 { margin: 0 0 10px; font-size: 1.55rem; line-height: 1.2; letter-spacing: -0.015em; }
+h3 { margin: 20px 0 9px; font-size: 1.08rem; line-height: 1.25; }
+p { margin: 0 0 12px; }
+a { color: var(--accent); }
+code {
+  padding: .08em .28em;
+  border-radius: 4px;
+  background: #edf2f7;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: .92em;
+}
+pre { margin: 12px 0 0; padding: 14px 16px; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+pre code { padding: 0; background: transparent; }
+.lede { max-width: 1000px; font-size: 1.05rem; }
+.takeaways { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
+.takeaway { border: 1px solid var(--line); border-radius: 9px; padding: 15px; background: #fff; }
+.takeaway strong { display: block; margin-bottom: 5px; }
+.takeaway.good { border-top: 4px solid var(--good); }
+.takeaway.warn { border-top: 4px solid var(--warn); }
+.video-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
+.video-grid.single { grid-template-columns: 1fr; max-width: 1120px; margin-inline: auto; }
+figure { margin: 0; border: 1px solid var(--line); border-radius: 9px; background: #fff; overflow: hidden; }
+figure img, video { display: block; width: 100%; height: auto; }
+video { background: #111827; aspect-ratio: 16 / 9; }
+figcaption { padding: 11px 13px 13px; border-top: 1px solid var(--line); color: var(--muted); font-size: .92rem; }
+.plot-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; align-items: start; }
+.note { border-left: 4px solid var(--accent); background: var(--panel); padding: 13px 15px; margin: 15px 0; }
+.warning { border-left-color: var(--warn); background: #fff8ec; }
+.bad { border-left-color: var(--bad); background: #fff3f4; }
+table { width: 100%; border-collapse: collapse; border: 1px solid var(--line); background: #fff; font-variant-numeric: tabular-nums; }
+th, td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+th { background: var(--panel); color: var(--muted); font-size: .80rem; text-transform: uppercase; letter-spacing: .025em; }
+td.good { color: var(--good); font-weight: 700; }
+td.bad { color: var(--bad); background: transparent; font-weight: 700; }
+.flow { display: grid; grid-template-columns: 1.05fr repeat(3, 1fr) .9fr; gap: 10px; align-items: stretch; margin-top: 17px; }
+.flow-card { position: relative; border: 1px solid var(--line); border-radius: 9px; padding: 13px; background: #fff; }
+.flow-card strong { display: block; margin-bottom: 4px; }
+.flow-card:not(:last-child)::after { content: "→"; position: absolute; right: -10px; top: 43%; z-index: 2; color: var(--accent); font-weight: 800; }
+.flow-card.branch { border-top: 4px solid var(--accent); }
+.flow-card.pending { border-style: dashed; border-color: var(--warn); }
+.check-list { margin: 0; padding-left: 1.2rem; }
+.check-list li { margin: .42rem 0; }
+.downloads { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
+.button { display: inline-block; border: 1px solid var(--accent); border-radius: 7px; padding: 8px 11px; color: var(--accent); text-decoration: none; font-weight: 700; }
+footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
+@media (max-width: 960px) {
+  .metric-row, .takeaways, .plot-grid, .video-grid { grid-template-columns: 1fr 1fr; }
+  .flow { grid-template-columns: 1fr; }
+  .flow-card:not(:last-child)::after { content: "↓"; right: 50%; top: auto; bottom: -15px; }
+}
+@media (max-width: 680px) {
+  .metric-row, .takeaways, .plot-grid, .video-grid { grid-template-columns: 1fr; }
+  th, td { font-size: .86rem; padding: 7px 6px; }
+}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <p class="breadcrumb"><a href="../">Newton Reports</a> / Robust GPU Contact for VBD</p>
+      <h1>Robust GPU Contact for VBD</h1>
+      <p class="subtitle">
+        Horde evidence for an ACM-inspired hybrid: queried event time for fast free-flight impact,
+        contact-only normal PCG for dense simultaneous impact, and conditioned physical VBD microsteps
+        for jointed, persistent, frictional contact evolution.
+      </p>
+      <div class="metric-row">
+        <div class="metric"><span class="label">10,000 m/s impact</span><span class="value good">+5.78 µm gap</span></div>
+        <div class="metric"><span class="label">16-body closure</span><span class="value good">5.01e-6 m/s error</span></div>
+        <div class="metric"><span class="label">Dense graph cost</span><span class="value good">0.584 ms</span></div>
+        <div class="metric"><span class="label">Guarantee status</span><span class="value warn">Empirical · queried pairs</span></div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section id="outcome">
+      <h2>Outcome</h2>
+      <p class="lede">
+        The narrow ACM-like route is already excellent on the cases it is designed for. A correctly queried
+        10,000 m/s plane impact is stopped at event time without a tiny global step, and a dense equal-mass
+        impact island reaches the analytic inelastic velocity while ordinary one-step VBD explodes. The cable
+        case also validates the opposite routing decision: event/PCG is gated off, full coupled VBD microsteps
+        remain active, and effective-mass contact conditioning materially improves feasibility.
+      </p>
+      <div class="takeaways">
+        <div class="takeaway good"><strong>Fast isolated impact works</strong>One queried event, two body updates, zero debt, and no tunnelling over a nominal 300 m displacement.</div>
+        <div class="takeaway good"><strong>Dense PCG has real meat</strong>Matrix-free normal impulse closure preserves momentum and costs well under 1 ms for the tested 16-body graph.</div>
+        <div class="takeaway warn"><strong>Not intersection-free yet</strong>Candidate completeness, curved swept geometry, post-redirection refresh, and rollback/finer replay remain open.</div>
+      </div>
+    </section>
+
+    <section id="fast-impact">
+      <h2>Fast free-flight impact</h2>
+      <p>
+        Both sides receive the same predictive sphere–plane contact. Ordinary VBD attempts to repair the entire
+        30 ms displacement at the endpoint; the event route reconstructs the contact time, applies the normal
+        impulse, then advances the remaining time from a physically consistent state.
+      </p>
+      <div class="video-grid single">
+        <figure>
+          <video src="assets/fast_impact_comparison.mp4" poster="assets/fast_impact_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+          <figcaption>
+            10,000 m/s sphere, 30 ms frame, 0.45 m initial gap. Motion between the large-step endpoints is
+            interpolated only for viewing and is slowed near impact; the displayed endpoints and velocities are
+            the actual Horde solver outputs.
+          </figcaption>
+        </figure>
+      </div>
+      <table style="margin-top: 18px;">
+        <thead><tr><th>Method</th><th>Final signed gap</th><th>Final normal velocity</th><th>Event updates</th><th>Result</th></tr></thead>
+        <tbody>
+          <tr><td>Ordinary one-step VBD</td><td class="bad">−16.579 m</td><td>−567.6 m/s</td><td>0</td><td class="bad">Tunnels</td></tr>
+          <tr><td>Queried event + direct impulse</td><td class="good">+5.778 µm</td><td>−2.20e−13 m/s</td><td>2</td><td class="good">Feasible, zero debt</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="dense-impact">
+      <h2>Dense simultaneous impact</h2>
+      <p>
+        Sixteen touching equal-mass spheres form one queried impact component. Body 0 enters at 20 m/s. The
+        contact-only PCG route solves the instantaneous unilateral normal impulse system; it does not replace
+        VBD for joints, friction, or persistent support.
+      </p>
+      <div class="video-grid single">
+        <figure>
+          <video src="assets/dense_chain_comparison.mp4" poster="assets/dense_chain_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+          <figcaption>
+            Endpoint positions are interpolated solely to expose the one-step result. The hybrid leaves the
+            chain touching and moving at the analytic 1.25 m/s; ordinary VBD creates large alternating velocities,
+            crossings, and gaps.
+          </figcaption>
+        </figure>
+      </div>
+      <div class="plot-grid">
+        <figure>
+          <img src="assets/dense_velocity_closure.png" alt="Final velocity by sphere for ordinary VBD, event PCG, and the analytic inelastic target.">
+          <figcaption>Velocity closure across the complete queried contact island.</figcaption>
+        </figure>
+        <table>
+          <thead><tr><th>Metric</th><th>Ordinary VBD</th><th>Event + PCG</th></tr></thead>
+          <tbody>
+            <tr><td>Max |v − v*|</td><td class="bad">56.57 m/s</td><td class="good">5.01e−6 m/s</td></tr>
+            <tr><td>Gap interval</td><td class="bad">[−2.201, +2.679] m</td><td class="good">[−1.42e−7, +2.01e−7] m</td></tr>
+            <tr><td>Momentum error</td><td class="bad">+21.74 kg·m/s</td><td class="good">0.0 kg·m/s</td></tr>
+            <tr><td>Energy ratio</td><td class="bad">24.46</td><td class="good">0.0625</td></tr>
+            <tr><td>Captured GPU median</td><td>not measured</td><td class="good">0.584 ms</td></tr>
+            <tr><td>Event debt</td><td>—</td><td class="good">0</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note warning">
+        The alternating <code>1:10⁶</code> mass chain also remained finite with zero debt and gaps within
+        approximately ±1.6e−7 m, but its velocity error is large relative to its tiny center-of-mass velocity.
+        A higher-precision unilateral reference is still required before claiming extreme mass-ratio robustness.
+      </div>
+    </section>
+
+    <section id="cable">
+      <h2>Jointed cable contact: coupled VBD wins the routing decision</h2>
+      <p>
+        The 20 rad/s cable-twist scene has 189 rigid bodies, joints, ground contact, self-contact, friction, and
+        changing topology. The dispatcher correctly performs zero event/PCG body updates: contact-only impact
+        impulses would omit the forces generating the contact. Instead, each selected bucket executes real
+        coupled VBD microsteps with collision refresh.
+      </p>
+      <div class="video-grid">
+        <figure>
+          <video src="assets/cable_conditioning_comparison.mp4" poster="assets/cable_conditioning_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+          <figcaption>Same 10 mm clock target. The effective-mass floor <code>k ≥ ρm_eff/h²</code>, with <code>ρ=5</code>, reduces worst fresh penetration from 62.03 mm to 3.31 mm.</figcaption>
+        </figure>
+        <figure>
+          <video src="assets/cable_accuracy_comparison.mp4" poster="assets/cable_accuracy_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+          <figcaption>Conditioned fast and high-robustness clocks. These are actual frame-by-frame Horde positions; overlays report a fresh collision query after each rendered frame.</figcaption>
+        </figure>
+      </div>
+      <div class="plot-grid">
+        <figure>
+          <img src="assets/cable_accuracy_cost.png" alt="Worst cable penetration versus median frame time for unconditioned and conditioned adaptive substep schedules.">
+          <figcaption>Conditioning provides the large first improvement; smaller motion targets then trade cost for additional temporal resolution.</figcaption>
+        </figure>
+        <table>
+          <thead><tr><th>Contact setup</th><th>Worst fresh penetration</th><th>Median / p95</th><th>Frames with newly missed pairs</th></tr></thead>
+          <tbody>
+            <tr><td>ρ=0, target 10 mm</td><td class="bad">62.03 mm</td><td>32.04 / 64.13 ms</td><td>22 / 120</td></tr>
+            <tr><td>ρ=5, target 10 mm</td><td class="good">3.311 mm</td><td>29.41 / 61.90 ms</td><td>22 / 120</td></tr>
+            <tr><td>ρ=5, target 5 mm</td><td class="good">2.487 mm</td><td>58.54 / 124.32 ms</td><td>28 / 120</td></tr>
+            <tr><td>ρ=5, target 1 mm</td><td class="good">1.559 mm</td><td>119.02 / 135.25 ms</td><td>14 / 120</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note warning">
+        This cable is a chaotic, GPU-order-sensitive stress test. A separate fresh-process repeat of the conditioned
+        1 mm case measured 0.324 mm rather than 1.559 mm worst penetration. The table deliberately uses the more
+        conservative value from the exact trajectory packaged with this report. Neither value is a guarantee.
+      </div>
+    </section>
+
+    <section id="architecture">
+      <h2>Current hybrid architecture</h2>
+      <div class="flow" aria-label="Current contact routing flow">
+        <div class="flow-card"><strong>Predictive query</strong>Swept displacement budget produces candidate contacts and contact-plus-joint islands.</div>
+        <div class="flow-card branch"><strong>Sparse free flight</strong>Exact queried event time and direct manifold normal impulse.</div>
+        <div class="flow-card branch"><strong>Dense free flight</strong>Same event time, matrix-free unilateral normal PCG, KKT/debt check.</div>
+        <div class="flow-card branch"><strong>Persistent / jointed</strong>Conditioned, displacement-bucketed full VBD island microsteps.</div>
+        <div class="flow-card pending"><strong>Next: certify</strong>Fresh swept validation, island snapshot, rollback, and finer graph replay.</div>
+      </div>
+      <p class="note">
+        This is built on VBD. There is no new global PCG solve: PCG is a narrow, contact-only instantaneous normal
+        impact accelerator. Jointed and frictional time evolution remains the ordinary coupled VBD solve.
+      </p>
+    </section>
+
+    <section id="local-clocks">
+      <h2>GPU local-clock foundation</h2>
+      <p>
+        Device kernels construct contact-plus-joint components, reduce the potential displacement
+        <code>h(|v| + R|ω|) + ½h²|a|</code>, and choose power-of-two rates. A captured diagnostic produced labels
+        <code>[0, 1, 1]</code> and rates <code>[2, 4, 4]</code>, preserving every inactive pose and velocity exactly.
+        Forcing insufficient component propagation set debt to 1 and failed closed to rate 8 for all participating bodies.
+      </p>
+      <div class="note warning">
+        The mask establishes correct local-clock state semantics, not a speedup claim. Current graph branches still
+        scan global arrays; compact per-rate body/contact worklists are required before local clocks can reduce cost
+        in proportion to active island size.
+      </div>
+    </section>
+
+    <section id="limits">
+      <h2>Limitations and non-claims</h2>
+      <ul class="check-list">
+        <li><strong>No complete collision guarantee.</strong> Success assumes the needed pair is in the predictive query. Arbitrary curved features, thin geometry, large rotation, and contacts created after impulse redirection are not certified.</li>
+        <li><strong>No production rollback/replay yet.</strong> Debt is detected, but island snapshots, fresh endpoint/swept validation, restoration, and automatic finer graph replay are still missing.</li>
+        <li><strong>PCG is normal-impact only.</strong> It does not solve friction, joints, persistent support, or cable forces; routing those cases into PCG would be physically incomplete.</li>
+        <li><strong>Cable contact is not penetration-free.</strong> Even 320 physical microsteps leave finite penetration, and the robust setting is expensive.</li>
+        <li><strong>Fresh pairs are still discovered late.</strong> Depending on the conditioned rate, 14–28 of 120 cable frames contained pairs absent from the solver's retained set.</li>
+        <li><strong>Active clocks have feature exclusions.</strong> Particle coupling, rigid contact-history matching, Dahl cable history, and event projection cannot yet share the experimental active-body mask safely.</li>
+        <li><strong>This is not original ACM's theorem.</strong> Finite queried events and finite VBD buckets do not inherit ACM's infinite-barrier/separating-certificate no-interpenetration result.</li>
+      </ul>
+    </section>
+
+    <section id="paper">
+      <h2>Is there a paper?</h2>
+      <p>
+        Not from any one ingredient: event-time impact, local time stepping, PCG contact, effective-mass scaling,
+        and CUDA graphs all have prior art. The defensible paper direction is the integrated graph-resident VBD
+        dispatcher—provided the next version adds conservative swept candidate completeness or rollback/finer replay,
+        compact worklists with equal-quality speed wins, and broad comparisons against CCD/IPC and adaptive rigid solvers.
+      </p>
+    </section>
+
+    <section id="reproduction">
+      <h2>Reproduction and raw evidence</h2>
+      <p>
+        Recorded on <strong>NVIDIA L40</strong>, Warp <code>1.17.0.dev20260807</code>, CUDA toolkit <code>12.9</code>,
+        driver <code>12.8</code>, branch <code>codex-sol/contact-strategy</code>. These are focused report benchmarks;
+        no unit-test suite was run. The report renderer never executes physics—it consumes the Horde NPZ trace.
+      </p>
+      <pre><code>curl -L https://jumyungc.github.io/newton/reports/robust_gpu_contact_vbd/ingredients/record_horde_results.py \
+  -o /tmp/record_horde_results.py
+cd /home/horde/git/newton-codex-sol-contact
+PYTHONPATH=$PWD /home/horde/git/newton/.venv/bin/python /tmp/record_horde_results.py \
+  --device cuda:0 --frames 120 --output-dir /tmp/robust_gpu_contact_vbd</code></pre>
+      <div class="downloads">
+        <a class="button" href="assets/horde_results.json">Horde metrics JSON</a>
+        <a class="button" href="assets/horde_traces.npz">Recorded trajectories NPZ</a>
+        <a class="button" href="ingredients/record_horde_results.py">GPU recorder source</a>
+        <a class="button" href="ingredients/render_report_assets.py">Renderer source</a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    Static report generated from Horde-recorded solver state. Published under <code>/newton/reports/robust_gpu_contact_vbd/</code>.
+  </footer>
+</body>
+</html>
