@@ -112,8 +112,8 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
       <div class="metric-row">
         <div class="metric"><span class="label">10,000 m/s impact</span><span class="value good">+5.78 µm gap</span></div>
         <div class="metric"><span class="label">16-body closure</span><span class="value good">5.01e-6 m/s error</span></div>
-        <div class="metric"><span class="label">Dense graph cost</span><span class="value good">0.584 ms</span></div>
-        <div class="metric"><span class="label">Guarantee status</span><span class="value warn">Empirical · queried pairs</span></div>
+        <div class="metric"><span class="label">Cable validated replay</span><span class="value good">31.45 ms median</span></div>
+        <div class="metric"><span class="label">Replay certificate</span><span class="value good">0.956 mm · zero debt</span></div>
       </div>
     </div>
   </header>
@@ -125,13 +125,13 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
         The narrow ACM-like route is already excellent on the cases it is designed for. A correctly queried
         10,000 m/s plane impact is stopped at event time without a tiny global step, and a dense equal-mass
         impact island reaches the analytic inelastic velocity while ordinary one-step VBD explodes. The cable
-        case also validates the opposite routing decision: event/PCG is gated off, full coupled VBD microsteps
-        remain active, and effective-mass contact conditioning materially improves feasibility.
+        case validates the opposite routing decision: event/PCG is gated off, full coupled VBD microsteps remain
+        active, and a device-only fresh-query/rollback loop now enforces a 1 mm endpoint penetration budget.
       </p>
       <div class="takeaways">
         <div class="takeaway good"><strong>Fast isolated impact works</strong>One queried event, two body updates, zero debt, and no tunnelling over a nominal 300 m displacement.</div>
         <div class="takeaway good"><strong>Dense PCG has real meat</strong>Matrix-free normal impulse closure preserves momentum and costs well under 1 ms for the tested 16-body graph.</div>
-        <div class="takeaway warn"><strong>Not intersection-free yet</strong>Candidate completeness, curved swept geometry, post-redirection refresh, and rollback/finer replay remain open.</div>
+        <div class="takeaway good"><strong>Rollback/replay now works</strong>Exact GPU restoration, fresh endpoint validation, residual-driven finer physical VBD, and explicit cap debt.</div>
       </div>
     </section>
 
@@ -243,6 +243,35 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
       </div>
     </section>
 
+    <section id="validated-replay">
+      <h2>Validated speculative VBD: the new cable result</h2>
+      <p>
+        The cable path now saves the complete rigid frame state on the GPU, runs the displacement-predicted VBD
+        branch, rebuilds contacts independently, and accepts only if maximum fresh penetration is at most 1 mm.
+        A failed frame restores the exact start and replays a finer physical branch. Device flags route a fixed CUDA
+        graph chain; there is no CPU decision or synchronization between attempts and no new global PCG solve.
+      </p>
+      <div class="plot-grid">
+        <table>
+          <thead><tr><th>120-frame strategy</th><th>Median / p95</th><th>Worst fresh penetration</th><th>Finite-budget debt</th></tr></thead>
+          <tbody>
+            <tr><td>Validated replay, 10 mm motion target</td><td class="good">31.45 / 98.63 ms</td><td class="good">0.956 mm</td><td class="good">0 motion · 0 replay</td></tr>
+            <tr><td>Always-fine, 1 mm motion target</td><td>118.28 / 134.82 ms</td><td class="good">0.475 mm</td><td class="bad">87 motion-cap frames</td></tr>
+          </tbody>
+        </table>
+        <div class="note">
+          <strong>3.76× faster at median.</strong> Only 12 of 120 frames replayed, with 13 total retries. The accepted
+          rate histogram was <code>{10:6, 20:11, 40:26, 80:53, 160:20, 320:4}</code>. A no-replay graph measured
+          30.30 ms median versus 29.19 ms for ordinary adaptive VBD, about 1.1 ms common-path validation overhead.
+        </div>
+      </div>
+      <p class="note warning">
+        This is a bounded endpoint certificate, not CCD. At 100 rad/s the same 30-frame stress remains finite with
+        zero debt and 0.805 mm worst penetration. At 1000 rad/s the 320-step cap is exceeded, debt is reported, and
+        penetration reaches 11.67 mm. Complete tunnel-and-separate trajectories still require swept candidates or CCD.
+      </p>
+    </section>
+
     <section id="cost">
       <h2>Computational cost: matched comparisons</h2>
       <p>
@@ -262,6 +291,7 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
             <tr><td>1,024 independent impacts</td><td>0.250 ms · −8.30 mm</td><td class="good">0.359 ms · +5.71 µm</td><td>1.44×</td></tr>
             <tr><td>Cable ρ=0 → ρ=5, target 10 mm</td><td>32.04 ms</td><td>29.41 ms</td><td>0.92×*</td></tr>
             <tr><td>Cable conditioned target 10 → 1 mm</td><td>29.41 ms</td><td>119.02 ms</td><td>4.05×</td></tr>
+            <tr><td>Cable always-fine → validated replay</td><td>118.28 ms</td><td class="good">31.45 ms</td><td class="good">0.27× (3.76× faster)</td></tr>
           </tbody>
         </table>
       </div>
@@ -279,7 +309,7 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
         <div class="flow-card branch"><strong>Sparse free flight</strong>Exact queried event time and direct manifold normal impulse.</div>
         <div class="flow-card branch"><strong>Dense free flight</strong>Same event time, matrix-free unilateral normal PCG, KKT/debt check.</div>
         <div class="flow-card branch"><strong>Persistent / jointed</strong>Conditioned, displacement-bucketed full VBD island microsteps.</div>
-        <div class="flow-card pending"><strong>Next: certify</strong>Fresh swept validation, island snapshot, rollback, and finer graph replay.</div>
+        <div class="flow-card"><strong>Validate + replay</strong>Fresh endpoint query, exact snapshot restore, residual-driven finer VBD, and explicit debt.</div>
       </div>
       <p class="note">
         This is built on VBD. There is no new global PCG solve: PCG is a narrow, contact-only instantaneous normal
@@ -306,7 +336,7 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
       <h2>Limitations and non-claims</h2>
       <ul class="check-list">
         <li><strong>No complete collision guarantee.</strong> Success assumes the needed pair is in the predictive query. Arbitrary curved features, thin geometry, large rotation, and contacts created after impulse redirection are not certified.</li>
-        <li><strong>No production rollback/replay yet.</strong> Debt is detected, but island snapshots, fresh endpoint/swept validation, restoration, and automatic finer graph replay are still missing.</li>
+        <li><strong>Replay is global, not island-local yet.</strong> Snapshot, fresh endpoint validation, exact restoration, and automatic finer replay work, but one cable failure currently replays all three cables.</li>
         <li><strong>PCG is normal-impact only.</strong> It does not solve friction, joints, persistent support, or cable forces; routing those cases into PCG would be physically incomplete.</li>
         <li><strong>Cable contact is not penetration-free.</strong> Even 320 physical microsteps leave finite penetration, and the robust setting is expensive.</li>
         <li><strong>Fresh pairs are still discovered late.</strong> Depending on the conditioned rate, 14–28 of 120 cable frames contained pairs absent from the solver's retained set.</li>
@@ -320,8 +350,9 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
       <p>
         Not from any one ingredient: event-time impact, local time stepping, PCG contact, effective-mass scaling,
         and CUDA graphs all have prior art. The defensible paper direction is the integrated graph-resident VBD
-        dispatcher—provided the next version adds conservative swept candidate completeness or rollback/finer replay,
-        compact worklists with equal-quality speed wins, and broad comparisons against CCD/IPC and adaptive rigid solvers.
+        dispatcher. The validated speculative VBD loop now supplies rollback/finer replay and a strong equal-quality
+        speed result; a paper still needs conservative swept candidate completeness, compact island worklists, broad
+        comparisons against CCD/IPC and adaptive rigid solvers, and a careful novelty review.
       </p>
     </section>
 
@@ -342,6 +373,8 @@ PYTHONPATH=$PWD /home/horde/git/newton/.venv/bin/python /tmp/record_horde_result
         <a class="button" href="assets/horde_results.json">Horde metrics JSON</a>
         <a class="button" href="assets/horde_cost_results.json">Matched cost JSON</a>
         <a class="button" href="assets/horde_render_results.json">Rendered repeat JSON</a>
+        <a class="button" href="assets/contact_replay_final.json">Validated replay JSON</a>
+        <a class="button" href="assets/contact_always_fine_final.json">Always-fine control JSON</a>
         <a class="button" href="assets/horde_traces.npz">Recorded trajectories NPZ</a>
         <a class="button" href="ingredients/record_horde_results.py">GPU recorder source</a>
         <a class="button" href="ingredients/record_horde_costs.py">Cost recorder source</a>
