@@ -267,8 +267,9 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
       </div>
       <p class="note warning">
         This is a bounded endpoint certificate, not CCD. At 100 rad/s the same 30-frame stress remains finite with
-        zero debt and 0.805 mm worst penetration. At 1000 rad/s the 320-step cap is exceeded, debt is reported, and
-        penetration reaches 11.67 mm. Complete tunnel-and-separate trajectories still require swept candidates or CCD.
+        zero debt and 0.805 mm worst penetration. In the earlier 320-capped 1000 rad/s stress, the cap is exceeded,
+        debt is reported, and penetration reaches 11.67 mm. The current ladder adds a 640-step emergency branch,
+        but complete tunnel-and-separate trajectories still require swept candidates or CCD.
       </p>
     </section>
 
@@ -318,7 +319,7 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
     </section>
 
     <section id="local-clocks">
-      <h2>GPU local-clock foundation</h2>
+      <h2>GPU local-clock foundation and replay A/B</h2>
       <p>
         Device kernels construct contact-plus-joint components, reduce the potential displacement
         <code>h(|v| + R|ω|) + ½h²|a|</code>, and choose power-of-two rates. A captured diagnostic produced labels
@@ -330,15 +331,34 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
         scan global arrays; compact per-rate body/contact worklists are required before local clocks can reduce cost
         in proportion to active island size.
       </div>
+      <p>
+        We also implemented the natural intermediate experiment: validate per contact-plus-joint island, restore
+        only rejected-island rows, mask the cable driver, and replay only failed bodies. It passes the same independent
+        1 mm endpoint gate, but three fresh-process 120-frame A/B runs show no performance win:
+      </p>
+      <table>
+        <thead><tr><th>Replay scope</th><th>Median range</th><th>p95 range</th><th>Worst fresh penetration</th><th>Replay debt</th></tr></thead>
+        <tbody>
+          <tr><td>Global graph replay (default)</td><td class="good">30.16-30.51 ms</td><td class="good">64.72-112.55 ms</td><td class="good">0.958-0.998 mm</td><td class="good">0 / 360</td></tr>
+          <tr><td>Masked island-local replay (experimental)</td><td>30.56-30.94 ms</td><td>102.32-130.21 ms</td><td class="good">0.958-0.975 mm</td><td class="good">0 / 360</td></tr>
+        </tbody>
+      </table>
+      <p class="note">
+        The negative result is useful: masking body arithmetic cannot repay global broad-phase, contact-generation,
+        coloring, launch, and memory traffic. Island-local replay stays research-only until it has compact body,
+        shape, joint, color, and contact worklists plus conservative island envelopes. One 640-step emergency run
+        removed the last replay debt at 0.973 mm worst penetration, but its 230.49 ms p95 confirms that the final
+        bucket is a safety valve, not an ordinary operating point.
+      </p>
     </section>
 
     <section id="limits">
       <h2>Limitations and non-claims</h2>
       <ul class="check-list">
         <li><strong>No complete collision guarantee.</strong> Success assumes the needed pair is in the predictive query. Arbitrary curved features, thin geometry, large rotation, and contacts created after impulse redirection are not certified.</li>
-        <li><strong>Replay is global, not island-local yet.</strong> Snapshot, fresh endpoint validation, exact restoration, and automatic finer replay work, but one cable failure currently replays all three cables.</li>
+        <li><strong>Replay is globally scoped by default.</strong> Experimental failed-island restore/masking works, but it is not faster while collision and solver buffers are still scanned globally.</li>
         <li><strong>PCG is normal-impact only.</strong> It does not solve friction, joints, persistent support, or cable forces; routing those cases into PCG would be physically incomplete.</li>
-        <li><strong>Cable contact is not penetration-free.</strong> Even 320 physical microsteps leave finite penetration, and the robust setting is expensive.</li>
+        <li><strong>Cable contact is not penetration-free.</strong> Even hundreds of physical microsteps leave finite penetration, and the rare 640-step emergency branch is expensive.</li>
         <li><strong>Fresh pairs are still discovered late.</strong> Depending on the conditioned rate, 14–28 of 120 cable frames contained pairs absent from the solver's retained set.</li>
         <li><strong>Active clocks have feature exclusions.</strong> Particle coupling, rigid contact-history matching, Dahl cable history, and event projection cannot yet share the experimental active-body mask safely.</li>
         <li><strong>This is not original ACM's theorem.</strong> Finite queried events and finite VBD buckets do not inherit ACM's infinite-barrier/separating-certificate no-interpenetration result.</li>
@@ -375,6 +395,12 @@ PYTHONPATH=$PWD /home/horde/git/newton/.venv/bin/python /tmp/record_horde_result
         <a class="button" href="assets/horde_render_results.json">Rendered repeat JSON</a>
         <a class="button" href="assets/contact_replay_final.json">Validated replay JSON</a>
         <a class="button" href="assets/contact_always_fine_final.json">Always-fine control JSON</a>
+        <a class="button" href="assets/replay_global_run1.json">Global replay A/B run 1</a>
+        <a class="button" href="assets/replay_global_run2.json">Global replay A/B run 2</a>
+        <a class="button" href="assets/replay_global_run3.json">Global replay A/B run 3</a>
+        <a class="button" href="assets/replay_island_run1.json">Island replay A/B run 1</a>
+        <a class="button" href="assets/replay_island_run2.json">Island replay A/B run 2</a>
+        <a class="button" href="assets/replay_island_run3.json">Island replay A/B run 3</a>
         <a class="button" href="assets/horde_traces.npz">Recorded trajectories NPZ</a>
         <a class="button" href="ingredients/record_horde_results.py">GPU recorder source</a>
         <a class="button" href="ingredients/record_horde_costs.py">Cost recorder source</a>
