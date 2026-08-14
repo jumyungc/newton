@@ -350,6 +350,24 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
         removed the last replay debt at 0.973 mm worst penetration, but its 230.49 ms p95 confirms that the final
         bucket is a safety valve, not an ordinary operating point.
       </p>
+      <p>
+        A second experiment remembered the rate that passed after a rejection and used it as a temporary floor for
+        later frames. The controller is entirely device-resident and cannot weaken the fresh certificate, but global
+        memory also failed the performance bar:
+      </p>
+      <table>
+        <thead><tr><th>Certificate-memory policy</th><th>Median range</th><th>p95 range</th><th>Replayed frames</th><th>Result</th></tr></thead>
+        <tbody>
+          <tr><td>Off (clean default)</td><td class="good">30.16-30.51 ms</td><td class="good">64.72-112.55 ms</td><td>10-20</td><td class="good">Keep</td></tr>
+          <tr><td>One-frame release</td><td>30.42-32.12 ms</td><td>104.65-139.58 ms</td><td>12-16</td><td>Experimental</td></tr>
+          <tr><td>Sticky four-easy-frame release</td><td>31.60-62.64 ms</td><td>92.83-153.38 ms</td><td class="good">7</td><td class="bad">Over-schedules</td></tr>
+        </tbody>
+      </table>
+      <p class="note warning">
+        Every memory run stayed below 1 mm with zero replay debt. Sticky memory reduced rejection count but sometimes
+        held all three cables at 320 physical steps long enough to double median cost. It may become valuable only
+        after compact per-island execution prevents one cable's memory from scheduling the other two.
+      </p>
     </section>
 
     <section id="limits">
@@ -401,6 +419,12 @@ PYTHONPATH=$PWD /home/horde/git/newton/.venv/bin/python /tmp/record_horde_result
         <a class="button" href="assets/replay_island_run1.json">Island replay A/B run 1</a>
         <a class="button" href="assets/replay_island_run2.json">Island replay A/B run 2</a>
         <a class="button" href="assets/replay_island_run3.json">Island replay A/B run 3</a>
+        <a class="button" href="assets/replay_memory_one_frame_run1.json">One-frame memory run 1</a>
+        <a class="button" href="assets/replay_memory_one_frame_run2.json">One-frame memory run 2</a>
+        <a class="button" href="assets/replay_memory_one_frame_run3.json">One-frame memory run 3</a>
+        <a class="button" href="assets/replay_memory_sticky_run1.json">Sticky memory run 1</a>
+        <a class="button" href="assets/replay_memory_sticky_run2.json">Sticky memory run 2</a>
+        <a class="button" href="assets/replay_memory_sticky_run3.json">Sticky memory run 3</a>
         <a class="button" href="assets/horde_traces.npz">Recorded trajectories NPZ</a>
         <a class="button" href="ingredients/record_horde_results.py">GPU recorder source</a>
         <a class="button" href="ingredients/record_horde_costs.py">Cost recorder source</a>

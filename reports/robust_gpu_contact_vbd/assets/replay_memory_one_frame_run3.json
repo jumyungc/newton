@@ -1,0 +1,90 @@
+{
+  "accepted_missing_pair_penetration_m": 0.0,
+  "adaptive_substeps": true,
+  "attempted_substep_histogram": {
+    "10": 6,
+    "20": 11,
+    "40": 30,
+    "80": 29,
+    "160": 32,
+    "320": 12
+  },
+  "attempted_substep_histogram_scope": "final accepted attempt only",
+  "contact_alpha": 0.0,
+  "contact_ke_n_m": null,
+  "event": false,
+  "finite": true,
+  "frame_replay_histogram": {
+    "0": 104,
+    "1": 15,
+    "3": 1
+  },
+  "frame_total_with_validation_median_ms": 78.0936973169446,
+  "frames": 120,
+  "frames_with_event_debt": 0,
+  "frames_with_missing_pairs": 28,
+  "frames_with_multiple_failing_islands": 3,
+  "graph_resident_replay": true,
+  "hard_contact_history": false,
+  "inertial_contact_stiffness_ratio": 5.0,
+  "initial_contact_joint_island_count": 3,
+  "initial_failing_island_histogram": {
+    "0": 104,
+    "1": 13,
+    "2": 3
+  },
+  "initial_island_body_rate_histogram": {
+    "10": 189
+  },
+  "initial_island_schedule_debt": 0,
+  "island_local_replay": false,
+  "iterations": 5,
+  "max_missing_pairs_per_frame": 6,
+  "max_speed_m_s": 123.83758544921875,
+  "maximum_failing_islands": 2,
+  "maximum_fresh_penetration_m": 0.000991273671388626,
+  "minimum_fresh_gap_m": -0.000991273671388626,
+  "motion_schedule_debt_frames": 0,
+  "physical_substeps_per_frame": 10,
+  "query_gap_m": null,
+  "refresh_interval_substeps": 10,
+  "replay_cap_debt_frames": 0,
+  "replay_control_median_ms": 30.555290170013905,
+  "replay_control_p95_ms": 135.69602714851496,
+  "replay_execution_model": "device_decision_global_cuda_graph_chain",
+  "replay_gap_tolerance_m": 0.001,
+  "replay_jump_error_order": 2.0,
+  "replay_jump_safety": 1.25,
+  "replay_memory_easy_frames": 1,
+  "replay_memory_easy_ratio": 1.0,
+  "replay_memory_peak_floor": 320,
+  "replay_missing_pair_tolerance_m": 0.0,
+  "replay_schedule_memory": true,
+  "replayed_frames": 16,
+  "selected_substep_histogram": {
+    "10": 6,
+    "20": 11,
+    "40": 30,
+    "80": 29,
+    "160": 32,
+    "320": 12
+  },
+  "simulation_frame_time_median_ms": 30.555290170013905,
+  "simulation_frame_time_p95_ms": 139.58107866346836,
+  "target_surface_motion_m": 0.01,
+  "total_event_body_updates": 0,
+  "total_replays": 18,
+  "twist_rate_rad_s": 20.0,
+  "worst_body_pair": [
+    133,
+    155
+  ],
+  "worst_shape_pair": [
+    133,
+    155
+  ],
+  "worst_shape_types": [
+    4,
+    4
+  ]
+}
