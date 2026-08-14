@@ -190,7 +190,7 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
             <tr><td>Gap interval</td><td class="bad">[−2.201, +2.679] m</td><td class="good">[−1.42e−7, +2.01e−7] m</td></tr>
             <tr><td>Momentum error</td><td class="bad">+21.74 kg·m/s</td><td class="good">0.0 kg·m/s</td></tr>
             <tr><td>Energy ratio</td><td class="bad">24.46</td><td class="good">0.0625</td></tr>
-            <tr><td>Captured GPU median</td><td>not measured</td><td class="good">0.584 ms</td></tr>
+            <tr><td>Captured GPU median</td><td>0.200 ms</td><td class="good">0.584 ms</td></tr>
             <tr><td>Event debt</td><td>—</td><td class="good">0</td></tr>
           </tbody>
         </table>
@@ -213,11 +213,11 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
       <div class="video-grid">
         <figure>
           <video src="assets/cable_conditioning_comparison.mp4" poster="assets/cable_conditioning_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
-          <figcaption>Same 10 mm clock target. The effective-mass floor <code>k ≥ ρm_eff/h²</code>, with <code>ρ=5</code>, reduces worst fresh penetration from 62.03 mm to 3.31 mm.</figcaption>
+          <figcaption>Same 10 mm clock target, shown at 4× slow motion (8.1 s). The fresh rendered repeat measured 62.03 mm versus 8.49 mm worst penetration; the separately recorded table run measured 62.03 mm versus 3.31 mm.</figcaption>
         </figure>
         <figure>
           <video src="assets/cable_accuracy_comparison.mp4" poster="assets/cable_accuracy_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
-          <figcaption>Conditioned fast and high-robustness clocks. These are actual frame-by-frame Horde positions; overlays report a fresh collision query after each rendered frame.</figcaption>
+          <figcaption>Conditioned fast and high-robustness clocks, shown at 4× slow motion (8.1 s). These are Newton ViewerGL captures of actual frame-by-frame Horde states; overlays report a fresh collision query after every frame.</figcaption>
         </figure>
       </div>
       <div class="plot-grid">
@@ -238,8 +238,38 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
       <div class="note warning">
         This cable is a chaotic, GPU-order-sensitive stress test. A separate fresh-process repeat of the conditioned
         1 mm case measured 0.324 mm rather than 1.559 mm worst penetration. The table deliberately uses the more
-        conservative value from the exact trajectory packaged with this report. Neither value is a guarantee.
+        conservative value from the exact trajectory packaged with this report. The newly rendered repeat measured
+        0.558 mm. Neither value is a guarantee; all repeat data are downloadable below.
       </div>
+    </section>
+
+    <section id="cost">
+      <h2>Computational cost: matched comparisons</h2>
+      <p>
+        The dense and independent-impact bars time the complete captured collision-plus-solve replay on the same
+        Horde L40 over 100 samples. This is the honest trade: the robust route is not free, but the increment is
+        bounded and buys a qualitatively different result.
+      </p>
+      <div class="plot-grid">
+        <figure>
+          <img src="assets/captured_gpu_cost.png" alt="Matched captured GPU cost for dense and independent contact benchmarks.">
+          <figcaption>Same initial state, iterations, collision pipeline, graph capture, GPU, and timing method within each pair.</figcaption>
+        </figure>
+        <table>
+          <thead><tr><th>Captured workload</th><th>Ordinary VBD</th><th>Routed contact</th><th>Multiplier</th></tr></thead>
+          <tbody>
+            <tr><td>Dense 16-body island</td><td>0.200 ms · fails</td><td class="good">0.584 ms · closes</td><td>2.92×</td></tr>
+            <tr><td>1,024 independent impacts</td><td>0.250 ms · −8.30 mm</td><td class="good">0.359 ms · +5.71 µm</td><td>1.44×</td></tr>
+            <tr><td>Cable ρ=0 → ρ=5, target 10 mm</td><td>32.04 ms</td><td>29.41 ms</td><td>0.92×*</td></tr>
+            <tr><td>Cable conditioned target 10 → 1 mm</td><td>29.41 ms</td><td>119.02 ms</td><td>4.05×</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">
+        *Cable figures are synchronized per-frame wall times from one chaotic run, not pure kernel timings; do not
+        interpret the small ρ=5 speed difference as a general speedup. The robust 1 mm clock reaches up to 320 real
+        VBD microsteps, so its cost is the clearest optimization target.
+      </p>
     </section>
 
     <section id="architecture">
@@ -300,7 +330,8 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
       <p>
         Recorded on <strong>NVIDIA L40</strong>, Warp <code>1.17.0.dev20260807</code>, CUDA toolkit <code>12.9</code>,
         driver <code>12.8</code>, branch <code>codex-sol/contact-strategy</code>. These are focused report benchmarks;
-        no unit-test suite was run. The report renderer never executes physics—it consumes the Horde NPZ trace.
+        no unit-test suite was run. Impact videos replay the exact Horde NPZ endpoints in Newton ViewerGL; cable
+        videos rerun all physics and capture every Newton framebuffer directly on Horde.
       </p>
       <pre><code>curl -L https://jumyungc.github.io/newton/reports/robust_gpu_contact_vbd/ingredients/record_horde_results.py \
   -o /tmp/record_horde_results.py
@@ -309,15 +340,19 @@ PYTHONPATH=$PWD /home/horde/git/newton/.venv/bin/python /tmp/record_horde_result
   --device cuda:0 --frames 120 --output-dir /tmp/robust_gpu_contact_vbd</code></pre>
       <div class="downloads">
         <a class="button" href="assets/horde_results.json">Horde metrics JSON</a>
+        <a class="button" href="assets/horde_cost_results.json">Matched cost JSON</a>
+        <a class="button" href="assets/horde_render_results.json">Rendered repeat JSON</a>
         <a class="button" href="assets/horde_traces.npz">Recorded trajectories NPZ</a>
         <a class="button" href="ingredients/record_horde_results.py">GPU recorder source</a>
+        <a class="button" href="ingredients/record_horde_costs.py">Cost recorder source</a>
+        <a class="button" href="ingredients/render_horde_newton_videos.py">Horde Newton renderer source</a>
         <a class="button" href="ingredients/render_report_assets.py">Renderer source</a>
       </div>
     </section>
   </main>
 
   <footer>
-    Static report generated from Horde-recorded solver state. Published under <code>/newton/reports/robust_gpu_contact_vbd/</code>.
+    Solver evidence and Newton framebuffers generated on Horde. Published under <code>/newton/reports/robust_gpu_contact_vbd/</code>.
   </footer>
 </body>
 </html>

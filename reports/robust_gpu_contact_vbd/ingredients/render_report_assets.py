@@ -365,7 +365,7 @@ def render_cable_comparison(
     plt.close(fig)
 
 
-def render_plots(assets: Path, traces, results: dict) -> None:
+def render_plots(assets: Path, traces, results: dict, costs: dict) -> None:
     dense = results["dense_equal_mass_chain"]
     ordinary = next(item for item in dense if item["method"] == "ordinary_vbd")
     event = next(item for item in dense if item["method"] == "event_pcg")
@@ -406,38 +406,99 @@ def render_plots(assets: Path, traces, results: dict) -> None:
     fig.savefig(assets / "cable_accuracy_cost.png", bbox_inches="tight")
     plt.close(fig)
 
+    dense_cost = costs["dense_16_equal_mass"]
+    batch_cost = costs["independent_sphere_plane_1024"]
+    fig, axes = plt.subplots(1, 2, figsize=(11.8, 5.2), dpi=140)
+    fig.patch.set_facecolor("white")
+    comparisons = (
+        (
+            axes[0],
+            "16-body coupled dense impact",
+            [dense_cost[0]["median_graph_gpu_ms"], dense_cost[1]["median_graph_gpu_ms"]],
+        ),
+        (
+            axes[1],
+            "1,024 independent sphere-plane impacts",
+            [batch_cost[0]["median_solve_gpu_ms"], batch_cost[1]["median_solve_gpu_ms"]],
+        ),
+    )
+    for ax, title, values in comparisons:
+        _style_axis(ax)
+        bars = ax.bar(
+            ("ordinary VBD", "routed contact"),
+            values,
+            color=(BAD, GOOD),
+            width=0.62,
+        )
+        ax.set_title(title, color=INK, fontsize=13, weight="bold", pad=12)
+        ax.set_ylabel("complete CUDA-graph replay [ms]")
+        ax.set_ylim(0.0, max(values) * 1.35)
+        for bar, value in zip(bars, values, strict=True):
+            ax.text(
+                bar.get_x() + bar.get_width() / 2.0,
+                value + max(values) * 0.035,
+                f"{value:.3f} ms",
+                ha="center",
+                color=INK,
+                fontsize=10,
+                weight="bold",
+            )
+        ax.text(
+            0.5,
+            0.91,
+            f"{values[1] / values[0]:.2f}× cost",
+            transform=ax.transAxes,
+            ha="center",
+            color=MUTED,
+            fontsize=10,
+        )
+    fig.suptitle(
+        "Matched Horde L40 cost: collision + solve, 100 captured replays",
+        color=INK,
+        fontsize=17,
+        weight="bold",
+        y=1.01,
+    )
+    fig.tight_layout()
+    fig.savefig(assets / "captured_gpu_cost.png", bbox_inches="tight")
+    plt.close(fig)
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--assets", type=Path, required=True)
+    parser.add_argument("--plots-only", action="store_true")
     args = parser.parse_args()
     with (args.assets / "horde_results.json").open(encoding="utf-8") as source:
         results = json.load(source)
+    with (args.assets / "horde_cost_results.json").open(encoding="utf-8") as source:
+        costs = json.load(source)
     traces = np.load(args.assets / "horde_traces.npz")
 
-    render_fast_impact(args.assets, traces, results)
-    render_dense_chain(args.assets, traces, results)
-    render_cable_comparison(
-        args.assets,
-        traces,
-        "cable_default_10mm",
-        "cable_conditioned_10mm",
-        "Unconditioned · target 10 mm",
-        "Conditioned ρ=5 · target 10 mm",
-        "cable_conditioning_comparison.mp4",
-        "cable_conditioning_poster.jpg",
-    )
-    render_cable_comparison(
-        args.assets,
-        traces,
-        "cable_conditioned_10mm",
-        "cable_conditioned_1mm",
-        "Fast · target 10 mm",
-        "High robustness · target 1 mm",
-        "cable_accuracy_comparison.mp4",
-        "cable_accuracy_poster.jpg",
-    )
-    render_plots(args.assets, traces, results)
+    if not args.plots_only:
+        render_fast_impact(args.assets, traces, results)
+        render_dense_chain(args.assets, traces, results)
+        render_cable_comparison(
+            args.assets,
+            traces,
+            "cable_default_10mm",
+            "cable_conditioned_10mm",
+            "Unconditioned · target 10 mm",
+            "Conditioned ρ=5 · target 10 mm",
+            "cable_conditioning_comparison.mp4",
+            "cable_conditioning_poster.jpg",
+        )
+        render_cable_comparison(
+            args.assets,
+            traces,
+            "cable_conditioned_10mm",
+            "cable_conditioned_1mm",
+            "Fast · target 10 mm",
+            "High robustness · target 1 mm",
+            "cable_accuracy_comparison.mp4",
+            "cable_accuracy_poster.jpg",
+        )
+    render_plots(args.assets, traces, results, costs)
 
 
 if __name__ == "__main__":
