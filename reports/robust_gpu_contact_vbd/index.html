@@ -370,12 +370,16 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
       <p class="note warning">
         The final result uses moderate <code>rho=1</code>, a 37.5 mm bounded speculative extension,
         a non-speculative authoritative endpoint query, contact tolerance 1 mm, and joint tolerance 5 mm.
+        If every captured branch fails, a final conditional graph restores exact frame-start state and leaves
+        debt set for pause or a stronger fallback. A forced 20-debt-frame control measured exactly 0.0 maximum
+        error across every snapshotted persistent array after restore.
         This is no-CCD/no-DAT evidence over the measured envelope, not an arbitrary-speed theorem.
       </p>
       <div class="downloads">
         <a class="button" href="assets/cable_pile_highdrop_4000_final.json">4,000-body high-drop JSON</a>
         <a class="button" href="assets/cable_pile_staged_4000_final.json">4,000-body staged JSON</a>
         <a class="button" href="assets/cable_pile_fixed6_control.json">Fixed-six failure control</a>
+        <a class="button" href="assets/cable_pile_forced_cap_restore.json">Forced cap-restore control</a>
         <a class="button" href="assets/cable_pile_failure_grid_a.json">Failure grid 6-48</a>
         <a class="button" href="assets/cable_pile_failure_grid_b.json">Failure grid 96-384</a>
         <a class="button" href="assets/cable_pile_gallery_800.json">Rendered 800-body metrics</a>
