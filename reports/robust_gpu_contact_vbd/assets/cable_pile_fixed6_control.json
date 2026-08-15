@@ -1,0 +1,86 @@
+{
+  "high-drop": {
+    "body_count": 144,
+    "bridge_memory_enabled": false,
+    "bridge_memory_frames": 0,
+    "drop_height_m": 5.0,
+    "finite": true,
+    "frame_dt_s": 0.016666666666666666,
+    "frames": 240,
+    "gap_tolerance_m": 0.001,
+    "lanes_per_layer": 2,
+    "layers": 3,
+    "maximum_final_body_height_m": 0.13925772905349731,
+    "maximum_final_speed_m_s": 0.10903820395469666,
+    "maximum_fresh_contact_count": 96,
+    "maximum_fresh_penetration_m": 0.01851214375346899,
+    "maximum_joint_translation_residual_m": 0.014616577886044979,
+    "mean_frame_time_ms": 18.692022319073264,
+    "median_attempted_physical_substeps": 6.0,
+    "median_frame_time_ms": 18.31059344112873,
+    "minimum_final_body_height_m": 0.011908824555575848,
+    "motion_cap_debt_frames": 2,
+    "p95_frame_time_ms": 20.440214034169912,
+    "p99_frame_time_ms": 23.325324468314662,
+    "policy": "motion-jump",
+    "release_frames": [],
+    "replay_cap_debt_frames": 19,
+    "replayed_frames": 19,
+    "scenario": "high-drop",
+    "segments_per_cable": 24,
+    "selected_substep_histogram": {
+      "6": 240
+    },
+    "substep_buckets": [
+      6
+    ],
+    "target_surface_motion_m": 0.03,
+    "timed_total_ms": 4299.16513338685,
+    "total_attempted_physical_substeps": 1440,
+    "total_replays": 19
+  },
+  "staged": {
+    "body_count": 144,
+    "bridge_memory_enabled": false,
+    "bridge_memory_frames": 0,
+    "drop_height_m": null,
+    "finite": true,
+    "frame_dt_s": 0.016666666666666666,
+    "frames": 330,
+    "gap_tolerance_m": 0.001,
+    "lanes_per_layer": 2,
+    "layers": 3,
+    "maximum_final_body_height_m": 0.07308430969715118,
+    "maximum_final_speed_m_s": 0.09428243339061737,
+    "maximum_fresh_contact_count": 113,
+    "maximum_fresh_penetration_m": 0.022444404661655426,
+    "maximum_joint_translation_residual_m": 0.006493203807622194,
+    "mean_frame_time_ms": 19.256821391172707,
+    "median_attempted_physical_substeps": 6.0,
+    "median_frame_time_ms": 18.95670872181654,
+    "minimum_final_body_height_m": 0.011865281499922276,
+    "motion_cap_debt_frames": 0,
+    "p95_frame_time_ms": 21.355348266661167,
+    "p99_frame_time_ms": 22.106753271073103,
+    "policy": "motion-jump",
+    "release_frames": [
+      0,
+      90,
+      180
+    ],
+    "replay_cap_debt_frames": 19,
+    "replayed_frames": 19,
+    "scenario": "staged",
+    "segments_per_cable": 24,
+    "selected_substep_histogram": {
+      "6": 330
+    },
+    "substep_buckets": [
+      6
+    ],
+    "target_surface_motion_m": 0.03,
+    "timed_total_ms": 6162.182845175266,
+    "total_attempted_physical_substeps": 1980,
+    "total_replays": 19
+  }
+}

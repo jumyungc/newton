@@ -1,0 +1,74 @@
+{
+  "body_count": 4000,
+  "contact_tolerance_m": 0.001,
+  "grid": [
+    {
+      "certified": false,
+      "elapsed_ms": 269.42238584160805,
+      "finite": true,
+      "fresh_contacts": 830,
+      "iterations": 5,
+      "joint_translation_residual_m": 0.01165605429559946,
+      "maximum_speed_m_s": 112.77676391601562,
+      "penetration_m": 0.014733896590769291,
+      "substeps": 96
+    },
+    {
+      "certified": false,
+      "elapsed_ms": 468.43861788511276,
+      "finite": true,
+      "fresh_contacts": 800,
+      "iterations": 10,
+      "joint_translation_residual_m": 0.018269607797265053,
+      "maximum_speed_m_s": 78.2698974609375,
+      "penetration_m": 0.01342646311968565,
+      "substeps": 96
+    },
+    {
+      "certified": false,
+      "elapsed_ms": 538.3917074650526,
+      "finite": true,
+      "fresh_contacts": 190,
+      "iterations": 5,
+      "joint_translation_residual_m": 0.03455803170800209,
+      "maximum_speed_m_s": 212.0627899169922,
+      "penetration_m": 0.008859008550643921,
+      "substeps": 192
+    },
+    {
+      "certified": false,
+      "elapsed_ms": 954.3825536966324,
+      "finite": true,
+      "fresh_contacts": 446,
+      "iterations": 10,
+      "joint_translation_residual_m": 0.05037542060017586,
+      "maximum_speed_m_s": 187.8554229736328,
+      "penetration_m": 0.022821178659796715,
+      "substeps": 192
+    },
+    {
+      "certified": false,
+      "elapsed_ms": 1086.2938854843378,
+      "finite": true,
+      "fresh_contacts": 60,
+      "iterations": 5,
+      "joint_translation_residual_m": 0.06003765016794205,
+      "maximum_speed_m_s": 548.359130859375,
+      "penetration_m": 0.0007020290940999985,
+      "substeps": 384
+    },
+    {
+      "certified": false,
+      "elapsed_ms": 1862.2177559882402,
+      "finite": true,
+      "fresh_contacts": 100,
+      "iterations": 10,
+      "joint_translation_residual_m": 0.0351356565952301,
+      "maximum_speed_m_s": 187.6504364013672,
+      "penetration_m": 0.006930917501449585,
+      "substeps": 384
+    }
+  ],
+  "joint_tolerance_m": 0.005,
+  "rejected_frame": 60
+}
