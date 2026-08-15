@@ -1,0 +1,74 @@
+{
+  "bullet_thin_dynamic_plate": [
+    {
+      "analytic_inelastic_common_velocity_m_s": 11.446036377803273,
+      "bullet_final_velocity_m_s": 28.894201278686523,
+      "crossed_plate_midplane": false,
+      "dt_s": 0.02,
+      "event_body_updates": 0,
+      "event_debt_count": 0,
+      "final_directed_gap_m": 0.17440127611160278,
+      "finite": true,
+      "initial_directed_gap_m": 0.48000000000000004,
+      "method": "ordinary_one_step_vbd",
+      "momentum_error_kg_m_s": 31.870803833007812,
+      "plate_final_velocity_m_s": 13.614264488220215,
+      "potential_displacement_m": 1.6,
+      "query_contact_count": 1,
+      "query_integrity_debt": 0,
+      "solver_list_required_capacity": 0,
+      "speed_m_s": 80.0
+    },
+    {
+      "analytic_inelastic_common_velocity_m_s": 11.446036377803273,
+      "bullet_final_velocity_m_s": 11.446036338806152,
+      "crossed_plate_midplane": false,
+      "dt_s": 0.02,
+      "event_body_updates": 2,
+      "event_debt_count": 0,
+      "final_directed_gap_m": 6.154477596304053e-06,
+      "finite": true,
+      "initial_directed_gap_m": 0.48000000000000004,
+      "method": "event_time_island_impulse",
+      "momentum_error_kg_m_s": -7.62939453125e-06,
+      "plate_final_velocity_m_s": 11.446036338806152,
+      "potential_displacement_m": 1.6,
+      "query_contact_count": 1,
+      "query_integrity_debt": 0,
+      "solver_list_required_capacity": 0,
+      "speed_m_s": 80.0
+    }
+  ],
+  "device": "cuda:0",
+  "scope": "focused Horde gallery simulations; no unit tests",
+  "staged_cable_pile": {
+    "cables_per_layer": 2,
+    "finite": true,
+    "frame_dt_s": 0.016666666666666666,
+    "frames": 330,
+    "layers": 3,
+    "maximum_final_speed_m_s": 0.11703943461179733,
+    "maximum_fresh_contact_count": 83,
+    "maximum_fresh_penetration_m": 0.0009647561237215996,
+    "maximum_solver_list_required_capacity": 0,
+    "median_frame_time_ms": 30.530902557075024,
+    "minimum_final_body_height_m": 0.017919911071658134,
+    "p95_frame_time_ms": 32.22667844966054,
+    "penetration_tolerance_m": 0.001,
+    "query_integrity_debt_frames": 0,
+    "release_frames": [
+      0,
+      90,
+      180
+    ],
+    "replay_cap_debt_frames": 0,
+    "replayed_frames": 2,
+    "segments_per_cable": 24,
+    "selected_substep_histogram": {
+      "10": 328,
+      "20": 2
+    },
+    "solver_list_integrity_debt_frames": 0,
+    "total_replays": 2
+  }
+}

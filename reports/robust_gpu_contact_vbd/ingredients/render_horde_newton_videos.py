@@ -30,6 +30,8 @@ from newton.examples.cable.example_cable_twist import Example
 from newton.tests import benchmark_cable_twist_contact_strategy as cable_benchmark
 from newton.viewer import ViewerGL
 
+import record_horde_gallery as gallery
+
 
 WIDTH = 1280
 HEIGHT = 720
@@ -162,12 +164,12 @@ def render_fast_impact(assets: Path, traces, results: dict, viewer: ViewerGL) ->
     viewer.camera.look_at(wp.vec3(0.0, 0.0, 0.20))
 
     def frames():
-        count = 180
+        count = 240
         for index in range(count):
-            if index < 30:
+            if index < 45:
                 u = 0.0
-            elif index < 105:
-                u = _ease((index - 30) / 74.0)
+            elif index < 150:
+                u = _ease((index - 45) / 104.0)
             else:
                 u = 1.0
             contact_z = radius + event["final_signed_gap_m"]
@@ -182,7 +184,7 @@ def render_fast_impact(assets: Path, traces, results: dict, viewer: ViewerGL) ->
             pose[1, :3] = (0.62, 0.0, right_z)
             state.body_q.assign(pose)
             arrows = None
-            if index >= 105:
+            if index >= 150:
                 arrows = (
                     np.asarray(((-0.62, 0.0, 0.13),), dtype=np.float32),
                     np.asarray(((-0.62, 0.0, -0.12),), dtype=np.float32),
@@ -195,11 +197,16 @@ def render_fast_impact(assets: Path, traces, results: dict, viewer: ViewerGL) ->
             _header(
                 draw,
                 "Fast queried impact · 10,000 m/s sphere → plane",
-                "One 30 ms solver step · slowed endpoint replay · same queried pair",
+                "What changed: solve at contact time, not after the full-step endpoint",
             )
             draw.text((144, 116), "ordinary one-step VBD", font=FONTS["panel"], fill=BAD)
             draw.text((774, 116), "event-time direct impulse", font=FONTS["panel"], fill=GOOD)
-            if index >= 105:
+            draw.text((84, 149), "1  integrate 30 ms   2  repair endpoint", font=FONTS["small"], fill=BAD)
+            draw.text((713, 149), "1  advance to hit   2  impulse   3  finish frame", font=FONTS["small"], fill=GOOD)
+            phase = "SAME QUERIED PAIR" if index < 45 else "CONTACT-TIME DIFFERENCE" if index < 150 else "EXACT SOLVER ENDPOINTS"
+            draw.rounded_rectangle((475, 177, 805, 215), 9, fill=PANEL)
+            draw.text((499, 187), phase, font=FONTS["small"], fill=INK)
+            if index >= 150:
                 draw.line((548, 338, 548, 431), fill=BAD, width=5)
                 draw.polygon(((536, 420), (560, 420), (548, 441)), fill=BAD)
                 draw.text((374, 448), "tunneled far below the view", font=FONTS["small"], fill=BAD)
@@ -246,23 +253,27 @@ def render_dense_chain(assets: Path, traces, results: dict, viewer: ViewerGL) ->
     builder = newton.ModelBuilder(gravity=wp.vec3(0.0))
     for row, color in ((0, BAD), (1, GOOD)):
         row_z = 0.55 if row == 0 else 0.16
-        for x in initial:
+        for sphere_index, x in enumerate(initial):
             body = builder.add_body(xform=wp.transform(wp.vec3(float(x), 0.0, row_z)))
-            builder.add_shape_sphere(body, radius=radius, color=_rgb(color))
+            builder.add_shape_sphere(
+                body,
+                radius=radius,
+                color=_rgb(ORANGE if sphere_index == 0 else color),
+            )
     builder.add_ground_plane()
     model = builder.finalize()
     state = model.state()
     viewer.set_model(model)
-    viewer.set_camera(wp.vec3(0.75, -3.7, 1.0), 0.0, 0.0)
+    viewer.set_camera(wp.vec3(0.75, -2.85, 0.88), 0.0, 0.0)
     viewer.camera.look_at(wp.vec3(0.68, 0.0, 0.32))
 
     def frames():
-        count = 210
+        count = 300
         for index in range(count):
-            if index < 45:
+            if index < 60:
                 u = 0.0
-            elif index < 135:
-                u = _ease((index - 45) / 89.0)
+            elif index < 180:
+                u = _ease((index - 60) / 119.0)
             else:
                 u = 1.0
             x0 = initial + u * (final_ordinary - initial)
@@ -280,15 +291,19 @@ def render_dense_chain(assets: Path, traces, results: dict, viewer: ViewerGL) ->
             colors = []
             current_v0 = (1.0 - u) * np.r_[20.0, np.zeros(15)] + u * velocity_ordinary
             current_v1 = (1.0 - u) * np.r_[20.0, np.zeros(15)] + u * velocity_event
+            global_scale = max(
+                20.0,
+                float(np.max(np.abs(current_v0))),
+                float(np.max(np.abs(current_v1))),
+            )
             for xs, z, velocities, color in (
                 (x0, 0.55, current_v0, BAD),
                 (x1, 0.16, current_v1, GOOD),
             ):
-                scale = max(1.0, float(np.max(np.abs(velocities))))
                 for x, velocity in zip(xs, velocities, strict=True):
                     if abs(float(velocity)) < 1.0e-4:
                         continue
-                    length = 0.08 + 0.26 * math.sqrt(abs(float(velocity)) / scale)
+                    length = 0.08 + 0.30 * math.sqrt(abs(float(velocity)) / global_scale)
                     starts.append((float(x), 0.0, z + 0.075))
                     ends.append((float(x + math.copysign(length, float(velocity))), 0.0, z + 0.075))
                     colors.append(tuple(component / 255.0 for component in color))
@@ -304,8 +319,11 @@ def render_dense_chain(assets: Path, traces, results: dict, viewer: ViewerGL) ->
             _header(
                 draw,
                 "Dense simultaneous impact · 16 touching spheres",
-                "body 0 enters at 20 m/s · arrows show velocity direction · endpoint morph is deliberately slow",
+                "orange is the striker · arrows share one velocity scale · exact endpoints held for four seconds",
             )
+            phase = "1  INITIAL STRIKER" if index < 60 else "2  COUPLED IMPACT SOLVE" if index < 180 else "3  EXACT ENDPOINT VELOCITIES"
+            draw.rounded_rectangle((520, 108, 833, 148), 9, fill=PANEL)
+            draw.text((535, 118), phase, font=FONTS["small"], fill=INK)
             draw.rounded_rectangle((30, 118, 510, 199), 10, fill=PANEL)
             draw.text((48, 130), "ordinary VBD", font=FONTS["panel"], fill=BAD)
             draw.text(
@@ -322,6 +340,21 @@ def render_dense_chain(assets: Path, traces, results: dict, viewer: ViewerGL) ->
                 font=FONTS["small"],
                 fill=GOOD,
             )
+            if index >= 180:
+                draw.rounded_rectangle((715, 198, 1225, 250), 9, fill=PANEL)
+                draw.text(
+                    (735, 214),
+                    f"ordinary: velocities alternate {velocity_ordinary.min():+.1f} to {velocity_ordinary.max():+.1f} m/s",
+                    font=FONTS["small"],
+                    fill=BAD,
+                )
+                draw.rounded_rectangle((715, 431, 1225, 483), 9, fill=PANEL)
+                draw.text(
+                    (735, 447),
+                    f"coupled PCG: all 16 bodies move together at {event['analytic_common_velocity_m_s']:.3f} m/s",
+                    font=FONTS["small"],
+                    fill=GOOD,
+                )
             _footer(
                 draw,
                 "Newton ViewerGL on Horde L40 · final states are exact · event PCG solves the coupled impact island, not 15 isolated pairs",
@@ -332,7 +365,233 @@ def render_dense_chain(assets: Path, traces, results: dict, viewer: ViewerGL) ->
         assets / "dense_chain_comparison.mp4",
         frames(),
         poster=assets / "dense_chain_poster.jpg",
-        poster_index=175,
+        poster_index=240,
+    )
+
+
+def render_bullet_thin_plate(assets: Path, traces, results: dict, viewer: ViewerGL) -> None:
+    values = results["bullet_thin_dynamic_plate"]
+    ordinary = next(item for item in values if item["method"] == "ordinary_one_step_vbd")
+    event = next(item for item in values if item["method"] == "event_time_island_impulse")
+    ordinary_initial = traces["bullet_vbd_initial_q"]
+    ordinary_final = traces["bullet_vbd_final_q"]
+    event_initial = traces["bullet_event_initial_q"]
+    event_final = traces["bullet_event_final_q"]
+    ordinary_initial_qd = traces["bullet_vbd_initial_qd"]
+    ordinary_final_qd = traces["bullet_vbd_final_qd"]
+    event_initial_qd = traces["bullet_event_initial_qd"]
+    event_final_qd = traces["bullet_event_final_qd"]
+
+    builder = newton.ModelBuilder(gravity=wp.vec3(0.0))
+    visual_bodies = []
+    for row_y, color in ((0.42, BAD), (-0.42, GOOD)):
+        bullet = builder.add_body(xform=wp.transform(wp.vec3(-0.55, row_y, 0.18)))
+        builder.add_shape_sphere(bullet, radius=gallery.BULLET_RADIUS, color=_rgb(ORANGE))
+        plate = builder.add_body(xform=wp.transform(wp.vec3(0.0, row_y, 0.18)))
+        builder.add_shape_box(
+            plate,
+            hx=gallery.PLATE_HALF_THICKNESS,
+            hy=gallery.PLATE_HALF_WIDTH,
+            hz=gallery.PLATE_HALF_WIDTH,
+            color=_rgb(color),
+        )
+        visual_bodies.extend((bullet, plate))
+    builder.add_ground_plane()
+    model = builder.finalize()
+    state = model.state()
+    viewer.set_model(model)
+    viewer.set_camera(wp.vec3(0.75, -3.0, 1.30), 0.0, 0.0)
+    viewer.camera.look_at(wp.vec3(0.15, 0.0, 0.16))
+
+    def _interpolate_pose(initial, final, u):
+        value = (1.0 - u) * initial + u * final
+        for body in range(value.shape[0]):
+            q = value[body, 3:7]
+            norm = float(np.linalg.norm(q))
+            value[body, 3:7] = q / norm if norm > 0.0 else np.asarray((0.0, 0.0, 0.0, 1.0))
+        return value
+
+    def frames():
+        count = 285
+        for index in range(count):
+            if index < 45:
+                u = 0.0
+            elif index < 180:
+                u = _ease((index - 45) / 134.0)
+            else:
+                u = 1.0
+            q_ordinary = _interpolate_pose(ordinary_initial, ordinary_final, u)
+            q_event = _interpolate_pose(event_initial, event_final, u)
+            qd_ordinary = (1.0 - u) * ordinary_initial_qd + u * ordinary_final_qd
+            qd_event = (1.0 - u) * event_initial_qd + u * event_final_qd
+            pose = np.zeros((4, 7), dtype=np.float32)
+            pose[0:2] = q_ordinary
+            pose[2:4] = q_event
+            pose[0:2, 1] = 0.42
+            pose[2:4, 1] = -0.42
+            pose[:, 2] += 0.18
+            state.body_q.assign(pose)
+
+            starts = []
+            ends = []
+            colors = []
+            for offset, qd, color in ((0, qd_ordinary, BAD), (2, qd_event, GOOD)):
+                for local_body in range(2):
+                    velocity = float(qd[local_body, 0])
+                    start = pose[offset + local_body, :3].copy()
+                    start[2] += 0.34 if local_body else 0.10
+                    length = 0.10 + 0.34 * min(1.0, abs(velocity) / gallery.BULLET_SPEED)
+                    end = start.copy()
+                    end[0] += math.copysign(length, velocity) if abs(velocity) > 1.0e-6 else 0.0
+                    starts.append(start)
+                    ends.append(end)
+                    colors.append(tuple(component / 255.0 for component in color))
+            arrows = (
+                np.asarray(starts, dtype=np.float32),
+                np.asarray(ends, dtype=np.float32),
+                np.asarray(colors, dtype=np.float32),
+            )
+            scene = _render(viewer, state, index / FPS, arrows)
+            canvas = Image.new("RGB", (WIDTH, HEIGHT), BG)
+            canvas.paste(Image.fromarray(scene), (0, 103))
+            draw = ImageDraw.Draw(canvas)
+            _header(
+                draw,
+                "Bullet-like sphere → dynamic thin plate",
+                "80 m/s · 20 ms solver step · momentum transfer, not a fixed-wall stop",
+            )
+            phase = "BEFORE IMPACT" if index < 45 else "CONTACT-TIME SOLVE" if index < 180 else "EXACT ENDPOINTS"
+            draw.rounded_rectangle((485, 108, 795, 146), 9, fill=PANEL)
+            draw.text((518, 118), phase, font=FONTS["small"], fill=INK)
+            draw.rounded_rectangle((30, 156, 600, 233), 10, fill=PANEL)
+            draw.text((49, 168), "ordinary one-step VBD", font=FONTS["panel"], fill=BAD)
+            draw.text(
+                (49, 201),
+                f"final gap {ordinary['final_directed_gap_m'] * 100:.1f} cm · momentum error {ordinary['momentum_error_kg_m_s']:+.1f} kg·m/s",
+                font=FONTS["small"],
+                fill=BAD,
+            )
+            draw.rounded_rectangle((30, 474, 660, 551), 10, fill=PANEL)
+            draw.text((49, 486), "event-time island impulse", font=FONTS["panel"], fill=GOOD)
+            draw.text(
+                (49, 519),
+                f"final gap {event['final_directed_gap_m'] * 1e6:.2f} µm · both bodies {event['plate_final_velocity_m_s']:.3f} m/s",
+                font=FONTS["small"],
+                fill=GOOD,
+            )
+            if index >= 180:
+                draw.rounded_rectangle((735, 258, 1235, 360), 10, fill=PANEL)
+                draw.text((758, 273), "What changed?", font=FONTS["panel"], fill=INK)
+                draw.text(
+                    (758, 307),
+                    "Advance to the queried hit time\nsolve both bodies together\nthen advance the remaining frame",
+                    font=FONTS["small"],
+                    fill=MUTED,
+                    spacing=5,
+                )
+            _footer(
+                draw,
+                "Simulation and ViewerGL rendering on Horde L40 · orange sphere and thin plate endpoints are exact",
+            )
+            yield np.asarray(canvas)
+
+    _write_video(
+        assets / "bullet_thin_plate_comparison.mp4",
+        frames(),
+        poster=assets / "bullet_thin_plate_poster.jpg",
+        poster_index=240,
+    )
+
+
+def render_staged_cable_pile(assets: Path, traces, results: dict, viewer: ViewerGL) -> None:
+    metrics = results["staged_cable_pile"]
+    poses = traces["pile_poses"]
+    substeps = traces["pile_selected_substeps"]
+    replays = traces["pile_replay_counts"]
+    penetration = traces["pile_fresh_penetration_m"]
+    contacts = traces["pile_fresh_contact_counts"]
+    model, _layer_bodies = gallery.build_staged_pile("cuda:0")
+    state = model.state()
+    viewer.set_model(model)
+    viewer.set_camera(wp.vec3(2.65, -3.65, 2.25), 0.0, 0.0)
+    viewer.camera.look_at(wp.vec3(0.0, 0.0, 0.62))
+
+    def frames():
+        initial_hold = 30
+        count = initial_hold + poses.shape[0] - 1
+        release_frames = tuple(int(value) for value in metrics["release_frames"])
+        for index in range(count):
+            if index < initial_hold:
+                pose_index = 0
+                sim_frame = -1
+            else:
+                sim_frame = index - initial_hold
+                pose_index = sim_frame + 1
+            state.body_q.assign(poses[pose_index])
+            scene = _render(viewer, state, index / FPS)
+            canvas = Image.new("RGB", (WIDTH, HEIGHT), BG)
+            canvas.paste(Image.fromarray(scene), (0, 103))
+            draw = ImageDraw.Draw(canvas)
+            _header(
+                draw,
+                "Staged cable pile · three independently released layers",
+                "six flexible rigid-body cables · alternating orientation · fresh validation after every frame",
+            )
+            for layer, release in enumerate(release_frames):
+                x = 475 + 165 * layer
+                released = sim_frame >= release
+                color = (BLUE, PURPLE, ORANGE)[layer] if released else MUTED
+                draw.ellipse((x, 113, x + 22, 135), fill=color)
+                draw.text(
+                    (x + 31, 115),
+                    f"L{layer + 1} {'released' if released else 'held'}",
+                    font=FONTS["small"],
+                    fill=color,
+                )
+            if sim_frame < 0:
+                status = "All layers suspended · first release next"
+                pen_mm = 0.0
+                step_count = 0
+                replay_count = 0
+                contact_count = 0
+            else:
+                released_count = 1 + sum(sim_frame >= release for release in release_frames[1:])
+                status = f"Simulation frame {sim_frame:03d}/{poses.shape[0] - 2:03d} · {released_count}/3 layers active"
+                pen_mm = float(penetration[sim_frame]) * 1000.0
+                step_count = int(substeps[sim_frame])
+                replay_count = int(replays[sim_frame])
+                contact_count = int(contacts[sim_frame])
+            draw.rounded_rectangle((34, 500, 685, 603), 11, fill=PANEL)
+            draw.text((54, 515), status, font=FONTS["panel"], fill=INK)
+            draw.text(
+                (54, 554),
+                f"fresh penetration {pen_mm:.3f} mm · contacts {contact_count}\n"
+                f"physical substeps {step_count} · exact finer replays {replay_count}",
+                font=FONTS["small"],
+                fill=GOOD if pen_mm <= 1.0 else WARN,
+                spacing=5,
+            )
+            draw.rounded_rectangle((835, 500, 1245, 603), 11, fill=PANEL)
+            draw.text((855, 516), "330-frame Horde result", font=FONTS["panel"], fill=INK)
+            draw.text(
+                (855, 554),
+                f"worst {metrics['maximum_fresh_penetration_m'] * 1000:.3f} mm · only {metrics['replayed_frames']} replayed frames\n"
+                f"query/list debt 0 · finite {str(metrics['finite']).lower()}",
+                font=FONTS["small"],
+                fill=GOOD,
+                spacing=5,
+            )
+            _footer(
+                draw,
+                "Every simulated state and render came from Horde L40 · held layers become dynamic at frames 0, 90, and 180",
+            )
+            yield np.asarray(canvas)
+
+    _write_video(
+        assets / "staged_cable_pile.mp4",
+        frames(),
+        poster=assets / "staged_cable_pile_poster.jpg",
+        poster_index=poses.shape[0] - 10,
     )
 
 
@@ -485,7 +744,7 @@ def _compose_cable_video(
         for state_index in range(state_count):
             left_scene = Image.open(work_dir / left["key"] / f"{state_index:04d}.jpg").convert("RGB")
             right_scene = Image.open(work_dir / right["key"] / f"{state_index:04d}.jpg").convert("RGB")
-            for _duplicate in range(2):  # 60 Hz states at 30 fps => 4× slow motion, about 8 seconds.
+            for _duplicate in range(4):  # 60 Hz states at 30 fps => 8x slow motion, about 16 seconds.
                 canvas = Image.new("RGB", (WIDTH, HEIGHT), BG)
                 canvas.paste(left_scene, (0, 103))
                 canvas.paste(right_scene, (640, 103))
@@ -493,7 +752,7 @@ def _compose_cable_video(
                 _header(
                     draw,
                     "Jointed cable contact · coupled VBD owns the routing decision",
-                    f"20 rad/s twist · actual Horde frame {state_index:03d}/{state_count - 1:03d} · 4× slow motion",
+                    f"20 rad/s twist · actual Horde frame {state_index:03d}/{state_count - 1:03d} · 8x slow motion",
                 )
                 draw.text((26, 117), left_title, font=FONTS["panel"], fill=INK)
                 draw.text((666, 117), right_title, font=FONTS["panel"], fill=INK)
@@ -537,7 +796,7 @@ def _compose_cable_video(
         assets / filename,
         frames(),
         poster=assets / poster,
-        poster_index=2 * state_count - 12,
+        poster_index=4 * state_count - 24,
     )
 
 
@@ -603,7 +862,7 @@ def main() -> None:
     parser.add_argument("--frames", type=int, default=120)
     parser.add_argument(
         "--only",
-        choices=("impacts", "cables"),
+        choices=("impacts", "cables", "gallery"),
         default="impacts",
     )
     args = parser.parse_args()
@@ -626,6 +885,14 @@ def main() -> None:
             with (args.assets / "horde_render_results.json").open("w", encoding="utf-8") as output:
                 json.dump(cable_results, output, indent=2, sort_keys=True)
                 output.write("\n")
+        if args.only == "gallery":
+            with (args.assets / "horde_gallery_results.json").open(encoding="utf-8") as source:
+                gallery_results = json.load(source)
+            gallery_traces = np.load(args.assets / "horde_gallery_traces.npz")
+            viewer = _viewer(WIDTH, 520)
+            render_bullet_thin_plate(args.assets, gallery_traces, gallery_results, viewer)
+            render_staged_cable_pile(args.assets, gallery_traces, gallery_results, viewer)
+            viewer.close()
 
 
 if __name__ == "__main__":

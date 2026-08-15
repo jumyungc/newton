@@ -107,13 +107,13 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
       <p class="subtitle">
         Horde evidence for an ACM-inspired hybrid: queried event time for fast free-flight impact,
         contact-only normal PCG for dense simultaneous impact, conditioned physical VBD microsteps
-        for jointed contact evolution, and fail-closed query plus solver-list integrity.
+        for jointed contact evolution, fresh validation/replay, and fail-closed contact integrity.
       </p>
       <div class="metric-row">
         <div class="metric"><span class="label">10,000 m/s impact</span><span class="value good">+5.78 µm gap</span></div>
         <div class="metric"><span class="label">16-body closure</span><span class="value good">5.01e-6 m/s error</span></div>
         <div class="metric"><span class="label">Cable validated replay</span><span class="value good">31.45 ms median</span></div>
-        <div class="metric"><span class="label">Integrity coverage</span><span class="value good">Query + solver lists</span></div>
+        <div class="metric"><span class="label">Staged cable pile</span><span class="value good">0.965 mm worst</span></div>
       </div>
     </div>
   </header>
@@ -124,9 +124,10 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
       <p class="lede">
         The narrow ACM-like route is already excellent on the cases it is designed for. A correctly queried
         10,000 m/s plane impact is stopped at event time without a tiny global step, and a dense equal-mass
-        impact island reaches the analytic inelastic velocity while ordinary one-step VBD explodes. The cable
-        case validates the opposite routing decision: event/PCG is gated off, full coupled VBD microsteps remain
-        active, and a device-only fresh-query/rollback loop now enforces a 1 mm endpoint penetration budget.
+        impact island reaches the analytic inelastic velocity while ordinary one-step VBD explodes. A dynamic
+        bullet/plate case confirms that the event route transfers momentum rather than merely stopping an object
+        at a fixed wall. Jointed cables validate the opposite routing decision: event/PCG is gated off, full coupled
+        VBD microsteps remain active, and a device-only fresh-query/rollback loop enforces a 1 mm endpoint budget.
       </p>
       <div class="takeaways">
         <div class="takeaway good"><strong>Fast isolated impact works</strong>One queried event, two body updates, zero debt, and no tunnelling over a nominal 300 m displacement.</div>
@@ -187,17 +188,19 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
     <section id="fast-impact">
       <h2>Fast free-flight impact</h2>
       <p>
-        Both sides receive the same predictive sphere–plane contact. Ordinary VBD attempts to repair the entire
-        30 ms displacement at the endpoint; the event route reconstructs the contact time, applies the normal
-        impulse, then advances the remaining time from a physically consistent state.
+        Both sides receive the same predictive sphere–plane pair; collision detection did not change. What changed
+        is when the response is solved. Ordinary VBD integrates the complete 30 ms frame and then tries to repair
+        its deeply invalid endpoint. The event route reconstructs the hit time from that already-queried pair,
+        advances to zero gap, applies the normal impulse to the participating free-flight island, and advances the
+        remainder of the same frame. It is ACM-like contact-time scheduling, not a new geometric CCD query.
       </p>
       <div class="video-grid single">
         <figure>
           <video src="assets/fast_impact_comparison.mp4" poster="assets/fast_impact_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
           <figcaption>
             10,000 m/s sphere, 30 ms frame, 0.45 m initial gap. Motion between the large-step endpoints is
-            interpolated only for viewing and is slowed near impact; the displayed endpoints and velocities are
-            the actual Horde solver outputs.
+            interpolated only for viewing and is slowed near impact. The first part of the video explains the two
+            schedules; the final endpoints and velocities are exact Horde solver outputs and are held for inspection.
           </figcaption>
         </figure>
       </div>
@@ -215,15 +218,17 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
       <p>
         Sixteen touching equal-mass spheres form one queried impact component. Body 0 enters at 20 m/s. The
         contact-only PCG route solves the instantaneous unilateral normal impulse system; it does not replace
-        VBD for joints, friction, or persistent support.
+        VBD for joints, friction, or persistent support. In the video, the orange sphere is the striker and every
+        arrow uses one global velocity scale, so the ordinary alternating velocities can be compared directly with
+        the coherent PCG result.
       </p>
       <div class="video-grid single">
         <figure>
           <video src="assets/dense_chain_comparison.mp4" poster="assets/dense_chain_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
           <figcaption>
-            Endpoint positions are interpolated solely to expose the one-step result. The hybrid leaves the
-            chain touching and moving at the analytic 1.25 m/s; ordinary VBD creates large alternating velocities,
-            crossings, and gaps.
+            Endpoint positions are interpolated solely to expose the one-step result, then the exact endpoint is
+            held for four seconds. The hybrid leaves the chain touching and moving at the analytic 1.25 m/s;
+            ordinary VBD creates alternating −36.1 to +57.8 m/s velocities, crossings, and metre-scale gaps.
           </figcaption>
         </figure>
       </div>
@@ -251,6 +256,52 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
       </div>
     </section>
 
+    <section id="adversarial-gallery">
+      <h2>Additional adversarial cases</h2>
+      <p>
+        These are separate Horde simulations, not illustrative animations. The first checks dynamic momentum
+        transfer through very thin geometry; the second checks persistent, topology-changing cable contact as
+        independently released layers land on an existing pile.
+      </p>
+      <div class="video-grid">
+        <figure>
+          <video src="assets/bullet_thin_plate_comparison.mp4" poster="assets/bullet_thin_plate_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+          <figcaption>An 80 m/s sphere crosses a potential 1.6 m in one 20 ms solver frame and strikes a dynamic plate only 40 mm thick. Event-time island response gives both bodies the analytic 11.446 m/s common velocity.</figcaption>
+        </figure>
+        <figure>
+          <video src="assets/staged_cable_pile.mp4" poster="assets/staged_cable_pile_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+          <figcaption>Six 24-segment rigid-body cables arrive in three alternating layers at frames 0, 90, and 180. Every frame is freshly queried and rejected/replayed if penetration exceeds 1 mm.</figcaption>
+        </figure>
+      </div>
+      <div class="plot-grid">
+        <table>
+          <thead><tr><th>Bullet → dynamic thin plate</th><th>Ordinary VBD</th><th>Event-time island</th></tr></thead>
+          <tbody>
+            <tr><td>Final directed gap</td><td class="bad">174.4 mm</td><td class="good">6.15 µm</td></tr>
+            <tr><td>Bullet / plate velocity</td><td class="bad">28.894 / 13.614 m/s</td><td class="good">11.446 / 11.446 m/s</td></tr>
+            <tr><td>Momentum error</td><td class="bad">+31.87 kg·m/s</td><td class="good">−7.63e−6 kg·m/s</td></tr>
+            <tr><td>Query / event debt</td><td>0 / —</td><td class="good">0 / 0</td></tr>
+          </tbody>
+        </table>
+        <table>
+          <thead><tr><th>Staged cable pile</th><th>330-frame Horde result</th></tr></thead>
+          <tbody>
+            <tr><td>Worst fresh penetration</td><td class="good">0.965 mm</td></tr>
+            <tr><td>Peak fresh contacts</td><td>83</td></tr>
+            <tr><td>Replay work</td><td class="good">2 frames, 2 total replays</td></tr>
+            <tr><td>Selected physical substeps</td><td>10 on 328 frames; 20 on 2</td></tr>
+            <tr><td>Median / p95 frame cost</td><td>30.53 / 32.23 ms</td></tr>
+            <tr><td>Query / list / cap debt</td><td class="good">0 / 0 / 0 frames</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note">
+        The bullet result is conditional on the predictive query returning the correct pair; it demonstrates correct
+        scheduled response, not arbitrary thin-feature collision completeness. The pile provides a stronger persistent
+        contact test: contacts are rebuilt after every physical frame and acceptance is based on a fresh endpoint query.
+      </div>
+    </section>
+
     <section id="cable">
       <h2>Jointed cable contact: coupled VBD wins the routing decision</h2>
       <p>
@@ -262,11 +313,11 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
       <div class="video-grid">
         <figure>
           <video src="assets/cable_conditioning_comparison.mp4" poster="assets/cable_conditioning_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
-          <figcaption>Same 10 mm clock target, shown at 4× slow motion (8.1 s). The fresh rendered repeat measured 62.03 mm versus 8.49 mm worst penetration; the separately recorded table run measured 62.03 mm versus 3.31 mm.</figcaption>
+          <figcaption>Same 10 mm clock target, now shown at 8× slow motion (16.1 s). The fresh rendered repeat measured 62.03 mm versus 8.49 mm worst penetration; the separately recorded table run measured 62.03 mm versus 3.31 mm.</figcaption>
         </figure>
         <figure>
           <video src="assets/cable_accuracy_comparison.mp4" poster="assets/cable_accuracy_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
-          <figcaption>Conditioned fast and high-robustness clocks, shown at 4× slow motion (8.1 s). These are Newton ViewerGL captures of actual frame-by-frame Horde states; overlays report a fresh collision query after every frame.</figcaption>
+          <figcaption>Conditioned fast and high-robustness clocks, now shown at 8× slow motion (16.1 s). These are Newton ViewerGL captures of actual frame-by-frame Horde states; overlays report a fresh collision query after every frame.</figcaption>
         </figure>
       </div>
       <div class="plot-grid">
@@ -449,7 +500,8 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
         Recorded on <strong>NVIDIA L40</strong>, Warp <code>1.17.0.dev20260807</code>, CUDA toolkit <code>12.9</code>,
         driver <code>12.8</code>, branch <code>codex-sol/contact-strategy</code>. These are focused report benchmarks;
         no unit-test suite was run. Impact videos replay the exact Horde NPZ endpoints in Newton ViewerGL; cable
-        videos rerun all physics and capture every Newton framebuffer directly on Horde.
+        videos rerun all physics and capture every Newton framebuffer directly on Horde. The gallery recorder adds
+        the dynamic thin-plate and independently released cable-layer cases.
       </p>
       <pre><code>curl -L https://jumyungc.github.io/newton/reports/robust_gpu_contact_vbd/ingredients/record_horde_results.py \
   -o /tmp/record_horde_results.py
@@ -460,6 +512,7 @@ PYTHONPATH=$PWD /home/horde/git/newton/.venv/bin/python /tmp/record_horde_result
         <a class="button" href="assets/horde_results.json">Horde metrics JSON</a>
         <a class="button" href="assets/horde_cost_results.json">Matched cost JSON</a>
         <a class="button" href="assets/horde_render_results.json">Rendered repeat JSON</a>
+        <a class="button" href="assets/horde_gallery_results.json">Adversarial gallery JSON</a>
         <a class="button" href="assets/contact_replay_final.json">Validated replay JSON</a>
         <a class="button" href="assets/contact_always_fine_final.json">Always-fine control JSON</a>
         <a class="button" href="assets/replay_global_run1.json">Global replay A/B run 1</a>
@@ -475,7 +528,9 @@ PYTHONPATH=$PWD /home/horde/git/newton/.venv/bin/python /tmp/record_horde_result
         <a class="button" href="assets/replay_memory_sticky_run2.json">Sticky memory run 2</a>
         <a class="button" href="assets/replay_memory_sticky_run3.json">Sticky memory run 3</a>
         <a class="button" href="assets/horde_traces.npz">Recorded trajectories NPZ</a>
+        <a class="button" href="assets/horde_gallery_traces.npz">Gallery trajectories NPZ</a>
         <a class="button" href="ingredients/record_horde_results.py">GPU recorder source</a>
+        <a class="button" href="ingredients/record_horde_gallery.py">Gallery recorder source</a>
         <a class="button" href="ingredients/record_horde_costs.py">Cost recorder source</a>
         <a class="button" href="ingredients/render_horde_newton_videos.py">Horde Newton renderer source</a>
         <a class="button" href="ingredients/render_report_assets.py">Renderer source</a>
