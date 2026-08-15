@@ -217,8 +217,8 @@
   ALM penalty parameter). It is not the authored physical stiffness <code>K</code>. The two
   have the same units so that <code>rho*C</code> and <code>K*C</code> are generalized forces,
   but they have different jobs: <code>K</code> defines the intended material law, while
-  <code>rho</code> determines the local row stiffness <code>k_eff</code> and the multiplier
-  update rate.</p>
+  <code>rho</code> combines with <code>K</code> to determine the local row stiffness
+  <code>k_eff</code> and the multiplier update rate.</p>
   <div class="table-scroll">
     <table>
       <thead><tr><th>Symbol</th><th>Meaning</th><th>Typical units</th></tr></thead>
@@ -229,7 +229,7 @@
         <tr><td><code>lambda</code></td><td>ALM multiplier carried by the row: a generalized reaction force or torque.</td><td>N or N m</td></tr>
         <tr><td><code>rho</code></td><td>Automatically selected ALM metric. It affects conditioning and finite-sweep convergence, not the converged finite-<code>K</code> material law.</td><td>same as <code>K</code></td></tr>
         <tr><td><code>dt</code></td><td>Solver substep duration.</td><td>s</td></tr>
-        <tr><td><code>w = J M^-1 J^T</code></td><td>Delassus mobility along a row: displacement response per generalized impulse/force scale.</td><td>inverse generalized mass</td></tr>
+        <tr><td><code>w = J M^-1 J^T</code></td><td>Constraint-space inverse mass: velocity response per impulse, equivalently acceleration response per force.</td><td>inverse generalized mass</td></tr>
         <tr><td><code>H</code></td><td>Joint/drive/limit inverse-Delassus support, approximately <code>1/(dt^2*w)</code>. Structural rows use reduced-mass or mean-inertia seeds; drive/limit axes use directional support including lever arms.</td><td>same as <code>K</code></td></tr>
         <tr><td><code>A_n</code></td><td>Normal-contact support. Each dynamic endpoint contributes inertial plus structural support; two dynamic endpoints are combined through compliance.</td><td>N/m</td></tr>
         <tr><td><code>A_t</code></td><td>Conservative tangent-plane contact support, computed from the most mobile tangent direction and combined across dynamic endpoints.</td><td>N/m</td></tr>
@@ -253,7 +253,7 @@ candidate_lambda = s*(lambda + rho*C)</code></pre>
     <table>
       <thead><tr><th>Row family</th><th>Automatic rule</th><th>Interpretation</th></tr></thead>
       <tbody>
-        <tr><td>Structural joints and cable material rows</td><td><code>rho = max(H, 9*K)</code></td><td><code>H</code> prevents a metric weak relative to row inertia. Since <code>9 = 0.9/(1-0.9)</code>, this guarantees <code>k_eff/K &gt;= 0.9</code>: at least 90% of the authored stiffness is present immediately at a small local-iteration budget. This is a finite-sweep local-VBD policy, not a change to <code>K</code>.</td></tr>
+        <tr><td>Structural joints and cable material rows</td><td><code>rho = max(H, 9*K)</code></td><td><code>H</code> prevents a metric weak relative to row inertia. Since <code>9 = 0.9/(1-0.9)</code>, this guarantees <code>k_eff/K &gt;= 0.9</code> in every local solve. This 90% threshold is a finite-sweep local-VBD conditioning policy, not a change to <code>K</code>.</td></tr>
         <tr><td>Bilateral drives</td><td><code>rho = max(H, 9*K_step)</code></td><td>The same finite-material policy after spring and damping are written as one backward-Euler row.</td></tr>
         <tr><td>Active unilateral limits</td><td><code>rho = H_limit</code></td><td>Physical <code>K_step</code> enters the common series law while <code>rho</code> remains conditioning-driven. The complete reaction is projected onto the active bound's half-line.</td></tr>
         <tr><td>Contact normal</td><td><code>rho_n = A_n</code></td><td>Authored <code>K_n</code> enters the finite-material series law. As <code>K_n</code> grows, <code>k_eff,n -&gt; A_n</code>, giving a continuous hard-contact limit. The multiplier is projected to nonnegative compression.</td></tr>
@@ -261,7 +261,8 @@ candidate_lambda = s*(lambda + rho*C)</code></pre>
       </tbody>
     </table>
   </div>
-  <p>Each contact multiplier is updated once, so the projected candidate is applied directly:</p>
+  <p>Each contact multiplier is updated once per solver iteration and per contact row—not once
+  per endpoint—so the projected candidate is applied directly:</p>
   <pre><code>lambda_next = candidate_lambda</code></pre>
   <p><code>A_n</code> and <code>A_t</code> already include both endpoints' mobility. Endpoint
   count therefore does not rescale either <code>rho</code> or the multiplier update; this is the
