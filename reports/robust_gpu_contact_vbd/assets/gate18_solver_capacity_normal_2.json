@@ -1,0 +1,103 @@
+{
+  "accepted_missing_pair_penetration_m": 0.0,
+  "adaptive_substeps": true,
+  "attempted_substep_histogram": {
+    "10": 2
+  },
+  "attempted_substep_histogram_scope": "final accepted attempt only",
+  "contact_alpha": 0.0,
+  "contact_ke_n_m": null,
+  "event": false,
+  "finite": true,
+  "frame_replay_histogram": {
+    "0": 2
+  },
+  "frame_total_with_validation_median_ms": 49.98294822871685,
+  "frames": 2,
+  "frames_with_event_debt": 0,
+  "frames_with_missing_pairs": 1,
+  "frames_with_multiple_failing_islands": 0,
+  "graph_resident_replay": true,
+  "hard_contact_history": false,
+  "inertial_contact_stiffness_ratio": 5.0,
+  "initial_contact_joint_island_count": 3,
+  "initial_failing_island_histogram": {
+    "0": 2
+  },
+  "initial_island_body_rate_histogram": {
+    "10": 189
+  },
+  "initial_island_schedule_debt": 0,
+  "island_local_replay": false,
+  "iterations": 5,
+  "max_missing_pairs_per_frame": 3,
+  "max_speed_m_s": 1.7756036520004272,
+  "maximum_failing_islands": 0,
+  "maximum_final_query_contacts_per_body": 7,
+  "maximum_fresh_penetration_m": 0.0003272648900747299,
+  "maximum_solver_overflow_required_capacity": 0,
+  "maximum_solver_reported_contacts": 770,
+  "maximum_verification_reported_contacts": 768,
+  "minimum_fresh_gap_m": -0.0003272648900747299,
+  "motion_schedule_debt_frames": 0,
+  "physical_substeps_per_frame": 10,
+  "query_capacity_debt_frames": 0,
+  "query_gap_m": null,
+  "query_integrity_debt_frames": 0,
+  "query_integrity_scope": [
+    "broad_phase_pairs",
+    "gjk_candidate_pairs",
+    "mesh_convex_pairs",
+    "triangle_pairs",
+    "mesh_plane_pairs",
+    "mesh_mesh_pairs",
+    "sdf_sdf_pairs",
+    "final_rigid_contacts",
+    "contact_reduction_insertions"
+  ],
+  "query_overflow_observed_frames": 0,
+  "query_overflow_response": "fail_closed_resize_and_recapture",
+  "refresh_interval_substeps": 10,
+  "replay_cap_debt_frames": 0,
+  "replay_control_median_ms": 4.303939640522003,
+  "replay_control_p95_ms": 4.303939640522003,
+  "replay_execution_model": "device_decision_global_cuda_graph_chain",
+  "replay_gap_tolerance_m": 0.001,
+  "replay_jump_error_order": 2.0,
+  "replay_jump_safety": 1.25,
+  "replay_memory_easy_frames": null,
+  "replay_memory_easy_ratio": null,
+  "replay_memory_peak_floor": null,
+  "replay_missing_pair_tolerance_m": 0.0,
+  "replay_schedule_memory": false,
+  "replayed_frames": 0,
+  "selected_substep_histogram": {
+    "10": 2
+  },
+  "simulation_frame_time_median_ms": 4.303939640522003,
+  "simulation_frame_time_p95_ms": 4.303939640522003,
+  "solver_contact_capacity": 10560,
+  "solver_contact_list_capacity_per_body": 64,
+  "solver_contact_list_integrity_debt_frames": 0,
+  "solver_contact_list_overflow_observed_frames": 0,
+  "solver_contact_list_overflow_response": "fail_closed_resize_and_recapture",
+  "speculative_contacts": false,
+  "speculative_extension_m": null,
+  "target_surface_motion_m": 0.01,
+  "total_event_body_updates": 0,
+  "total_replays": 0,
+  "twist_rate_rad_s": 20.0,
+  "verification_contact_max": 10560,
+  "worst_body_pair": [
+    -1,
+    149
+  ],
+  "worst_shape_pair": [
+    192,
+    149
+  ],
+  "worst_shape_types": [
+    1,
+    4
+  ]
+}

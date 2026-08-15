@@ -106,14 +106,14 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
       <h1>Robust GPU Contact for VBD</h1>
       <p class="subtitle">
         Horde evidence for an ACM-inspired hybrid: queried event time for fast free-flight impact,
-        contact-only normal PCG for dense simultaneous impact, and conditioned physical VBD microsteps
-        for jointed, persistent, frictional contact evolution.
+        contact-only normal PCG for dense simultaneous impact, conditioned physical VBD microsteps
+        for jointed contact evolution, and fail-closed query plus solver-list integrity.
       </p>
       <div class="metric-row">
         <div class="metric"><span class="label">10,000 m/s impact</span><span class="value good">+5.78 µm gap</span></div>
         <div class="metric"><span class="label">16-body closure</span><span class="value good">5.01e-6 m/s error</span></div>
         <div class="metric"><span class="label">Cable validated replay</span><span class="value good">31.45 ms median</span></div>
-        <div class="metric"><span class="label">Replay certificate</span><span class="value good">0.956 mm · zero debt</span></div>
+        <div class="metric"><span class="label">Integrity coverage</span><span class="value good">Query + solver lists</span></div>
       </div>
     </div>
   </header>
@@ -132,6 +132,55 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
         <div class="takeaway good"><strong>Fast isolated impact works</strong>One queried event, two body updates, zero debt, and no tunnelling over a nominal 300 m displacement.</div>
         <div class="takeaway good"><strong>Dense PCG has real meat</strong>Matrix-free normal impulse closure preserves momentum and costs well under 1 ms for the tested 16-body graph.</div>
         <div class="takeaway good"><strong>Rollback/replay now works</strong>Exact GPU restoration, fresh endpoint validation, residual-driven finer physical VBD, and explicit cap debt.</div>
+      </div>
+    </section>
+
+    <section id="integrity">
+      <h2>Gate 18: complete contact integrity</h2>
+      <p class="lede">
+        A good endpoint is trustworthy only if collision detection found every candidate it was configured to hold
+        <em>and</em> SolverVBD retained every returned contact in its per-body lists. Both stages now publish
+        graph-resident, caller-reset certificates. Capacity failure rejects immediately and requests resize/recapture;
+        it never wastes finer physical replay on a memory problem.
+      </p>
+      <table style="margin-top: 18px;">
+        <thead><tr><th>Horde L40 check</th><th>Configured / required</th><th>Observed response</th><th>Accepted?</th></tr></thead>
+        <tbody>
+          <tr><td>Normal cable smoke</td><td>64 per body / at most 7 at final queries</td><td>770 global contacts, zero query debt, zero solver-list debt, finite</td><td class="good">Yes</td></tr>
+          <tr><td>Forced verifier overflow</td><td>1 final verification contact / 768 reported</td><td>Query-integrity debt on both frames; zero replay</td><td class="bad">No: resize</td></tr>
+          <tr><td>Forced SolverVBD list overflow</td><td>1 per body / 7 required</td><td>Solver-list debt on both frames; exact required capacity reported; zero replay</td><td class="bad">No: resize</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Speculative candidates were tested, not assumed</h3>
+      <p>
+        Three matched 120-frame cable runs compared the discrete-query memoryless replay default with a 12.5 mm
+        velocity-swept speculative cap. Speculation modestly reduced frames with missing endpoint pairs, but produced
+        more replay and a worse cost tail without improving the approximately 1 mm accepted penetration bound.
+        It remains an opt-in risk-reduction experiment rather than the default.
+      </p>
+      <table>
+        <thead><tr><th>Policy, three runs</th><th>Median</th><th>p95</th><th>Replayed frames / retries</th><th>Missing-pair frames</th><th>Worst fresh penetration</th></tr></thead>
+        <tbody>
+          <tr><td>Discrete microstep query</td><td class="good">30.33-30.45 ms</td><td class="good">112.54-128.25 ms</td><td>43 / 53</td><td>81</td><td>0.9973 mm</td></tr>
+          <tr><td>Speculative, 12.5 mm cap</td><td>30.78-31.63 ms</td><td class="bad">129.72-202.26 ms</td><td>74 / 102</td><td>71</td><td>0.9956 mm</td></tr>
+        </tbody>
+      </table>
+      <div class="note warning">
+        <strong>Bounded claim.</strong> The tested cable and 100 rad/s cases need neither global CCD nor rigid DAT.
+        This is a useful common-path feature, not an arbitrary-speed nonpenetration theorem. A thin object can still
+        cross and separate between discrete endpoint queries; motion-cap and replay-cap debt remain explicit.
+      </div>
+      <div class="downloads">
+        <a class="button" href="assets/gate18_solver_capacity_normal_2.json">Normal integrity JSON</a>
+        <a class="button" href="assets/gate18_forced_query_overflow_2.json">Forced query JSON</a>
+        <a class="button" href="assets/gate18_solver_capacity_forced_2.json">Forced solver-list JSON</a>
+        <a class="button" href="assets/gate18_base_r1_120.json">Baseline run 1</a>
+        <a class="button" href="assets/gate18_base_r2_120.json">Baseline run 2</a>
+        <a class="button" href="assets/gate18_base_r3_120.json">Baseline run 3</a>
+        <a class="button" href="assets/gate18_spec_r1_120.json">Speculative run 1</a>
+        <a class="button" href="assets/gate18_spec_r2_120.json">Speculative run 2</a>
+        <a class="button" href="assets/gate18_spec_r3_120.json">Speculative run 3</a>
       </div>
     </section>
 
