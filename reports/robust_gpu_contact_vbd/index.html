@@ -112,8 +112,8 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
       <div class="metric-row">
         <div class="metric"><span class="label">10,000 m/s impact</span><span class="value good">+5.78 µm gap</span></div>
         <div class="metric"><span class="label">16-body closure</span><span class="value good">5.01e-6 m/s error</span></div>
-        <div class="metric"><span class="label">Cable validated replay</span><span class="value good">31.45 ms median</span></div>
-        <div class="metric"><span class="label">Staged cable pile</span><span class="value good">0.965 mm worst</span></div>
+        <div class="metric"><span class="label">Cable validated replay</span><span class="value good">15.86 ms median</span></div>
+        <div class="metric"><span class="label">Staged cable pile</span><span class="value good">16.75 ms median</span></div>
       </div>
     </div>
   </header>
@@ -286,11 +286,11 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
         <table>
           <thead><tr><th>Staged cable pile</th><th>330-frame Horde result</th></tr></thead>
           <tbody>
-            <tr><td>Worst fresh penetration</td><td class="good">0.965 mm</td></tr>
-            <tr><td>Peak fresh contacts</td><td>83</td></tr>
-            <tr><td>Replay work</td><td class="good">2 frames, 2 total replays</td></tr>
-            <tr><td>Selected physical substeps</td><td>10 on 328 frames; 20 on 2</td></tr>
-            <tr><td>Median / p95 frame cost</td><td>30.53 / 32.23 ms</td></tr>
+            <tr><td>Worst fresh penetration</td><td class="good">0.984 mm</td></tr>
+            <tr><td>Peak fresh contacts</td><td>85</td></tr>
+            <tr><td>Replay work</td><td class="good">16 frames, 21 total replays</td></tr>
+            <tr><td>Selected physical substeps</td><td>5 on 314 frames; 10/20/40 on 16</td></tr>
+            <tr><td>Median / p95 frame cost</td><td class="good">16.86 / 22.32 ms</td></tr>
             <tr><td>Query / list / cap debt</td><td class="good">0 / 0 / 0 frames</td></tr>
           </tbody>
         </table>
@@ -299,6 +299,8 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
         The bullet result is conditional on the predictive query returning the correct pair; it demonstrates correct
         scheduled response, not arbitrary thin-feature collision completeness. The pile provides a stronger persistent
         contact test: contacts are rebuilt after every physical frame and acceptance is based on a fresh endpoint query.
+        Across three fresh five-step runs, median cost was 16.59–17.37 ms, p95 was 18.80–21.99 ms, and worst
+        penetration was at most 0.995 mm with zero debt—1.82× faster at median than the previous 10-step start.
       </div>
     </section>
 
@@ -355,14 +357,18 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
         <table>
           <thead><tr><th>120-frame strategy</th><th>Median / p95</th><th>Worst fresh penetration</th><th>Finite-budget debt</th></tr></thead>
           <tbody>
+            <tr><td>Validated replay, balanced 30 mm predictor</td><td class="good">15.82–15.87 / 44.85–99.25 ms</td><td class="good">0.937 mm</td><td class="good">0 query · 0 list · 0 replay</td></tr>
             <tr><td>Validated replay, 10 mm motion target</td><td class="good">31.45 / 98.63 ms</td><td class="good">0.956 mm</td><td class="good">0 motion · 0 replay</td></tr>
             <tr><td>Always-fine, 1 mm motion target</td><td>118.28 / 134.82 ms</td><td class="good">0.475 mm</td><td class="bad">87 motion-cap frames</td></tr>
           </tbody>
         </table>
         <div class="note">
-          <strong>3.76× faster at median.</strong> Only 12 of 120 frames replayed, with 13 total retries. The accepted
-          rate histogram was <code>{10:6, 20:11, 40:26, 80:53, 160:20, 320:4}</code>. A no-replay graph measured
-          30.30 ms median versus 29.19 ms for ordinary adaptive VBD, about 1.1 ms common-path validation overhead.
+          <strong>1.98× faster than our previous validated policy and 7.46× faster than always-fine at median.</strong>
+          The independent 1 mm acceptance threshold is unchanged. The 30 mm value controls only the optimistic first
+          guess; rejected frames restore exactly and jump to finer physical buckets. Across three fresh processes,
+          medians were 15.815, 15.862, and 15.866 ms and every capacity/replay debt counter remained zero. This is now
+          automatic when validated replay has no explicit target: predictor = 30× fresh tolerance. A no-override Horde
+          confirmation measured 15.84/47.31 ms median/p95, 0.971 mm worst penetration, and zero debt.
         </div>
       </div>
       <p class="note warning">
@@ -392,14 +398,17 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
             <tr><td>1,024 independent impacts</td><td>0.250 ms · −8.30 mm</td><td class="good">0.359 ms · +5.71 µm</td><td>1.44×</td></tr>
             <tr><td>Cable ρ=0 → ρ=5, target 10 mm</td><td>32.04 ms</td><td>29.41 ms</td><td>0.92×*</td></tr>
             <tr><td>Cable conditioned target 10 → 1 mm</td><td>29.41 ms</td><td>119.02 ms</td><td>4.05×</td></tr>
-            <tr><td>Cable always-fine → validated replay</td><td>118.28 ms</td><td class="good">31.45 ms</td><td class="good">0.27× (3.76× faster)</td></tr>
+            <tr><td>Cable old validated → balanced predictor</td><td>31.45 ms</td><td class="good">15.86 ms</td><td class="good">0.50× (1.98× faster)</td></tr>
+            <tr><td>Cable always-fine → balanced predictor</td><td>118.28 ms</td><td class="good">15.86 ms</td><td class="good">0.13× (7.46× faster)</td></tr>
+            <tr><td>Staged pile 10-step → 5-step certified start</td><td>30.53 ms</td><td class="good">16.75 ms</td><td class="good">0.55× (1.82× faster)</td></tr>
           </tbody>
         </table>
       </div>
       <p class="note">
-        *Cable figures are synchronized per-frame wall times from one chaotic run, not pure kernel timings; do not
-        interpret the small ρ=5 speed difference as a general speedup. The robust 1 mm clock reaches up to 320 real
-        VBD microsteps, so its cost is the clearest optimization target.
+        *Cable figures are synchronized per-frame wall times, not pure kernel timings. The balanced predictor uses
+        three fresh 120-frame Horde runs because this cable is trajectory-sensitive. Attempts to start at five steps,
+        reuse collision queries, use four VBD iterations, or increase conditioning above ρ=5 all lost on median,
+        tail, trajectory quality, or several of those measures; they are retained in the raw sweep as negative evidence.
       </p>
     </section>
 
@@ -513,6 +522,7 @@ PYTHONPATH=$PWD /home/horde/git/newton/.venv/bin/python /tmp/record_horde_result
         <a class="button" href="assets/horde_cost_results.json">Matched cost JSON</a>
         <a class="button" href="assets/horde_render_results.json">Rendered repeat JSON</a>
         <a class="button" href="assets/horde_gallery_results.json">Adversarial gallery JSON</a>
+        <a class="button" href="assets/horde_speed_sweep.json">Contact speed sweep JSON</a>
         <a class="button" href="assets/contact_replay_final.json">Validated replay JSON</a>
         <a class="button" href="assets/contact_always_fine_final.json">Always-fine control JSON</a>
         <a class="button" href="assets/replay_global_run1.json">Global replay A/B run 1</a>
@@ -531,6 +541,7 @@ PYTHONPATH=$PWD /home/horde/git/newton/.venv/bin/python /tmp/record_horde_result
         <a class="button" href="assets/horde_gallery_traces.npz">Gallery trajectories NPZ</a>
         <a class="button" href="ingredients/record_horde_results.py">GPU recorder source</a>
         <a class="button" href="ingredients/record_horde_gallery.py">Gallery recorder source</a>
+        <a class="button" href="ingredients/summarize_horde_contact_speed.py">Speed sweep packager</a>
         <a class="button" href="ingredients/record_horde_costs.py">Cost recorder source</a>
         <a class="button" href="ingredients/render_horde_newton_videos.py">Horde Newton renderer source</a>
         <a class="button" href="ingredients/render_report_assets.py">Renderer source</a>

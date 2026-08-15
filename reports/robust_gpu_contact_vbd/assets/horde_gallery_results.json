@@ -47,13 +47,14 @@
     "frame_dt_s": 0.016666666666666666,
     "frames": 330,
     "layers": 3,
-    "maximum_final_speed_m_s": 0.11703943461179733,
-    "maximum_fresh_contact_count": 83,
-    "maximum_fresh_penetration_m": 0.0009647561237215996,
+    "maximum_final_speed_m_s": 0.07994250953197479,
+    "maximum_fresh_contact_count": 85,
+    "maximum_fresh_penetration_m": 0.0009840242564678192,
     "maximum_solver_list_required_capacity": 0,
-    "median_frame_time_ms": 30.530902557075024,
-    "minimum_final_body_height_m": 0.017919911071658134,
-    "p95_frame_time_ms": 32.22667844966054,
+    "median_attempted_physical_substeps": 5.0,
+    "median_frame_time_ms": 16.862032003700733,
+    "minimum_final_body_height_m": 0.017919382080435753,
+    "p95_frame_time_ms": 22.31652103364494,
     "penetration_tolerance_m": 0.001,
     "query_integrity_debt_frames": 0,
     "release_frames": [
@@ -62,13 +63,24 @@
       180
     ],
     "replay_cap_debt_frames": 0,
-    "replayed_frames": 2,
+    "replayed_frames": 16,
     "segments_per_cable": 24,
     "selected_substep_histogram": {
-      "10": 328,
-      "20": 2
+      "10": 12,
+      "20": 3,
+      "40": 1,
+      "5": 314
     },
     "solver_list_integrity_debt_frames": 0,
-    "total_replays": 2
+    "substep_buckets": [
+      5,
+      10,
+      20,
+      40,
+      80,
+      160
+    ],
+    "total_attempted_physical_substeps": 1930,
+    "total_replays": 21
   }
 }

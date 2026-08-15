@@ -40,7 +40,7 @@ PILE_LENGTH = 1.60
 PILE_FRAME_DT = 1.0 / 60.0
 PILE_RELEASE_FRAMES = (0, 90, 180)
 PILE_FRAMES = 330
-PILE_BUCKETS = (10, 20, 40, 80, 160)
+PILE_BUCKETS = (5, 10, 20, 40, 80, 160)
 PILE_PENETRATION_TOLERANCE = 1.0e-3
 
 LAYER_COLORS = (
@@ -48,6 +48,15 @@ LAYER_COLORS = (
     wp.vec3(174.0 / 255.0, 125.0 / 255.0, 238.0 / 255.0),
     wp.vec3(255.0 / 255.0, 177.0 / 255.0, 83.0 / 255.0),
 )
+
+
+def _parse_pile_buckets(value: str) -> tuple[int, ...]:
+    buckets = tuple(int(item) for item in value.split(","))
+    if not buckets or any(bucket < 1 for bucket in buckets):
+        raise argparse.ArgumentTypeError("expected positive comma-separated buckets")
+    if any(a >= b for a, b in zip(buckets, buckets[1:])):
+        raise argparse.ArgumentTypeError("pile buckets must be strictly increasing")
+    return buckets
 
 
 def _json_default(value):
@@ -225,7 +234,10 @@ def _simulate_pile_attempt(example, substeps: int) -> None:
         example.state_0, example.state_1 = example.state_1, example.state_0
 
 
-def _record_staged_pile(device: str) -> tuple[dict, dict[str, np.ndarray]]:
+def _record_staged_pile(
+    device: str,
+    buckets: tuple[int, ...] = PILE_BUCKETS,
+) -> tuple[dict, dict[str, np.ndarray]]:
     model, layer_bodies = build_staged_pile(device)
     pipeline = newton.CollisionPipeline(model, contact_matching="disabled")
     contacts = pipeline.contacts()
@@ -253,6 +265,7 @@ def _record_staged_pile(device: str) -> tuple[dict, dict[str, np.ndarray]]:
     poses = [example.state_0.body_q.numpy().copy()]
     velocities = [example.state_0.body_qd.numpy().copy()]
     selected_substeps: list[int] = []
+    attempted_physical_substeps: list[int] = []
     replay_counts: list[int] = []
     fresh_penetration: list[float] = []
     fresh_contact_counts: list[int] = []
@@ -268,7 +281,9 @@ def _record_staged_pile(device: str) -> tuple[dict, dict[str, np.ndarray]]:
         snapshot.save()
         accepted = False
         last_penetration = float("inf")
-        for attempt, bucket in enumerate(PILE_BUCKETS):
+        frame_attempted_substeps = 0
+        for attempt, bucket in enumerate(buckets):
+            frame_attempted_substeps += bucket
             pipeline.narrow_phase.buffer_overflow_accumulator.zero_()
             solver.body_body_contact_overflow_accumulator.zero_()
             _simulate_pile_attempt(example, bucket)
@@ -289,15 +304,17 @@ def _record_staged_pile(device: str) -> tuple[dict, dict[str, np.ndarray]]:
                 replay_counts.append(attempt)
                 query_debt.append(0)
                 solver_list_required.append(0)
+                attempted_physical_substeps.append(frame_attempted_substeps)
                 accepted = True
                 break
-            if bucket != PILE_BUCKETS[-1]:
+            if bucket != buckets[-1]:
                 snapshot.restore()
         if not accepted:
-            selected_substeps.append(PILE_BUCKETS[-1])
-            replay_counts.append(len(PILE_BUCKETS) - 1)
+            selected_substeps.append(buckets[-1])
+            replay_counts.append(len(buckets) - 1)
             query_debt.append(0)
             solver_list_required.append(0)
+            attempted_physical_substeps.append(frame_attempted_substeps)
 
         wp.synchronize()
         frame_times_ms.append((time.perf_counter() - start) * 1000.0)
@@ -318,6 +335,7 @@ def _record_staged_pile(device: str) -> tuple[dict, dict[str, np.ndarray]]:
         "segments_per_cable": PILE_SEGMENTS,
         "release_frames": PILE_RELEASE_FRAMES,
         "penetration_tolerance_m": PILE_PENETRATION_TOLERANCE,
+        "substep_buckets": buckets,
         "maximum_fresh_penetration_m": float(max(fresh_penetration)),
         "maximum_fresh_contact_count": int(max(fresh_contact_counts)),
         "replayed_frames": int(np.count_nonzero(replay_counts)),
@@ -328,6 +346,8 @@ def _record_staged_pile(device: str) -> tuple[dict, dict[str, np.ndarray]]:
         "selected_substep_histogram": {
             str(int(rate)): int(count) for rate, count in zip(rates, counts, strict=True)
         },
+        "median_attempted_physical_substeps": float(statistics.median(attempted_physical_substeps)),
+        "total_attempted_physical_substeps": int(sum(attempted_physical_substeps)),
         "query_integrity_debt_frames": int(np.count_nonzero(query_debt)),
         "solver_list_integrity_debt_frames": int(np.count_nonzero(solver_list_required)),
         "maximum_solver_list_required_capacity": int(max(solver_list_required)),
@@ -342,6 +362,7 @@ def _record_staged_pile(device: str) -> tuple[dict, dict[str, np.ndarray]]:
         "velocities": np.asarray(velocities, dtype=np.float32),
         "selected_substeps": np.asarray(selected_substeps, dtype=np.int32),
         "replay_counts": np.asarray(replay_counts, dtype=np.int32),
+        "attempted_physical_substeps": np.asarray(attempted_physical_substeps, dtype=np.int32),
         "fresh_penetration_m": np.asarray(fresh_penetration, dtype=np.float32),
         "fresh_contact_counts": np.asarray(fresh_contact_counts, dtype=np.int32),
         "layer_bodies": np.asarray(layer_bodies, dtype=np.int32),
@@ -354,6 +375,12 @@ def main() -> None:
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--only", choices=("all", "bullet", "pile"), default="all")
+    parser.add_argument(
+        "--pile-buckets",
+        type=_parse_pile_buckets,
+        default=PILE_BUCKETS,
+        help="Strictly increasing physical-step replay ladder for the staged pile.",
+    )
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -373,7 +400,7 @@ def main() -> None:
                 arrays.update({f"{prefix}_{key}": value for key, value in trace.items()})
             report["bullet_thin_dynamic_plate"] = bullet_results
         if args.only in ("all", "pile"):
-            metrics, trace = _record_staged_pile(args.device)
+            metrics, trace = _record_staged_pile(args.device, args.pile_buckets)
             report["staged_cable_pile"] = metrics
             arrays.update({f"pile_{key}": value for key, value in trace.items()})
 

@@ -870,12 +870,11 @@ def main() -> None:
     args.work_dir.mkdir(parents=True, exist_ok=True)
 
     wp.init()
-    with (args.assets / "horde_results.json").open(encoding="utf-8") as source:
-        results = json.load(source)
-    traces = np.load(args.assets / "horde_traces.npz")
-
     with wp.ScopedDevice("cuda:0"):
         if args.only == "impacts":
+            with (args.assets / "horde_results.json").open(encoding="utf-8") as source:
+                results = json.load(source)
+            traces = np.load(args.assets / "horde_traces.npz")
             viewer = _viewer(WIDTH, 520)
             render_fast_impact(args.assets, traces, results, viewer)
             render_dense_chain(args.assets, traces, results, viewer)
