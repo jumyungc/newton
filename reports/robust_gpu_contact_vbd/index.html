@@ -92,6 +92,7 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
           <tr><td>Dense simultaneous impact</td><td>16 moving bodies</td><td class="good">5.01e-6 m/s shared-velocity error</td><td>0.584 ms captured median</td></tr>
           <tr><td>Compact cable pile dropped from 5 m</td><td>4,000 rigid cable bodies</td><td class="good">0.995 mm penetration, 1.982 mm joint residual</td><td>9.05 ms median, 20.08 ms p95</td></tr>
           <tr><td>Ten cable layers released separately</td><td>4,000 rigid cable bodies</td><td class="good">0.988 mm penetration, 2.134 mm joint residual</td><td>8.73 ms median, 14.70 ms p95</td></tr>
+          <tr><td>Counter-twisted cable bundle</td><td>7 cables, 280 bodies, 4 turns</td><td class="good">0.988 mm penetration, zero debt</td><td>3.57 ms median, 40.68 ms p95</td></tr>
           <tr><td>Extended cable twist</td><td>240 frames at 20 rad/s</td><td class="good">0.797 mm with the fine setting</td><td>32.1 s report video at 8&times; slow motion</td></tr>
         </tbody>
       </table>
@@ -117,6 +118,15 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
           <figcaption>Separately released cable layers with ground contact, self-contact, and joints.</figcaption>
         </figure>
       </div>
+    </section>
+
+    <section id="bundle-twist">
+      <h2>Kinematically twisted cable bundle</h2>
+      <p>Seven suspended cables were clamped at both ends and driven through four full relative turns. The captured fixed six-step control exceeded the combined contact and joint limits in 91 of 240 frames. The adaptive result completed all four turns with zero debt.</p>
+      <figure style="margin-top:18px">
+        <video src="assets/cable_bundle_twist_comparison.mp4" poster="assets/cable_bundle_twist_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+        <figcaption>Exact sampled Horde states. Fixed control: 2.495 mm penetration and 5.407 mm joint residual. Adaptive result: 0.988 mm and 3.865 mm.</figcaption>
+      </figure>
     </section>
 
     <section id="full-pile">
@@ -165,6 +175,7 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
           <tr><td>Dense 16-body impact</td><td>0.200 ms, unstable endpoint</td><td class="good">0.584 ms, analytic closure</td></tr>
           <tr><td>1,024 independent impacts</td><td>0.250 ms, 8.30 mm penetration</td><td class="good">0.359 ms, +5.71 &micro;m gap</td></tr>
           <tr><td>144-body staged cable pile</td><td>19.85 ms host-driven</td><td class="good">2.17 ms captured</td></tr>
+          <tr><td>280-body four-turn cable bundle</td><td>3.45 ms median, 91 failed frames</td><td class="good">3.57 ms median, zero debt</td></tr>
         </tbody>
       </table>
       <figure style="margin-top:18px">
