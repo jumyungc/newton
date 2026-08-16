@@ -94,6 +94,7 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
           <tr><td>Ten cable layers released separately</td><td>4,000 rigid cable bodies</td><td class="good">0.988 mm penetration, 2.134 mm joint residual</td><td>8.73 ms median, 14.70 ms p95</td></tr>
           <tr><td>Counter-twisted cable bundle</td><td>7 cables, 280 bodies, 4 turns</td><td class="good">0.988 mm penetration, zero debt</td><td>3.57 ms median, 40.68 ms p95</td></tr>
           <tr><td>Extended cable twist</td><td>240 frames at 20 rad/s</td><td class="good">0.797 mm with the fine setting</td><td>32.1 s report video at 8&times; slow motion</td></tr>
+          <tr><td>Slow-to-fast cable curtains</td><td>160 cable bodies, 0.4 to 160 m/s</td><td class="good">13.21 kJ cable response versus 0.103 kJ fixed</td><td>473 ms adaptive versus 1,638 ms uniform fine</td></tr>
         </tbody>
       </table>
     </section>
@@ -118,6 +119,15 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
           <figcaption>Separately released cable layers with ground contact, self-contact, and joints.</figcaption>
         </figure>
       </div>
+    </section>
+
+    <section id="cable-curtain-bullet">
+      <h2>Slow-to-fast cable-curtain impact</h2>
+      <p>A prescribed sphere moves slowly through the first cable curtain, crosses the remaining curtains at 160 m/s, and then stops while the cables ring down. The fast 1/60-second interval is shown 360&times; slower.</p>
+      <figure style="margin-top:18px">
+        <video src="assets/acm_cable_curtain_bullet_comparison.mp4" poster="assets/acm_cable_curtain_bullet_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+        <figcaption>Exact Horde states. Fixed six-step VBD transfers 0.103 kJ; the 977-step adaptive frame transfers 13.21 kJ and is 3.46&times; faster than the matched 3,840-step fine run.</figcaption>
+      </figure>
     </section>
 
     <section id="bundle-twist">
@@ -176,6 +186,7 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
           <tr><td>1,024 independent impacts</td><td>0.250 ms, 8.30 mm penetration</td><td class="good">0.359 ms, +5.71 &micro;m gap</td></tr>
           <tr><td>144-body staged cable pile</td><td>19.85 ms host-driven</td><td class="good">2.17 ms captured</td></tr>
           <tr><td>280-body four-turn cable bundle</td><td>3.45 ms median, 91 failed frames</td><td class="good">3.57 ms median, zero debt</td></tr>
+          <tr><td>160-body cable-curtain fast frame</td><td>1,638 ms uniform fine</td><td class="good">473 ms adaptive</td></tr>
         </tbody>
       </table>
       <figure style="margin-top:18px">
