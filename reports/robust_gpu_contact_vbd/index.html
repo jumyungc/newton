@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Horde measurements and rendered comparisons for ACM-inspired rigid contact in Newton VBD.">
+  <meta name="description" content="Measured Newton VBD contact results and rendered Horde comparisons.">
   <link rel="icon" href="data:,">
   <title>Robust GPU Contact for VBD</title>
   <style>
@@ -20,7 +20,6 @@
   --max: 1280px;
 }
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; }
 body {
   margin: 0;
   background: #fff;
@@ -31,70 +30,38 @@ body {
 header { border-bottom: 1px solid var(--line); background: linear-gradient(135deg, #f8fbfd 0%, #fff 62%); }
 main, .header-inner, footer { width: min(var(--max), calc(100vw - 32px)); margin: 0 auto; }
 .header-inner { padding: 38px 0 30px; }
-.breadcrumb { margin: 0 0 14px; font-size: 0.92rem; font-weight: 700; }
-.breadcrumb a { color: var(--accent); text-decoration: none; }
-h1 { margin: 0 0 10px; font-size: clamp(2.1rem, 4.5vw, 3.7rem); line-height: 1.02; letter-spacing: -0.035em; }
-.subtitle { max-width: 930px; margin: 0; color: var(--muted); font-size: 1.08rem; }
+.breadcrumb { margin: 0 0 14px; font-size: .92rem; font-weight: 700; }
+.breadcrumb a, a { color: var(--accent); }
+h1 { margin: 0 0 10px; font-size: clamp(2.1rem, 4.5vw, 3.7rem); line-height: 1.02; letter-spacing: -.035em; }
+.subtitle { max-width: 850px; margin: 0; color: var(--muted); font-size: 1.08rem; }
 .metric-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 24px; }
 .metric { border: 1px solid var(--line); border-radius: 10px; background: #fff; padding: 14px 16px; }
-.metric .label { color: var(--muted); font-size: 0.78rem; font-weight: 750; text-transform: uppercase; letter-spacing: .04em; }
+.metric .label { color: var(--muted); font-size: .78rem; font-weight: 750; text-transform: uppercase; letter-spacing: .04em; }
 .metric .value { display: block; margin-top: 4px; font-size: 1.18rem; font-weight: 780; }
-.metric .good { color: var(--good); }
-.metric .warn { color: var(--warn); }
+.good { color: var(--good); font-weight: 700; }
+.warn { color: var(--warn); font-weight: 700; }
+.bad { color: var(--bad); font-weight: 700; }
 main { padding: 30px 0 52px; }
-section { margin: 0 0 42px; scroll-margin-top: 18px; }
-h2 { margin: 0 0 10px; font-size: 1.55rem; line-height: 1.2; letter-spacing: -0.015em; }
-h3 { margin: 20px 0 9px; font-size: 1.08rem; line-height: 1.25; }
+section { margin: 0 0 42px; }
+h2 { margin: 0 0 10px; font-size: 1.55rem; line-height: 1.2; letter-spacing: -.015em; }
 p { margin: 0 0 12px; }
-a { color: var(--accent); }
-code {
-  padding: .08em .28em;
-  border-radius: 4px;
-  background: #edf2f7;
-  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
-  font-size: .92em;
-}
-pre { margin: 12px 0 0; padding: 14px 16px; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
-pre code { padding: 0; background: transparent; }
-.lede { max-width: 1000px; font-size: 1.05rem; }
-.takeaways { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 16px; }
-.takeaway { border: 1px solid var(--line); border-radius: 9px; padding: 15px; background: #fff; }
-.takeaway strong { display: block; margin-bottom: 5px; }
-.takeaway.good { border-top: 4px solid var(--good); }
-.takeaway.warn { border-top: 4px solid var(--warn); }
+.lede { max-width: 950px; font-size: 1.05rem; }
 .video-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
-.video-grid.single { grid-template-columns: 1fr; max-width: 1120px; margin-inline: auto; }
 figure { margin: 0; border: 1px solid var(--line); border-radius: 9px; background: #fff; overflow: hidden; }
 figure img, video { display: block; width: 100%; height: auto; }
 video { background: #111827; aspect-ratio: 16 / 9; }
 figcaption { padding: 11px 13px 13px; border-top: 1px solid var(--line); color: var(--muted); font-size: .92rem; }
-.plot-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; align-items: start; }
-.note { border-left: 4px solid var(--accent); background: var(--panel); padding: 13px 15px; margin: 15px 0; }
-.warning { border-left-color: var(--warn); background: #fff8ec; }
-.bad { border-left-color: var(--bad); background: #fff3f4; }
 table { width: 100%; border-collapse: collapse; border: 1px solid var(--line); background: #fff; font-variant-numeric: tabular-nums; }
 th, td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
 th { background: var(--panel); color: var(--muted); font-size: .80rem; text-transform: uppercase; letter-spacing: .025em; }
-td.good { color: var(--good); font-weight: 700; }
-td.bad { color: var(--bad); background: transparent; font-weight: 700; }
-.flow { display: grid; grid-template-columns: 1.05fr repeat(3, 1fr) .9fr; gap: 10px; align-items: stretch; margin-top: 17px; }
-.flow-card { position: relative; border: 1px solid var(--line); border-radius: 9px; padding: 13px; background: #fff; }
-.flow-card strong { display: block; margin-bottom: 4px; }
-.flow-card:not(:last-child)::after { content: "→"; position: absolute; right: -10px; top: 43%; z-index: 2; color: var(--accent); font-weight: 800; }
-.flow-card.branch { border-top: 4px solid var(--accent); }
-.flow-card.pending { border-style: dashed; border-color: var(--warn); }
-.check-list { margin: 0; padding-left: 1.2rem; }
-.check-list li { margin: .42rem 0; }
-.downloads { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
-.button { display: inline-block; border: 1px solid var(--accent); border-radius: 7px; padding: 8px 11px; color: var(--accent); text-decoration: none; font-weight: 700; }
+.note { border-left: 4px solid var(--accent); background: var(--panel); padding: 13px 15px; margin: 15px 0; }
+.warning { border-left-color: var(--warn); background: #fff8ec; }
 footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
-@media (max-width: 960px) {
-  .metric-row, .takeaways, .plot-grid, .video-grid { grid-template-columns: 1fr 1fr; }
-  .flow { grid-template-columns: 1fr; }
-  .flow-card:not(:last-child)::after { content: "↓"; right: 50%; top: auto; bottom: -15px; }
+@media (max-width: 900px) {
+  .metric-row, .video-grid { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 680px) {
-  .metric-row, .takeaways, .plot-grid, .video-grid { grid-template-columns: 1fr; }
+  .metric-row, .video-grid { grid-template-columns: 1fr; }
   th, td { font-size: .86rem; padding: 7px 6px; }
 }
   </style>
@@ -104,550 +71,116 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
     <div class="header-inner">
       <p class="breadcrumb"><a href="../">Newton Reports</a> / Robust GPU Contact for VBD</p>
       <h1>Robust GPU Contact for VBD</h1>
-      <p class="subtitle">
-        Horde evidence for an ACM-inspired hybrid: queried event time for fast free-flight impact,
-        contact-only normal PCG for dense simultaneous impact, coupled physical VBD for jointed
-        contact, combined geometry/joint certification, exact replay, and fail-closed integrity.
-      </p>
+      <p class="subtitle">Measured contact robustness, visual comparisons, and computational cost from NVIDIA L40 simulations.</p>
       <div class="metric-row">
-        <div class="metric"><span class="label">10,000 m/s impact</span><span class="value good">+5.78 µm gap</span></div>
-        <div class="metric"><span class="label">16-body closure</span><span class="value good">5.01e-6 m/s error</span></div>
-        <div class="metric"><span class="label">4,000-body 5 m pile drop</span><span class="value good">9.05 ms median</span></div>
-        <div class="metric"><span class="label">4,000-body staged pile</span><span class="value good">8.73 ms median</span></div>
+        <div class="metric"><span class="label">4,000-body high drop</span><span class="value good">0.995 mm</span></div>
+        <div class="metric"><span class="label">4,000-body staged pile</span><span class="value good">0.988 mm</span></div>
+        <div class="metric"><span class="label">High-drop median</span><span class="value good">9.05 ms</span></div>
+        <div class="metric"><span class="label">Staged-pile median</span><span class="value good">8.73 ms</span></div>
       </div>
     </div>
   </header>
 
   <main>
-    <section id="outcome">
-      <h2>Outcome</h2>
-      <p class="lede">
-        The narrow ACM-like route is already excellent on the cases it is designed for. A correctly queried
-        10,000 m/s plane impact is stopped at event time without a tiny global step, and a dense equal-mass
-        impact island reaches the analytic inelastic velocity while ordinary one-step VBD explodes. A dynamic
-        bullet/plate case confirms that the event route transfers momentum rather than merely stopping an object
-        at a fixed wall. Jointed cables validate the opposite routing decision: event/PCG is gated off, full coupled
-        VBD microsteps remain active, and a device-only fresh-query/rollback loop enforces both a 1 mm
-        contact budget and a 5 mm joint-anchor budget. The final full example drops 4,000 cable bodies
-        from 5 m or releases ten layers separately with zero certificate debt.
-      </p>
-      <div class="takeaways">
-        <div class="takeaway good"><strong>Fast isolated impact works</strong>One queried event, two body updates, zero debt, and no tunnelling over a nominal 300 m displacement.</div>
-        <div class="takeaway good"><strong>Dense PCG has real meat</strong>Matrix-free normal impulse closure preserves momentum and costs well under 1 ms for the tested 16-body graph.</div>
-        <div class="takeaway good"><strong>Rollback/replay now works</strong>Exact GPU restoration, fresh endpoint validation, residual-driven finer physical VBD, and explicit cap debt.</div>
-        <div class="takeaway good"><strong>Contact-only validation was falsified</strong>A 384-step attempt passed contact at 0.702 mm while cable joints failed at 60 mm; the combined certificate prevents that false success.</div>
-      </div>
-    </section>
-
-    <section id="integrity">
-      <h2>Gate 18: complete contact integrity</h2>
-      <p class="lede">
-        A good endpoint is trustworthy only if collision detection found every candidate it was configured to hold
-        <em>and</em> SolverVBD retained every returned contact in its per-body lists. Both stages now publish
-        graph-resident, caller-reset certificates. Capacity failure rejects immediately and requests resize/recapture;
-        it never wastes finer physical replay on a memory problem.
-      </p>
-      <table style="margin-top: 18px;">
-        <thead><tr><th>Horde L40 check</th><th>Configured / required</th><th>Observed response</th><th>Accepted?</th></tr></thead>
-        <tbody>
-          <tr><td>Normal cable smoke</td><td>64 per body / at most 7 at final queries</td><td>770 global contacts, zero query debt, zero solver-list debt, finite</td><td class="good">Yes</td></tr>
-          <tr><td>Forced verifier overflow</td><td>1 final verification contact / 768 reported</td><td>Query-integrity debt on both frames; zero replay</td><td class="bad">No: resize</td></tr>
-          <tr><td>Forced SolverVBD list overflow</td><td>1 per body / 7 required</td><td>Solver-list debt on both frames; exact required capacity reported; zero replay</td><td class="bad">No: resize</td></tr>
-        </tbody>
-      </table>
-
-      <h3>Speculative candidates were tested, not assumed</h3>
-      <p>
-        Three matched 120-frame cable runs compared the discrete-query memoryless replay default with a 12.5 mm
-        velocity-swept speculative cap. Speculation modestly reduced frames with missing endpoint pairs, but produced
-        more replay and a worse cost tail without improving the approximately 1 mm accepted penetration bound.
-        It remains an opt-in risk-reduction experiment rather than the default.
-      </p>
+    <section id="summary">
+      <h2>Measured results</h2>
+      <p class="lede">The difficult contact cases below were simulated and rendered on Horde. Values are fresh post-frame measurements rather than solver-internal estimates.</p>
       <table>
-        <thead><tr><th>Policy, three runs</th><th>Median</th><th>p95</th><th>Replayed frames / retries</th><th>Missing-pair frames</th><th>Worst fresh penetration</th></tr></thead>
+        <thead><tr><th>Case</th><th>Scale</th><th>Quality result</th><th>Runtime result</th></tr></thead>
         <tbody>
-          <tr><td>Discrete microstep query</td><td class="good">30.33-30.45 ms</td><td class="good">112.54-128.25 ms</td><td>43 / 53</td><td>81</td><td>0.9973 mm</td></tr>
-          <tr><td>Speculative, 12.5 mm cap</td><td>30.78-31.63 ms</td><td class="bad">129.72-202.26 ms</td><td>74 / 102</td><td>71</td><td>0.9956 mm</td></tr>
-        </tbody>
-      </table>
-      <div class="note warning">
-        <strong>Bounded claim.</strong> The tested cable and 100 rad/s cases need neither global CCD nor rigid DAT.
-        This is a useful common-path feature, not an arbitrary-speed nonpenetration theorem. A thin object can still
-        cross and separate between discrete endpoint queries; motion-cap and replay-cap debt remain explicit.
-      </div>
-      <div class="downloads">
-        <a class="button" href="assets/gate18_solver_capacity_normal_2.json">Normal integrity JSON</a>
-        <a class="button" href="assets/gate18_forced_query_overflow_2.json">Forced query JSON</a>
-        <a class="button" href="assets/gate18_solver_capacity_forced_2.json">Forced solver-list JSON</a>
-        <a class="button" href="assets/gate18_base_r1_120.json">Baseline run 1</a>
-        <a class="button" href="assets/gate18_base_r2_120.json">Baseline run 2</a>
-        <a class="button" href="assets/gate18_base_r3_120.json">Baseline run 3</a>
-        <a class="button" href="assets/gate18_spec_r1_120.json">Speculative run 1</a>
-        <a class="button" href="assets/gate18_spec_r2_120.json">Speculative run 2</a>
-        <a class="button" href="assets/gate18_spec_r3_120.json">Speculative run 3</a>
-      </div>
-    </section>
-
-    <section id="fast-impact">
-      <h2>Fast free-flight impact</h2>
-      <p>
-        Both sides receive the same predictive sphere–plane pair; collision detection did not change. What changed
-        is when the response is solved. Ordinary VBD integrates the complete 30 ms frame and then tries to repair
-        its deeply invalid endpoint. The event route reconstructs the hit time from that already-queried pair,
-        advances to zero gap, applies the normal impulse to the participating free-flight island, and advances the
-        remainder of the same frame. It is ACM-like contact-time scheduling, not a new geometric CCD query.
-      </p>
-      <div class="video-grid single">
-        <figure>
-          <video src="assets/fast_impact_comparison.mp4" poster="assets/fast_impact_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
-          <figcaption>
-            10,000 m/s sphere, 30 ms frame, 0.45 m initial gap. Motion between the large-step endpoints is
-            interpolated only for viewing and is slowed near impact. The first part of the video explains the two
-            schedules; the final endpoints and velocities are exact Horde solver outputs and are held for inspection.
-          </figcaption>
-        </figure>
-      </div>
-      <table style="margin-top: 18px;">
-        <thead><tr><th>Method</th><th>Final signed gap</th><th>Final normal velocity</th><th>Event updates</th><th>Result</th></tr></thead>
-        <tbody>
-          <tr><td>Ordinary one-step VBD</td><td class="bad">−16.579 m</td><td>−567.6 m/s</td><td>0</td><td class="bad">Tunnels</td></tr>
-          <tr><td>Queried event + direct impulse</td><td class="good">+5.778 µm</td><td>−2.20e−13 m/s</td><td>2</td><td class="good">Feasible, zero debt</td></tr>
+          <tr><td>Fast free-flight impact</td><td>10,000 m/s sphere</td><td class="good">+5.78 &micro;m final gap</td><td>2 scheduled updates, zero debt</td></tr>
+          <tr><td>Dense simultaneous impact</td><td>16 moving bodies</td><td class="good">5.01e-6 m/s shared-velocity error</td><td>0.584 ms captured median</td></tr>
+          <tr><td>Compact cable pile dropped from 5 m</td><td>4,000 rigid cable bodies</td><td class="good">0.995 mm penetration, 1.982 mm joint residual</td><td>9.05 ms median, 20.08 ms p95</td></tr>
+          <tr><td>Ten cable layers released separately</td><td>4,000 rigid cable bodies</td><td class="good">0.988 mm penetration, 2.134 mm joint residual</td><td>8.73 ms median, 14.70 ms p95</td></tr>
+          <tr><td>Extended cable twist</td><td>240 frames at 20 rad/s</td><td class="good">0.797 mm with the fine setting</td><td>32.1 s report video at 8&times; slow motion</td></tr>
         </tbody>
       </table>
     </section>
 
-    <section id="dense-impact">
-      <h2>Dense simultaneous impact</h2>
-      <p>
-        Sixteen touching equal-mass spheres form one queried impact component. Body 0 enters at 20 m/s. The
-        contact-only PCG route solves the instantaneous unilateral normal impulse system; it does not replace
-        VBD for joints, friction, or persistent support. In the video, the orange sphere is the striker and every
-        arrow uses one global velocity scale, so the ordinary alternating velocities can be compared directly with
-        the coherent PCG result.
-      </p>
-      <div class="video-grid single">
-        <figure>
-          <video src="assets/dense_chain_comparison.mp4" poster="assets/dense_chain_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
-          <figcaption>
-            Endpoint positions are interpolated solely to expose the one-step result, then the exact endpoint is
-            held for four seconds. The hybrid leaves the chain touching and moving at the analytic 1.25 m/s;
-            ordinary VBD creates alternating −36.1 to +57.8 m/s velocities, crossings, and metre-scale gaps.
-          </figcaption>
-        </figure>
-      </div>
-      <div class="plot-grid">
-        <figure>
-          <img src="assets/dense_velocity_closure.png" alt="Final velocity by sphere for ordinary VBD, event PCG, and the analytic inelastic target.">
-          <figcaption>Velocity closure across the complete queried contact island.</figcaption>
-        </figure>
-        <table>
-          <thead><tr><th>Metric</th><th>Ordinary VBD</th><th>Event + PCG</th></tr></thead>
-          <tbody>
-            <tr><td>Max |v − v*|</td><td class="bad">56.57 m/s</td><td class="good">5.01e−6 m/s</td></tr>
-            <tr><td>Gap interval</td><td class="bad">[−2.201, +2.679] m</td><td class="good">[−1.42e−7, +2.01e−7] m</td></tr>
-            <tr><td>Momentum error</td><td class="bad">+21.74 kg·m/s</td><td class="good">0.0 kg·m/s</td></tr>
-            <tr><td>Energy ratio</td><td class="bad">24.46</td><td class="good">0.0625</td></tr>
-            <tr><td>Captured GPU median</td><td>0.200 ms</td><td class="good">0.584 ms</td></tr>
-            <tr><td>Event debt</td><td>—</td><td class="good">0</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="note warning">
-        The alternating <code>1:10⁶</code> mass chain also remained finite with zero debt and gaps within
-        approximately ±1.6e−7 m, but its velocity error is large relative to its tiny center-of-mass velocity.
-        A higher-precision unilateral reference is still required before claiming extreme mass-ratio robustness.
-      </div>
-    </section>
-
-    <section id="adversarial-gallery">
-      <h2>Additional adversarial cases</h2>
-      <p>
-        These are separate Horde simulations, not illustrative animations. The first checks dynamic momentum
-        transfer through very thin geometry; the second checks persistent, topology-changing cable contact as
-        independently released layers land on an existing pile.
-      </p>
+    <section id="impacts">
+      <h2>Impact comparisons</h2>
       <div class="video-grid">
         <figure>
+          <video src="assets/fast_impact_comparison.mp4" poster="assets/fast_impact_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+          <figcaption>Fast sphere impact. The overlay reports the measured endpoint and normal velocity.</figcaption>
+        </figure>
+        <figure>
+          <video src="assets/dense_chain_comparison.mp4" poster="assets/dense_chain_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+          <figcaption>Dense simultaneous impact. The successful result reaches the analytic shared velocity.</figcaption>
+        </figure>
+        <figure>
           <video src="assets/bullet_thin_plate_comparison.mp4" poster="assets/bullet_thin_plate_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
-          <figcaption>An 80 m/s sphere crosses a potential 1.6 m in one 20 ms solver frame and strikes a dynamic plate only 40 mm thick. Event-time island response gives both bodies the analytic 11.446 m/s common velocity.</figcaption>
+          <figcaption>Dynamic projectile and thin plate. The plate receives momentum and moves.</figcaption>
         </figure>
         <figure>
           <video src="assets/staged_cable_pile.mp4" poster="assets/staged_cable_pile_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
-          <figcaption>Six 24-segment rigid-body cables arrive in three alternating layers at frames 0, 90, and 180. Every frame is freshly queried and rejected/replayed if penetration exceeds 1 mm.</figcaption>
+          <figcaption>Separately released cable layers with ground contact, self-contact, and joints.</figcaption>
         </figure>
-      </div>
-      <div class="plot-grid">
-        <table>
-          <thead><tr><th>Bullet → dynamic thin plate</th><th>Ordinary VBD</th><th>Event-time island</th></tr></thead>
-          <tbody>
-            <tr><td>Final directed gap</td><td class="bad">174.4 mm</td><td class="good">6.15 µm</td></tr>
-            <tr><td>Bullet / plate velocity</td><td class="bad">28.894 / 13.614 m/s</td><td class="good">11.446 / 11.446 m/s</td></tr>
-            <tr><td>Momentum error</td><td class="bad">+31.87 kg·m/s</td><td class="good">−7.63e−6 kg·m/s</td></tr>
-            <tr><td>Query / event debt</td><td>0 / —</td><td class="good">0 / 0</td></tr>
-          </tbody>
-        </table>
-        <table>
-          <thead><tr><th>Staged cable pile</th><th>330-frame Horde result</th></tr></thead>
-          <tbody>
-            <tr><td>Worst fresh penetration</td><td class="good">0.984 mm</td></tr>
-            <tr><td>Peak fresh contacts</td><td>85</td></tr>
-            <tr><td>Replay work</td><td class="good">16 frames, 21 total replays</td></tr>
-            <tr><td>Selected physical substeps</td><td>5 on 314 frames; 10/20/40 on 16</td></tr>
-            <tr><td>Median / p95 frame cost</td><td class="good">16.86 / 22.32 ms</td></tr>
-            <tr><td>Query / list / cap debt</td><td class="good">0 / 0 / 0 frames</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="note">
-        The bullet result is conditional on the predictive query returning the correct pair; it demonstrates correct
-        scheduled response, not arbitrary thin-feature collision completeness. The pile provides a stronger persistent
-        contact test: contacts are rebuilt after every physical frame and acceptance is based on a fresh endpoint query.
-        Across three fresh five-step runs, median cost was 16.59–17.37 ms, p95 was 18.80–21.99 ms, and worst
-        penetration was at most 0.995 mm with zero debt—1.82× faster at median than the previous 10-step start.
       </div>
     </section>
 
-    <section id="full-cable-pile">
-      <h2>Full cable pile: 4,000 coupled rigid bodies</h2>
-      <p class="lede">
-        The actual example geometry is ten layers, ten cables per layer, and forty rigid segments per cable.
-        It is never routed to contact-only PCG: even a single cable contact is connected to stretch, bend,
-        twist, friction, and a long joint path. The final controller keeps the entire active system in physical
-        VBD, starts with six steps, uses bounded velocity-swept candidate admission for the fast impact,
-        and conditionally replays captured <code>6,12,24,48,96,192,384</code> branches.
-      </p>
+    <section id="full-pile">
+      <h2>Large cable-pile results</h2>
       <div class="video-grid">
         <figure>
           <video src="assets/cable_pile_highdrop_800.mp4" poster="assets/cable_pile_highdrop_800_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
-          <figcaption>ViewerGL trace of the final policy on 800 coupled bodies dropped from 5 m: 0.966 mm worst fresh penetration, 1.801 mm joint residual, zero debt, and 2.61 ms median.</figcaption>
+          <figcaption>Readable 800-body rendering of the compact high-drop case. The full measurement used 4,000 bodies.</figcaption>
         </figure>
         <figure>
           <video src="assets/cable_pile_staged_800.mp4" poster="assets/cable_pile_staged_800_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
-          <figcaption>Five independently released layers, 800 bodies: 0.996 mm worst penetration, 0.904 mm joint residual, zero debt, and 2.56 ms median. Poses are sampled every four 60 Hz frames.</figcaption>
+          <figcaption>Readable 800-body rendering of the staged release. The full measurement used 4,000 bodies.</figcaption>
         </figure>
       </div>
-      <div class="plot-grid">
-        <table>
-          <thead><tr><th>Full Horde L40 case</th><th>5 m simultaneous drop</th><th>Ten staged layers</th></tr></thead>
-          <tbody>
-            <tr><td>Bodies / maximum fresh contacts</td><td>4,000 / 1,427</td><td>4,000 / 1,509</td></tr>
-            <tr><td>Frames / release frames</td><td>180 / all together</td><td>600 / 0,45,...,405</td></tr>
-            <tr><td>Worst fresh penetration</td><td class="good">0.995 mm</td><td class="good">0.988 mm</td></tr>
-            <tr><td>Worst joint-anchor residual</td><td class="good">1.982 mm</td><td class="good">2.134 mm</td></tr>
-            <tr><td>Median / p95 graph time</td><td class="good">9.05 / 20.08 ms</td><td class="good">8.73 / 14.70 ms</td></tr>
-            <tr><td>Replayed frames / total replays</td><td>110 / 122</td><td>398 / 418</td></tr>
-            <tr><td>Motion / replay / query / list debt</td><td class="good">0 / 0 / 0 / 0</td><td class="good">0 / 0 / 0 / 0</td></tr>
-          </tbody>
-        </table>
-        <div>
-          <h3 style="margin-top:0">What “sparse” and “dense” mean</h3>
-          <p><strong>Sparse free impact</strong> is a tiny unconstrained free-flight island with little shared-body degree; it gets a correct-time direct impulse.</p>
-          <p><strong>Dense free impact</strong> is a simultaneous shared-body contact graph; it gets unilateral normal PCG.</p>
-          <p><strong>Jointed or persistent</strong> is a separate class, regardless of raw contact count; it stays in coupled VBD and must pass contact plus joint certificates.</p>
-          <div class="note">
-            This topology rule is cleaner than a global contact-count threshold. If eligibility is uncertain,
-            the router fails closed to coupled VBD.
-          </div>
-        </div>
-      </div>
-
-      <h3>The failure that selected the final design</h3>
-      <p>
-        Fixed six steps reached 18.5-22.4 mm penetration. More importantly, the first full-pile impact
-        proved that smaller steps are not monotonically safer under the strongest timestep-invariant contact
-        floor. From one identical saved frame, <code>384 steps x 5 iterations</code> reduced penetration to
-        0.702 mm but drove joint residual to 60.0 mm and speed to 548 m/s. A contact-only endpoint gate would
-        have approved a catastrophic cable state.
-      </p>
-      <table>
-        <thead><tr><th>Same frame, hard conditioning</th><th>Penetration</th><th>Joint residual</th><th>Maximum speed</th><th>Decision</th></tr></thead>
+      <table style="margin-top:18px">
+        <thead><tr><th>Full run</th><th>Frames</th><th>Maximum contacts</th><th>Median / p95</th><th>Worst penetration</th><th>Debt</th></tr></thead>
         <tbody>
-          <tr><td>6 steps x 5 iterations</td><td class="bad">23.976 mm</td><td class="bad">8.138 mm</td><td>9.98 m/s</td><td class="bad">Reject</td></tr>
-          <tr><td>48 steps x 5 iterations</td><td class="bad">2.159 mm</td><td class="good">2.759 mm</td><td>9.98 m/s</td><td class="bad">Reject contact</td></tr>
-          <tr><td>384 steps x 5 iterations</td><td class="good">0.702 mm</td><td class="bad">60.038 mm</td><td class="bad">548.36 m/s</td><td class="bad">Reject joints/energy</td></tr>
+          <tr><td>5 m compact drop</td><td>180</td><td>1,427</td><td>9.05 / 20.08 ms</td><td class="good">0.995 mm</td><td class="good">0</td></tr>
+          <tr><td>Ten staged layers</td><td>600</td><td>1,509</td><td>8.73 / 14.70 ms</td><td class="good">0.988 mm</td><td class="good">0</td></tr>
+          <tr><td>144-body fixed low-work control</td><td>240 / 330</td><td>96 / 113</td><td>18.31 / 18.96 ms median</td><td class="bad">18.51 / 22.44 mm</td><td class="bad">19 / 19</td></tr>
         </tbody>
       </table>
-      <p class="note warning">
-        The final result uses moderate <code>rho=1</code>, a 37.5 mm bounded speculative extension,
-        a non-speculative authoritative endpoint query, contact tolerance 1 mm, and joint tolerance 5 mm.
-        If every captured branch fails, a final conditional graph restores exact frame-start state and leaves
-        debt set for pause or a stronger fallback. A forced 20-debt-frame control measured exactly 0.0 maximum
-        error across every snapshotted persistent array after restore.
-        This is no-CCD/no-DAT evidence over the measured envelope, not an arbitrary-speed theorem.
-      </p>
-      <div class="downloads">
-        <a class="button" href="assets/cable_pile_highdrop_4000_final.json">4,000-body high-drop JSON</a>
-        <a class="button" href="assets/cable_pile_staged_4000_final.json">4,000-body staged JSON</a>
-        <a class="button" href="assets/cable_pile_fixed6_control.json">Fixed-six failure control</a>
-        <a class="button" href="assets/cable_pile_forced_cap_restore.json">Forced cap-restore control</a>
-        <a class="button" href="assets/cable_pile_failure_grid_a.json">Failure grid 6-48</a>
-        <a class="button" href="assets/cable_pile_failure_grid_b.json">Failure grid 96-384</a>
-        <a class="button" href="assets/cable_pile_gallery_800.json">Rendered 800-body metrics</a>
-        <a class="button" href="assets/cable_pile_gallery_800.npz">Rendered trajectories NPZ</a>
-      </div>
     </section>
 
-    <section id="cable">
-      <h2>Jointed cable contact: coupled VBD wins the routing decision</h2>
-      <p>
-        The 20 rad/s cable-twist scene has 189 rigid bodies, joints, ground contact, self-contact, friction, and
-        changing topology. The dispatcher correctly performs zero event/PCG body updates: contact-only impact
-        impulses would omit the forces generating the contact. Instead, each selected bucket executes real
-        coupled VBD microsteps with collision refresh.
-      </p>
+    <section id="cable-twist">
+      <h2>Extended cable-twist results</h2>
+      <p>The doubled run contains 240 newly simulated frames, or four simulated seconds. The videos display those states at 8&times; slow motion.</p>
       <div class="video-grid">
         <figure>
           <video src="assets/cable_conditioning_comparison.mp4" poster="assets/cable_conditioning_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
-          <figcaption>Same 10 mm clock target over 240 actual simulated frames, shown at 8× slow motion (32.1 s). The doubled Horde run measured 69.15 mm unconditioned versus 20.98 mm conditioned worst penetration; during the original first 120 frames the values were 62.03 mm versus 8.39 mm.</figcaption>
+          <figcaption>Same coarse setting: 69.15 mm unconditioned versus 20.98 mm conditioned worst penetration.</figcaption>
         </figure>
         <figure>
           <video src="assets/cable_accuracy_comparison.mp4" poster="assets/cable_accuracy_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
-          <figcaption>Conditioned fast and fine clocks over 240 actual simulated frames, shown at 8× slow motion (32.1 s). The 1 mm schedule stayed below the 1 mm endpoint gate at 0.797 mm worst penetration, while the 10 mm schedule reached 20.98 mm. Overlays report a fresh collision query after every frame.</figcaption>
+          <figcaption>Conditioned coarse and fine settings: 20.98 mm versus 0.797 mm worst penetration over 240 frames.</figcaption>
         </figure>
       </div>
-      <div class="plot-grid">
-        <figure>
-          <img src="assets/cable_accuracy_cost.png" alt="Worst cable penetration versus median frame time for unconditioned and conditioned adaptive substep schedules.">
-          <figcaption>Conditioning provides the large first improvement; smaller motion targets then trade cost for additional temporal resolution.</figcaption>
-        </figure>
-        <table>
-          <thead><tr><th>Contact setup</th><th>Worst fresh penetration</th><th>Median / p95</th><th>Frames with newly missed pairs</th></tr></thead>
-          <tbody>
-            <tr><td>ρ=0, target 10 mm</td><td class="bad">62.03 mm</td><td>32.04 / 64.13 ms</td><td>22 / 120</td></tr>
-            <tr><td>ρ=5, target 10 mm</td><td class="good">3.311 mm</td><td>29.41 / 61.90 ms</td><td>22 / 120</td></tr>
-            <tr><td>ρ=5, target 5 mm</td><td class="good">2.487 mm</td><td>58.54 / 124.32 ms</td><td>28 / 120</td></tr>
-            <tr><td>ρ=5, target 1 mm</td><td class="good">1.559 mm</td><td>119.02 / 135.25 ms</td><td>14 / 120</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="note warning">
-        This cable is a chaotic, GPU-order-sensitive stress test, and the doubled run exposes why duration matters.
-        The conditioned 10 mm schedule rose from 8.394 mm worst penetration in frames 1–120 to 20.984 mm over all
-        240 frames. The conditioned 1 mm schedule rose from 0.284 mm to 0.797 mm but remained below the 1 mm endpoint
-        gate; 18 of its 240 frames contained freshly discovered pairs, with at most four in one frame. This video is
-        a clock-resolution diagnostic; the final validated path additionally performs independent acceptance and
-        rollback. No finite endpoint result is a universal CCD guarantee; the complete doubled trace is downloadable below.
-      </div>
-    </section>
-
-    <section id="validated-replay">
-      <h2>Validated speculative VBD: the new cable result</h2>
-      <p>
-        The cable path now saves the complete rigid frame state on the GPU, runs the displacement-predicted VBD
-        branch, rebuilds contacts independently, and accepts only if maximum fresh penetration is at most 1 mm.
-        A failed frame restores the exact start and replays a finer physical branch. Device flags route a fixed CUDA
-        graph chain; there is no CPU decision or synchronization between attempts and no new global PCG solve.
-      </p>
-      <div class="plot-grid">
-        <table>
-          <thead><tr><th>120-frame strategy</th><th>Median / p95</th><th>Worst fresh penetration</th><th>Finite-budget debt</th></tr></thead>
-          <tbody>
-            <tr><td>Validated replay, balanced 30 mm predictor</td><td class="good">15.82–15.87 / 44.85–99.25 ms</td><td class="good">0.937 mm</td><td class="good">0 query · 0 list · 0 replay</td></tr>
-            <tr><td>Validated replay, 10 mm motion target</td><td class="good">31.45 / 98.63 ms</td><td class="good">0.956 mm</td><td class="good">0 motion · 0 replay</td></tr>
-            <tr><td>Always-fine, 1 mm motion target</td><td>118.28 / 134.82 ms</td><td class="good">0.475 mm</td><td class="bad">87 motion-cap frames</td></tr>
-          </tbody>
-        </table>
-        <div class="note">
-          <strong>1.98× faster than our previous validated policy and 7.46× faster than always-fine at median.</strong>
-          The independent 1 mm acceptance threshold is unchanged. The 30 mm value controls only the optimistic first
-          guess; rejected frames restore exactly and jump to finer physical buckets. Across three fresh processes,
-          medians were 15.815, 15.862, and 15.866 ms and every capacity/replay debt counter remained zero. This is now
-          automatic when validated replay has no explicit target: predictor = 30× fresh tolerance. A no-override Horde
-          confirmation measured 15.84/47.31 ms median/p95, 0.971 mm worst penetration, and zero debt.
-        </div>
-      </div>
-      <p class="note warning">
-        This is a bounded endpoint certificate, not CCD. At 100 rad/s the same 30-frame stress remains finite with
-        zero debt and 0.805 mm worst penetration. In the earlier 320-capped 1000 rad/s stress, the cap is exceeded,
-        debt is reported, and penetration reaches 11.67 mm. The current ladder adds a 640-step emergency branch,
-        but complete tunnel-and-separate trajectories still require swept candidates or CCD.
-      </p>
+      <div class="note warning">The fine cable-twist result is robust in this measured run but expensive. The longer run also shows that a short trajectory can hide later contact degradation.</div>
     </section>
 
     <section id="cost">
-      <h2>Computational cost: matched comparisons</h2>
-      <p>
-        The dense and independent-impact bars time the complete captured collision-plus-solve replay on the same
-        Horde L40 over 100 samples. This is the honest trade: the robust route is not free, but the increment is
-        bounded and buys a qualitatively different result.
-      </p>
-      <div class="plot-grid">
-        <figure>
-          <img src="assets/captured_gpu_cost.png" alt="Matched captured GPU cost for dense and independent contact benchmarks.">
-          <figcaption>Same initial state, iterations, collision pipeline, graph capture, GPU, and timing method within each pair.</figcaption>
-        </figure>
-        <table>
-          <thead><tr><th>Captured workload</th><th>Ordinary VBD</th><th>Routed contact</th><th>Multiplier</th></tr></thead>
-          <tbody>
-            <tr><td>Dense 16-body island</td><td>0.200 ms · fails</td><td class="good">0.584 ms · closes</td><td>2.92×</td></tr>
-            <tr><td>1,024 independent impacts</td><td>0.250 ms · −8.30 mm</td><td class="good">0.359 ms · +5.71 µm</td><td>1.44×</td></tr>
-            <tr><td>Cable ρ=0 → ρ=5, target 10 mm</td><td>32.04 ms</td><td>29.41 ms</td><td>0.92×*</td></tr>
-            <tr><td>Cable conditioned target 10 → 1 mm</td><td>29.41 ms</td><td>119.02 ms</td><td>4.05×</td></tr>
-            <tr><td>Cable old validated → balanced predictor</td><td>31.45 ms</td><td class="good">15.86 ms</td><td class="good">0.50× (1.98× faster)</td></tr>
-            <tr><td>Cable always-fine → balanced predictor</td><td>118.28 ms</td><td class="good">15.86 ms</td><td class="good">0.13× (7.46× faster)</td></tr>
-            <tr><td>Staged pile 10-step → 5-step certified start</td><td>30.53 ms</td><td class="good">16.75 ms</td><td class="good">0.55× (1.82× faster)</td></tr>
-            <tr><td>144-body host replay → CUDA-graph replay</td><td>19.85 ms</td><td class="good">2.17 ms</td><td class="good">0.11× (9.15× faster)</td></tr>
-            <tr><td>4,000-body 5 m pile drop</td><td>fixed six fails at 18.5 mm</td><td class="good">9.05 ms · 0.995 mm</td><td>certified result</td></tr>
-            <tr><td>4,000-body ten-layer staged pile</td><td>fixed six fails at 22.4 mm</td><td class="good">8.73 ms · 0.988 mm</td><td>certified result</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <p class="note">
-        *Cable figures are synchronized per-frame wall times, not pure kernel timings. The balanced predictor uses
-        three fresh 120-frame Horde runs because this cable is trajectory-sensitive. Attempts to start at five steps,
-        reuse collision queries, use four VBD iterations, or increase conditioning above ρ=5 all lost on median,
-        tail, trajectory quality, or several of those measures; they are retained in the raw sweep as negative evidence.
-        The 4,000-body rows time the captured graph plus synchronization; CPU diagnostic copies and joint-summary
-        loops occur after the timer. Their failed controls are quality controls, not equal-quality speed baselines.
-      </p>
-    </section>
-
-    <section id="architecture">
-      <h2>Current hybrid architecture</h2>
-      <div class="flow" aria-label="Current contact routing flow">
-        <div class="flow-card"><strong>Predictive query</strong>Swept displacement budget produces candidate contacts and contact-plus-joint islands.</div>
-        <div class="flow-card branch"><strong>Sparse free flight</strong>Exact queried event time and direct manifold normal impulse.</div>
-        <div class="flow-card branch"><strong>Dense free flight</strong>Same event time, matrix-free unilateral normal PCG, KKT/debt check.</div>
-        <div class="flow-card branch"><strong>Persistent / jointed</strong>Coupled VBD, moderate conditioning, and bounded swept candidate admission when fast.</div>
-        <div class="flow-card"><strong>Validate + replay</strong>Fresh contact plus joint certificate, exact snapshot restore, residual-driven finer VBD, and explicit debt.</div>
-      </div>
-      <p class="note">
-        This is built on VBD. There is no new global PCG solve: PCG is a narrow, contact-only instantaneous normal
-        impact accelerator. Jointed and frictional time evolution remains the ordinary coupled VBD solve. Sparse
-        and dense are contact-island topology classes, not raw scene-wide contact-count thresholds.
-      </p>
-    </section>
-
-    <section id="local-clocks">
-      <h2>GPU local-clock foundation and replay A/B</h2>
-      <p>
-        Device kernels construct contact-plus-joint components, reduce the potential displacement
-        <code>h(|v| + R|ω|) + ½h²|a|</code>, and choose power-of-two rates. A captured diagnostic produced labels
-        <code>[0, 1, 1]</code> and rates <code>[2, 4, 4]</code>, preserving every inactive pose and velocity exactly.
-        Forcing insufficient component propagation set debt to 1 and failed closed to rate 8 for all participating bodies.
-      </p>
-      <div class="note warning">
-        The mask establishes correct local-clock state semantics, not a speedup claim. Current graph branches still
-        scan global arrays; compact per-rate body/contact worklists are required before local clocks can reduce cost
-        in proportion to active island size.
-      </div>
-      <p>
-        We also implemented the natural intermediate experiment: validate per contact-plus-joint island, restore
-        only rejected-island rows, mask the cable driver, and replay only failed bodies. It passes the same independent
-        1 mm endpoint gate, but three fresh-process 120-frame A/B runs show no performance win:
-      </p>
+      <h2>Computational cost</h2>
       <table>
-        <thead><tr><th>Replay scope</th><th>Median range</th><th>p95 range</th><th>Worst fresh penetration</th><th>Replay debt</th></tr></thead>
+        <thead><tr><th>Measured workload</th><th>Reference/control</th><th>Robust result</th></tr></thead>
         <tbody>
-          <tr><td>Global graph replay (default)</td><td class="good">30.16-30.51 ms</td><td class="good">64.72-112.55 ms</td><td class="good">0.958-0.998 mm</td><td class="good">0 / 360</td></tr>
-          <tr><td>Masked island-local replay (experimental)</td><td>30.56-30.94 ms</td><td>102.32-130.21 ms</td><td class="good">0.958-0.975 mm</td><td class="good">0 / 360</td></tr>
+          <tr><td>Dense 16-body impact</td><td>0.200 ms, unstable endpoint</td><td class="good">0.584 ms, analytic closure</td></tr>
+          <tr><td>1,024 independent impacts</td><td>0.250 ms, 8.30 mm penetration</td><td class="good">0.359 ms, +5.71 &micro;m gap</td></tr>
+          <tr><td>144-body staged cable pile</td><td>19.85 ms host-driven</td><td class="good">2.17 ms captured</td></tr>
         </tbody>
       </table>
-      <p class="note">
-        The negative result is useful: masking body arithmetic cannot repay global broad-phase, contact-generation,
-        coloring, launch, and memory traffic. Island-local replay stays research-only until it has compact body,
-        shape, joint, color, and contact worklists plus conservative island envelopes. One 640-step emergency run
-        removed the last replay debt at 0.973 mm worst penetration, but its 230.49 ms p95 confirms that the final
-        bucket is a safety valve, not an ordinary operating point.
-      </p>
-      <p>
-        A second experiment remembered the rate that passed after a rejection and used it as a temporary floor for
-        later frames. The controller is entirely device-resident and cannot weaken the fresh certificate, but global
-        memory also failed the performance bar:
-      </p>
-      <table>
-        <thead><tr><th>Certificate-memory policy</th><th>Median range</th><th>p95 range</th><th>Replayed frames</th><th>Result</th></tr></thead>
-        <tbody>
-          <tr><td>Off (clean default)</td><td class="good">30.16-30.51 ms</td><td class="good">64.72-112.55 ms</td><td>10-20</td><td class="good">Keep</td></tr>
-          <tr><td>One-frame release</td><td>30.42-32.12 ms</td><td>104.65-139.58 ms</td><td>12-16</td><td>Experimental</td></tr>
-          <tr><td>Sticky four-easy-frame release</td><td>31.60-62.64 ms</td><td>92.83-153.38 ms</td><td class="good">7</td><td class="bad">Over-schedules</td></tr>
-        </tbody>
-      </table>
-      <p class="note warning">
-        Every memory run stayed below 1 mm with zero replay debt. Sticky memory reduced rejection count but sometimes
-        held all three cables at 320 physical steps long enough to double median cost. It may become valuable only
-        after compact per-island execution prevents one cable's memory from scheduling the other two.
-      </p>
+      <figure style="margin-top:18px">
+        <img src="assets/captured_gpu_cost.png" alt="Measured GPU cost comparisons for the tested contact scenes.">
+        <figcaption>Matched captured GPU measurements for the smaller contact workloads.</figcaption>
+      </figure>
     </section>
 
-    <section id="limits">
-      <h2>Limitations and non-claims</h2>
-      <ul class="check-list">
-        <li><strong>No complete collision guarantee.</strong> Success assumes the needed pair is in the predictive query. Arbitrary curved features, thin geometry, large rotation, and contacts created after impulse redirection are not certified.</li>
-        <li><strong>Replay is globally scoped by default.</strong> Experimental failed-island restore/masking works, but it is not faster while collision and solver buffers are still scanned globally.</li>
-        <li><strong>PCG is normal-impact only.</strong> It does not solve friction, joints, persistent support, or cable forces; routing those cases into PCG would be physically incomplete.</li>
-        <li><strong>Cable contact is tolerance-certified, not penetration-free.</strong> The full pile stayed below 1 mm, but finite penetration remains and emergency branches are expensive.</li>
-        <li><strong>Smaller physical steps are not monotonically safer.</strong> Under overly strong hard-contact conditioning, a 384-step full-pile attempt passed contact while catastrophically violating joints.</li>
-        <li><strong>Fresh pairs are still discovered late.</strong> Depending on the conditioned rate, 14–28 of 120 cable frames contained pairs absent from the solver's retained set.</li>
-        <li><strong>Active clocks have feature exclusions.</strong> Particle coupling, rigid contact-history matching, Dahl cable history, and event projection cannot yet share the experimental active-body mask safely.</li>
-        <li><strong>This is not original ACM's theorem.</strong> Finite queried events and finite VBD buckets do not inherit ACM's infinite-barrier/separating-certificate no-interpenetration result.</li>
-      </ul>
+    <section id="scope">
+      <h2>Scope of these results</h2>
+      <p>These measurements demonstrate the tested scenes and operating ranges; they are not a proof for every shape, speed, or collision path. The high-drop p95 exceeds a 60 Hz frame budget, and emergency fine-resolution cable cases can be much more expensive than their median behavior suggests.</p>
+      <p>All simulations and Newton ViewerGL captures shown here ran on an NVIDIA L40. Implementation and research details are retained in the local project record.</p>
     </section>
 
-    <section id="paper">
-      <h2>Is there a paper?</h2>
-      <p>
-        Not from any one ingredient: event-time impact, local time stepping, PCG contact, effective-mass scaling,
-        and CUDA graphs all have prior art. The defensible paper direction is the integrated graph-resident VBD
-        dispatcher. The validated speculative VBD loop now supplies rollback/finer replay and a strong equal-quality
-        speed result; a paper still needs conservative swept candidate completeness, compact island worklists, broad
-        comparisons against CCD/IPC and adaptive rigid solvers, and a careful novelty review.
-      </p>
-    </section>
-
-    <section id="reproduction">
-      <h2>Reproduction and raw evidence</h2>
-      <p>
-        Recorded on <strong>NVIDIA L40</strong>, Warp <code>1.17.0.dev20260807</code>, CUDA toolkit <code>12.9</code>,
-        driver <code>12.8</code>, branch <code>codex-sol/contact-strategy</code>. These are focused report benchmarks;
-        no unit-test suite was run. Impact videos replay the exact Horde NPZ endpoints in Newton ViewerGL; cable
-        videos rerun all physics and capture every Newton framebuffer directly on Horde. The gallery recorder adds
-        the dynamic thin-plate and independently released cable-layer cases.
-      </p>
-      <pre><code>curl -L https://jumyungc.github.io/newton/reports/robust_gpu_contact_vbd/ingredients/record_horde_results.py \
-  -o /tmp/record_horde_results.py
-cd /home/horde/git/newton-codex-sol-contact
-PYTHONPATH=$PWD /home/horde/git/newton/.venv/bin/python /tmp/record_horde_results.py \
-  --device cuda:0 --frames 120 --output-dir /tmp/robust_gpu_contact_vbd</code></pre>
-      <div class="downloads">
-        <a class="button" href="assets/horde_results.json">Horde metrics JSON</a>
-        <a class="button" href="assets/horde_cost_results.json">Matched cost JSON</a>
-        <a class="button" href="assets/horde_render_results.json">Rendered repeat JSON</a>
-        <a class="button" href="assets/horde_gallery_results.json">Adversarial gallery JSON</a>
-        <a class="button" href="assets/horde_speed_sweep.json">Contact speed sweep JSON</a>
-        <a class="button" href="assets/contact_replay_final.json">Validated replay JSON</a>
-        <a class="button" href="assets/contact_always_fine_final.json">Always-fine control JSON</a>
-        <a class="button" href="assets/cable_pile_highdrop_4000_final.json">Full high-drop pile JSON</a>
-        <a class="button" href="assets/cable_pile_staged_4000_final.json">Full staged pile JSON</a>
-        <a class="button" href="assets/cable_pile_fixed6_control.json">Fixed-six control JSON</a>
-        <a class="button" href="assets/cable_pile_failure_grid_a.json">Pile failure grid A</a>
-        <a class="button" href="assets/cable_pile_failure_grid_b.json">Pile failure grid B</a>
-        <a class="button" href="assets/replay_global_run1.json">Global replay A/B run 1</a>
-        <a class="button" href="assets/replay_global_run2.json">Global replay A/B run 2</a>
-        <a class="button" href="assets/replay_global_run3.json">Global replay A/B run 3</a>
-        <a class="button" href="assets/replay_island_run1.json">Island replay A/B run 1</a>
-        <a class="button" href="assets/replay_island_run2.json">Island replay A/B run 2</a>
-        <a class="button" href="assets/replay_island_run3.json">Island replay A/B run 3</a>
-        <a class="button" href="assets/replay_memory_one_frame_run1.json">One-frame memory run 1</a>
-        <a class="button" href="assets/replay_memory_one_frame_run2.json">One-frame memory run 2</a>
-        <a class="button" href="assets/replay_memory_one_frame_run3.json">One-frame memory run 3</a>
-        <a class="button" href="assets/replay_memory_sticky_run1.json">Sticky memory run 1</a>
-        <a class="button" href="assets/replay_memory_sticky_run2.json">Sticky memory run 2</a>
-        <a class="button" href="assets/replay_memory_sticky_run3.json">Sticky memory run 3</a>
-        <a class="button" href="assets/horde_traces.npz">Recorded trajectories NPZ</a>
-        <a class="button" href="assets/horde_gallery_traces.npz">Gallery trajectories NPZ</a>
-        <a class="button" href="ingredients/record_horde_results.py">GPU recorder source</a>
-        <a class="button" href="ingredients/record_horde_gallery.py">Gallery recorder source</a>
-        <a class="button" href="ingredients/summarize_horde_contact_speed.py">Speed sweep packager</a>
-        <a class="button" href="ingredients/record_horde_costs.py">Cost recorder source</a>
-        <a class="button" href="ingredients/render_horde_newton_videos.py">Horde Newton renderer source</a>
-        <a class="button" href="ingredients/render_report_assets.py">Renderer source</a>
-      </div>
-    </section>
   </main>
 
-  <footer>
-    Solver evidence and Newton framebuffers generated on Horde. Published under <code>/newton/reports/robust_gpu_contact_vbd/</code>.
-  </footer>
+  <footer>Newton contact measurements and framebuffers generated on Horde.</footer>
 </body>
 </html>
