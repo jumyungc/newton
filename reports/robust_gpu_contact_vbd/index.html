@@ -95,6 +95,7 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
           <tr><td>Counter-twisted cable bundle</td><td>7 cables, 280 bodies, 4 turns</td><td class="good">0.988 mm penetration, zero debt</td><td>3.57 ms median, 40.68 ms p95</td></tr>
           <tr><td>Extended cable twist</td><td>240 frames at 20 rad/s</td><td class="good">0.797 mm with the fine setting</td><td>32.1 s report video at 8&times; slow motion</td></tr>
           <tr><td>Slow-to-fast cable curtains</td><td>160 cable bodies, 0.4 to 160 m/s</td><td class="good">13.21 kJ cable response versus 0.103 kJ fixed</td><td>473 ms adaptive versus 1,638 ms uniform fine</td></tr>
+          <tr><td>Rotating thin-feature sweep</td><td>180&deg; in 1/60 s</td><td class="good">0.64% velocity error, zero missed queried pairs</td><td>5,406 adaptive versus 8,192 uniform steps</td></tr>
         </tbody>
       </table>
     </section>
@@ -117,6 +118,10 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
         <figure>
           <video src="assets/staged_cable_pile.mp4" poster="assets/staged_cable_pile_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
           <figcaption>Separately released cable layers with ground contact, self-contact, and joints.</figcaption>
+        </figure>
+        <figure>
+          <video src="assets/rotating_thin_sweep_comparison.mp4" poster="assets/rotating_thin_sweep_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+          <figcaption>A thin paddle rotates 180&deg; between frame endpoints. Six-step VBD samples no contact; the adaptive result agrees with the 8,192-step reference within 0.64% velocity.</figcaption>
         </figure>
       </div>
     </section>
@@ -187,6 +192,7 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
           <tr><td>144-body staged cable pile</td><td>19.85 ms host-driven</td><td class="good">2.17 ms captured</td></tr>
           <tr><td>280-body four-turn cable bundle</td><td>3.45 ms median, 91 failed frames</td><td class="good">3.57 ms median, zero debt</td></tr>
           <tr><td>160-body cable-curtain fast frame</td><td>1,638 ms uniform fine</td><td class="good">473 ms adaptive</td></tr>
+          <tr><td>180&deg; rotating thin-feature frame</td><td>2,295 ms, 8,192 uniform steps</td><td class="good">1,428 ms, 5,406 adaptive steps</td></tr>
         </tbody>
       </table>
       <figure style="margin-top:18px">
