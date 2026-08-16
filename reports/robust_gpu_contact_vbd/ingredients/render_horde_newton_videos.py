@@ -644,6 +644,7 @@ def _configure_cable_example(
     adaptive_args = argparse.Namespace(
         target_surface_motion=target_surface_motion,
         twist_rate=twist_rate,
+        contact_substep_buckets=cable_benchmark.CONTACT_SUBSTEP_BUCKETS,
     )
     example.graph, required_substeps = cable_benchmark._capture_adaptive_contact_substeps(
         example,
@@ -744,7 +745,7 @@ def _compose_cable_video(
         for state_index in range(state_count):
             left_scene = Image.open(work_dir / left["key"] / f"{state_index:04d}.jpg").convert("RGB")
             right_scene = Image.open(work_dir / right["key"] / f"{state_index:04d}.jpg").convert("RGB")
-            for _duplicate in range(4):  # 60 Hz states at 30 fps => 8x slow motion, about 16 seconds.
+            for _duplicate in range(4):  # 60 Hz states at 30 fps => 8x slow motion.
                 canvas = Image.new("RGB", (WIDTH, HEIGHT), BG)
                 canvas.paste(left_scene, (0, 103))
                 canvas.paste(right_scene, (640, 103))

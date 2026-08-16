@@ -398,11 +398,11 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
       <div class="video-grid">
         <figure>
           <video src="assets/cable_conditioning_comparison.mp4" poster="assets/cable_conditioning_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
-          <figcaption>Same 10 mm clock target, now shown at 8× slow motion (16.1 s). The fresh rendered repeat measured 62.03 mm versus 8.49 mm worst penetration; the separately recorded table run measured 62.03 mm versus 3.31 mm.</figcaption>
+          <figcaption>Same 10 mm clock target over 240 actual simulated frames, shown at 8× slow motion (32.1 s). The doubled Horde run measured 69.15 mm unconditioned versus 20.98 mm conditioned worst penetration; during the original first 120 frames the values were 62.03 mm versus 8.39 mm.</figcaption>
         </figure>
         <figure>
           <video src="assets/cable_accuracy_comparison.mp4" poster="assets/cable_accuracy_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
-          <figcaption>Conditioned fast and high-robustness clocks, now shown at 8× slow motion (16.1 s). These are Newton ViewerGL captures of actual frame-by-frame Horde states; overlays report a fresh collision query after every frame.</figcaption>
+          <figcaption>Conditioned fast and fine clocks over 240 actual simulated frames, shown at 8× slow motion (32.1 s). The 1 mm schedule stayed below the 1 mm endpoint gate at 0.797 mm worst penetration, while the 10 mm schedule reached 20.98 mm. Overlays report a fresh collision query after every frame.</figcaption>
         </figure>
       </div>
       <div class="plot-grid">
@@ -421,10 +421,12 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
         </table>
       </div>
       <div class="note warning">
-        This cable is a chaotic, GPU-order-sensitive stress test. A separate fresh-process repeat of the conditioned
-        1 mm case measured 0.324 mm rather than 1.559 mm worst penetration. The table deliberately uses the more
-        conservative value from the exact trajectory packaged with this report. The newly rendered repeat measured
-        0.558 mm. Neither value is a guarantee; all repeat data are downloadable below.
+        This cable is a chaotic, GPU-order-sensitive stress test, and the doubled run exposes why duration matters.
+        The conditioned 10 mm schedule rose from 8.394 mm worst penetration in frames 1–120 to 20.984 mm over all
+        240 frames. The conditioned 1 mm schedule rose from 0.284 mm to 0.797 mm but remained below the 1 mm endpoint
+        gate; 18 of its 240 frames contained freshly discovered pairs, with at most four in one frame. This video is
+        a clock-resolution diagnostic; the final validated path additionally performs independent acceptance and
+        rollback. No finite endpoint result is a universal CCD guarantee; the complete doubled trace is downloadable below.
       </div>
     </section>
 
