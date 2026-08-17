@@ -95,7 +95,7 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
           <tr><td>Counter-twisted cable bundle</td><td>7 cables, 280 bodies, 4 turns</td><td class="good">0.988 mm penetration, zero debt</td><td>3.57 ms median, 40.68 ms p95</td></tr>
           <tr><td>Extended cable twist</td><td>240 frames at 20 rad/s</td><td class="good">0.797 mm with the fine setting</td><td>32.1 s report video at 8&times; slow motion</td></tr>
           <tr><td>Slow-to-fast cable curtains</td><td>160 cable bodies, 0.4 to 160 m/s</td><td class="good">13.21 kJ cable response versus 0.103 kJ fixed</td><td>473 ms adaptive versus 1,638 ms uniform fine</td></tr>
-          <tr><td>Small projectile through compact cable layers</td><td>840 cable bodies, 10 depth layers, 38 m/s</td><td class="good">0.626 mm projectile penetration versus 45.22 mm fixed</td><td>1,008 ms adaptive versus 1,462 ms uniform fine</td></tr>
+          <tr><td>Small projectile through compact cable layers</td><td>840 cable bodies, 10 depth layers, 38 m/s</td><td class="good">0.626 mm projectile and 0.887 mm inter-cable penetration</td><td>955 ms impact; 40.99 ms refined ring-down frames</td></tr>
           <tr><td>Rotating thin-feature sweep</td><td>180&deg; in 1/60 s</td><td class="good">0.64% velocity error, zero missed queried pairs</td><td>5,406 adaptive versus 8,192 uniform steps</td></tr>
         </tbody>
       </table>
@@ -141,7 +141,7 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
       <p>A 45 mm-radius prescribed sphere crosses ten tightly spaced, staggered cable layers at 38 m/s. The layers are stacked along the flight direction so several layers and strands engage during the same short interval.</p>
       <figure style="margin-top:18px">
         <video src="assets/dense_bullet_curtain_comparison.mp4" poster="assets/dense_bullet_curtain_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
-        <figcaption>Exact Horde states. Six-step VBD reaches 45.22 mm penetration. The 1,028-step event frame limits it to 0.626 mm, with no contact-buffer overflow. A matched 1,598-step uniform frame costs 1,462 ms; event refinement costs 1,008 ms.</figcaption>
+        <figcaption>Exact Horde states. Six-step VBD reaches 45.22 mm projectile and 15.98 mm inter-cable penetration. The refined result limits them to 0.626 mm and 0.887 mm, with no contact-buffer overflow. The impact frame costs 955 ms; 96-step coupled ring-down frames average 40.99 ms.</figcaption>
       </figure>
     </section>
 
@@ -202,7 +202,8 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
           <tr><td>144-body staged cable pile</td><td>19.85 ms host-driven</td><td class="good">2.17 ms captured</td></tr>
           <tr><td>280-body four-turn cable bundle</td><td>3.45 ms median, 91 failed frames</td><td class="good">3.57 ms median, zero debt</td></tr>
           <tr><td>160-body cable-curtain fast frame</td><td>1,638 ms uniform fine</td><td class="good">473 ms adaptive</td></tr>
-          <tr><td>840-body compact bullet-curtain frame</td><td>1,462 ms, 1,598 uniform steps</td><td class="good">1,008 ms, 1,028 event steps</td></tr>
+          <tr><td>840-body compact bullet-curtain frame</td><td>1,462 ms, 1,598 uniform steps</td><td class="good">955 ms, 1,028 event steps</td></tr>
+          <tr><td>840-body cable-curtain ring-down</td><td>2.37 ms, 15.98 mm inter-cable penetration</td><td class="good">40.99 ms, 0.887 mm inter-cable penetration</td></tr>
           <tr><td>180&deg; rotating thin-feature frame</td><td>1,349 ms, 8,192 uniform steps</td><td class="good">909 ms, 5,406 adaptive steps</td></tr>
         </tbody>
       </table>
