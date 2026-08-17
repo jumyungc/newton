@@ -213,6 +213,19 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
         </tbody>
       </table>
       <div class="note">FOM is millions of rigid-body &times; physical-step &times; solver-iteration updates per second. It is useful only for old/new comparison within the same scene. The largest stock-cable slowdown is 0.33%; the larger costs below occur only when a hard contact case activates extra physical steps.</div>
+      <p><strong>Forced activation on stock cable scenes.</strong> Doubling coupled physical steps recaptures the complete authored simulation at the smaller timestep; the independent fresh-contact audit is excluded from timing.</p>
+      <table>
+        <thead><tr><th>Existing cable example</th><th>Authored cadence / median</th><th>Doubled physical cadence / median</th><th>Worst fresh dynamic-contact penetration</th></tr></thead>
+        <tbody>
+          <tr><td><code>bundle_hysteresis</code></td><td>10 &times; 5 / 5.595 ms</td><td>20 &times; 5 / 11.268 ms (2.01&times;)</td><td>14.886 &rarr; 16.706 mm</td></tr>
+          <tr><td><code>cross_slide_table</code></td><td>10 &times; 5 / 10.028 ms</td><td>20 &times; 5 / 19.918 ms (1.99&times;)</td><td>0.0207 &rarr; 0.0206 mm</td></tr>
+          <tr><td><code>cable_pile</code></td><td>10 &times; 5 / 6.136 ms</td><td>20 &times; 5 / 12.298 ms (2.00&times;)</td><td class="good">2.849 &rarr; 1.045 mm</td></tr>
+          <tr><td><code>plectoneme</code></td><td>8 &times; 20 / 10.477 ms</td><td>16 &times; 20 / 20.882 ms (1.99&times;)</td><td>0.0724 mm &rarr; positive gap</td></tr>
+          <tr><td><code>cable_twist</code></td><td>10 &times; 5 / 3.991 ms</td><td>20 &times; 5 / 7.955 ms (1.99&times;)</td><td>0.2075 &rarr; 0.2103 mm</td></tr>
+          <tr><td><code>y_junction</code></td><td>20 &times; 5 / 6.949 ms</td><td>40 &times; 5 / 13.735 ms (1.98&times;)</td><td>No queried contact</td></tr>
+        </tbody>
+      </table>
+      <div class="note">Blindly doubling steps is not the policy: five scenes do not earn the cost. For the 4,000-body pile, a tuned 20 &times; 6 bucket is the fastest measured point below a 1 mm gate: 14.003 ms and 0.911 mm, versus 24.808 ms and 0.479 mm at 40 &times; 5.</div>
       <p><strong>Activated hard-contact cost.</strong></p>
       <table>
         <thead><tr><th>Measured workload</th><th>Reference/control</th><th>Robust result</th></tr></thead>
