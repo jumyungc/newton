@@ -198,6 +198,18 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
 
     <section id="cost">
       <h2>Computational cost</h2>
+      <p><strong>Stock-example regression check.</strong> Existing examples do not enable event refinement, so this table isolates the normal-path cost of the contact changes. Each value combines two opposite-order Horde runs, with 60 warm-up frames and 180 synchronized measured frames per run; graph construction and compilation are excluded.</p>
+      <table>
+        <thead><tr><th>Existing Newton example</th><th>Scale and cadence</th><th>Unmodified baseline median / p95</th><th>Current contact branch median / p95</th><th>Median change</th></tr></thead>
+        <tbody>
+          <tr><td><code>cable_twist</code></td><td>192 rigid bodies, 10 substeps &times; 5 iterations</td><td>3.995 / 4.043 ms</td><td>3.992 / 4.037 ms</td><td class="good">&minus;0.07%</td></tr>
+          <tr><td><code>cable_pile</code></td><td>4,000 rigid bodies, 10 substeps &times; 5 iterations</td><td>6.132 / 6.141 ms</td><td>6.138 / 6.149 ms</td><td class="good">+0.10%</td></tr>
+          <tr><td><code>vbd_rigid_rigid_contact</code></td><td>6 rigid bodies, 5 substeps &times; 15 iterations</td><td>3.681 / 3.763 ms</td><td>3.686 / 3.761 ms</td><td class="good">+0.14%</td></tr>
+          <tr><td><code>vbd_soft_rigid_contact</code></td><td>6 rigid bodies + 3,126 particles, 5 substeps &times; 15 iterations</td><td>93.179 / 95.017 ms</td><td>93.349 / 95.191 ms</td><td class="good">+0.18%</td></tr>
+        </tbody>
+      </table>
+      <div class="note">Normal existing-example overhead is at most 0.18% in these paired runs. The larger costs below occur only when a hard contact case activates extra physical steps; those rows compare against either an incorrect coarse control or a correct uniform-fine reference.</div>
+      <p><strong>Activated hard-contact cost.</strong></p>
       <table>
         <thead><tr><th>Measured workload</th><th>Reference/control</th><th>Robust result</th></tr></thead>
         <tbody>
