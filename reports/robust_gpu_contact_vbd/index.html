@@ -81,7 +81,7 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
       <div class="metric-row">
         <div class="metric"><span class="label">40,000-body high drop</span><span class="value good">0.996 mm</span></div>
         <div class="metric"><span class="label">40,000-body integrity</span><span class="value good">Zero debt</span></div>
-        <div class="metric"><span class="label">1,024 impacts</span><span class="value good">0.469 ms</span></div>
+        <div class="metric"><span class="label">Latest fixed-work gain</span><span class="value good">1.1&ndash;7.1%</span></div>
         <div class="metric"><span class="label">Dense velocity error</span><span class="value good">4.41e-6 m/s</span></div>
       </div>
     </div>
@@ -176,11 +176,23 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
         </tbody>
       </table>
       <div class="note">The hard cases pay for additional physical steps and exact replay. Ordinary frames remain at their selected coarse cadence; the 4,000-body p95 values are above a 60 Hz frame budget.</div>
+
+      <h3>Latest matched-work update</h3>
+      <p class="lede">A final execution cleanup was measured from the same saved simulation states at the same physical-step and nonlinear-iteration counts. Contact tolerances, accepted-state checks, and the equations were unchanged.</p>
+      <table>
+        <thead><tr><th>Fixed workload</th><th>Previous</th><th>Latest</th><th>Change</th></tr></thead>
+        <tbody>
+          <tr><td>4,000-body high drop, 96 steps &times; 2 iterations</td><td>29.116 ms</td><td class="good">27.045 ms</td><td class="good">7.1% faster</td></tr>
+          <tr><td>Abrupt cable contact, 320 steps &times; 2 iterations</td><td>73.992 ms</td><td class="good">71.462 ms</td><td class="good">3.4% faster</td></tr>
+          <tr><td>Dense cable bundle, 96 steps &times; 2 iterations</td><td>29.078 ms</td><td class="good">28.758 ms</td><td class="good">1.1% faster</td></tr>
+        </tbody>
+      </table>
+      <div class="note">End-to-end high-drop mean / p95 improved from 22.77 / 42.42 ms to 21.96 / 39.85 ms. Abrupt-cable mean / median / p95 improved from 56.46 / 48.76 / 118.39 ms to 53.04 / 47.79 / 113.60 ms. Final runs remained finite, below the published 1 mm contact target and 5 mm joint target, with zero reported debt.</div>
     </section>
 
     <section id="scope">
       <h2>Scope</h2>
-      <p>These are measured outcomes for the listed scenes, shapes, speeds, tolerances, and step ladder—not a proof for every possible collision path. All simulation, fresh-contact validation, and rendering ran on Horde using the current research branch and unified compliant ALM.</p>
+      <p>These are measured outcomes for the listed scenes, shapes, speeds, tolerances, and step ladder—not a proof for every possible collision path. All simulation, fresh-contact validation, and rendering ran on Horde using the private research checkout and unified compliant ALM.</p>
     </section>
   </main>
 
