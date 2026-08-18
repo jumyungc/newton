@@ -79,7 +79,7 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
       <h1>Robust GPU Contact for VBD</h1>
       <p class="subtitle">Fresh unified compliant-ALM results with adaptive physical-step refinement, measured and rendered on an NVIDIA L40.</p>
       <div class="metric-row">
-        <div class="metric"><span class="label">40,000-body high drop</span><span class="value good">0.996 mm</span></div>
+        <div class="metric"><span class="label">40,000-body high drop</span><span class="value good">0.931 mm</span></div>
         <div class="metric"><span class="label">40,000-body integrity</span><span class="value good">Zero debt</span></div>
         <div class="metric"><span class="label">Latest fixed-work gain</span><span class="value good">1.1&ndash;7.1%</span></div>
         <div class="metric"><span class="label">Dense velocity error</span><span class="value good">4.41e-6 m/s</span></div>
@@ -98,8 +98,8 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
           <tr><td>Independent impacts</td><td>1,024 bodies</td><td class="good">+5.71 &micro;m minimum gap</td><td>0.469 ms captured median</td></tr>
           <tr><td>Dense simultaneous impact</td><td>16 moving bodies</td><td class="good">4.41e-6 m/s shared-velocity error</td><td>0.657 ms captured median</td></tr>
           <tr><td>Abrupt three-cable contact</td><td>189 dynamic bodies, 3 driven bodies, 20 rad/s</td><td class="good">0.995 mm penetration; zero debt</td><td>47.97 ms median; 116.01 ms p95</td></tr>
-          <tr><td>Compact pile dropped from 5 m</td><td>4,000 cable bodies</td><td class="good">0.989 mm penetration; 2.163 mm joint residual; zero debt</td><td>14.43 ms median; 42.51 ms p95</td></tr>
-          <tr><td>Large compact pile dropped from 5 m</td><td>40,000 cable bodies</td><td class="good">0.996 mm penetration; 2.191 mm joint residual; zero debt</td><td>580 ms median; 2.61 s p95; 4.04 s maximum</td></tr>
+          <tr><td>Compact pile dropped from 5 m</td><td>4,000 cable bodies</td><td class="good">0.997 mm penetration; 2.197 mm joint residual; zero debt</td><td>12.42 ms median; 39.23 ms p95</td></tr>
+          <tr><td>Large compact pile dropped from 5 m</td><td>40,000 cable bodies</td><td class="good">0.931 mm penetration; 2.228 mm joint residual; zero debt</td><td>447.05 ms median; 2.44 s p95; 4.30 s maximum</td></tr>
           <tr><td>Ten layers released separately</td><td>4,000 cable bodies</td><td class="good">1.000 mm penetration; 1.644 mm joint residual; zero debt</td><td>22.14 ms median; 48.36 ms p95</td></tr>
           <tr><td>Counter-twisted bundle</td><td>7 cables, 280 bodies, 4 turns over 16 s</td><td class="good">0.995 mm penetration; 3.480 mm joint residual; zero debt</td><td>9.80 ms median; 26.89 ms p95</td></tr>
           <tr><td>Projectile through compact cable layers</td><td>721 bodies, 10 layers, 4 strands/layer, 38 m/s</td><td class="good">1.717 mm projectile compression; 0.338 mm inter-cable penetration; continuous exit</td><td>Not separately timed</td></tr>
@@ -109,28 +109,32 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
 
     <section id="scale">
       <h2>Scale and total cost</h2>
-      <p class="lede">The lower-overhead route is fastest once its setup is amortized. The scalable route starts much sooner at large scene sizes. Bars show measured model/controller setup plus the timed portion of the same 180-frame high-drop workload.</p>
+      <p class="lede">Complete workload totals include model setup, controller setup, and all 180 simulated frames. They are seconds, while the per-frame columns below are milliseconds. The winning route changes with scale.</p>
       <div class="scale-grid">
         <div class="scale-card">
           <h3>8,000 cable bodies</h3>
-          <div class="bar-row"><span>Precomputed</span><span class="bar-track"><span class="bar precomputed" style="width:86%"></span></span><span class="bar-value">31.6 s</span></div>
-          <div class="bar-row"><span>Scalable</span><span class="bar-track"><span class="bar scalable" style="width:100%"></span></span><span class="bar-value">36.8 s</span></div>
+          <div class="bar-row"><span>Explicit</span><span class="bar-track"><span class="bar precomputed" style="width:100%"></span></span><span class="bar-value">194.0 s</span></div>
+          <div class="bar-row"><span>Bounded NxN</span><span class="bar-track"><span class="bar scalable" style="width:10.3%"></span></span><span class="bar-value">19.9 s</span></div>
+          <div class="bar-row"><span>BVH</span><span class="bar-track"><span class="bar scalable" style="width:20.6%"></span></span><span class="bar-value">40.0 s</span></div>
         </div>
         <div class="scale-card">
           <h3>16,000 cable bodies</h3>
-          <div class="bar-row"><span>Precomputed</span><span class="bar-track"><span class="bar precomputed" style="width:100%"></span></span><span class="bar-value">92.2 s</span></div>
-          <div class="bar-row"><span>Scalable</span><span class="bar-track"><span class="bar scalable" style="width:85%"></span></span><span class="bar-value">78.2 s</span></div>
+          <div class="bar-row"><span>Explicit</span><span class="bar-track"><span class="bar precomputed" style="width:100%"></span></span><span class="bar-value">755.2 s</span></div>
+          <div class="bar-row"><span>Bounded NxN</span><span class="bar-track"><span class="bar scalable" style="width:6.0%"></span></span><span class="bar-value">45.4 s</span></div>
+          <div class="bar-row"><span>BVH</span><span class="bar-track"><span class="bar scalable" style="width:10.1%"></span></span><span class="bar-value">76.2 s</span></div>
         </div>
       </div>
       <table>
-        <thead><tr><th>Scale</th><th>Fastest steady-state median</th><th>Fastest measured total</th><th>Contact result</th></tr></thead>
+        <thead><tr><th>Scale</th><th>Winning route</th><th>Median / p95 per frame</th><th>Complete total</th><th>Resident GPU memory</th><th>Contact result</th></tr></thead>
         <tbody>
-          <tr><td>8,000 bodies</td><td>17.87 ms</td><td class="good">31.62 s, precomputed route</td><td>0.996 mm; zero debt</td></tr>
-          <tr><td>16,000 bodies</td><td>50.79 ms</td><td class="good">78.18 s, scalable route</td><td>0.987 mm; zero debt</td></tr>
-          <tr><td>40,000 bodies</td><td>580.17 ms, scalable route</td><td class="good">Completed with bounded storage</td><td>0.996 mm; zero debt</td></tr>
+          <tr><td>500 bodies</td><td>Explicit</td><td>6.25 / 26.53 ms</td><td class="good">7.21 s</td><td>46 MiB</td><td>0.998 mm; zero debt</td></tr>
+          <tr><td>4,000 bodies</td><td>Bounded NxN</td><td>20.76 / 45.88 ms</td><td class="good">13.04 s</td><td>176 MiB</td><td>0.998 mm; zero debt</td></tr>
+          <tr><td>8,000 bodies</td><td>Bounded NxN</td><td>30.47 / 117.29 ms</td><td class="good">19.89 s</td><td>336 MiB</td><td>0.990 mm; zero debt</td></tr>
+          <tr><td>16,000 bodies</td><td>Bounded NxN</td><td>106.13 / 413.75 ms</td><td class="good">45.38 s</td><td>624 MiB</td><td>0.985 mm; zero debt</td></tr>
+          <tr><td>40,000 bodies</td><td>BVH</td><td>447.05 / 2444.20 ms</td><td class="good">180.14 s</td><td>1,520 MiB</td><td>0.931 mm; zero debt</td></tr>
         </tbody>
       </table>
-      <div class="note">There is no single size-only crossover. At 16,000 bodies, the precomputed route remains about 3&times; faster per frame, while the scalable route saves about 52.5 seconds of setup. For this scene the measured setup difference is amortized after roughly 232 timed frames.</div>
+      <div class="note">This is the measured L40 frontier for this workload, not a universal hard-coded crossover: explicit wins at 500 bodies, bounded NxN wins from 4,000 through 16,000, and BVH wins at 40,000.</div>
     </section>
 
     <section id="videos">
@@ -144,6 +148,18 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
         <figure>
           <video src="assets/cable_pile_highdrop_4000.mp4" poster="assets/cable_pile_highdrop_4000_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
           <figcaption>Complete 4,000-body cable pile dropped from 5 m. Three simulated seconds at natural time; 0.997 mm maximum fresh penetration and zero debt in the rendered run.</figcaption>
+        </figure>
+        <figure>
+          <video src="assets/highdrop_8000_natural.mp4" poster="assets/highdrop_8000_natural_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+          <figcaption>8,000-body high drop using its fastest measured complete-workload route. Exact Newton states at natural time; 0.990 mm maximum fresh penetration and zero debt.</figcaption>
+        </figure>
+        <figure>
+          <video src="assets/highdrop_16000_natural.mp4" poster="assets/highdrop_16000_natural_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+          <figcaption>16,000-body high drop using bounded GPU storage. Exact Newton states at natural time; 0.985 mm maximum fresh penetration and zero debt.</figcaption>
+        </figure>
+        <figure>
+          <video src="assets/highdrop_40000_natural.mp4" poster="assets/highdrop_40000_natural_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+          <figcaption>40,000-body high drop. The camera begins at full scale and smoothly moves into the contact weave; the physics frames are exact and play at natural time. Maximum fresh penetration is 0.931 mm with zero debt.</figcaption>
         </figure>
         <figure>
           <video src="assets/dense_bullet_curtain_13s_18s.mp4" poster="assets/dense_bullet_curtain_13s_18s_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
@@ -188,6 +204,17 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
         </tbody>
       </table>
       <div class="note">End-to-end high-drop mean / p95 improved from 22.77 / 42.42 ms to 21.96 / 39.85 ms. Abrupt-cable mean / median / p95 improved from 56.46 / 48.76 / 118.39 ms to 53.04 / 47.79 / 113.60 ms. Final runs remained finite, below the published 1 mm contact target and 5 mm joint target, with zero reported debt.</div>
+
+      <h3>Measured accuracy boundary</h3>
+      <table>
+        <thead><tr><th>4,000-body target</th><th>Maximum fresh penetration</th><th>Replay result</th></tr></thead>
+        <tbody>
+          <tr><td>2.0 mm</td><td class="good">1.974 mm</td><td class="good">Zero debt</td></tr>
+          <tr><td>1.0 mm</td><td class="good">0.997 mm</td><td class="good">Zero debt</td></tr>
+          <tr><td>0.5 mm</td><td>0.576 mm</td><td class="bad">Cap reached on 120 frames</td></tr>
+        </tbody>
+      </table>
+      <div class="note">The controller fails closed: the 0.5 mm request is reported as unresolved instead of being presented as a successful run. A separate stiff two-body mechanics audit was still unconverged at 6,144 physical steps, so the present certificate is an endpoint contact/integrity result, not a claim of exact impact dynamics.</div>
     </section>
 
     <section id="scope">
