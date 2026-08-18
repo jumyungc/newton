@@ -1,0 +1,1 @@
+Improve steady-state CUDA VBD rigid-body solver throughput by adapting block sizes to available GPU parallelism. Scenes that select several block sizes build one rigid-kernel module variant per size, lengthening first-run kernel compilation.

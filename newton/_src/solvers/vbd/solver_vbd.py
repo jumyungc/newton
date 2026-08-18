@@ -92,6 +92,29 @@ from .vbd_coupling_kernels import (
 __all__ = ["SolverVBD"]
 
 
+def _select_rigid_block_dim(launch_dim: int, device: wp.Device) -> int:
+    """Choose a block size for model-sized rigid VBD launches.
+
+    CUDA uses the largest power of two in ``[4, 256]`` whose grid contains at
+    least one block per two SMs, so a launch too small to fill the device is
+    spread over more SMs instead of crowding a few. Smaller launches fall back
+    to four threads. Non-CUDA devices keep Warp's default because
+    :func:`warp.launch` forces ``block_dim`` to one on CPU.
+    """
+    if not device.is_cuda:
+        return 256
+
+    # The empirical half-SM target avoids small-launch regressions seen with a full-SM target.
+    target_block_count = max(1, (device.sm_count + 1) // 2)
+    block_dim = 4
+    while block_dim < 256:
+        candidate = 2 * block_dim
+        if (launch_dim + candidate - 1) // candidate < target_block_count:
+            break
+        block_dim = candidate
+    return block_dim
+
+
 def _validate_compliant_alm_material_coefficient(
     values: Any,
     name: str,
@@ -2679,6 +2702,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                     self.body_inertia_q,
                 ],
                 dim=model.body_count,
+                block_dim=_select_rigid_block_dim(model.body_count, self.device),
                 device=self.device,
             )
 
@@ -2691,6 +2715,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                 wp.launch(
                     kernel=step_joint_C0_lambda_rho,
                     dim=model.joint_count,
+                    block_dim=_select_rigid_block_dim(model.joint_count, self.device),
                     inputs=[
                         model.joint_type,
                         model.joint_enabled,
@@ -2769,6 +2794,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                         self.joint_C_fric,
                     ],
                     dim=model.joint_count,
+                    block_dim=_select_rigid_block_dim(model.joint_count, self.device),
                     device=self.device,
                 )
 
@@ -3139,6 +3165,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                 wp.launch(
                     kernel=accumulate_body_body_contacts_per_body,
                     dim=color_group.size * _NUM_CONTACT_THREADS_PER_BODY,
+                    block_dim=_select_rigid_block_dim(color_group.size * _NUM_CONTACT_THREADS_PER_BODY, self.device),
                     inputs=[
                         dt,
                         color_group,
@@ -3245,6 +3272,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                     state_in.body_q,
                 ],
                 dim=color_group.size,
+                block_dim=_select_rigid_block_dim(color_group.size, self.device),
                 device=self.device,
             )
 
@@ -3307,6 +3335,7 @@ class SolverVBD(SolverBase, CouplingInterface):
             wp.launch(
                 kernel=update_duals_joint,
                 dim=model.joint_count,
+                block_dim=_select_rigid_block_dim(model.joint_count, self.device),
                 inputs=[
                     model.joint_type,
                     model.joint_enabled,
@@ -3537,6 +3566,7 @@ class SolverVBD(SolverBase, CouplingInterface):
             ],
             outputs=[self.body_q_prev, state_out.body_qd, state_in.body_qd, state_out.body_q],
             dim=model.body_count,
+            block_dim=_select_rigid_block_dim(model.body_count, self.device),
             device=self.device,
         )
 
@@ -3565,6 +3595,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                     self.joint_dkappa_prev,
                 ],
                 dim=model.joint_count,
+                block_dim=_select_rigid_block_dim(model.joint_count, self.device),
                 device=self.device,
             )
 

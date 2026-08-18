@@ -41,6 +41,7 @@ from newton._src.solvers.vbd.rigid_vbd_kernels import (
     update_duals_body_body_contacts,
     update_duals_joint,
 )
+from newton._src.solvers.vbd.solver_vbd import _select_rigid_block_dim
 from newton.solvers.experimental.coupled import SolverCoupledProxy
 from newton.tests.unittest_utils import (
     add_function_test,
@@ -3736,7 +3737,23 @@ def _soft_contact_presize_is_world_aware(test, device):
 
 
 class TestSolverVBD(unittest.TestCase):
-    pass
+    def test_select_rigid_block_dim(self):
+        """Verify the block-dim ladder's CPU fallback, floor, first transition, and saturation."""
+
+        class Device:
+            def __init__(self, is_cuda, sm_count):
+                self.is_cuda = is_cuda
+                self.sm_count = sm_count
+
+        for is_cuda, sm_count, launch_dim, expected in (
+            (False, 142, 1, 256),
+            (True, 142, 560, 4),
+            (True, 142, 561, 8),
+            (True, 142, 17921, 256),
+            (True, 7, 25, 8),
+        ):
+            with self.subTest(is_cuda=is_cuda, sm_count=sm_count, launch_dim=launch_dim):
+                self.assertEqual(_select_rigid_block_dim(launch_dim, Device(is_cuda, sm_count)), expected)
 
 
 add_function_test(
