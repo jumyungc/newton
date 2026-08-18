@@ -97,12 +97,12 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
           <tr><td>Fast free-flight impact</td><td>10,000 m/s sphere</td><td class="good">+5.78 &micro;m final gap; zero debt</td><td>2 event body updates</td></tr>
           <tr><td>Independent impacts</td><td>1,024 bodies</td><td class="good">+5.71 &micro;m minimum gap</td><td>0.469 ms captured median</td></tr>
           <tr><td>Dense simultaneous impact</td><td>16 moving bodies</td><td class="good">4.41e-6 m/s shared-velocity error</td><td>0.657 ms captured median</td></tr>
-          <tr><td>Abrupt three-cable contact</td><td>189 dynamic bodies, 3 driven bodies, 20 rad/s</td><td class="good">0.996 mm penetration; zero debt</td><td>47.97 ms median; 116.01 ms p95</td></tr>
+          <tr><td>Abrupt three-cable contact</td><td>189 dynamic bodies, 3 driven bodies, 20 rad/s</td><td class="good">0.995 mm penetration; zero debt</td><td>47.97 ms median; 116.01 ms p95</td></tr>
           <tr><td>Compact pile dropped from 5 m</td><td>4,000 cable bodies</td><td class="good">0.989 mm penetration; 2.163 mm joint residual; zero debt</td><td>14.43 ms median; 42.51 ms p95</td></tr>
           <tr><td>Large compact pile dropped from 5 m</td><td>40,000 cable bodies</td><td class="good">0.996 mm penetration; 2.191 mm joint residual; zero debt</td><td>580 ms median; 2.61 s p95; 4.04 s maximum</td></tr>
           <tr><td>Ten layers released separately</td><td>4,000 cable bodies</td><td class="good">1.000 mm penetration; 1.644 mm joint residual; zero debt</td><td>22.14 ms median; 48.36 ms p95</td></tr>
-          <tr><td>Counter-twisted bundle</td><td>7 cables, 280 bodies, 4 turns over 8 s</td><td class="good">0.998 mm penetration; 3.387 mm joint residual; zero debt</td><td>9.84 ms median; 27.97 ms p95</td></tr>
-          <tr><td>Projectile through compact cable layers</td><td>721 bodies, 10 layers, 4 strands/layer, 38 m/s</td><td class="good">1.648 mm projectile compression; 0.228 mm inter-cable penetration; continuous exit</td><td>Not separately timed</td></tr>
+          <tr><td>Counter-twisted bundle</td><td>7 cables, 280 bodies, 4 turns over 16 s</td><td class="good">0.998 mm penetration; 3.439 mm joint residual; zero debt</td><td>10.10 ms median; 40.98 ms p95</td></tr>
+          <tr><td>Projectile through compact cable layers</td><td>721 bodies, 10 layers, 4 strands/layer, 38 m/s</td><td class="good">1.717 mm projectile compression; 0.338 mm inter-cable penetration; continuous exit</td><td>Not separately timed</td></tr>
         </tbody>
       </table>
     </section>
@@ -135,11 +135,11 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
 
     <section id="videos">
       <h2>Newton renders</h2>
-      <p class="lede">These are direct Newton ViewerGL framebuffers with no labels, split screens, compositing, or interpolated physics states. The cable cases play at simulation time. The fast projectile is sampled from exact physical substeps and shown at 30&times; slow motion.</p>
+      <p class="lede">These are direct Newton ViewerGL framebuffers with no labels, split screens, compositing, or interpolated physics states. The cable cases play at simulation time. The fast projectile is sampled from exact physical substeps and shown at 90&times; slow motion.</p>
       <div class="video-grid">
         <figure>
           <video src="assets/three_cable_abrupt_contact.mp4" poster="assets/three_cable_abrupt_contact_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
-          <figcaption>Three 64-segment cables driven abruptly at 20 rad/s. Two simulated seconds at natural time; 0.996 mm maximum fresh penetration and zero debt.</figcaption>
+          <figcaption>Three 64-segment cables driven abruptly at 20 rad/s. Five simulated seconds at natural time; 0.995 mm maximum fresh penetration and zero debt.</figcaption>
         </figure>
         <figure>
           <video src="assets/cable_pile_highdrop_4000.mp4" poster="assets/cable_pile_highdrop_4000_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
@@ -147,11 +147,11 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
         </figure>
         <figure>
           <video src="assets/dense_bullet_curtain_13s_18s.mp4" poster="assets/dense_bullet_curtain_13s_18s_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
-          <figcaption>Five-second, 30&times; slow-motion highlight of the projectile traversal and coupled curtain response.</figcaption>
+          <figcaption>The same projectile-impact interval now plays for 15 seconds at 90&times; slow motion, sampled from exact physical substeps.</figcaption>
         </figure>
         <figure>
           <video src="assets/cable_bundle_twist_natural.mp4" poster="assets/cable_bundle_twist_natural_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
-          <figcaption>Seven-cable bundle driven through four complete relative turns at half the previous rate. 8.0 seconds.</figcaption>
+          <figcaption>Seven-cable bundle driven through four complete relative turns over 16.0 simulated seconds; 0.998 mm maximum fresh penetration, 3.439 mm maximum joint residual, and zero debt.</figcaption>
         </figure>
         <figure>
           <video src="assets/cable_pile_staged_natural.mp4" poster="assets/cable_pile_staged_natural_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
