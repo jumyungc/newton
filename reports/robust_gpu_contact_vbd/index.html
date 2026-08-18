@@ -97,10 +97,11 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
           <tr><td>Fast free-flight impact</td><td>10,000 m/s sphere</td><td class="good">+5.78 &micro;m final gap; zero debt</td><td>2 event body updates</td></tr>
           <tr><td>Independent impacts</td><td>1,024 bodies</td><td class="good">+5.71 &micro;m minimum gap</td><td>0.469 ms captured median</td></tr>
           <tr><td>Dense simultaneous impact</td><td>16 moving bodies</td><td class="good">4.41e-6 m/s shared-velocity error</td><td>0.657 ms captured median</td></tr>
-          <tr><td>Compact pile dropped from 5 m</td><td>4,000 cable bodies</td><td class="good">0.999 mm penetration; 2.163 mm joint residual; zero debt</td><td>22.54 ms median; 98.68 ms p95</td></tr>
+          <tr><td>Abrupt three-cable contact</td><td>189 dynamic bodies, 3 driven bodies, 20 rad/s</td><td class="good">0.996 mm penetration; zero debt</td><td>47.97 ms median; 116.01 ms p95</td></tr>
+          <tr><td>Compact pile dropped from 5 m</td><td>4,000 cable bodies</td><td class="good">0.989 mm penetration; 2.163 mm joint residual; zero debt</td><td>14.43 ms median; 42.51 ms p95</td></tr>
           <tr><td>Large compact pile dropped from 5 m</td><td>40,000 cable bodies</td><td class="good">0.996 mm penetration; 2.191 mm joint residual; zero debt</td><td>580 ms median; 2.61 s p95; 4.04 s maximum</td></tr>
           <tr><td>Ten layers released separately</td><td>4,000 cable bodies</td><td class="good">1.000 mm penetration; 1.644 mm joint residual; zero debt</td><td>22.14 ms median; 48.36 ms p95</td></tr>
-          <tr><td>Counter-twisted bundle</td><td>7 cables, 280 bodies, 4 turns over 8 s</td><td class="good">0.998 mm penetration; 3.513 mm joint residual; zero debt</td><td>15.17 ms median; 60.74 ms p95</td></tr>
+          <tr><td>Counter-twisted bundle</td><td>7 cables, 280 bodies, 4 turns over 8 s</td><td class="good">0.998 mm penetration; 3.387 mm joint residual; zero debt</td><td>9.84 ms median; 27.97 ms p95</td></tr>
           <tr><td>Projectile through compact cable layers</td><td>721 bodies, 10 layers, 4 strands/layer, 38 m/s</td><td class="good">1.648 mm projectile compression; 0.228 mm inter-cable penetration; continuous exit</td><td>Not separately timed</td></tr>
         </tbody>
       </table>
@@ -134,8 +135,16 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
 
     <section id="videos">
       <h2>Newton renders</h2>
-      <p class="lede">These are direct Newton ViewerGL framebuffers with no labels, split screens, compositing, or interpolated physics states. The bundle and piles play at simulation time. The fast projectile is sampled from exact physical substeps and shown at 30&times; slow motion.</p>
+      <p class="lede">These are direct Newton ViewerGL framebuffers with no labels, split screens, compositing, or interpolated physics states. The cable cases play at simulation time. The fast projectile is sampled from exact physical substeps and shown at 30&times; slow motion.</p>
       <div class="video-grid">
+        <figure>
+          <video src="assets/three_cable_abrupt_contact.mp4" poster="assets/three_cable_abrupt_contact_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+          <figcaption>Three 64-segment cables driven abruptly at 20 rad/s. Two simulated seconds at natural time; 0.996 mm maximum fresh penetration and zero debt.</figcaption>
+        </figure>
+        <figure>
+          <video src="assets/cable_pile_highdrop_4000.mp4" poster="assets/cable_pile_highdrop_4000_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+          <figcaption>Complete 4,000-body cable pile dropped from 5 m. Three simulated seconds at natural time; 0.997 mm maximum fresh penetration and zero debt in the rendered run.</figcaption>
+        </figure>
         <figure>
           <video src="assets/dense_bullet_curtain_13s_18s.mp4" poster="assets/dense_bullet_curtain_13s_18s_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
           <figcaption>Five-second, 30&times; slow-motion highlight of the projectile traversal and coupled curtain response.</figcaption>
@@ -143,10 +152,6 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
         <figure>
           <video src="assets/cable_bundle_twist_natural.mp4" poster="assets/cable_bundle_twist_natural_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
           <figcaption>Seven-cable bundle driven through four complete relative turns at half the previous rate. 8.0 seconds.</figcaption>
-        </figure>
-        <figure>
-          <video src="assets/cable_pile_highdrop_natural.mp4" poster="assets/cable_pile_highdrop_natural_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
-          <figcaption>Complete 800-body cable pile dropped from 5 m. The camera follows the physical fall without retiming it. 5.0 seconds.</figcaption>
         </figure>
         <figure>
           <video src="assets/cable_pile_staged_natural.mp4" poster="assets/cable_pile_staged_natural_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
@@ -162,10 +167,11 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
         <tbody>
           <tr><td>1,024 independent impacts</td><td>0.341 ms; 15.33 mm penetration</td><td class="good">0.469 ms; positive gap</td><td>1.37&times;</td></tr>
           <tr><td>16-body simultaneous impact</td><td>0.208 ms; unstable endpoint</td><td class="good">0.657 ms; analytic closure</td><td>3.16&times;</td></tr>
-          <tr><td>280-body bundle</td><td>&mdash;</td><td class="good">15.17 ms median; 0.998 mm</td><td>Activated only as needed</td></tr>
+          <tr><td>189-body abrupt three-cable contact</td><td>67.07 / 184.52 ms median / p95</td><td class="good">47.97 / 116.01 ms; 0.996 mm</td><td>0.72&times; median; 0.63&times; p95</td></tr>
+          <tr><td>280-body bundle</td><td>15.20 / 60.83 ms median / p95</td><td class="good">9.84 / 27.97 ms; 0.998 mm</td><td>0.65&times; median; 0.46&times; p95</td></tr>
           <tr><td>800-body high drop</td><td>&mdash;</td><td class="good">8.50 ms median; 0.998 mm</td><td>Activated only as needed</td></tr>
           <tr><td>800-body staged pile</td><td>&mdash;</td><td class="good">8.15 ms median; 0.995 mm</td><td>Activated only as needed</td></tr>
-          <tr><td>4,000-body high drop</td><td>&mdash;</td><td class="good">22.54 ms median; 0.999 mm</td><td>Activated only as needed</td></tr>
+          <tr><td>4,000-body high drop</td><td>22.48 / 98.80 ms median / p95</td><td class="good">14.43 / 42.51 ms; 0.989 mm</td><td>0.64&times; median; 0.43&times; p95</td></tr>
           <tr><td>4,000-body staged pile</td><td>&mdash;</td><td class="good">22.14 ms median; 1.000 mm</td><td>Activated only as needed</td></tr>
         </tbody>
       </table>
