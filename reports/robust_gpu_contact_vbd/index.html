@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Measured compliant-ALM VBD contact results and Newton renders from Horde.">
+  <meta name="description" content="Measured GPU contact results, Newton renders, and a certified rigid-impact research track from Horde.">
   <link rel="icon" href="data:,">
   <title>Robust GPU Contact for VBD</title>
   <style>
@@ -77,12 +77,12 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
     <div class="header-inner">
       <p class="breadcrumb"><a href="../">Newton Reports</a> / Robust GPU Contact for VBD</p>
       <h1>Robust GPU Contact for VBD</h1>
-      <p class="subtitle">Fresh unified compliant-ALM results with adaptive physical-step refinement, measured and rendered on an NVIDIA L40.</p>
+      <p class="subtitle">Measured compliant-ALM VBD contact results and a certified rigid-impact research track, generated on an NVIDIA L40.</p>
       <div class="metric-row">
         <div class="metric"><span class="label">40,000-body high drop</span><span class="value good">0.931 mm</span></div>
         <div class="metric"><span class="label">40,000-body integrity</span><span class="value good">Zero debt</span></div>
         <div class="metric"><span class="label">Latest fixed-work gain</span><span class="value good">1.1&ndash;7.1%</span></div>
-        <div class="metric"><span class="label">Dense velocity error</span><span class="value good">4.41e-6 m/s</span></div>
+        <div class="metric"><span class="label">Rigid elastic impact</span><span class="value good">0.569 ms</span></div>
       </div>
     </div>
   </header>
@@ -252,9 +252,37 @@ footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
       <div class="note">The contact result is deliberately narrow: independent sphere&ndash;plane contacts with a fixed candidate set. Shared-body contact islands, cable&ndash;cable ACM contact, friction, and a certified dynamic swept-contact frontier are not yet implemented in the AVI solver and are not claimed by these videos.</div>
     </section>
 
+    <section id="certified-rigid-impact">
+      <h2>Certified rigid-impact research track</h2>
+      <p class="lede">A separate graph-captured rigid-contact prototype was evaluated on analytic elastic impacts and increasingly coupled simultaneous-impact chains. The table reports accepted endpoints only; rejected attempts are rolled back rather than presented as simulation results.</p>
+      <table>
+        <thead><tr><th>Case</th><th>Selected route</th><th>Captured frame cost</th><th>Maximum penetration</th><th>Dynamics result</th></tr></thead>
+        <tbody>
+          <tr><td>Equal spheres at 5 / 20 / 80 m/s</td><td>Short-contact route</td><td class="good">0.570 / 0.569 / 0.569 ms</td><td class="good">Zero</td><td class="good">Analytic positions and rebound velocities to floating-point error</td></tr>
+          <tr><td>Three-contact simultaneous chain</td><td>Short coupled route</td><td class="good">0.696 ms</td><td>6.24 &micro;m</td><td class="good">Zero printed momentum error; 0.0030% relative energy error</td></tr>
+          <tr><td>Four-contact simultaneous chain</td><td>Dense coupled route</td><td class="good">1.301 ms</td><td>7.13 &micro;m</td><td class="good">1.82e-7 momentum error; 0.0083% energy error</td></tr>
+          <tr><td>16-body chain plus projectile</td><td>Dense coupled route, 115 iterations</td><td>3.120 ms</td><td>7.19 &micro;m</td><td class="good">Zero printed momentum error; 0.0195% energy error</td></tr>
+          <tr><td>48-body chain plus projectile</td><td>Dense coupled route, 288 iterations</td><td>14.884 ms</td><td>7.25 &micro;m</td><td class="good">1.82e-7 momentum error; 0.0833% energy error</td></tr>
+          <tr><td>No-impact frame</td><td>Free-flight route</td><td class="good">0.295 ms</td><td class="good">Zero</td><td class="good">State advances normally</td></tr>
+          <tr><td>Unqualified contact frontier</td><td>Fail closed</td><td class="good">0.023 ms</td><td>&mdash;</td><td class="good">Canonical state remains unchanged; replay debt is reported</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Matched rigid DAT comparison</h3>
+      <table>
+        <thead><tr><th>Elastic gate</th><th>Certified rigid track</th><th>Rigid DAT comparator</th><th>Observed distinction</th></tr></thead>
+        <tbody>
+          <tr><td>Isolated 20 / 80 m/s pair</td><td class="good">0.569 ms; analytic rebound</td><td>About 0.68 ms; zero outgoing velocity</td><td class="good">Certified track is faster here and preserves the elastic solution</td></tr>
+          <tr><td>16-body chain</td><td>3.120 ms</td><td class="good">About 0.87 ms</td><td>DAT is faster but returns unit relative momentum and energy error</td></tr>
+          <tr><td>48-body chain</td><td>14.884 ms</td><td class="good">About 1.08 ms</td><td>DAT is faster but returns unit relative momentum and energy error</td></tr>
+        </tbody>
+      </table>
+      <div class="note">These numbers separate non-penetration throughput from elastic-impact accuracy. The current rigid prototype handles one scheduled event split per frame and requires a qualified swept-contact frontier. The results do not claim general CCD, arbitrary repeated impacts, friction, or all rotating geometry.</div>
+    </section>
+
     <section id="scope">
       <h2>Scope</h2>
-      <p>These are measured outcomes for the listed scenes, shapes, speeds, tolerances, and step ladder—not a proof for every possible collision path. The VBD simulation, fresh-contact validation, and rendering ran on Horde using the private research checkout and unified compliant ALM. The AVI / ACM section is a separate research prototype; its contact evidence is limited to the independent-contact case stated above.</p>
+      <p>These are measured outcomes for the listed scenes, shapes, speeds, tolerances, and step ladder—not a proof for every possible collision path. The simulations, fresh-contact validation, and rendering ran on Horde using private research checkouts. The AVI / ACM and certified rigid-impact sections are separate research prototypes with the explicit boundaries stated above.</p>
     </section>
   </main>
 
