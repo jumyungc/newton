@@ -1,0 +1,149 @@
+{
+  "frames": 61,
+  "generated_utc": "20260708T125237Z",
+  "hostname": "jumyungc-spock",
+  "owner_line_start": "OWNER: Team Fable (claimed 2026-07-08T12:17:53Z \u2014 round 6, full invention: certified two-level multigrid-VBD (coarse companion cable + SO3-aware prolongation), LRA level-0, frozen-tangent chord-BGN; all falsified on the stiffness ladder this round; target: law-tracking accuracy at near-VBD cost)",
+  "pid": 2237551,
+  "results": {
+    "n1024_s1e5_b2500": {
+      "mgg_r32_c1": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 600,
+        "corrections_attempted": 600,
+        "final_max_bend_rad": 0.022026218473911285,
+        "final_max_stretch_m": 0.0013070141430944204,
+        "last_diag": {
+          "alpha": 1.000000000002339,
+          "alpha_star": 1.000000000002339,
+          "delta_max_m": 1.567668025012262e-05,
+          "delta_max_rad": 1.3491207229242145e-05,
+          "merit_after": 37.788958250718714,
+          "merit_before": 37.789946354484435
+        },
+        "max_bend_rad": 0.022026218473911285,
+        "max_stretch_m": 0.0013070141430944204,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 30.540048144757748,
+        "wall_s": 22.850227117538452
+      },
+      "mgg_r32_c2": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 300,
+        "corrections_attempted": 300,
+        "final_max_bend_rad": 1.9293521642684937,
+        "final_max_stretch_m": 0.2903817892074585,
+        "last_diag": {
+          "alpha": 1.0000000001226068,
+          "alpha_star": 1.0000000001226068,
+          "delta_max_m": 0.03588524474421747,
+          "delta_max_rad": 2.1749622365592485,
+          "merit_after": 170561.287971502,
+          "merit_before": 180835.05612902247
+        },
+        "max_bend_rad": 1.9293521642684937,
+        "max_stretch_m": 0.30641430616378784,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 15.133222565054893,
+        "wall_s": 11.808234214782715
+      }
+    },
+    "n1024_s1e6_b2500": {
+      "mgg_r32_c1": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 600,
+        "corrections_attempted": 600,
+        "final_max_bend_rad": 0.013254859484732151,
+        "final_max_stretch_m": 0.00013483177463058382,
+        "last_diag": {
+          "alpha": 1.0000000000047995,
+          "alpha_star": 1.0000000000047995,
+          "delta_max_m": 1.6474169927826996e-05,
+          "delta_max_rad": 7.841395206626995e-06,
+          "merit_after": 6.935991818484135,
+          "merit_before": 6.937234483599079
+        },
+        "max_bend_rad": 0.013254859484732151,
+        "max_stretch_m": 0.00013483177463058382,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 30.442404560744762,
+        "wall_s": 20.7801730632782
+      },
+      "mgg_r32_c2": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 300,
+        "corrections_attempted": 300,
+        "final_max_bend_rad": 0.02266014739871025,
+        "final_max_stretch_m": 0.00017478795780334622,
+        "last_diag": {
+          "alpha": 1.0000000000052511,
+          "alpha_star": 1.0000000000052511,
+          "delta_max_m": 3.073688292817167e-05,
+          "delta_max_rad": 1.3887622979729926e-05,
+          "merit_after": 12.151280812235786,
+          "merit_before": 12.153456270236722
+        },
+        "max_bend_rad": 0.02266014739871025,
+        "max_stretch_m": 0.00017478795780334622,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 15.123425051569939,
+        "wall_s": 11.737729787826538
+      }
+    },
+    "n1024_s1e7_b2500": {
+      "mgg_r32_c1": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 599,
+        "corrections_attempted": 600,
+        "final_max_bend_rad": 0.1757635623216629,
+        "final_max_stretch_m": 0.0005310918786562979,
+        "last_diag": {
+          "alpha": 1.0000000000495581,
+          "alpha_star": 1.0000000000495581,
+          "delta_max_m": 0.0005050580742244435,
+          "delta_max_rad": 0.000539307402807996,
+          "merit_after": 887.9163603368046,
+          "merit_before": 888.0560334053063
+        },
+        "max_bend_rad": 0.1757635623216629,
+        "max_stretch_m": 0.0005310918786562979,
+        "n_substeps": 600,
+        "reject_worse_merit": 1,
+        "substep_ms_p50": 30.510111711919308,
+        "wall_s": 20.818060636520386
+      },
+      "mgg_r32_c2": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 300,
+        "corrections_attempted": 300,
+        "final_max_bend_rad": 0.04577429220080376,
+        "final_max_stretch_m": 3.239354555262253e-05,
+        "last_diag": {
+          "alpha": 1.0000000000157103,
+          "alpha_star": 1.0000000000157103,
+          "delta_max_m": 5.2177711838994744e-05,
+          "delta_max_rad": 2.5124448809230515e-05,
+          "merit_after": 17.28777320144112,
+          "merit_before": 17.290833144026777
+        },
+        "max_bend_rad": 0.04577429220080376,
+        "max_stretch_m": 3.324228964629583e-05,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 15.220876783132553,
+        "wall_s": 11.762744188308716
+      }
+    }
+  },
+  "schema": "fable-mg-vbd-ladder/v1",
+  "semantics": "mg_rR_cK = requested-VBD2 smoother + certificate-gated coarse-companion BGN correction every K substeps at coarsening R; lra = known-art long-range attachment clamp witness; Track-B; descriptive timings",
+  "sources": {
+    "codex_bgn_global.py": "e20f2bbd65a5058b06c1c569405a9bc6333b950e02fc5d9bc0b79168b1190d93",
+    "fable_fast_step.py": "27ac986b6d82cabc3424905733c297b5653a2342099d2dde51504d1674041d8b",
+    "fable_ladder.py": "745327eed04050e7117c9c302924c71dd9c64fcbe92a3fe1286dfa0e3a86b4ca",
+    "fable_mg.py": "3d21f177bcb5b43521cad2ae31ffe379be0bf3ad010bf54d10da67aa22097f4a"
+  }
+}

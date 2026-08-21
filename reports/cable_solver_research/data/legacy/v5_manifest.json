@@ -1,0 +1,300 @@
+{
+  "exact_set_rule": "actual files equal manifest.json plus files; bytes and SHA-256 exact",
+  "files": [
+    {
+      "bytes": 327726,
+      "path": "data/base/broad__broad_20260705T013247Z_jumyungc-spock_1806917.json",
+      "sha256": "a53936052c9a8f686ca469dc87e8d1c04d8d31a633a98bdf1e0f6db25b4655d9"
+    },
+    {
+      "bytes": 115733,
+      "path": "data/base/cold__summary_20260704T092145Z_1721800.json",
+      "sha256": "b12126d05ff8df2ba85f303e64779edfc6916c9bd31c62af04dec651ab6ccd0e"
+    },
+    {
+      "bytes": 528643,
+      "path": "data/base/dense_pile_failure__run_20260705T011827Z_jumyungc-spock_1798933__result.json",
+      "sha256": "ed1842160a435b065048c5668bee50367568e50d6daf118a9a2b35017dd0e2b0"
+    },
+    {
+      "bytes": 1043416,
+      "path": "data/base/dense_pile_stabilization__sweep_20260705T012406Z_jumyungc-spock_1802269__result.json",
+      "sha256": "bb9a051b53422b126af84685a70d1c121590cf2db986c2c83a829c7edff76a2d"
+    },
+    {
+      "bytes": 72255,
+      "path": "data/base/prepared__summary_20260704T091617Z_1720960.json",
+      "sha256": "ebdb25451a33c06cca831d855c048ca302c010ae6ef0bc97ca2da4619a0b85ab"
+    },
+    {
+      "bytes": 812675,
+      "path": "data/base/ten_step__broad_20260704T092544Z_jumyungc-spock_1724542.json",
+      "sha256": "21e5fe6c73b9ba88721e1b872fc93bd9df862b56b633cef7c1d4f3f12759dcf9"
+    },
+    {
+      "bytes": 17138,
+      "path": "data/base/trajectory__codex_bgn_trajectory_run_manifest.json",
+      "sha256": "b4154ad0d9d58c86a8b992aafba4622b163c8f68c331678772984df7985e056d"
+    },
+    {
+      "bytes": 24003,
+      "path": "data/contact/dense_robustness.json",
+      "sha256": "789055c31ef4bb35b87265e87700255cf36a481075c57da5af899f61013ad83f"
+    },
+    {
+      "bytes": 85587,
+      "path": "data/contact/global_kkt_ladder.json",
+      "sha256": "4973242b57babd4f86d5ed7a7873d77f0dc29c2647f0a083ce575fdb5601d068"
+    },
+    {
+      "bytes": 77956,
+      "path": "data/contact/global_kkt_tiny_pile_negative.json",
+      "sha256": "b07ae03523d349e80d74adce6f992bdae61bf7153c45d6e9906e92a8abd6f192"
+    },
+    {
+      "bytes": 134122,
+      "path": "data/contact/hard_confirmation.json",
+      "sha256": "97438fd14624bbc2eea0614ffeaf77659bbb2c4d0f12e511af0e95cd238f04bf"
+    },
+    {
+      "bytes": 1682853,
+      "path": "data/contact/native_sweep.json",
+      "sha256": "9febfe4a05211b18a3b5302c11c0612538dc40b804c725d74c1f0d79ef86fc6b"
+    },
+    {
+      "bytes": 31019,
+      "path": "data/smooth/base_report_v4.json",
+      "sha256": "98c61e348234b3b2cfb0b1f1f1d63a8ea8144cd1f4a05951bb18419112828460"
+    },
+    {
+      "bytes": 11073236,
+      "path": "data/trajectory/dense_canonical_failure.npz",
+      "sha256": "dc6eed2eae68c9348d78a92e480052d79e0f8c542b3514085824700d33a8ed1b"
+    },
+    {
+      "bytes": 15400106,
+      "path": "data/trajectory/dense_hard_latest_repeat0.npz",
+      "sha256": "885a141d28d02ea1da8a20889d49fed8613579d02d4871d2648071cc7b8c1fe7"
+    },
+    {
+      "bytes": 19828946,
+      "path": "data/trajectory/dense_soft_contact.npz",
+      "sha256": "8b18c338eb556e4af137574fe4f36716444f760004f089881daf834037743ec4"
+    },
+    {
+      "bytes": 1234214,
+      "path": "data/trajectory/long_cantilever_1024_superbend500.json",
+      "sha256": "1e3a6055bfcc234a61297a2f285cdae3437d6e80f58d657e2e5e797de9ca231b"
+    },
+    {
+      "bytes": 1232782,
+      "path": "data/trajectory/long_cantilever_512_bend.json",
+      "sha256": "b3f545ffb8e4d313e03f327988bffbf06ae8ea9535d1b24ddacfa66ca4a0dbaf"
+    },
+    {
+      "bytes": 3488,
+      "path": "data/visual/dense_comparison_table.json",
+      "sha256": "d5d62005eceeb6da8cf399eaf5a0445c555b0073277b575584d1d1225901eb9a"
+    },
+    {
+      "bytes": 4024,
+      "path": "data/visual/dense_input_contract.json",
+      "sha256": "53124ece211d896003c535504e9e3fcfea75b89bb72f417247053c27d801fa1d"
+    },
+    {
+      "bytes": 9202,
+      "path": "data/visual/dense_manifest.json",
+      "sha256": "c8553c992363ad69f29f820d44401e06dfc0bcbcc5699fa1e63471730384d8ea"
+    },
+    {
+      "bytes": 6090,
+      "path": "data/visual/moderate_comparison_table.json",
+      "sha256": "463e46665f10f2102559811026bacd30a96ef14b821309042f3ac3dea3991806"
+    },
+    {
+      "bytes": 5974,
+      "path": "data/visual/moderate_input_contract.json",
+      "sha256": "e20723312c6c8496e0d0f09c91d67b7592eac52dac83247d085bb54986324bfe"
+    },
+    {
+      "bytes": 10945,
+      "path": "data/visual/moderate_manifest.json",
+      "sha256": "a3d2b18691c3896f773d6224f5d84e0d7d2036f22484ea454f95b46063d8719b"
+    },
+    {
+      "bytes": 22866,
+      "path": "index.html",
+      "sha256": "d15350a4f6f74a1b65d851aef39f609c080a41710131a855f64f8204eeb69258"
+    },
+    {
+      "bytes": 2383457,
+      "path": "media/dense/dense_contact_comparison.mp4",
+      "sha256": "788508ab54f1893ba2be723f8e12169b8ea4698e773a23c3242e5d2bf9e0d338"
+    },
+    {
+      "bytes": 1640519,
+      "path": "media/dense/dense_contact_comparison_mobile.mp4",
+      "sha256": "9a5011702d7530e7eccb17c6798203aaba4a6e78f8fd5602dfac5123a08edf1b"
+    },
+    {
+      "bytes": 130079,
+      "path": "media/dense/dense_contact_comparison_mobile_poster.png",
+      "sha256": "179a4864b33b42de629ddf6379469bec2ce3faa7f073de2e647f7cfbefd577c6"
+    },
+    {
+      "bytes": 150081,
+      "path": "media/dense/dense_contact_comparison_poster.png",
+      "sha256": "d84b7a8e576c0cf55641a3165008f530ff0f7c9bd4229f5aedcd7e78f21ac3d8"
+    },
+    {
+      "bytes": 5010551,
+      "path": "media/moderate/moderate_grid.mp4",
+      "sha256": "5efc00bb97a5e83715476c18a3a5e1724cbe659f5f593e4e904102c5a8317ee2"
+    },
+    {
+      "bytes": 3958923,
+      "path": "media/moderate/moderate_grid_mobile.mp4",
+      "sha256": "65899df73a2f9e9e55efe05f83ed1e0cfddf1cc6121fd0dafc62240bcbee1c6c"
+    },
+    {
+      "bytes": 146314,
+      "path": "media/moderate/moderate_grid_mobile_poster.png",
+      "sha256": "b6c77736046ef44e6c479a72759adbc5f73fd8bacf413deda2f2581d20975566"
+    },
+    {
+      "bytes": 179137,
+      "path": "media/moderate/moderate_grid_poster.png",
+      "sha256": "f64252237e3abfa445ac65667dd91b0db34aa11b908c8e6a028f6fb0e9481b16"
+    },
+    {
+      "bytes": 225563,
+      "path": "media/trajectory/long_cantilever_1024_superbend500.mp4",
+      "sha256": "06657b9278aa79c30d23a4da59c5148344e8a5055876503f09353399280b0aae"
+    },
+    {
+      "bytes": 90179,
+      "path": "media/trajectory/long_cantilever_1024_superbend500_poster.png",
+      "sha256": "e8cb74bb41eb83c899a963e623114978b66f36272ddeb8720d79296a832c22d9"
+    },
+    {
+      "bytes": 221434,
+      "path": "media/trajectory/long_cantilever_512_bend.mp4",
+      "sha256": "926d52d159e84bedb27f2fd1d20d5d9693224b0e7a0109e6d0140bd93cd291e7"
+    },
+    {
+      "bytes": 87697,
+      "path": "media/trajectory/long_cantilever_512_bend_poster.png",
+      "sha256": "75d49f119da8bcb75ce22274d9467a524071b028399fc0c7d3f729a411e4ca6b"
+    },
+    {
+      "bytes": 246056,
+      "path": "report.json",
+      "sha256": "27c22e17ee85b9542fef15858eca86a09e2cfb6d9ea0a4ba223d2205cfaa3724"
+    },
+    {
+      "bytes": 22190,
+      "path": "source/bench/global_cable/codex_best_solver_portfolio.py",
+      "sha256": "06623ab228286ac8c3235ce26b63017189619ce765f59b39c93bfb58a6f0da20"
+    },
+    {
+      "bytes": 38608,
+      "path": "source/bench/global_cable/codex_bgn_contact_kkt.py",
+      "sha256": "40eed7dbae395dd07beeb7ff6edbeda1c0444fe3086f499341531c19262096f4"
+    },
+    {
+      "bytes": 13854,
+      "path": "source/bench/global_cable/codex_bgn_contact_kkt_pile.py",
+      "sha256": "57088bce9f26d86b2574a95d5eb3a50ee2bb728c9f7306d34a8cc9ddc101eee9"
+    },
+    {
+      "bytes": 35339,
+      "path": "source/bench/global_cable/codex_bgn_dense_comparison.py",
+      "sha256": "c22397df7447d6e63c7e2f0eea2f424dd043f045747e875c7cfba4d9aaeb2218"
+    },
+    {
+      "bytes": 43513,
+      "path": "source/bench/global_cable/codex_bgn_dense_pile.py",
+      "sha256": "0599e86b2a591602d5398e00183f1d41a83ab83af87efa1f085e9fa11cb4d01a"
+    },
+    {
+      "bytes": 57087,
+      "path": "source/bench/global_cable/codex_bgn_global.py",
+      "sha256": "e20f2bbd65a5058b06c1c569405a9bc6333b950e02fc5d9bc0b79168b1190d93"
+    },
+    {
+      "bytes": 53733,
+      "path": "source/bench/global_cable/codex_bgn_pile_comparison.py",
+      "sha256": "523ef8807a4b8af6b7e028a2fe0fe52ce3ce08bfc86b5bce78f2c46610440dc6"
+    },
+    {
+      "bytes": 44255,
+      "path": "source/bench/global_cable/codex_cable_report_v5.py",
+      "sha256": "8653d71736cc20ce54f9d668763bc0c7cbef4400bcc56de5e17572cdd108a58c"
+    },
+    {
+      "bytes": 31499,
+      "path": "source/bench/global_cable/codex_native_contact_ablation.py",
+      "sha256": "1cf722376f8f2faee8d51ec7d359ea67f38a13ee61046303adda23ed0d2c39e2"
+    },
+    {
+      "bytes": 8473,
+      "path": "source/bench/global_cable/codex_native_contact_confirm.py",
+      "sha256": "dd1aa6caf0fdd08fb31f3826fc58c2a971e58cbe021f4c2b60fd2e4ae0dbd2ad"
+    },
+    {
+      "bytes": 11592,
+      "path": "source/bench/global_cable/codex_native_contact_robustness.py",
+      "sha256": "fd09c304132953f551a781abc6fd540ec595e804d6c74f2462883c1803eb97cb"
+    },
+    {
+      "bytes": 11462,
+      "path": "source/bench/global_cable/test_codex_best_solver_portfolio.py",
+      "sha256": "e7032975ab1b520dab6cd7834d86e0c036d14dfb71bbb1d2e284de4f2c591b9e"
+    },
+    {
+      "bytes": 8109,
+      "path": "source/bench/global_cable/test_codex_bgn_contact_kkt.py",
+      "sha256": "9eb7a685c6261d69044d54887cb0085b0984afb650b6cd63e295455ff6e95076"
+    },
+    {
+      "bytes": 6027,
+      "path": "source/bench/global_cable/test_codex_bgn_dense_comparison.py",
+      "sha256": "f71e40f833f0cb1a54cee1f5f3325c254915f5a98cb22d7546d12cad7ffc2924"
+    },
+    {
+      "bytes": 6590,
+      "path": "source/bench/global_cable/test_codex_bgn_pile_comparison.py",
+      "sha256": "9747a194e7480dafd027117d554aac06b152f88543d825ce3ddd8ce3efa5a025"
+    },
+    {
+      "bytes": 5134,
+      "path": "source/bench/global_cable/test_codex_cable_report_v5.py",
+      "sha256": "1d3f0a5e646a71abba21ffee7f90ff4ba1f66ab44ac0937d3f48e4a780987c68"
+    },
+    {
+      "bytes": 3394,
+      "path": "source/bench/global_cable/test_codex_native_contact_ablation.py",
+      "sha256": "d56b05921d20ddd82996c8a69343598441ee9d23607a1e2f60703e44dc2be3cf"
+    },
+    {
+      "bytes": 2636,
+      "path": "source/bench/global_cable/test_codex_native_contact_confirm.py",
+      "sha256": "2ea1e79f321c8dd6f51f0ebb96c9d2e5d3bd2d46c6d49b1ec888b8ea635c682a"
+    },
+    {
+      "bytes": 2856,
+      "path": "source/bench/global_cable/test_codex_native_contact_robustness.py",
+      "sha256": "891ad87c9e3e8e1c5f22ec9f8b25a8b6de81cc63724ceab2d1059a531c3ab611"
+    },
+    {
+      "bytes": 3379,
+      "path": "styles.css",
+      "sha256": "a4c536fa24b2fa92d2d009b9a5ea9cd2f5cae506a87e4e506c30e905da694490"
+    }
+  ],
+  "generated_utc": "2026-07-05T02:51:43Z",
+  "owner_line": "OWNER: Team Codex-Remote — 2026-07-05T02:00Z — contact-global solver + visual comparison round",
+  "publication_ready": false,
+  "schema": "codex-cable-results-review-manifest/v5",
+  "verdict": "MEASURED CABLE PORTFOLIO: SMOOTH-GLOBAL WIN + FIRST DENSE-CONTACT PASSES"
+}

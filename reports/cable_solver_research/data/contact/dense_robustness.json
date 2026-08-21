@@ -1,0 +1,591 @@
+{
+  "all_policy_repeats_gate_pass": true,
+  "campaign_integrity_pass": true,
+  "claim_boundary": "bounded 5x2 dense robustness audit; timings descriptive; soft and hard contact formulations remain separately labeled; no universal or paper-best claim",
+  "command": "bench/global_cable/codex_native_contact_robustness.py",
+  "contracts": {
+    "A_hard": {
+      "candidate": {
+        "avbd_gamma": 0.999,
+        "cable_mu": 1.0,
+        "category": "history",
+        "contact_alpha": 0.0,
+        "contact_hard": true,
+        "contact_history": false,
+        "contact_kd": 0.0,
+        "contact_ke": 100000.0,
+        "contact_matching": "latest",
+        "friction_epsilon": 0.01,
+        "ground_mu": 1000000000.0,
+        "hard_stretch": false,
+        "name": "alpha000_nohistory_latest",
+        "rationale": "disable VBD lambda/k/anchor warm start while retaining latest matching for reporting",
+        "same_problem_eligible": true,
+        "stretch_ke_scale": 1.0
+      },
+      "contact_formulation": "hard augmented-Lagrangian contact",
+      "difference_from_canonical": "contact alpha=0 and history disabled",
+      "same_authored_scene_and_material": true
+    },
+    "B_soft": {
+      "candidate": {
+        "avbd_gamma": 0.999,
+        "cable_mu": 1.0,
+        "category": "contact_formulation",
+        "contact_alpha": 0.0,
+        "contact_hard": false,
+        "contact_history": false,
+        "contact_kd": 0.0,
+        "contact_ke": 100000.0,
+        "contact_matching": "latest",
+        "friction_epsilon": 0.01,
+        "ground_mu": 1000000000.0,
+        "hard_stretch": false,
+        "name": "soft_contact",
+        "rationale": "penalty-only body contact without hard-mode duals",
+        "same_problem_eligible": true,
+        "stretch_ke_scale": 1.0
+      },
+      "contact_formulation": "penalty-only contact",
+      "disclosure": "discrete contact formulation differs from hard-contact canonical",
+      "same_authored_scene_and_material": true
+    },
+    "case": {
+      "body_count": 7680,
+      "duration_s": 2.0,
+      "fps": 60,
+      "frames": 120,
+      "iterations": 10,
+      "lanes_per_layer": 8,
+      "layers": 8,
+      "name": "dense",
+      "radius": 0.012,
+      "segment_length": 0.04,
+      "segments_per_cable": 120,
+      "substeps": 10
+    }
+  },
+  "device": "cuda:0",
+  "elapsed_s": 282.17292017675936,
+  "frozen_gates": {
+    "duration_s": 2.0,
+    "penetration_limit_m": 0.012,
+    "penetration_operator": "strictly less than",
+    "stretch_limit_m": 0.01,
+    "stretch_operator": "strictly less than"
+  },
+  "generated_utc": "2026-07-05T02:31:32Z",
+  "newton_head_read_only": "933146521b1667fb3ac5bb56e1c59508adc0ad9e",
+  "owner_line_end": "OWNER: Team Codex-Remote \u2014 2026-07-05T02:00Z \u2014 contact-global solver + visual comparison round",
+  "owner_line_start": "OWNER: Team Codex-Remote \u2014 2026-07-05T02:00Z \u2014 contact-global solver + visual comparison round",
+  "platform": "Linux-5.15.0-113-generic-x86_64-with-glibc2.35",
+  "python": "3.12.13 (main, Jun 11 2026, 04:03:26) [Clang 22.1.3 ]",
+  "repeats": {
+    "alpha000_nohistory_latest": [
+      {
+        "gates": {
+          "cable_cable_contact_observed": true,
+          "finite_normalized_state_and_contact": true,
+          "ground_contact_observed": true,
+          "no_contact_buffer_overflow": true,
+          "penetration_lt_0p012m": true,
+          "stretch_lt_0p010m": true
+        },
+        "initial_physics_sha256": "3bf1e3605105271206ff12b9fcbadba70e88a5dd86d0570663777c1a41ec57a0",
+        "integrity_pass": true,
+        "pass": true,
+        "repeat": 0,
+        "summary": {
+          "display_frames": 120,
+          "duration_s": 2.0,
+          "final_state_sha256": "a4b3a8a94fed45109eac1ba2513defeb0c337b69bd10b9909b72c0f854fc2180",
+          "max_penetration_m": 0.011357259825265593,
+          "max_stretch_m": 0.0007686922446790215,
+          "maximum_linear_speed_m_per_s": 4.378218131220473,
+          "peak_active_contacts": 6670,
+          "peak_cable_cable_contacts": 5479,
+          "peak_ground_contacts": 1327,
+          "penetration_limit_m": 0.012,
+          "stretch_limit_m": 0.01,
+          "substeps": 1200
+        },
+        "timing_descriptive_not_accuracy": {
+          "build_ms": 20969.889542999998,
+          "display_frame_p50_ms": 50.881961,
+          "display_frame_p95_ms": 53.16755745,
+          "simulation_wall_s": 7.556549722328782,
+          "solver_init_ms": 69.327874
+        }
+      },
+      {
+        "gates": {
+          "cable_cable_contact_observed": true,
+          "finite_normalized_state_and_contact": true,
+          "ground_contact_observed": true,
+          "no_contact_buffer_overflow": true,
+          "penetration_lt_0p012m": true,
+          "stretch_lt_0p010m": true
+        },
+        "initial_physics_sha256": "3bf1e3605105271206ff12b9fcbadba70e88a5dd86d0570663777c1a41ec57a0",
+        "integrity_pass": true,
+        "pass": true,
+        "repeat": 1,
+        "summary": {
+          "display_frames": 120,
+          "duration_s": 2.0,
+          "final_state_sha256": "7a2549c04301c2507a14565ce8a2ee17281cb75b18b7e0705c77ad35097495b4",
+          "max_penetration_m": 0.011357256135690785,
+          "max_stretch_m": 0.0007682715038964949,
+          "maximum_linear_speed_m_per_s": 4.378239570293765,
+          "peak_active_contacts": 6687,
+          "peak_cable_cable_contacts": 5553,
+          "peak_ground_contacts": 1295,
+          "penetration_limit_m": 0.012,
+          "stretch_limit_m": 0.01,
+          "substeps": 1200
+        },
+        "timing_descriptive_not_accuracy": {
+          "build_ms": 20221.260147,
+          "display_frame_p50_ms": 50.9387495,
+          "display_frame_p95_ms": 51.63337995,
+          "simulation_wall_s": 7.298733938485384,
+          "solver_init_ms": 48.86891
+        }
+      },
+      {
+        "gates": {
+          "cable_cable_contact_observed": true,
+          "finite_normalized_state_and_contact": true,
+          "ground_contact_observed": true,
+          "no_contact_buffer_overflow": true,
+          "penetration_lt_0p012m": true,
+          "stretch_lt_0p010m": true
+        },
+        "initial_physics_sha256": "3bf1e3605105271206ff12b9fcbadba70e88a5dd86d0570663777c1a41ec57a0",
+        "integrity_pass": true,
+        "pass": true,
+        "repeat": 2,
+        "summary": {
+          "display_frames": 120,
+          "duration_s": 2.0,
+          "final_state_sha256": "dea54abfa1ff0765bfcd58faf5ee72860a548dfc927c32f537d44fdd946b4dba",
+          "max_penetration_m": 0.011357259825265593,
+          "max_stretch_m": 0.0007686922446790215,
+          "maximum_linear_speed_m_per_s": 4.378218131220473,
+          "peak_active_contacts": 6697,
+          "peak_cable_cable_contacts": 5424,
+          "peak_ground_contacts": 1377,
+          "penetration_limit_m": 0.012,
+          "stretch_limit_m": 0.01,
+          "substeps": 1200
+        },
+        "timing_descriptive_not_accuracy": {
+          "build_ms": 20178.681141999998,
+          "display_frame_p50_ms": 50.9332405,
+          "display_frame_p95_ms": 51.33092605,
+          "simulation_wall_s": 7.265586385503411,
+          "solver_init_ms": 50.356586
+        }
+      },
+      {
+        "gates": {
+          "cable_cable_contact_observed": true,
+          "finite_normalized_state_and_contact": true,
+          "ground_contact_observed": true,
+          "no_contact_buffer_overflow": true,
+          "penetration_lt_0p012m": true,
+          "stretch_lt_0p010m": true
+        },
+        "initial_physics_sha256": "3bf1e3605105271206ff12b9fcbadba70e88a5dd86d0570663777c1a41ec57a0",
+        "integrity_pass": true,
+        "pass": true,
+        "repeat": 3,
+        "summary": {
+          "display_frames": 120,
+          "duration_s": 2.0,
+          "final_state_sha256": "36ef9a48bbf2c33a8b5c8a10d755182bb88caf6724f593397aa2bcd6a039400d",
+          "max_penetration_m": 0.011357213957617403,
+          "max_stretch_m": 0.0007684533778637911,
+          "maximum_linear_speed_m_per_s": 4.378203839870454,
+          "peak_active_contacts": 6639,
+          "peak_cable_cable_contacts": 5443,
+          "peak_ground_contacts": 1279,
+          "penetration_limit_m": 0.012,
+          "stretch_limit_m": 0.01,
+          "substeps": 1200
+        },
+        "timing_descriptive_not_accuracy": {
+          "build_ms": 20130.157984999998,
+          "display_frame_p50_ms": 50.6998755,
+          "display_frame_p95_ms": 51.463560949999994,
+          "simulation_wall_s": 7.28509658575058,
+          "solver_init_ms": 49.450928
+        }
+      },
+      {
+        "gates": {
+          "cable_cable_contact_observed": true,
+          "finite_normalized_state_and_contact": true,
+          "ground_contact_observed": true,
+          "no_contact_buffer_overflow": true,
+          "penetration_lt_0p012m": true,
+          "stretch_lt_0p010m": true
+        },
+        "initial_physics_sha256": "3bf1e3605105271206ff12b9fcbadba70e88a5dd86d0570663777c1a41ec57a0",
+        "integrity_pass": true,
+        "pass": true,
+        "repeat": 4,
+        "summary": {
+          "display_frames": 120,
+          "duration_s": 2.0,
+          "final_state_sha256": "ebe78ac64c8223f3c84c3707ff2f70cf533d58e881861e19eb5900be8052a987",
+          "max_penetration_m": 0.011357183568454908,
+          "max_stretch_m": 0.0007685149673458749,
+          "maximum_linear_speed_m_per_s": 4.378178305358652,
+          "peak_active_contacts": 6735,
+          "peak_cable_cable_contacts": 5446,
+          "peak_ground_contacts": 1381,
+          "penetration_limit_m": 0.012,
+          "stretch_limit_m": 0.01,
+          "substeps": 1200
+        },
+        "timing_descriptive_not_accuracy": {
+          "build_ms": 20162.040414,
+          "display_frame_p50_ms": 50.786479,
+          "display_frame_p95_ms": 51.490756,
+          "simulation_wall_s": 7.383463004603982,
+          "solver_init_ms": 49.510493
+        }
+      }
+    ],
+    "soft_contact": [
+      {
+        "gates": {
+          "cable_cable_contact_observed": true,
+          "finite_normalized_state_and_contact": true,
+          "ground_contact_observed": true,
+          "no_contact_buffer_overflow": true,
+          "penetration_lt_0p012m": true,
+          "stretch_lt_0p010m": true
+        },
+        "initial_physics_sha256": "3bf1e3605105271206ff12b9fcbadba70e88a5dd86d0570663777c1a41ec57a0",
+        "integrity_pass": true,
+        "pass": true,
+        "repeat": 0,
+        "summary": {
+          "display_frames": 120,
+          "duration_s": 2.0,
+          "final_state_sha256": "a1ec685588eb62a4d86c3daa2202cf099c21b02a4c245be8347a8ff857ff0ce5",
+          "max_penetration_m": 0.006847494951734888,
+          "max_stretch_m": 0.00046264573060992437,
+          "maximum_linear_speed_m_per_s": 3.1044216228140415,
+          "peak_active_contacts": 11049,
+          "peak_cable_cable_contacts": 8127,
+          "peak_ground_contacts": 3047,
+          "penetration_limit_m": 0.012,
+          "stretch_limit_m": 0.01,
+          "substeps": 1200
+        },
+        "timing_descriptive_not_accuracy": {
+          "build_ms": 20231.821773,
+          "display_frame_p50_ms": 50.80624949999999,
+          "display_frame_p95_ms": 51.468137649999996,
+          "simulation_wall_s": 7.544581439346075,
+          "solver_init_ms": 49.034921999999995
+        }
+      },
+      {
+        "gates": {
+          "cable_cable_contact_observed": true,
+          "finite_normalized_state_and_contact": true,
+          "ground_contact_observed": true,
+          "no_contact_buffer_overflow": true,
+          "penetration_lt_0p012m": true,
+          "stretch_lt_0p010m": true
+        },
+        "initial_physics_sha256": "3bf1e3605105271206ff12b9fcbadba70e88a5dd86d0570663777c1a41ec57a0",
+        "integrity_pass": true,
+        "pass": true,
+        "repeat": 1,
+        "summary": {
+          "display_frames": 120,
+          "duration_s": 2.0,
+          "final_state_sha256": "de31cbab83c610ad30dfa082a0ab428b3e980e5e86de6d398e0709e40dbced2e",
+          "max_penetration_m": 0.006849683136812265,
+          "max_stretch_m": 0.0004630145287167972,
+          "maximum_linear_speed_m_per_s": 3.104438645959398,
+          "peak_active_contacts": 11047,
+          "peak_cable_cable_contacts": 8112,
+          "peak_ground_contacts": 3072,
+          "penetration_limit_m": 0.012,
+          "stretch_limit_m": 0.01,
+          "substeps": 1200
+        },
+        "timing_descriptive_not_accuracy": {
+          "build_ms": 20181.487596,
+          "display_frame_p50_ms": 50.88721699999999,
+          "display_frame_p95_ms": 51.994789499999996,
+          "simulation_wall_s": 7.476987089961767,
+          "solver_init_ms": 49.810167
+        }
+      },
+      {
+        "gates": {
+          "cable_cable_contact_observed": true,
+          "finite_normalized_state_and_contact": true,
+          "ground_contact_observed": true,
+          "no_contact_buffer_overflow": true,
+          "penetration_lt_0p012m": true,
+          "stretch_lt_0p010m": true
+        },
+        "initial_physics_sha256": "3bf1e3605105271206ff12b9fcbadba70e88a5dd86d0570663777c1a41ec57a0",
+        "integrity_pass": true,
+        "pass": true,
+        "repeat": 2,
+        "summary": {
+          "display_frames": 120,
+          "duration_s": 2.0,
+          "final_state_sha256": "58adfbe1a88f18b6698c5a2ae63ca6f9a2c96b735ac515bec5600a757150c554",
+          "max_penetration_m": 0.006850439579087625,
+          "max_stretch_m": 0.00046242425054710684,
+          "maximum_linear_speed_m_per_s": 3.1044407544114025,
+          "peak_active_contacts": 11013,
+          "peak_cable_cable_contacts": 8090,
+          "peak_ground_contacts": 3075,
+          "penetration_limit_m": 0.012,
+          "stretch_limit_m": 0.01,
+          "substeps": 1200
+        },
+        "timing_descriptive_not_accuracy": {
+          "build_ms": 20184.476403,
+          "display_frame_p50_ms": 51.0690975,
+          "display_frame_p95_ms": 52.01678955,
+          "simulation_wall_s": 7.464010454714298,
+          "solver_init_ms": 49.190726
+        }
+      },
+      {
+        "gates": {
+          "cable_cable_contact_observed": true,
+          "finite_normalized_state_and_contact": true,
+          "ground_contact_observed": true,
+          "no_contact_buffer_overflow": true,
+          "penetration_lt_0p012m": true,
+          "stretch_lt_0p010m": true
+        },
+        "initial_physics_sha256": "3bf1e3605105271206ff12b9fcbadba70e88a5dd86d0570663777c1a41ec57a0",
+        "integrity_pass": true,
+        "pass": true,
+        "repeat": 3,
+        "summary": {
+          "display_frames": 120,
+          "duration_s": 2.0,
+          "final_state_sha256": "27f985025fcbcff81f1e2403e55ccb635c57aedb18b59b7133e8027cbfb14a28",
+          "max_penetration_m": 0.006853466978604561,
+          "max_stretch_m": 0.00046155298247883836,
+          "maximum_linear_speed_m_per_s": 3.104458854962666,
+          "peak_active_contacts": 11021,
+          "peak_cable_cable_contacts": 8095,
+          "peak_ground_contacts": 3076,
+          "penetration_limit_m": 0.012,
+          "stretch_limit_m": 0.01,
+          "substeps": 1200
+        },
+        "timing_descriptive_not_accuracy": {
+          "build_ms": 20392.059146,
+          "display_frame_p50_ms": 51.191738,
+          "display_frame_p95_ms": 51.7519038,
+          "simulation_wall_s": 7.737440969794989,
+          "solver_init_ms": 49.058004
+        }
+      },
+      {
+        "gates": {
+          "cable_cable_contact_observed": true,
+          "finite_normalized_state_and_contact": true,
+          "ground_contact_observed": true,
+          "no_contact_buffer_overflow": true,
+          "penetration_lt_0p012m": true,
+          "stretch_lt_0p010m": true
+        },
+        "initial_physics_sha256": "3bf1e3605105271206ff12b9fcbadba70e88a5dd86d0570663777c1a41ec57a0",
+        "integrity_pass": true,
+        "pass": true,
+        "repeat": 4,
+        "summary": {
+          "display_frames": 120,
+          "duration_s": 2.0,
+          "final_state_sha256": "5cb3a7e546f83e3097cbaaae0d3e3b1cb081f3079fccaf7506cfd914dc0d3ccb",
+          "max_penetration_m": 0.0068521553968330685,
+          "max_stretch_m": 0.0004624977749801834,
+          "maximum_linear_speed_m_per_s": 3.104432907492102,
+          "peak_active_contacts": 11079,
+          "peak_cable_cable_contacts": 8155,
+          "peak_ground_contacts": 3050,
+          "penetration_limit_m": 0.012,
+          "stretch_limit_m": 0.01,
+          "substeps": 1200
+        },
+        "timing_descriptive_not_accuracy": {
+          "build_ms": 20450.517109,
+          "display_frame_p50_ms": 51.314125499999996,
+          "display_frame_p95_ms": 52.71650105,
+          "simulation_wall_s": 7.837925987318158,
+          "solver_init_ms": 49.205830999999996
+        }
+      }
+    ]
+  },
+  "schema": "codex-native-contact-robustness/v1",
+  "selected_robust_dense_default": "soft_contact",
+  "selection_disclosure": "soft_contact may be selected for robustness but is penalty-only; the hard-contact default remains alpha000_nohistory_latest when hard AL semantics are required",
+  "selection_rule": "among 5/5 gate-passing policies, minimize worst max(penetration/0.012, stretch/0.010), then descriptive median display-frame time, then frozen order",
+  "source_manifest_stable": true,
+  "sources_end": {
+    "bench/global_cable/codex_bgn_dense_pile.py": "0599e86b2a591602d5398e00183f1d41a83ab83af87efa1f085e9fa11cb4d01a",
+    "bench/global_cable/codex_native_contact_ablation.py": "1cf722376f8f2faee8d51ec7d359ea67f38a13ee61046303adda23ed0d2c39e2",
+    "bench/global_cable/codex_native_contact_robustness.py": "fd09c304132953f551a781abc6fd540ec595e804d6c74f2462883c1803eb97cb",
+    "bench/global_cable/test_codex_bgn_dense_pile.py": "990c97d026794dcc5602feddf7c029c2ca5045a2d1bf2ce3ae5e6a7314bff71c",
+    "bench/global_cable/test_codex_native_contact_ablation.py": "d56b05921d20ddd82996c8a69343598441ee9d23607a1e2f60703e44dc2be3cf",
+    "bench/global_cable/test_codex_native_contact_robustness.py": "891ad87c9e3e8e1c5f22ec9f8b25a8b6de81cc63724ceab2d1059a531c3ab611",
+    "newton/_src/geometry/contact_match.py": "38c7be4a995224a9be5237068cdf462dc116bdaa965aecd13c7d8503ff404753",
+    "newton/_src/sim/collide.py": "a2bb06773b9975ccc804a246cc1edc846538789a3310a002885e5e65885227be",
+    "newton/_src/solvers/vbd/rigid_vbd_kernels.py": "4aac3a4865852930ae58f26998a83c6c4735b944797bf0ef0f65261d811aaef6",
+    "newton/_src/solvers/vbd/solver_vbd.py": "ca4984f3a894bdb87c0dd309feb28e98008820e477420d60bf82d37a70c701d7",
+    "newton/solvers.py": "12344e3d32429f62eb90516cc671cb045752cca462450f89e4d9f5f67e2ef792"
+  },
+  "sources_start": {
+    "bench/global_cable/codex_bgn_dense_pile.py": "0599e86b2a591602d5398e00183f1d41a83ab83af87efa1f085e9fa11cb4d01a",
+    "bench/global_cable/codex_native_contact_ablation.py": "1cf722376f8f2faee8d51ec7d359ea67f38a13ee61046303adda23ed0d2c39e2",
+    "bench/global_cable/codex_native_contact_robustness.py": "fd09c304132953f551a781abc6fd540ec595e804d6c74f2462883c1803eb97cb",
+    "bench/global_cable/test_codex_bgn_dense_pile.py": "990c97d026794dcc5602feddf7c029c2ca5045a2d1bf2ce3ae5e6a7314bff71c",
+    "bench/global_cable/test_codex_native_contact_ablation.py": "d56b05921d20ddd82996c8a69343598441ee9d23607a1e2f60703e44dc2be3cf",
+    "bench/global_cable/test_codex_native_contact_robustness.py": "891ad87c9e3e8e1c5f22ec9f8b25a8b6de81cc63724ceab2d1059a531c3ab611",
+    "newton/_src/geometry/contact_match.py": "38c7be4a995224a9be5237068cdf462dc116bdaa965aecd13c7d8503ff404753",
+    "newton/_src/sim/collide.py": "a2bb06773b9975ccc804a246cc1edc846538789a3310a002885e5e65885227be",
+    "newton/_src/solvers/vbd/rigid_vbd_kernels.py": "4aac3a4865852930ae58f26998a83c6c4735b944797bf0ef0f65261d811aaef6",
+    "newton/_src/solvers/vbd/solver_vbd.py": "ca4984f3a894bdb87c0dd309feb28e98008820e477420d60bf82d37a70c701d7",
+    "newton/solvers.py": "12344e3d32429f62eb90516cc671cb045752cca462450f89e4d9f5f67e2ef792"
+  },
+  "summaries": {
+    "alpha000_nohistory_latest": {
+      "all_gate_pass": true,
+      "all_integrity_pass": true,
+      "bitwise_final_state_repeatable": false,
+      "display_frame_p50_ms_descriptive": {
+        "max": 50.9387495,
+        "median": 50.881961,
+        "min": 50.6998755,
+        "range": 0.2388740000000027
+      },
+      "final_state_hash_unique_count": 5,
+      "final_state_sha256": [
+        "a4b3a8a94fed45109eac1ba2513defeb0c337b69bd10b9909b72c0f854fc2180",
+        "7a2549c04301c2507a14565ce8a2ee17281cb75b18b7e0705c77ad35097495b4",
+        "dea54abfa1ff0765bfcd58faf5ee72860a548dfc927c32f537d44fdd946b4dba",
+        "36ef9a48bbf2c33a8b5c8a10d755182bb88caf6724f593397aa2bcd6a039400d",
+        "ebe78ac64c8223f3c84c3707ff2f70cf533d58e881861e19eb5900be8052a987"
+      ],
+      "gate_pass_count": 5,
+      "gate_pass_rate": 1.0,
+      "initial_physics_hash_unique_count": 1,
+      "initial_physics_sha256": [
+        "3bf1e3605105271206ff12b9fcbadba70e88a5dd86d0570663777c1a41ec57a0"
+      ],
+      "peak_active_contacts": {
+        "max": 6735.0,
+        "median": 6687.0,
+        "min": 6639.0,
+        "range": 96.0
+      },
+      "peak_cable_cable_contacts": {
+        "max": 5553.0,
+        "median": 5446.0,
+        "min": 5424.0,
+        "range": 129.0
+      },
+      "penetration_m": {
+        "max": 0.011357259825265593,
+        "median": 0.011357256135690785,
+        "min": 0.011357183568454908,
+        "range": 7.625681068545997e-08
+      },
+      "per_gate_pass_counts": {
+        "cable_cable_contact_observed": 5,
+        "finite_normalized_state_and_contact": 5,
+        "ground_contact_observed": 5,
+        "no_contact_buffer_overflow": 5,
+        "penetration_lt_0p012m": 5,
+        "stretch_lt_0p010m": 5
+      },
+      "repeat_count": 5,
+      "stretch_m": {
+        "max": 0.0007686922446790215,
+        "median": 0.0007685149673458749,
+        "min": 0.0007682715038964949,
+        "range": 4.207407825265741e-07
+      },
+      "worst_normalized_gate_utilization": 0.9464383187721328
+    },
+    "soft_contact": {
+      "all_gate_pass": true,
+      "all_integrity_pass": true,
+      "bitwise_final_state_repeatable": false,
+      "display_frame_p50_ms_descriptive": {
+        "max": 51.314125499999996,
+        "median": 51.0690975,
+        "min": 50.80624949999999,
+        "range": 0.5078760000000031
+      },
+      "final_state_hash_unique_count": 5,
+      "final_state_sha256": [
+        "a1ec685588eb62a4d86c3daa2202cf099c21b02a4c245be8347a8ff857ff0ce5",
+        "de31cbab83c610ad30dfa082a0ab428b3e980e5e86de6d398e0709e40dbced2e",
+        "58adfbe1a88f18b6698c5a2ae63ca6f9a2c96b735ac515bec5600a757150c554",
+        "27f985025fcbcff81f1e2403e55ccb635c57aedb18b59b7133e8027cbfb14a28",
+        "5cb3a7e546f83e3097cbaaae0d3e3b1cb081f3079fccaf7506cfd914dc0d3ccb"
+      ],
+      "gate_pass_count": 5,
+      "gate_pass_rate": 1.0,
+      "initial_physics_hash_unique_count": 1,
+      "initial_physics_sha256": [
+        "3bf1e3605105271206ff12b9fcbadba70e88a5dd86d0570663777c1a41ec57a0"
+      ],
+      "peak_active_contacts": {
+        "max": 11079.0,
+        "median": 11047.0,
+        "min": 11013.0,
+        "range": 66.0
+      },
+      "peak_cable_cable_contacts": {
+        "max": 8155.0,
+        "median": 8112.0,
+        "min": 8090.0,
+        "range": 65.0
+      },
+      "penetration_m": {
+        "max": 0.006853466978604561,
+        "median": 0.006850439579087625,
+        "min": 0.006847494951734888,
+        "range": 5.972026869673075e-06
+      },
+      "per_gate_pass_counts": {
+        "cable_cable_contact_observed": 5,
+        "finite_normalized_state_and_contact": 5,
+        "ground_contact_observed": 5,
+        "no_contact_buffer_overflow": 5,
+        "penetration_lt_0p012m": 5,
+        "stretch_lt_0p010m": 5
+      },
+      "repeat_count": 5,
+      "stretch_m": {
+        "max": 0.0004630145287167972,
+        "median": 0.0004624977749801834,
+        "min": 0.00046155298247883836,
+        "range": 1.461546237958855e-06
+      },
+      "worst_normalized_gate_utilization": 0.5711222482170467
+    }
+  },
+  "warp_version": "1.15.0.dev20260626"
+}

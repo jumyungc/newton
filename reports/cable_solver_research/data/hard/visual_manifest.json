@@ -1,0 +1,155 @@
+{
+  "claim_boundary": "synchronized N128 no-contact qualitative trajectory plus quantitative absolute joint-gap colour/overlays; hard and finite rows have different material semantics; never timing, contact, production, novelty, or universal-winner evidence",
+  "generated_utc": "2026-07-05T12:42:24.692211+00:00",
+  "hostname": "jumyungc-spock",
+  "media_qa": {
+    "all_pass": true,
+    "checks": {
+      "all_frames_nonblank": true,
+      "codec_h264": true,
+      "count_api_frames": true,
+      "dimensions": true,
+      "duration": true,
+      "ffmpeg_full_decode_clean": true,
+      "fps": true,
+      "full_reader_frames": true,
+      "pixel_format_yuv420p": true,
+      "poster_dimensions": true
+    },
+    "decoded_rgb_stream_sha256": "cf51d1cb2f59550f11db50de3e7b09afd5011bfe4b77ffa4215a1f677f0146eb",
+    "duration_s": 1.01,
+    "frame_count": 61,
+    "frame_statistics": {
+      "first": {
+        "mean": 21.10862477494856,
+        "std": 29.49488744990734
+      },
+      "last": {
+        "mean": 21.585705214763376,
+        "std": 30.78197741206738
+      },
+      "maximum_std": 30.814496053208526,
+      "middle": {
+        "mean": 21.428308899176955,
+        "std": 30.319997628947732
+      },
+      "minimum_std": 29.4059805796603
+    },
+    "full_decode_command": "/home/horde/JC/newton/.venv/lib/python3.12/site-packages/imageio_ffmpeg/binaries/ffmpeg-linux-x86_64-v7.0.2 -v error -i /home/horde/JC/newton/bench/_workspace/codex_hard_kkt_review/run_20260705T124208Z_1944273/n128_hard_vs_finite_2x2.mp4 -map 0:v:0 -f null -",
+    "full_decode_stderr": "",
+    "metadata": {
+      "codec": "h264",
+      "duration": 1.02,
+      "ffmpeg_version": "7.0.2-static https://johnvansickle.com/ffmpeg/ built with gcc 8 (Debian 8.3.0-6)",
+      "fps": 60.0,
+      "pix_fmt": "yuv420p(progressive)",
+      "rotate": 0,
+      "size": [
+        1920,
+        1080
+      ],
+      "source_size": [
+        1920,
+        1080
+      ]
+    },
+    "reader_frame_count": 61
+  },
+  "methods": [
+    {
+      "key": "hard_k2",
+      "semantics": "inextensible Track B",
+      "source": {
+        "bytes": 205003,
+        "path": "/home/horde/JC/newton/bench/_workspace/codex_hard_kkt_trajectory/run_20260705T121845Z_1924599/n128_hard_render_states.npz",
+        "sha256": "6100c505a7d8b304d589ffe9de82807195f88e56a128fe71c086e24b96274ec3"
+      },
+      "title": "Hard equality K2",
+      "trajectory_gap_max_m": 4.687495207781365e-07
+    },
+    {
+      "key": "finite_bgn",
+      "semantics": "authored finite compliance",
+      "source": {
+        "bytes": 203399,
+        "path": "/home/horde/JC/newton/bench/_workspace/codex_hard_kkt_trajectory/run_20260705T121845Z_1924599/n128_finite_bgn_render_states.npz",
+        "sha256": "bab7ff95c53077c96e63ff3dfaccedab2eaac235719a3eac7df2cb132d2ccf25"
+      },
+      "title": "Compact global BGN K5",
+      "trajectory_gap_max_m": 0.006245419703156625
+    },
+    {
+      "key": "vbd10",
+      "semantics": "authored finite compliance",
+      "source": {
+        "bytes": 193834,
+        "path": "/home/horde/JC/newton/bench/_workspace/codex_hard_kkt_trajectory/run_20260705T121845Z_1924599/n128_vbd10_render_states.npz",
+        "sha256": "34934e4887035a56def941816ef0871dd7b6aa31d84577a1555e9d89e40c4c3e"
+      },
+      "title": "Requested VBD10",
+      "trajectory_gap_max_m": 0.0062390268622609015
+    },
+    {
+      "key": "vbd80",
+      "semantics": "authored finite compliance",
+      "source": {
+        "bytes": 194082,
+        "path": "/home/horde/JC/newton/bench/_workspace/codex_hard_kkt_trajectory/run_20260705T121845Z_1924599/n128_vbd80_render_states.npz",
+        "sha256": "835000472b26aa64247e160a0e4d36919ff15324acff1541b646d2af265c884b"
+      },
+      "title": "Requested VBD80",
+      "trajectory_gap_max_m": 0.006241979163508678
+    }
+  ],
+  "outputs": {
+    "poster": {
+      "bytes": 143214,
+      "path": "/home/horde/JC/newton/bench/_workspace/codex_hard_kkt_review/run_20260705T124208Z_1944273/n128_hard_vs_finite_2x2_poster.png",
+      "sha256": "9b414ed15d745027c79bf30036da9ea8e6e8f554687302c46c517df34bdb0f31"
+    },
+    "video": {
+      "bytes": 246431,
+      "path": "/home/horde/JC/newton/bench/_workspace/codex_hard_kkt_review/run_20260705T124208Z_1944273/n128_hard_vs_finite_2x2.mp4",
+      "sha256": "2f89d0fcf515775fae0058e8df37f790bd6eff6d95c55df350c6d8affdc714d9"
+    }
+  },
+  "owner": "OWNER: Team Codex-Remote \u2014 2026-07-05T11:40Z \u2014 coupled long-chain/contact solver invention round",
+  "render": {
+    "camera": {
+      "projection": "orthographic x-z",
+      "xlim_m": [
+        -0.2594000023563424,
+        5.379400036176956
+      ],
+      "zlim_m": [
+        -4.362667348221375,
+        1.3006129897177021
+      ]
+    },
+    "elapsed_s_descriptive": 16.648018391802907,
+    "encoded_duration_s": 1.0166666666666666,
+    "fps": 60,
+    "frames": 61,
+    "height": 1080,
+    "joint_gap_colour_scale_mm": {
+      "mapping": "turbo, clipped",
+      "maximum": 8.0,
+      "minimum": 0.0
+    },
+    "raw_preencode_rgb_stream_sha256": "95d8b967d29dcb9f15582ba960c20e54e5f924e31489d21a4442c6eb77660088",
+    "source_cadence_hz": 60,
+    "source_duration_s": 1.0,
+    "width": 1920
+  },
+  "schema": "codex-hard-kkt-four-panel-review/v1",
+  "source_result": {
+    "bytes": 19576,
+    "path": "/home/horde/JC/newton/bench/_workspace/codex_hard_kkt_trajectory/run_20260705T121845Z_1924599/result.json",
+    "sha256": "597305e713f3f0ac24b3829126d3d9c2fd61168c530acf35c8a0f68120e3be56"
+  },
+  "source_script": {
+    "bytes": 19279,
+    "path": "/home/horde/JC/newton/bench/global_cable/codex_hard_kkt_review_render.py",
+    "sha256": "82003cbf0609bacfe896a17d67c92356d85174d9b1d7b989d749680910cd686e"
+  }
+}

@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Measured compliant-ALM VBD contact results and Newton renders from Horde.">
+  <link rel="icon" href="data:,">
+  <title>Robust GPU Contact for VBD</title>
+  <style>
+:root {
+  color-scheme: light;
+  --ink: #17202a;
+  --muted: #5f6f82;
+  --line: #d9e0e8;
+  --panel: #f7f9fb;
+  --accent: #1f6f8b;
+  --good: #16845b;
+  --bad: #b83243;
+  --max: 1180px;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #fff;
+  color: var(--ink);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.55;
+}
+header { border-bottom: 1px solid var(--line); background: linear-gradient(135deg, #f8fbfd 0%, #fff 62%); }
+main, .header-inner, footer { width: min(var(--max), calc(100vw - 32px)); margin: 0 auto; }
+.header-inner { padding: 38px 0 30px; }
+.breadcrumb { margin: 0 0 14px; font-size: .92rem; font-weight: 700; }
+.breadcrumb a, a { color: var(--accent); }
+h1 { margin: 0 0 10px; font-size: clamp(2.1rem, 4.5vw, 3.7rem); line-height: 1.02; letter-spacing: -.035em; }
+.subtitle { max-width: 900px; margin: 0; color: var(--muted); font-size: 1.08rem; }
+.metric-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 24px; }
+.metric { border: 1px solid var(--line); border-radius: 10px; background: #fff; padding: 14px 16px; }
+.metric .label { color: var(--muted); font-size: .78rem; font-weight: 750; text-transform: uppercase; letter-spacing: .04em; }
+.metric .value { display: block; margin-top: 4px; font-size: 1.18rem; font-weight: 780; }
+.good { color: var(--good); font-weight: 700; }
+.bad { color: var(--bad); font-weight: 700; }
+main { padding: 30px 0 52px; }
+section { margin: 0 0 42px; }
+h2 { margin: 0 0 10px; font-size: 1.55rem; line-height: 1.2; letter-spacing: -.015em; }
+p { margin: 0 0 12px; }
+.lede { max-width: 980px; font-size: 1.05rem; }
+.video-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 18px; }
+figure { margin: 0; border: 1px solid var(--line); border-radius: 9px; background: #fff; overflow: hidden; }
+video { display: block; width: 100%; height: auto; background: #111827; aspect-ratio: 16 / 9; }
+figcaption { padding: 11px 13px 13px; border-top: 1px solid var(--line); color: var(--muted); font-size: .92rem; }
+table { width: 100%; border-collapse: collapse; border: 1px solid var(--line); background: #fff; font-variant-numeric: tabular-nums; }
+th, td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+th { background: var(--panel); color: var(--muted); font-size: .80rem; text-transform: uppercase; letter-spacing: .025em; }
+.note { border-left: 4px solid var(--accent); background: var(--panel); padding: 13px 15px; margin: 15px 0; }
+.scale-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 18px 0; }
+.scale-card { border: 1px solid var(--line); border-radius: 9px; background: var(--panel); padding: 15px; }
+.scale-card h3 { margin: 0 0 12px; font-size: 1rem; }
+.bar-row { display: grid; grid-template-columns: 118px 1fr 68px; gap: 9px; align-items: center; margin: 9px 0; font-size: .88rem; }
+.bar-track { height: 11px; border-radius: 999px; background: #e4eaf0; overflow: hidden; }
+.bar { display: block; height: 100%; border-radius: inherit; }
+.bar.precomputed { background: var(--accent); }
+.bar.scalable { background: var(--good); }
+.bar-value { text-align: right; font-variant-numeric: tabular-nums; font-weight: 750; }
+footer { padding: 0 0 44px; color: var(--muted); font-size: .9rem; }
+@media (max-width: 900px) {
+  .metric-row, .video-grid, .scale-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 680px) {
+  .metric-row, .video-grid, .scale-grid { grid-template-columns: 1fr; }
+  .bar-row { grid-template-columns: 102px 1fr 62px; }
+  th, td { font-size: .86rem; padding: 7px 6px; }
+}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <p class="breadcrumb"><a href="../">Newton Reports</a> / Robust GPU Contact for VBD</p>
+      <h1>Robust GPU Contact for VBD</h1>
+      <p class="subtitle">Fresh unified compliant-ALM results with adaptive physical-step refinement, measured and rendered on an NVIDIA L40.</p>
+      <div class="metric-row">
+        <div class="metric"><span class="label">40,000-body high drop</span><span class="value good">0.931 mm</span></div>
+        <div class="metric"><span class="label">40,000-body integrity</span><span class="value good">Zero debt</span></div>
+        <div class="metric"><span class="label">Latest fixed-work gain</span><span class="value good">1.1&ndash;7.1%</span></div>
+        <div class="metric"><span class="label">Dense velocity error</span><span class="value good">4.41e-6 m/s</span></div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section id="summary">
+      <h2>Measured results</h2>
+      <p class="lede">Every result below was regenerated after the research examples explicitly enabled <code>rigid_compliant_alm=True</code>. Contact quality is measured from a fresh post-frame collision query.</p>
+      <table>
+        <thead><tr><th>Case</th><th>Scale</th><th>Measured contact result</th><th>Measured cost</th></tr></thead>
+        <tbody>
+          <tr><td>Fast free-flight impact</td><td>10,000 m/s sphere</td><td class="good">+5.78 &micro;m final gap; zero debt</td><td>2 event body updates</td></tr>
+          <tr><td>Independent impacts</td><td>1,024 bodies</td><td class="good">+5.71 &micro;m minimum gap</td><td>0.469 ms captured median</td></tr>
+          <tr><td>Dense simultaneous impact</td><td>16 moving bodies</td><td class="good">4.41e-6 m/s shared-velocity error</td><td>0.657 ms captured median</td></tr>
+          <tr><td>Abrupt three-cable contact</td><td>189 dynamic bodies, 3 driven bodies, 20 rad/s</td><td class="good">0.995 mm penetration; zero debt</td><td>47.97 ms median; 116.01 ms p95</td></tr>
+          <tr><td>Compact pile dropped from 5 m</td><td>4,000 cable bodies</td><td class="good">0.997 mm penetration; 2.197 mm joint residual; zero debt</td><td>12.42 ms median; 39.23 ms p95</td></tr>
+          <tr><td>Large compact pile dropped from 5 m</td><td>40,000 cable bodies</td><td class="good">0.931 mm penetration; 2.228 mm joint residual; zero debt</td><td>447.05 ms median; 2.44 s p95; 4.30 s maximum</td></tr>
+          <tr><td>Ten layers released separately</td><td>4,000 cable bodies</td><td class="good">1.000 mm penetration; 1.644 mm joint residual; zero debt</td><td>22.14 ms median; 48.36 ms p95</td></tr>
+          <tr><td>Counter-twisted bundle</td><td>7 cables, 280 bodies, 4 turns over 16 s</td><td class="good">0.995 mm penetration; 3.480 mm joint residual; zero debt</td><td>9.80 ms median; 26.89 ms p95</td></tr>
+          <tr><td>Projectile through compact cable layers</td><td>721 bodies, 10 layers, 4 strands/layer, 38 m/s</td><td class="good">1.717 mm projectile compression; 0.338 mm inter-cable penetration; continuous exit</td><td>Not separately timed</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="scale">
+      <h2>Scale and total cost</h2>
+      <p class="lede">Complete workload totals include model setup, controller setup, and all 180 simulated frames. They are seconds, while the per-frame columns below are milliseconds. The winning route changes with scale.</p>
+      <div class="scale-grid">
+        <div class="scale-card">
+          <h3>8,000 cable bodies</h3>
+          <div class="bar-row"><span>Explicit</span><span class="bar-track"><span class="bar precomputed" style="width:100%"></span></span><span class="bar-value">194.0 s</span></div>
+          <div class="bar-row"><span>Bounded NxN</span><span class="bar-track"><span class="bar scalable" style="width:10.3%"></span></span><span class="bar-value">19.9 s</span></div>
+          <div class="bar-row"><span>BVH</span><span class="bar-track"><span class="bar scalable" style="width:20.6%"></span></span><span class="bar-value">40.0 s</span></div>
+        </div>
+        <div class="scale-card">
+          <h3>16,000 cable bodies</h3>
+          <div class="bar-row"><span>Explicit</span><span class="bar-track"><span class="bar precomputed" style="width:100%"></span></span><span class="bar-value">755.2 s</span></div>
+          <div class="bar-row"><span>Bounded NxN</span><span class="bar-track"><span class="bar scalable" style="width:6.0%"></span></span><span class="bar-value">45.4 s</span></div>
+          <div class="bar-row"><span>BVH</span><span class="bar-track"><span class="bar scalable" style="width:10.1%"></span></span><span class="bar-value">76.2 s</span></div>
+        </div>
+      </div>
+      <table>
+        <thead><tr><th>Scale</th><th>Winning route</th><th>Median / p95 per frame</th><th>Complete total</th><th>Resident GPU memory</th><th>Contact result</th></tr></thead>
+        <tbody>
+          <tr><td>500 bodies</td><td>Explicit</td><td>6.25 / 26.53 ms</td><td class="good">7.21 s</td><td>46 MiB</td><td>0.998 mm; zero debt</td></tr>
+          <tr><td>4,000 bodies</td><td>Bounded NxN</td><td>20.76 / 45.88 ms</td><td class="good">13.04 s</td><td>176 MiB</td><td>0.998 mm; zero debt</td></tr>
+          <tr><td>8,000 bodies</td><td>Bounded NxN</td><td>30.47 / 117.29 ms</td><td class="good">19.89 s</td><td>336 MiB</td><td>0.990 mm; zero debt</td></tr>
+          <tr><td>16,000 bodies</td><td>Bounded NxN</td><td>106.13 / 413.75 ms</td><td class="good">45.38 s</td><td>624 MiB</td><td>0.985 mm; zero debt</td></tr>
+          <tr><td>40,000 bodies</td><td>BVH</td><td>447.05 / 2444.20 ms</td><td class="good">180.14 s</td><td>1,520 MiB</td><td>0.931 mm; zero debt</td></tr>
+        </tbody>
+      </table>
+      <div class="note">This is the measured L40 frontier for this workload, not a universal hard-coded crossover: explicit wins at 500 bodies, bounded NxN wins from 4,000 through 16,000, and BVH wins at 40,000.</div>
+    </section>
+
+    <section id="videos">
+      <h2>Newton renders</h2>
+      <p class="lede">These are direct Newton ViewerGL framebuffers with no labels, split screens, compositing, or interpolated physics states. The cable cases play at simulation time. The fast projectile is sampled from exact physical substeps and shown at 90&times; slow motion.</p>
+      <div class="video-grid">
+        <figure>
+          <video src="assets/three_cable_abrupt_contact.mp4" poster="assets/three_cable_abrupt_contact_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+          <figcaption>Three 64-segment cables driven abruptly at 20 rad/s. Five simulated seconds at natural time; 0.995 mm maximum fresh penetration and zero debt.</figcaption>
+        </figure>
+        <figure>
+          <video src="assets/cable_pile_highdrop_4000.mp4" poster="assets/cable_pile_highdrop_4000_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+          <figcaption>Complete 4,000-body cable pile dropped from 5 m. Three simulated seconds at natural time; 0.997 mm maximum fresh penetration and zero debt in the rendered run.</figcaption>
+        </figure>
+        <figure>
+          <video src="assets/highdrop_8000_natural.mp4" poster="assets/highdrop_8000_natural_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+          <figcaption>8,000-body high drop using its fastest measured complete-workload route. Exact Newton states at natural time; 0.990 mm maximum fresh penetration and zero debt.</figcaption>
+        </figure>
+        <figure>
+          <video src="assets/highdrop_16000_natural.mp4" poster="assets/highdrop_16000_natural_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+          <figcaption>16,000-body high drop using bounded GPU storage. Exact Newton states at natural time; 0.985 mm maximum fresh penetration and zero debt.</figcaption>
+        </figure>
+        <figure>
+          <video src="assets/highdrop_40000_natural.mp4" poster="assets/highdrop_40000_natural_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+          <figcaption>40,000-body high drop. The camera begins at full scale and smoothly moves into the contact weave; the physics frames are exact and play at natural time. Maximum fresh penetration is 0.931 mm with zero debt.</figcaption>
+        </figure>
+        <figure>
+          <video src="assets/dense_bullet_curtain_13s_18s.mp4" poster="assets/dense_bullet_curtain_13s_18s_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+          <figcaption>The same projectile-impact interval now plays for 15 seconds at 90&times; slow motion, sampled from exact physical substeps.</figcaption>
+        </figure>
+        <figure>
+          <video src="assets/cable_bundle_twist_natural.mp4" poster="assets/cable_bundle_twist_natural_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+          <figcaption>Seven-cable bundle with contact damping, driven through four complete relative turns over 16.0 simulated seconds; 0.995 mm maximum fresh penetration, 3.480 mm maximum joint residual, and zero debt.</figcaption>
+        </figure>
+        <figure>
+          <video src="assets/cable_pile_staged_natural.mp4" poster="assets/cable_pile_staged_natural_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+          <figcaption>Five 160-body layers released separately and settled together. 9.0 seconds.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section id="cost">
+      <h2>Computational cost</h2>
+      <table>
+        <thead><tr><th>Workload</th><th>Low-work result</th><th>Robust result</th><th>Cost ratio</th></tr></thead>
+        <tbody>
+          <tr><td>1,024 independent impacts</td><td>0.341 ms; 15.33 mm penetration</td><td class="good">0.469 ms; positive gap</td><td>1.37&times;</td></tr>
+          <tr><td>16-body simultaneous impact</td><td>0.208 ms; unstable endpoint</td><td class="good">0.657 ms; analytic closure</td><td>3.16&times;</td></tr>
+          <tr><td>189-body abrupt three-cable contact</td><td>67.07 / 184.52 ms median / p95</td><td class="good">47.97 / 116.01 ms; 0.996 mm</td><td>0.72&times; median; 0.63&times; p95</td></tr>
+          <tr><td>280-body bundle</td><td>15.20 / 60.83 ms median / p95</td><td class="good">9.80 / 26.89 ms; 0.995 mm</td><td>0.64&times; median; 0.44&times; p95</td></tr>
+          <tr><td>800-body high drop</td><td>&mdash;</td><td class="good">8.50 ms median; 0.998 mm</td><td>Activated only as needed</td></tr>
+          <tr><td>800-body staged pile</td><td>&mdash;</td><td class="good">8.15 ms median; 0.995 mm</td><td>Activated only as needed</td></tr>
+          <tr><td>4,000-body high drop</td><td>22.48 / 98.80 ms median / p95</td><td class="good">12.42 / 39.23 ms; 0.997 mm</td><td>0.55&times; median; 0.40&times; p95</td></tr>
+          <tr><td>4,000-body staged pile</td><td>&mdash;</td><td class="good">22.14 ms median; 1.000 mm</td><td>Activated only as needed</td></tr>
+        </tbody>
+      </table>
+      <div class="note">The hard cases pay for additional physical steps and exact replay. Ordinary frames remain at their selected coarse cadence; the 4,000-body p95 values are above a 60 Hz frame budget.</div>
+
+      <h3>Latest matched-work update</h3>
+      <p class="lede">A final execution cleanup was measured from the same saved simulation states at the same physical-step and nonlinear-iteration counts. Contact tolerances, accepted-state checks, and the equations were unchanged.</p>
+      <table>
+        <thead><tr><th>Fixed workload</th><th>Previous</th><th>Latest</th><th>Change</th></tr></thead>
+        <tbody>
+          <tr><td>4,000-body high drop, 96 steps &times; 2 iterations</td><td>29.116 ms</td><td class="good">27.045 ms</td><td class="good">7.1% faster</td></tr>
+          <tr><td>Abrupt cable contact, 320 steps &times; 2 iterations</td><td>73.992 ms</td><td class="good">71.462 ms</td><td class="good">3.4% faster</td></tr>
+          <tr><td>Dense cable bundle, 96 steps &times; 2 iterations</td><td>29.078 ms</td><td class="good">28.758 ms</td><td class="good">1.1% faster</td></tr>
+        </tbody>
+      </table>
+      <div class="note">End-to-end high-drop mean / p95 improved from 22.77 / 42.42 ms to 21.96 / 39.85 ms. Abrupt-cable mean / median / p95 improved from 56.46 / 48.76 / 118.39 ms to 53.04 / 47.79 / 113.60 ms. Final runs remained finite, below the published 1 mm contact target and 5 mm joint target, with zero reported debt.</div>
+
+      <h3>Measured accuracy boundary</h3>
+      <table>
+        <thead><tr><th>4,000-body target</th><th>Maximum fresh penetration</th><th>Replay result</th></tr></thead>
+        <tbody>
+          <tr><td>2.0 mm</td><td class="good">1.974 mm</td><td class="good">Zero debt</td></tr>
+          <tr><td>1.0 mm</td><td class="good">0.997 mm</td><td class="good">Zero debt</td></tr>
+          <tr><td>0.5 mm</td><td>0.576 mm</td><td class="bad">Cap reached on 120 frames</td></tr>
+        </tbody>
+      </table>
+      <div class="note">The controller fails closed: the 0.5 mm request is reported as unresolved instead of being presented as a successful run. A separate stiff two-body mechanics audit was still unconverged at 6,144 physical steps, so the present certificate is an endpoint contact/integrity result, not a claim of exact impact dynamics.</div>
+    </section>
+
+    <section id="avi-acm">
+      <h2>AVI / ACM research track</h2>
+      <p class="lede">A separate graph-captured AVI prototype was measured on conservative rigid-cable mechanics and a bounded ACM-style independent-contact workload. A controlled-gap crosshatch replaces cable count with a fixed number of designed contact patches for the VBD comparison scene.</p>
+      <div class="video-grid">
+        <figure>
+          <video src="assets/controlled_gap_crosshatch_vbd.mp4" poster="assets/controlled_gap_crosshatch_vbd_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+          <figcaption>VBD controlled-gap crosshatch: 768 cable bodies and 192 designed adjacent-layer crossings. Two simulated seconds at natural time.</figcaption>
+        </figure>
+        <figure>
+          <video src="assets/avi_acm_sphere_plane_1024.mp4" poster="assets/avi_acm_sphere_plane_1024_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+          <figcaption>AVI / ACM independent-contact prototype: 1,024 simultaneous 20 m/s sphere&ndash;plane impacts, shown at 4&times; slow motion from exact states.</figcaption>
+        </figure>
+        <figure>
+          <video src="assets/avi_rigid_cable.mp4" poster="assets/avi_rigid_cable_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+          <figcaption>AVI conservative rigid cable. Five simulated seconds at natural time.</figcaption>
+        </figure>
+        <figure>
+          <video src="assets/vbd_rigid_cable.mp4" poster="assets/vbd_rigid_cable_poster.jpg" autoplay loop muted playsinline controls preload="metadata"></video>
+          <figcaption>Matched VBD + compliant-ALM cable baseline: identical model, initial state, camera, and five-second duration.</figcaption>
+        </figure>
+      </div>
+
+      <h3>Current measured results</h3>
+      <table>
+        <thead><tr><th>Case</th><th>Scale</th><th>Measured result</th><th>Captured / frame cost</th></tr></thead>
+        <tbody>
+          <tr><td>Controlled-gap VBD crosshatch</td><td>768 bodies; 192 designed crossings</td><td class="good">0.954 mm maximum fresh penetration; zero replay debt</td><td>5.10 ms median; 12.46 ms p95</td></tr>
+          <tr><td>Bounded AVI / ACM independent impacts</td><td>1,024 bodies at 20 m/s</td><td class="good">0.182 mm minimum gap; zero tunneling; zero event overflow</td><td>0.402 ms median for a 30 ms step</td></tr>
+          <tr><td>AVI nonlinear cable</td><td>32 segments; 5 s</td><td class="good">1.274% peak relative energy deviation</td><td>0.114 ms median</td></tr>
+          <tr><td>Matched VBD nonlinear cable</td><td>32 segments; 5 s; 2 iterations</td><td>98.015% peak relative energy deviation</td><td class="good">0.101 ms median</td></tr>
+        </tbody>
+      </table>
+      <div class="note">The contact result is deliberately narrow: independent sphere&ndash;plane contacts with a fixed candidate set. Shared-body contact islands, cable&ndash;cable ACM contact, friction, and a certified dynamic swept-contact frontier are not yet implemented in the AVI solver and are not claimed by these videos.</div>
+    </section>
+
+    <section id="scope">
+      <h2>Scope</h2>
+      <p>These are measured outcomes for the listed scenes, shapes, speeds, tolerances, and step ladder—not a proof for every possible collision path. The VBD simulation, fresh-contact validation, and rendering ran on Horde using the private research checkout and unified compliant ALM. The AVI / ACM section is a separate research prototype; its contact evidence is limited to the independent-contact case stated above.</p>
+    </section>
+  </main>
+
+  <footer>Newton simulations and unannotated framebuffers generated on Horde.</footer>
+</body>
+</html>
