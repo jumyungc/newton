@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quasistatic Cable Localized Helical Buckling</title>
+  <style>
+:root {
+  color-scheme: light;
+  --ink: #17202a;
+  --muted: #5f6f82;
+  --line: #d9e0e8;
+  --panel: #f7f9fb;
+  --accent: #1f6f8b;
+  --good: #146c43;
+  --warn: #9a5b00;
+  --max: 1280px;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #ffffff;
+  color: var(--ink);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+header { border-bottom: 1px solid var(--line); background: #fbfcfd; }
+main, .header-inner, footer { width: min(var(--max), calc(100vw - 32px)); margin: 0 auto; }
+.header-inner { padding: 36px 0 28px; }
+h1 { margin: 0 0 10px; font-size: clamp(2rem, 4vw, 3.35rem); line-height: 1.05; letter-spacing: 0; }
+.subtitle { max-width: 850px; margin: 0; color: var(--muted); font-size: 1.05rem; }
+.metric-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
+.metric { border: 1px solid var(--line); border-radius: 8px; background: #ffffff; padding: 14px 16px; }
+.metric .label { color: var(--muted); font-size: 0.82rem; font-weight: 650; text-transform: uppercase; }
+.metric .value { display: block; margin-top: 4px; font-size: 1.25rem; font-weight: 760; }
+main { padding: 28px 0 48px; }
+section { margin: 0 0 34px; }
+h2 { margin: 0 0 10px; font-size: 1.45rem; line-height: 1.2; letter-spacing: 0; }
+h3 { margin: 0 0 10px; font-size: 1rem; line-height: 1.25; }
+p { margin: 0 0 12px; }
+a { color: var(--accent); }
+code {
+  padding: 0.08em 0.25em;
+  border-radius: 4px;
+  background: #edf2f7;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+}
+pre { margin: 12px 0 0; padding: 14px 16px; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+pre code { padding: 0; background: transparent; }
+.two-col { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr); gap: 22px; align-items: start; }
+.plot-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 18px; }
+.plot-grid-single { grid-template-columns: minmax(0, 1fr); }
+.plot-block { margin-top: 18px; }
+.plot-block:first-child { margin-top: 0; }
+.breadcrumb { margin: 0 0 14px; font-size: 0.92rem; font-weight: 650; }
+.breadcrumb a { color: var(--accent); text-decoration: none; }
+.breadcrumb a:hover { text-decoration: underline; }
+.video-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; max-width: 1120px; margin: 18px auto 0; }
+.video-grid-single { grid-template-columns: minmax(0, 1fr); max-width: 1280px; }
+.video-main { max-width: 820px; margin: 14px auto 18px; }
+figure { margin: 0; border: 1px solid var(--line); border-radius: 8px; background: #ffffff; overflow: hidden; }
+figure img, video { display: block; width: 100%; height: auto; }
+video { background: #111827; }
+figcaption { padding: 10px 12px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.92rem; }
+.takeaways, .card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+.takeaway, .card { border: 1px solid var(--line); border-radius: 8px; padding: 14px; background: #ffffff; }
+.card { display: block; color: inherit; text-decoration: none; }
+.takeaway strong, .card strong { display: block; margin-bottom: 6px; }
+.check-list { margin: 0; padding-left: 1.15rem; }
+.check-list li { margin: 0.35rem 0; }
+.note { border-left: 4px solid var(--accent); background: var(--panel); padding: 12px 14px; }
+table { width: 100%; border-collapse: collapse; border: 1px solid var(--line); background: white; }
+th, td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+th { background: var(--panel); color: var(--muted); font-size: 0.86rem; text-transform: uppercase; }
+footer { padding: 0 0 42px; color: var(--muted); font-size: 0.9rem; }
+@media (max-width: 820px) {
+  .metric-row, .takeaways, .two-col, .plot-grid, .video-grid, .card-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <nav class="breadcrumb"><a href="../cable_bend_twist_verification/">&larr; Cable Bend/Twist Verification</a></nav>
+      <h1>Quasistatic Cable Localized Helical Buckling</h1>
+      <p class="subtitle">No-inertia clamped twisted rod with axial shortening, using DER localized-buckling parameters.</p>
+      <div class="metric-row">
+        <div class="metric"><span class="label">Target clamp twist</span><span class="value">27.0 turns</span></div>
+<div class="metric"><span class="label">Target axial shortening</span><span class="value">0.300 m</span></div>
+<div class="metric"><span class="label">Theory tangent angle</span><span class="value">0.919 rad</span></div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="two-col">
+      <div>
+        <h2>Verification Target</h2>
+        <p>This example uses the DER localized-buckling parameter set: a naturally straight rod of length 9.29, bend modulus 1.345, twist modulus 0.789, 27 clamp turns, and 0.3 units of axial shortening. Root and tip are kinematic; the interior rod uses Newton&#x27;s cable stretch, geometric bend, and transported-twist energy. The report shows the no-inertia quasistatic reproduction used for validation. The run is initialized with the requested 27-turn material-frame path, but final path-continuous twist unwrapping is not yet supported, so this page validates the localized centerline equilibrium rather than final 27-turn twist retention. Endpoint-quaternion driving is intentionally excluded from the validation path because it is branch-limited for this 27-turn case.</p>
+        <p class="note">The analytic boundary-value report checks exact low-deformation bend and twist separately. This example stresses large twist, axial shortening, and bend/twist coupling in one open-rod setup.</p>
+      </div>
+      <div>
+        <h2>Key Metrics</h2>
+        <table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody><tr><td>Target clamp twist</td><td>27.0 turns</td></tr>
+<tr><td>Target axial shortening</td><td>0.300 m</td></tr>
+<tr><td>Theory tangent angle</td><td>0.919 rad</td></tr>
+<tr><td>Quasistatic finest n</td><td>100</td></tr>
+<tr><td>Finest peak angle</td><td>0.910 rad</td></tr>
+<tr><td>Finest envelope R2</td><td>0.993</td></tr>
+<tr><td>Quasistatic peak angle</td><td>0.910 rad</td></tr>
+<tr><td>Quasistatic peak location</td><td>0.505 L</td></tr>
+<tr><td>Quasistatic envelope R2</td><td>0.993</td></tr>
+<tr><td>Quasistatic budget</td><td>one 300-iteration no-inertia solve</td></tr>
+<tr><td>Current status</td><td>quasistatic validation</td></tr></tbody></table>
+      </div>
+    </section>
+
+    <section>
+      <h2>Simulation Setup</h2>
+      <table><thead><tr><th>Setting</th><th>Value</th></tr></thead><tbody><tr><td>Quasistatic run command</td><td>uv run --extra examples python -m newton.examples.cable._example_cable_localized_buckling --loading-mode quasistatic_reproduction --twist-mode initial_material --static-iterations 300</td></tr>
+<tr><td>Quasistatic convergence command</td><td>uv run --extra examples python -m newton.examples.cable._example_cable_localized_buckling --convergence --viewer null</td></tr>
+<tr><td>Video capture</td><td>quasistatic video uses 1280 px width, 45 fps, and 420 rendered frames</td></tr>
+<tr><td>Quasistatic sweep</td><td>n = 60, 80, 100 no-inertia static branch solves</td></tr>
+<tr><td>Rod</td><td>L = 9.29 m, 100 default segments, r = 0.020 m</td></tr>
+<tr><td>Material</td><td>bend modulus = 1.345, twist modulus = 0.789</td></tr>
+<tr><td>Stretch stiffness</td><td>2.0e7 N/m</td></tr>
+<tr><td>Quasistatic budget</td><td>one 300-iteration no-inertia solve per plotted resolution</td></tr>
+<tr><td>Seed</td><td>localized 5-turn helical seed, amplitude 5e-3 m, sigma = 0.12 L</td></tr>
+<tr><td>Unsupported</td><td>final path-continuous 27-turn twist unwrapping</td></tr>
+<tr><td>Gravity</td><td>off</td></tr>
+<tr><td>Scope</td><td>quasistatic validation only</td></tr>
+<tr><td>Report video</td><td>45 fps render, 420 solver frames, stride 2</td></tr></tbody></table>
+    </section>
+
+    <section>
+      <h2>Video Checks</h2>
+      <p>The quasistatic video is the validation path: the analytical branch is advanced with inertia removed.</p>
+
+
+      <div class="video-grid video-grid-single">
+
+        <figure>
+          <video controls preload="metadata" muted playsinline>
+            <source src="assets/cable_localized_buckling_quasistatic.mp4?v=1781956716-63795" type="video/mp4">
+          </video>
+          <figcaption>No-inertia analytical-branch solve using Newton&#x27;s cable energy, rendered with the localized-buckling report camera.</figcaption>
+        </figure>
+
+      </div>
+
+
+    </section>
+
+
+    <section>
+      <h2>Acceptance Criteria</h2>
+      <div class="card-grid">
+
+        <div class="card">
+          <h3>Passes When</h3>
+          <ul class="check-list"><li>Orange centerline should leave the gray straight reference.</li><li>The buckle amplitude should localize instead of becoming a uniform sideways drift.</li><li>Blue clamp markers should remain fixed.</li></ul>
+        </div>
+
+        <div class="card">
+          <h3>Watch For</h3>
+          <ul class="check-list"><li>rod stays nearly straight</li><li>tip clamp drifts away from the prescribed shortened position</li><li>segments visibly stretch or collapse</li></ul>
+        </div>
+
+        <div class="card">
+          <h3>Validated Behavior</h3>
+          <ul class="check-list"><li>Newton&#x27;s cable energy reproduces the localized-buckling equilibrium branch</li><li>large imposed twist couples into centerline buckling</li><li>the kinematic clamp position remains enforced during the run</li><li>final 27-turn incremental twist unwrapping remains explicitly unsupported</li></ul>
+        </div>
+
+      </div>
+    </section>
+
+
+
+    <section>
+      <h2>Plot Checks</h2>
+
+        <div class="plot-block">
+          <h3>Quasistatic Final-State Diagnostics</h3>
+          <p>This plot shows the no-inertia quasistatic solve against the localized-buckling envelope. The old twist-transfer panel is intentionally removed: the final quaternion state cannot represent the 27-turn path without path-continuous unwrapping.</p>
+          <div class="plot-grid">
+
+        <figure>
+          <img src="assets/localized_buckling_quasistatic.png?v=1782215538-169388" alt="Quasistatic Cable Localized Helical Buckling plot localized_buckling_quasistatic.png">
+          <figcaption>Quasistatic reproduction: analytical localized-buckling branch initialization followed by a no-inertia Newton cable-energy solve.</figcaption>
+        </figure>
+
+          </div>
+        </div>
+
+
+        <div class="plot-block">
+          <h3>Quasistatic Resolution Sweep</h3>
+          <p>The resolution sweep uses the same quasistatic solver and the same 27-turn initialized material-frame path as the quasistatic final-state plot. It answers the refinement question: convergence toward the analytical centerline envelope.</p>
+          <div class="plot-grid">
+
+        <figure>
+          <img src="assets/localized_buckling_quasistatic_convergence.png?v=1782215538-287944" alt="Quasistatic Cable Localized Helical Buckling plot localized_buckling_quasistatic_convergence.png">
+          <figcaption>Quasistatic convergence: no-inertia Newton cable-energy solves with real-valued imposed material twist across multiple resolutions.</figcaption>
+        </figure>
+
+          </div>
+        </div>
+
+    </section>
+
+
+    <section>
+      <h2>Reproduce</h2>
+      <pre><code>uv run --extra examples python -m newton.examples.cable._example_cable_localized_buckling --loading-mode quasistatic_reproduction --twist-mode initial_material --viewer null</code></pre>
+    </section>
+  </main>
+
+  <footer>
+    Report payload: this page, Newton-rendered MP4 video(s), and selected PNG plots in <code>assets/</code>.
+    Parent hub: <a href="../cable_bend_twist_verification/">Cable Bend/Twist Verification</a>.
+  </footer>
+</body>
+</html>

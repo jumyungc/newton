@@ -1,0 +1,642 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VBD Joint Reaction Validation</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17202a;
+      --muted: #5f6f82;
+      --line: #d9e0e8;
+      --panel: #f7f9fb;
+      --accent: #1f6f8b;
+      --accent-soft: #e7f2f7;
+      --max: 1120px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: #ffffff;
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+    }
+
+    header {
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfd;
+    }
+
+    main,
+    .header-inner {
+      width: min(var(--max), calc(100vw - 32px));
+      margin: 0 auto;
+    }
+
+    .header-inner {
+      padding: 38px 0 30px;
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: clamp(2rem, 4vw, 3.2rem);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 0 0 12px;
+      font-size: 1.45rem;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .subsection-title {
+      margin-top: 34px;
+      padding-top: 26px;
+      border-top: 1px solid var(--line);
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 1.12rem;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 12px;
+    }
+
+    a {
+      color: var(--accent);
+    }
+
+    code {
+      padding: 0.08rem 0.25rem;
+      border-radius: 4px;
+      background: #eef3f7;
+      font-size: 0.93em;
+    }
+
+    .subtitle {
+      max-width: 920px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 1.05rem;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 22px;
+    }
+
+    .summary-card,
+    .report-card,
+    .note {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .summary-card {
+      padding: 14px 16px;
+    }
+
+    .summary-card .label {
+      color: var(--muted);
+      font-size: 0.82rem;
+      font-weight: 650;
+      text-transform: uppercase;
+    }
+
+    .summary-card .value {
+      display: block;
+      margin-top: 4px;
+      font-size: 1.2rem;
+      font-weight: 760;
+    }
+
+    main {
+      padding: 30px 0 50px;
+    }
+
+    section {
+      margin: 0 0 36px;
+    }
+
+    .note {
+      padding: 16px 18px;
+      background: var(--panel);
+      color: var(--muted);
+      max-width: 960px;
+    }
+
+    .readout-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+      max-width: 960px;
+    }
+
+    .readout-item {
+      padding: 13px 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .readout-item strong {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .readout-item span {
+      display: block;
+      color: var(--muted);
+      font-size: 0.94rem;
+    }
+
+    .report-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+      margin-top: 16px;
+    }
+
+    .plot-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .video-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .report-card {
+      overflow: hidden;
+    }
+
+    .media {
+      border-bottom: 1px solid var(--line);
+      background: #ffffff;
+    }
+
+    .media img,
+    .media video {
+      display: block;
+      width: 100%;
+      aspect-ratio: 4 / 3;
+      object-fit: contain;
+    }
+
+    .media img {
+      background: #ffffff;
+    }
+
+    .media video {
+      background: #111827;
+    }
+
+    .video-grid .media video {
+      aspect-ratio: 80 / 27;
+    }
+
+    .plot-grid .media img {
+      height: auto;
+      aspect-ratio: auto;
+    }
+
+    .body {
+      padding: 16px 18px 18px;
+    }
+
+    .body p {
+      color: var(--muted);
+    }
+
+    .matrix {
+      width: 100%;
+      margin-top: 16px;
+      border-collapse: collapse;
+      border: 1px solid var(--line);
+      background: #ffffff;
+    }
+
+    .matrix th,
+    .matrix td {
+      padding: 10px 12px;
+      border-top: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .matrix th {
+      color: var(--muted);
+      font-size: 0.86rem;
+      font-weight: 700;
+      background: #fbfcfd;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 7px 11px;
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-weight: 650;
+      text-decoration: none;
+    }
+
+    .report-nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 18px;
+    }
+
+    @media (max-width: 760px) {
+      .summary,
+      .readout-grid,
+      .report-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <nav class="report-nav" aria-label="report navigation">
+        <a class="button" href="../vbd_validation/index.html">VBD validation overview</a>
+        <a class="button" href="../vbd_cable_tension/index.html">Cable tension page</a>
+      </nav>
+      <h1>VBD Joint Reaction Validation</h1>
+      <p class="subtitle">
+        Validation for reading reaction force and torque at articulated rigid-body joints through
+        <code>State.body_parent_f</code> in <code>SolverVBD</code>.
+      </p>
+      <div class="summary" aria-label="summary">
+        <div class="summary-card">
+          <span class="label">Budget</span>
+          <span class="value">4 iter, 4 substeps</span>
+        </div>
+        <div class="summary-card">
+          <span class="label">Single Pendulum</span>
+          <span class="value">0.003 N RMS force error</span>
+        </div>
+        <div class="summary-card">
+          <span class="label">Double Pendulum</span>
+          <span class="value">0.121 N RMS force error</span>
+        </div>
+        <div class="summary-card">
+          <span class="label">Sweeps</span>
+          <span class="value">iterations and substeps</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>What Is Reported</h2>
+      <p>
+        <code>SolverVBD</code> now populates <code>State.body_parent_f</code> when the state attribute is requested
+        with <code>ModelBuilder.request_state_attributes("body_parent_f")</code>. Each entry stores the incoming
+        parent-to-child joint wrench in world frame, referenced to the child body's center of mass.
+      </p>
+      <div class="note">
+        This matches the convention used by Newton's other parent-force outputs. The values are VBD's applied
+        reaction for the accepted iterative solve, so the validation checks force and torque balance against the
+        simulated acceleration rather than assuming an exact continuous-time trajectory. The main plots validate
+        default hard-mode structural joints. A soft-mode comparison using the same tuned stiffness is included as
+        a separate test after the hard-mode results.
+      </div>
+      <div class="readout-grid" aria-label="readout convention">
+        <div class="readout-item">
+          <strong>Hard structural slots</strong>
+          <span>accepted AL reaction, i.e. the post-update lambda-style load</span>
+        </div>
+        <div class="readout-item">
+          <strong>Soft structural slots</strong>
+          <span>penalty reaction from the soft constraint force law</span>
+        </div>
+        <div class="readout-item">
+          <strong>Drives, limits, damping</strong>
+          <span>not used in these tests; included by the readout when present</span>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Budget And Stiffness</h2>
+      <p>
+        The baseline uses 4 VBD iterations, 4 substeps, and a frame timestep of <code>dt = 1 / 60</code>.
+        That is 16 VBD iterations per rendered frame, with each solve using a substep timestep of
+        <code>1 / 240 s</code>.
+      </p>
+      <table class="matrix">
+        <tbody>
+          <tr>
+            <th>Constraint mode</th>
+            <td>Default hard structural joints</td>
+          </tr>
+          <tr>
+            <th>Baseline timestep</th>
+            <td><code>1 / 60 s</code></td>
+          </tr>
+          <tr>
+            <th>Baseline iterations / substeps</th>
+            <td>4 iterations, 4 substeps</td>
+          </tr>
+          <tr>
+            <th>Stiffness</th>
+            <td>
+              <code>rigid_joint_linear_ke = 1.0e4</code>,
+              <code>rigid_joint_angular_ke = 1.0e5</code>,
+              <code>rigid_avbd_beta = 0.0</code>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="note">
+        The baseline uses a tuned linear stiffness below the default so the report can compare reaction readout
+        quality without hiding everything behind very stiff stabilization. Hard structural joints report the
+        accepted AL reaction after the current residual has been folded into lambda; the soft comparison reports
+        the corresponding penalty-mode reaction.
+      </div>
+    </section>
+
+    <section>
+      <h2>Analytic Balance</h2>
+      <p>
+        For a single child body with only gravity and the inbound joint reaction, Newton's law gives
+        <code>R = m a - m g</code>. For the second body of the double pendulum the same expression applies.
+        For the first body, the root joint also carries the child link load:
+        <code>R0 = m0 (a0 - g) + R1</code>.
+      </p>
+      <p>
+        The torque check uses the joint moment arm from the child COM:
+        <code>tau = r_joint x R</code>.
+      </p>
+      <p>
+        The video side plots use these balance equations as the reference. Their x-axis is time in seconds. Force
+        residuals are plotted separately in N, and torque residuals are plotted separately in N m.
+      </p>
+      <p>
+        In the plot legends, <em>reference</em> means this analytic balance value computed from the simulated
+        acceleration, for example <code>Fx reference</code> is the x-component of <code>R = m a - m g</code>.
+      </p>
+      <p>
+        Force component plots show <code>Fx</code>, <code>Fy</code>, and <code>Fz</code> separately. These pendula
+        move in the <code>x-z</code> plane around revolute <code>y</code>-axes, so the component torque plots focus
+        on <code>Ty</code>; the residual plots still use the full 3D torque norm.
+      </p>
+    </section>
+
+    <section>
+      <h2>Load Scale</h2>
+      <p>
+        The force errors are small compared with the loads carried by the joints. For scale, the single pendulum
+        has a 1.000 kg body, so its static weight is 9.810 N. Each double-pendulum link is 0.512 kg, with a
+        5.023 N link weight and a 10.045 N root-subtree weight.
+      </p>
+      <table class="matrix">
+        <thead>
+          <tr>
+            <th>Joint</th>
+            <th>Static load scale</th>
+            <th>RMS analytic load</th>
+            <th>RMS force error</th>
+            <th>Error / RMS load</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Single pendulum</td>
+            <td>9.810 N body weight</td>
+            <td>10.579 N</td>
+            <td>0.003 N</td>
+            <td>0.024%</td>
+          </tr>
+          <tr>
+            <td>Double pendulum root</td>
+            <td>10.045 N subtree weight</td>
+            <td>10.785 N</td>
+            <td>0.172 N</td>
+            <td>1.59%</td>
+          </tr>
+          <tr>
+            <td>Double pendulum middle</td>
+            <td>5.023 N child-link weight</td>
+            <td>5.945 N</td>
+            <td>0.002 N</td>
+            <td>0.035%</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Newton Rendered Videos</h2>
+      <div class="report-grid video-grid">
+        <article class="report-card">
+          <div class="media">
+            <video controls muted loop playsinline preload="metadata">
+              <source src="assets/single_pendulum_newton.mp4" type="video/mp4">
+            </video>
+          </div>
+          <div class="body">
+            <h3>Single Pendulum</h3>
+            <p>
+              Headless <code>ViewerGL</code> rendering at the baseline budget. The side panel plots VBD and
+              analytic-reference force and torque on the physical load scale. The annotation gives the RMS error
+              for that trace.
+            </p>
+          </div>
+        </article>
+
+        <article class="report-card">
+          <div class="media">
+            <video controls muted loop playsinline preload="metadata">
+              <source src="assets/double_pendulum_newton.mp4" type="video/mp4">
+            </video>
+          </div>
+          <div class="body">
+            <h3>Double Pendulum</h3>
+            <p>
+              Headless <code>ViewerGL</code> rendering at the baseline budget. The side panel shows root and middle
+              joint load traces on the force and torque scales, with VBD and analytic reference curves overlaid.
+            </p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>Results</h2>
+      <div class="report-grid plot-grid">
+        <article class="report-card">
+          <div class="media">
+            <img src="assets/single_pendulum_reaction.png" alt="Single pendulum reaction force and torque plots">
+          </div>
+          <div class="body">
+            <h3>Single Pendulum</h3>
+            <p>
+              The reported joint force tracks the balance expression over a dynamic swing. The maximum force
+              residual is 0.010 N and the RMS force residual is 0.003 N, about 0.024% of the RMS analytic load.
+            </p>
+          </div>
+        </article>
+
+        <article class="report-card">
+          <div class="media">
+            <img src="assets/double_pendulum_reaction.png" alt="Double pendulum reaction force plots">
+          </div>
+          <div class="body">
+            <h3>Double Pendulum</h3>
+            <p>
+              With 4 iterations and 4 substeps, the double pendulum has a 0.121 N RMS force residual. The middle
+              joint balances the second link directly, while the root joint balances the first link plus the
+              child-link reaction. The root is the harder readout, at 0.172 N RMS force error against a 10.785 N
+              RMS analytic load.
+            </p>
+          </div>
+        </article>
+      </div>
+
+      <table class="matrix">
+        <thead>
+          <tr>
+            <th>Case</th>
+            <th>Max force error</th>
+            <th>RMS force error</th>
+            <th>Max torque error</th>
+            <th>RMS torque error</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Single pendulum, hard</td>
+            <td>0.010 N</td>
+            <td>0.003 N</td>
+            <td>0.004 N m</td>
+            <td>0.001 N m</td>
+          </tr>
+          <tr>
+            <td>Double pendulum, hard</td>
+            <td>0.488 N</td>
+            <td>0.121 N</td>
+            <td>0.221 N m</td>
+            <td>0.056 N m</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2 class="subsection-title">Soft-Mode Comparison</h2>
+      <p>
+        The same scenes were also run with the structural joint slots switched to soft penalty mode, using the same
+        tuned stiffness and solve budget. This is a separate readout test, not a replacement for hard constraint
+        validation: soft joints trade exact constraint enforcement for penalty compliance.
+      </p>
+      <table class="matrix">
+        <thead>
+          <tr>
+            <th>Case</th>
+            <th>Max force error</th>
+            <th>RMS force error</th>
+            <th>Max torque error</th>
+            <th>RMS torque error</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Single pendulum, soft</td>
+            <td>0.009 N</td>
+            <td>0.003 N</td>
+            <td>0.003 N m</td>
+            <td>0.001 N m</td>
+          </tr>
+          <tr>
+            <td>Double pendulum, soft</td>
+            <td>0.407 N</td>
+            <td>0.131 N</td>
+            <td>0.200 N m</td>
+            <td>0.063 N m</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <h2 class="subsection-title">Budget Sweeps</h2>
+      <p>
+        The sweeps keep the frame timestep fixed at <code>dt = 1 / 60</code>. The iteration sweep varies
+        iterations <code>2, 4, 8, 16</code> at 4 substeps. The substep sweep fixes 4 iterations and varies
+        substeps <code>1, 2, 4, 8</code>.
+      </p>
+      <div class="report-grid plot-grid">
+        <article class="report-card">
+          <div class="media">
+            <img src="assets/budget_sweeps.png" alt="Iteration and substep residual sweeps">
+          </div>
+          <div class="body">
+            <h3>RMS Residual Trends</h3>
+            <p>
+              The double pendulum is the sensitive case. At 4 substeps, increasing iterations from 4 to 16 drops
+              RMS force residual from 0.121 N to 0.003 N. At 4 iterations, increasing substeps from 1 to 8 drops
+              RMS force residual from 0.943 N to 0.022 N.
+            </p>
+          </div>
+        </article>
+      </div>
+
+      <table class="matrix">
+        <thead>
+          <tr>
+            <th>Iteration sweep at 4 substeps</th>
+            <th>Iterations</th>
+            <th>VBD iterations / frame</th>
+            <th>Single RMS force error</th>
+            <th>Double RMS force error</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>iterations varied</td><td>2</td><td>8</td><td>0.003 N</td><td>0.431 N</td></tr>
+          <tr><td>iterations varied</td><td>4</td><td>16</td><td>0.003 N</td><td>0.121 N</td></tr>
+          <tr><td>iterations varied</td><td>8</td><td>32</td><td>0.002 N</td><td>0.012 N</td></tr>
+          <tr><td>iterations varied</td><td>16</td><td>64</td><td>0.002 N</td><td>0.003 N</td></tr>
+        </tbody>
+      </table>
+
+      <table class="matrix">
+        <thead>
+          <tr>
+            <th>Substep sweep at 4 iterations</th>
+            <th>Substeps</th>
+            <th>VBD iterations / frame</th>
+            <th>Single RMS force error</th>
+            <th>Double RMS force error</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td>substeps varied</td><td>1</td><td>4</td><td>0.002 N</td><td>0.943 N</td></tr>
+          <tr><td>substeps varied</td><td>2</td><td>8</td><td>0.002 N</td><td>0.495 N</td></tr>
+          <tr><td>substeps varied</td><td>4</td><td>16</td><td>0.003 N</td><td>0.121 N</td></tr>
+          <tr><td>substeps varied</td><td>8</td><td>32</td><td>0.007 N</td><td>0.022 N</td></tr>
+        </tbody>
+      </table>
+
+    </section>
+  </main>
+</body>
+</html>

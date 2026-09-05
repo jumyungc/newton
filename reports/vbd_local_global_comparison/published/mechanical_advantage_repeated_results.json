@@ -1,0 +1,1005 @@
+{
+  "frames": 780,
+  "generated_at": "2026-08-07T06:06:42.155468+00:00",
+  "repositories": {
+    "current": {
+      "branch": "jumyungc/vbd-compliance-kkt",
+      "commit": "6ab269f97",
+      "dirty": true,
+      "path": "/home/jumyungc/JC/git/newton_second/newton"
+    },
+    "pcr": {
+      "branch": "fmeyer/franka_mechanical_advantage_pcr",
+      "commit": "3e08cb17",
+      "dirty": false,
+      "path": "/home/jumyungc/JC/git/newton_fmeyer_pcr"
+    }
+  },
+  "results": [
+    {
+      "advantage": 2,
+      "cable_stretch_stiffness_n_per_m": 100000.0,
+      "contact_damping_scale": null,
+      "contact_stiffness_scale": null,
+      "method": "legacy",
+      "method_label": "Legacy local VBD",
+      "non_cable_joint_damping": null,
+      "non_cable_joint_stiffness_n_per_m": null,
+      "runs": 3,
+      "schedule": "10 local VBD iterations",
+      "summary": {
+        "closure_rms_mm": {
+          "max": 0.1551468488856367,
+          "median": 0.1549238692349359,
+          "min": 0.15491901399560432
+        },
+        "final_lift_error_mm": {
+          "max": 2.842295169830311,
+          "median": 2.248096466064442,
+          "min": 2.235281467437733
+        },
+        "median_force_ratio": {
+          "max": 2.2968152879316235,
+          "median": 2.295799023774886,
+          "min": 2.295002824887316
+        },
+        "peak_pulley_speed_rad_s": {
+          "max": 2.4596564769744873,
+          "median": 2.4539105892181396,
+          "min": 2.4421300888061523
+        },
+        "pull_force_rms_n": {
+          "max": 2.1166443899712903,
+          "median": 2.1134482020504812,
+          "min": 2.110915462866753
+        },
+        "settled_lift_rms_mm": {
+          "max": 2.808546898738995,
+          "median": 2.2163980492508504,
+          "min": 2.1852501492017593
+        },
+        "trajectory_time_s": {
+          "max": 22.479797682259232,
+          "median": 22.43465055897832,
+          "min": 22.404767140746117
+        }
+      },
+      "trials": [
+        {
+          "closure_rms_mm": 0.1551468488856367,
+          "final_lift_error_mm": 2.842295169830311,
+          "median_force_ratio": 2.295799023774886,
+          "peak_pulley_speed_rad_s": 2.4596564769744873,
+          "pull_force_rms_n": 2.1166443899712903,
+          "settled_lift_rms_mm": 2.808546898738995,
+          "trajectory_time_s": 22.43465055897832,
+          "trial": 1
+        },
+        {
+          "closure_rms_mm": 0.15491901399560432,
+          "final_lift_error_mm": 2.235281467437733,
+          "median_force_ratio": 2.295002824887316,
+          "peak_pulley_speed_rad_s": 2.4539105892181396,
+          "pull_force_rms_n": 2.110915462866753,
+          "settled_lift_rms_mm": 2.1852501492017593,
+          "trajectory_time_s": 22.404767140746117,
+          "trial": 2
+        },
+        {
+          "closure_rms_mm": 0.1549238692349359,
+          "final_lift_error_mm": 2.248096466064442,
+          "median_force_ratio": 2.2968152879316235,
+          "peak_pulley_speed_rad_s": 2.4421300888061523,
+          "pull_force_rms_n": 2.1134482020504812,
+          "settled_lift_rms_mm": 2.2163980492508504,
+          "trajectory_time_s": 22.479797682259232,
+          "trial": 3
+        }
+      ],
+      "weight_kg": 3.0
+    },
+    {
+      "advantage": 2,
+      "cable_stretch_stiffness_n_per_m": 100000.0,
+      "contact_damping_scale": null,
+      "contact_stiffness_scale": null,
+      "method": "pcr",
+      "method_label": "Reference scalar PCR",
+      "non_cable_joint_damping": null,
+      "non_cable_joint_stiffness_n_per_m": null,
+      "runs": 3,
+      "schedule": "scalar translation PCR on every one of 10 local iterations",
+      "summary": {
+        "closure_rms_mm": {
+          "max": 0.15193724411577383,
+          "median": 0.15193304452040463,
+          "min": 0.15179859694619066
+        },
+        "final_lift_error_mm": {
+          "max": 0.5803227424621693,
+          "median": 0.04218816757201038,
+          "min": 0.02466440200804554
+        },
+        "median_force_ratio": {
+          "max": 1.9365995115581522,
+          "median": 1.9363656476728144,
+          "min": 1.9362760576035127
+        },
+        "peak_pulley_speed_rad_s": {
+          "max": 3.413316011428833,
+          "median": 3.4129936695098877,
+          "min": 3.399254322052002
+        },
+        "pull_force_rms_n": {
+          "max": 0.5362178486657765,
+          "median": 0.5140398340756681,
+          "min": 0.511938609878691
+        },
+        "settled_lift_rms_mm": {
+          "max": 0.7419555675376861,
+          "median": 0.369768125666583,
+          "min": 0.36622407271240376
+        },
+        "trajectory_time_s": {
+          "max": 25.51421247376129,
+          "median": 25.303213672712445,
+          "min": 25.228268852923065
+        }
+      },
+      "trials": [
+        {
+          "closure_rms_mm": 0.15193724411577383,
+          "final_lift_error_mm": 0.04218816757201038,
+          "median_force_ratio": 1.9363656476728144,
+          "peak_pulley_speed_rad_s": 3.413316011428833,
+          "pull_force_rms_n": 0.511938609878691,
+          "settled_lift_rms_mm": 0.36622407271240376,
+          "trajectory_time_s": 25.51421247376129,
+          "trial": 1
+        },
+        {
+          "closure_rms_mm": 0.15179859694619066,
+          "final_lift_error_mm": 0.5803227424621693,
+          "median_force_ratio": 1.9365995115581522,
+          "peak_pulley_speed_rad_s": 3.4129936695098877,
+          "pull_force_rms_n": 0.5362178486657765,
+          "settled_lift_rms_mm": 0.7419555675376861,
+          "trajectory_time_s": 25.228268852923065,
+          "trial": 2
+        },
+        {
+          "closure_rms_mm": 0.15193304452040463,
+          "final_lift_error_mm": 0.02466440200804554,
+          "median_force_ratio": 1.9362760576035127,
+          "peak_pulley_speed_rad_s": 3.399254322052002,
+          "pull_force_rms_n": 0.5140398340756681,
+          "settled_lift_rms_mm": 0.369768125666583,
+          "trajectory_time_s": 25.303213672712445,
+          "trial": 3
+        }
+      ],
+      "weight_kg": 3.0
+    },
+    {
+      "advantage": 2,
+      "cable_stretch_stiffness_n_per_m": 100000.0,
+      "contact_damping_scale": 1.0,
+      "contact_stiffness_scale": 1.0,
+      "method": "g1",
+      "method_label": "Local\u2013Global VBD",
+      "non_cable_joint_damping": 0.0,
+      "non_cable_joint_stiffness_n_per_m": 2000000.0,
+      "runs": 3,
+      "schedule": "one early 6D KKT/CR pass + 9 local sweeps",
+      "summary": {
+        "closure_rms_mm": {
+          "max": 0.15284701829738692,
+          "median": 0.15273800826994957,
+          "min": 0.15261415567529507
+        },
+        "final_lift_error_mm": {
+          "max": 0.8686304092407338,
+          "median": 0.7663846015930065,
+          "min": 0.4313468933105358
+        },
+        "median_force_ratio": {
+          "max": 1.9579200325434203,
+          "median": 1.9572551230158055,
+          "min": 1.9556489318198287
+        },
+        "peak_pulley_speed_rad_s": {
+          "max": 1.2951446771621704,
+          "median": 1.2904376983642578,
+          "min": 1.231163740158081
+        },
+        "pull_force_rms_n": {
+          "max": 0.44236586625811225,
+          "median": 0.39384289910802667,
+          "min": 0.3684785213347042
+        },
+        "settled_lift_rms_mm": {
+          "max": 1.0023336482360894,
+          "median": 0.7685760508855427,
+          "min": 0.5123256537041558
+        },
+        "trajectory_time_s": {
+          "max": 28.34348301915452,
+          "median": 28.237344462890178,
+          "min": 28.130002022720873
+        }
+      },
+      "trials": [
+        {
+          "closure_rms_mm": 0.15284701829738692,
+          "final_lift_error_mm": 0.7663846015930065,
+          "median_force_ratio": 1.9572551230158055,
+          "peak_pulley_speed_rad_s": 1.231163740158081,
+          "pull_force_rms_n": 0.3684785213347042,
+          "settled_lift_rms_mm": 0.7685760508855427,
+          "trajectory_time_s": 28.130002022720873,
+          "trial": 1
+        },
+        {
+          "closure_rms_mm": 0.15261415567529507,
+          "final_lift_error_mm": 0.8686304092407338,
+          "median_force_ratio": 1.9579200325434203,
+          "peak_pulley_speed_rad_s": 1.2904376983642578,
+          "pull_force_rms_n": 0.44236586625811225,
+          "settled_lift_rms_mm": 1.0023336482360894,
+          "trajectory_time_s": 28.237344462890178,
+          "trial": 2
+        },
+        {
+          "closure_rms_mm": 0.15273800826994957,
+          "final_lift_error_mm": 0.4313468933105358,
+          "median_force_ratio": 1.9556489318198287,
+          "peak_pulley_speed_rad_s": 1.2951446771621704,
+          "pull_force_rms_n": 0.39384289910802667,
+          "settled_lift_rms_mm": 0.5123256537041558,
+          "trajectory_time_s": 28.34348301915452,
+          "trial": 3
+        }
+      ],
+      "weight_kg": 3.0
+    },
+    {
+      "advantage": 4,
+      "cable_stretch_stiffness_n_per_m": 100000.0,
+      "contact_damping_scale": null,
+      "contact_stiffness_scale": null,
+      "method": "legacy",
+      "method_label": "Legacy local VBD",
+      "non_cable_joint_damping": null,
+      "non_cable_joint_stiffness_n_per_m": null,
+      "runs": 3,
+      "schedule": "10 local VBD iterations",
+      "summary": {
+        "closure_rms_mm": {
+          "max": 0.13608614095772836,
+          "median": 0.13596100155739527,
+          "min": 0.13580255618394754
+        },
+        "final_lift_error_mm": {
+          "max": 0.48778057098389227,
+          "median": 0.41612386703490656,
+          "min": 0.06988048553466242
+        },
+        "median_force_ratio": {
+          "max": 4.777320681364274,
+          "median": 4.777029127107216,
+          "min": 4.776922678567099
+        },
+        "peak_pulley_speed_rad_s": {
+          "max": 3.609052896499634,
+          "median": 3.5895087718963623,
+          "min": 3.584141969680786
+        },
+        "pull_force_rms_n": {
+          "max": 2.1122372236040445,
+          "median": 2.1033167760957077,
+          "min": 2.094249200695347
+        },
+        "settled_lift_rms_mm": {
+          "max": 0.5343551859964139,
+          "median": 0.419309716958141,
+          "min": 0.1746344547079703
+        },
+        "trajectory_time_s": {
+          "max": 28.030610295012593,
+          "median": 27.65065567009151,
+          "min": 27.252430939115584
+        }
+      },
+      "trials": [
+        {
+          "closure_rms_mm": 0.13608614095772836,
+          "final_lift_error_mm": 0.41612386703490656,
+          "median_force_ratio": 4.777029127107216,
+          "peak_pulley_speed_rad_s": 3.584141969680786,
+          "pull_force_rms_n": 2.094249200695347,
+          "settled_lift_rms_mm": 0.419309716958141,
+          "trajectory_time_s": 27.65065567009151,
+          "trial": 1
+        },
+        {
+          "closure_rms_mm": 0.13580255618394754,
+          "final_lift_error_mm": 0.48778057098389227,
+          "median_force_ratio": 4.777320681364274,
+          "peak_pulley_speed_rad_s": 3.609052896499634,
+          "pull_force_rms_n": 2.1033167760957077,
+          "settled_lift_rms_mm": 0.5343551859964139,
+          "trajectory_time_s": 27.252430939115584,
+          "trial": 2
+        },
+        {
+          "closure_rms_mm": 0.13596100155739527,
+          "final_lift_error_mm": 0.06988048553466242,
+          "median_force_ratio": 4.776922678567099,
+          "peak_pulley_speed_rad_s": 3.5895087718963623,
+          "pull_force_rms_n": 2.1122372236040445,
+          "settled_lift_rms_mm": 0.1746344547079703,
+          "trajectory_time_s": 28.030610295012593,
+          "trial": 3
+        }
+      ],
+      "weight_kg": 5.0
+    },
+    {
+      "advantage": 4,
+      "cable_stretch_stiffness_n_per_m": 100000.0,
+      "contact_damping_scale": null,
+      "contact_stiffness_scale": null,
+      "method": "pcr",
+      "method_label": "Reference scalar PCR",
+      "non_cable_joint_damping": null,
+      "non_cable_joint_stiffness_n_per_m": null,
+      "runs": 3,
+      "schedule": "scalar translation PCR on every one of 10 local iterations",
+      "summary": {
+        "closure_rms_mm": {
+          "max": 0.12891673762569023,
+          "median": 0.12878996940680826,
+          "min": 0.12860438119117681
+        },
+        "final_lift_error_mm": {
+          "max": 0.6733179092407171,
+          "median": 0.3999114036560003,
+          "min": 0.012612342834478207
+        },
+        "median_force_ratio": {
+          "max": 3.9352902285610942,
+          "median": 3.934808036554474,
+          "min": 3.9340196614601544
+        },
+        "peak_pulley_speed_rad_s": {
+          "max": 3.9052093029022217,
+          "median": 3.87353253364563,
+          "min": 3.8484690189361572
+        },
+        "pull_force_rms_n": {
+          "max": 0.2884973574638291,
+          "median": 0.266823406507869,
+          "min": 0.25537514756761176
+        },
+        "settled_lift_rms_mm": {
+          "max": 0.6614975233553835,
+          "median": 0.39846265944366577,
+          "min": 0.17673528505126515
+        },
+        "trajectory_time_s": {
+          "max": 31.15597645472735,
+          "median": 30.948033675551414,
+          "min": 30.627634870819747
+        }
+      },
+      "trials": [
+        {
+          "closure_rms_mm": 0.12891673762569023,
+          "final_lift_error_mm": 0.6733179092407171,
+          "median_force_ratio": 3.934808036554474,
+          "peak_pulley_speed_rad_s": 3.87353253364563,
+          "pull_force_rms_n": 0.25537514756761176,
+          "settled_lift_rms_mm": 0.6614975233553835,
+          "trajectory_time_s": 30.627634870819747,
+          "trial": 1
+        },
+        {
+          "closure_rms_mm": 0.12860438119117681,
+          "final_lift_error_mm": 0.012612342834478207,
+          "median_force_ratio": 3.9352902285610942,
+          "peak_pulley_speed_rad_s": 3.9052093029022217,
+          "pull_force_rms_n": 0.2884973574638291,
+          "settled_lift_rms_mm": 0.17673528505126515,
+          "trajectory_time_s": 30.948033675551414,
+          "trial": 2
+        },
+        {
+          "closure_rms_mm": 0.12878996940680826,
+          "final_lift_error_mm": 0.3999114036560003,
+          "median_force_ratio": 3.9340196614601544,
+          "peak_pulley_speed_rad_s": 3.8484690189361572,
+          "pull_force_rms_n": 0.266823406507869,
+          "settled_lift_rms_mm": 0.39846265944366577,
+          "trajectory_time_s": 31.15597645472735,
+          "trial": 3
+        }
+      ],
+      "weight_kg": 5.0
+    },
+    {
+      "advantage": 4,
+      "cable_stretch_stiffness_n_per_m": 100000.0,
+      "contact_damping_scale": 1.0,
+      "contact_stiffness_scale": 1.0,
+      "method": "g1",
+      "method_label": "Local\u2013Global VBD",
+      "non_cable_joint_damping": 0.0,
+      "non_cable_joint_stiffness_n_per_m": 2000000.0,
+      "runs": 3,
+      "schedule": "one early 6D KKT/CR pass + 9 local sweeps",
+      "summary": {
+        "closure_rms_mm": {
+          "max": 0.13057130631029124,
+          "median": 0.12992747773312216,
+          "min": 0.12988268596709152
+        },
+        "final_lift_error_mm": {
+          "max": 0.809872150421137,
+          "median": 0.48104524612427313,
+          "min": 0.39526224136351984
+        },
+        "median_force_ratio": {
+          "max": 3.974636982952671,
+          "median": 3.9640660004949395,
+          "min": 3.958035624616412
+        },
+        "peak_pulley_speed_rad_s": {
+          "max": 3.4352123737335205,
+          "median": 3.2159481048583984,
+          "min": 3.0391716957092285
+        },
+        "pull_force_rms_n": {
+          "max": 0.29778979405909434,
+          "median": 0.241947659153,
+          "min": 0.2408445452430885
+        },
+        "settled_lift_rms_mm": {
+          "max": 0.7893789610827103,
+          "median": 0.5452772264887831,
+          "min": 0.40112711424317604
+        },
+        "trajectory_time_s": {
+          "max": 36.13194339489564,
+          "median": 36.05204567173496,
+          "min": 35.64428089186549
+        }
+      },
+      "trials": [
+        {
+          "closure_rms_mm": 0.13057130631029124,
+          "final_lift_error_mm": 0.809872150421137,
+          "median_force_ratio": 3.958035624616412,
+          "peak_pulley_speed_rad_s": 3.4352123737335205,
+          "pull_force_rms_n": 0.2408445452430885,
+          "settled_lift_rms_mm": 0.7893789610827103,
+          "trajectory_time_s": 35.64428089186549,
+          "trial": 1
+        },
+        {
+          "closure_rms_mm": 0.12992747773312216,
+          "final_lift_error_mm": 0.39526224136351984,
+          "median_force_ratio": 3.9640660004949395,
+          "peak_pulley_speed_rad_s": 3.0391716957092285,
+          "pull_force_rms_n": 0.241947659153,
+          "settled_lift_rms_mm": 0.40112711424317604,
+          "trajectory_time_s": 36.05204567173496,
+          "trial": 2
+        },
+        {
+          "closure_rms_mm": 0.12988268596709152,
+          "final_lift_error_mm": 0.48104524612427313,
+          "median_force_ratio": 3.974636982952671,
+          "peak_pulley_speed_rad_s": 3.2159481048583984,
+          "pull_force_rms_n": 0.29778979405909434,
+          "settled_lift_rms_mm": 0.5452772264887831,
+          "trajectory_time_s": 36.13194339489564,
+          "trial": 3
+        }
+      ],
+      "weight_kg": 5.0
+    },
+    {
+      "advantage": 8,
+      "cable_stretch_stiffness_n_per_m": 100000.0,
+      "contact_damping_scale": null,
+      "contact_stiffness_scale": null,
+      "method": "legacy",
+      "method_label": "Legacy local VBD",
+      "non_cable_joint_damping": null,
+      "non_cable_joint_stiffness_n_per_m": null,
+      "runs": 3,
+      "schedule": "10 local VBD iterations",
+      "summary": {
+        "closure_rms_mm": {
+          "max": 0.14946042212118374,
+          "median": 0.14943141991218598,
+          "min": 0.14907064366097317
+        },
+        "final_lift_error_mm": {
+          "max": 9.16169881820679,
+          "median": 8.852887153625492,
+          "min": 8.852112293243412
+        },
+        "median_force_ratio": {
+          "max": 9.198882004092004,
+          "median": 9.192461797620943,
+          "min": 9.182626550136758
+        },
+        "peak_pulley_speed_rad_s": {
+          "max": 3.3703269958496094,
+          "median": 3.3610827922821045,
+          "min": 3.3505284786224365
+        },
+        "pull_force_rms_n": {
+          "max": 3.6368752187649793,
+          "median": 3.6275701131386042,
+          "min": 3.618103911299899
+        },
+        "settled_lift_rms_mm": {
+          "max": 9.17537464901087,
+          "median": 8.870400512294484,
+          "min": 8.869006876978595
+        },
+        "trajectory_time_s": {
+          "max": 37.680331331677735,
+          "median": 37.6303822719492,
+          "min": 37.527546126861125
+        }
+      },
+      "trials": [
+        {
+          "closure_rms_mm": 0.14946042212118374,
+          "final_lift_error_mm": 8.852887153625492,
+          "median_force_ratio": 9.192461797620943,
+          "peak_pulley_speed_rad_s": 3.3703269958496094,
+          "pull_force_rms_n": 3.6275701131386042,
+          "settled_lift_rms_mm": 8.870400512294484,
+          "trajectory_time_s": 37.6303822719492,
+          "trial": 1
+        },
+        {
+          "closure_rms_mm": 0.14943141991218598,
+          "final_lift_error_mm": 8.852112293243412,
+          "median_force_ratio": 9.198882004092004,
+          "peak_pulley_speed_rad_s": 3.3610827922821045,
+          "pull_force_rms_n": 3.618103911299899,
+          "settled_lift_rms_mm": 8.869006876978595,
+          "trajectory_time_s": 37.680331331677735,
+          "trial": 2
+        },
+        {
+          "closure_rms_mm": 0.14907064366097317,
+          "final_lift_error_mm": 9.16169881820679,
+          "median_force_ratio": 9.182626550136758,
+          "peak_pulley_speed_rad_s": 3.3505284786224365,
+          "pull_force_rms_n": 3.6368752187649793,
+          "settled_lift_rms_mm": 9.17537464901087,
+          "trajectory_time_s": 37.527546126861125,
+          "trial": 3
+        }
+      ],
+      "weight_kg": 12.0
+    },
+    {
+      "advantage": 8,
+      "cable_stretch_stiffness_n_per_m": 100000.0,
+      "contact_damping_scale": null,
+      "contact_stiffness_scale": null,
+      "method": "pcr",
+      "method_label": "Reference scalar PCR",
+      "non_cable_joint_damping": null,
+      "non_cable_joint_stiffness_n_per_m": null,
+      "runs": 3,
+      "schedule": "scalar translation PCR on every one of 10 local iterations",
+      "summary": {
+        "closure_rms_mm": {
+          "max": 0.1491336199460705,
+          "median": 0.14904038889629023,
+          "min": 0.148668613150167
+        },
+        "final_lift_error_mm": {
+          "max": 1.6832828521728542,
+          "median": 1.2452483177185085,
+          "min": 1.1028528213501003
+        },
+        "median_force_ratio": {
+          "max": 7.972307008377648,
+          "median": 7.970219699159331,
+          "min": 7.966973701936625
+        },
+        "peak_pulley_speed_rad_s": {
+          "max": 4.398725509643555,
+          "median": 3.8683745861053467,
+          "min": 3.842609405517578
+        },
+        "pull_force_rms_n": {
+          "max": 0.7805900571488338,
+          "median": 0.6251083386975131,
+          "min": 0.5705842047303192
+        },
+        "settled_lift_rms_mm": {
+          "max": 1.703669668036501,
+          "median": 1.2701445369828255,
+          "min": 1.1245398904100767
+        },
+        "trajectory_time_s": {
+          "max": 42.15545407496393,
+          "median": 41.36734667606652,
+          "min": 41.21579700708389
+        }
+      },
+      "trials": [
+        {
+          "closure_rms_mm": 0.148668613150167,
+          "final_lift_error_mm": 1.6832828521728542,
+          "median_force_ratio": 7.972307008377648,
+          "peak_pulley_speed_rad_s": 3.842609405517578,
+          "pull_force_rms_n": 0.7805900571488338,
+          "settled_lift_rms_mm": 1.703669668036501,
+          "trajectory_time_s": 41.21579700708389,
+          "trial": 1
+        },
+        {
+          "closure_rms_mm": 0.14904038889629023,
+          "final_lift_error_mm": 1.2452483177185085,
+          "median_force_ratio": 7.966973701936625,
+          "peak_pulley_speed_rad_s": 4.398725509643555,
+          "pull_force_rms_n": 0.6251083386975131,
+          "settled_lift_rms_mm": 1.2701445369828255,
+          "trajectory_time_s": 41.36734667606652,
+          "trial": 2
+        },
+        {
+          "closure_rms_mm": 0.1491336199460705,
+          "final_lift_error_mm": 1.1028528213501003,
+          "median_force_ratio": 7.970219699159331,
+          "peak_pulley_speed_rad_s": 3.8683745861053467,
+          "pull_force_rms_n": 0.5705842047303192,
+          "settled_lift_rms_mm": 1.1245398904100767,
+          "trajectory_time_s": 42.15545407496393,
+          "trial": 3
+        }
+      ],
+      "weight_kg": 12.0
+    },
+    {
+      "advantage": 8,
+      "cable_stretch_stiffness_n_per_m": 100000.0,
+      "contact_damping_scale": 1.0,
+      "contact_stiffness_scale": 1.0,
+      "method": "g1",
+      "method_label": "Local\u2013Global VBD",
+      "non_cable_joint_damping": 200.0,
+      "non_cable_joint_stiffness_n_per_m": 300000.0,
+      "runs": 3,
+      "schedule": "one early 6D KKT/CR pass + 9 local sweeps",
+      "summary": {
+        "closure_rms_mm": {
+          "max": 0.15209114208947716,
+          "median": 0.15173602165453404,
+          "min": 0.15110599494333718
+        },
+        "final_lift_error_mm": {
+          "max": 2.1691799163818386,
+          "median": 1.5519738197326687,
+          "min": 1.3166546821594265
+        },
+        "median_force_ratio": {
+          "max": 7.975046155670191,
+          "median": 7.966477485262261,
+          "min": 7.963552699471941
+        },
+        "peak_pulley_speed_rad_s": {
+          "max": 3.3947436809539795,
+          "median": 3.302703619003296,
+          "min": 3.174755096435547
+        },
+        "pull_force_rms_n": {
+          "max": 1.0153619561549265,
+          "median": 0.7860988625202259,
+          "min": 0.687412723049517
+        },
+        "settled_lift_rms_mm": {
+          "max": 2.222262980589446,
+          "median": 1.6000987980307546,
+          "min": 1.343880137570183
+        },
+        "trajectory_time_s": {
+          "max": 47.636713014915586,
+          "median": 47.62196567701176,
+          "min": 47.29544643498957
+        }
+      },
+      "trials": [
+        {
+          "closure_rms_mm": 0.15173602165453404,
+          "final_lift_error_mm": 1.5519738197326687,
+          "median_force_ratio": 7.966477485262261,
+          "peak_pulley_speed_rad_s": 3.3947436809539795,
+          "pull_force_rms_n": 0.7860988625202259,
+          "settled_lift_rms_mm": 1.6000987980307546,
+          "trajectory_time_s": 47.62196567701176,
+          "trial": 1
+        },
+        {
+          "closure_rms_mm": 0.15110599494333718,
+          "final_lift_error_mm": 2.1691799163818386,
+          "median_force_ratio": 7.975046155670191,
+          "peak_pulley_speed_rad_s": 3.302703619003296,
+          "pull_force_rms_n": 1.0153619561549265,
+          "settled_lift_rms_mm": 2.222262980589446,
+          "trajectory_time_s": 47.636713014915586,
+          "trial": 2
+        },
+        {
+          "closure_rms_mm": 0.15209114208947716,
+          "final_lift_error_mm": 1.3166546821594265,
+          "median_force_ratio": 7.963552699471941,
+          "peak_pulley_speed_rad_s": 3.174755096435547,
+          "pull_force_rms_n": 0.687412723049517,
+          "settled_lift_rms_mm": 1.343880137570183,
+          "trajectory_time_s": 47.29544643498957,
+          "trial": 3
+        }
+      ],
+      "weight_kg": 12.0
+    },
+    {
+      "advantage": 20,
+      "cable_stretch_stiffness_n_per_m": 100000.0,
+      "contact_damping_scale": null,
+      "contact_stiffness_scale": null,
+      "method": "legacy",
+      "method_label": "Legacy local VBD",
+      "non_cable_joint_damping": null,
+      "non_cable_joint_stiffness_n_per_m": null,
+      "runs": 3,
+      "schedule": "10 local VBD iterations",
+      "summary": {
+        "closure_rms_mm": {
+          "max": 0.15501965719427416,
+          "median": 0.1446951799920311,
+          "min": 0.13951447290539148
+        },
+        "final_lift_error_mm": {
+          "max": 7.671852111816406,
+          "median": 6.19234561920166,
+          "min": 2.70106315612793
+        },
+        "median_force_ratio": {
+          "max": 23.601600989542423,
+          "median": 23.510642721536907,
+          "min": 23.49114443606353
+        },
+        "peak_pulley_speed_rad_s": {
+          "max": 694.45654296875,
+          "median": 674.5830688476562,
+          "min": 407.532958984375
+        },
+        "pull_force_rms_n": {
+          "max": 5.582041049652515,
+          "median": 5.230183244546056,
+          "min": 3.4097117097099026
+        },
+        "settled_lift_rms_mm": {
+          "max": 7.679419694736803,
+          "median": 6.193134274081173,
+          "min": 2.7068895999276226
+        },
+        "trajectory_time_s": {
+          "max": 59.41456305794418,
+          "median": 59.085159154143184,
+          "min": 58.9349429551512
+        }
+      },
+      "trials": [
+        {
+          "closure_rms_mm": 0.1446951799920311,
+          "final_lift_error_mm": 6.19234561920166,
+          "median_force_ratio": 23.510642721536907,
+          "peak_pulley_speed_rad_s": 694.45654296875,
+          "pull_force_rms_n": 5.230183244546056,
+          "settled_lift_rms_mm": 6.193134274081173,
+          "trajectory_time_s": 59.085159154143184,
+          "trial": 1
+        },
+        {
+          "closure_rms_mm": 0.13951447290539148,
+          "final_lift_error_mm": 7.671852111816406,
+          "median_force_ratio": 23.49114443606353,
+          "peak_pulley_speed_rad_s": 674.5830688476562,
+          "pull_force_rms_n": 5.582041049652515,
+          "settled_lift_rms_mm": 7.679419694736803,
+          "trajectory_time_s": 58.9349429551512,
+          "trial": 2
+        },
+        {
+          "closure_rms_mm": 0.15501965719427416,
+          "final_lift_error_mm": 2.70106315612793,
+          "median_force_ratio": 23.601600989542423,
+          "peak_pulley_speed_rad_s": 407.532958984375,
+          "pull_force_rms_n": 3.4097117097099026,
+          "settled_lift_rms_mm": 2.7068895999276226,
+          "trajectory_time_s": 59.41456305794418,
+          "trial": 3
+        }
+      ],
+      "weight_kg": 30.0
+    },
+    {
+      "advantage": 20,
+      "cable_stretch_stiffness_n_per_m": 100000.0,
+      "contact_damping_scale": null,
+      "contact_stiffness_scale": null,
+      "method": "pcr",
+      "method_label": "Reference scalar PCR",
+      "non_cable_joint_damping": null,
+      "non_cable_joint_stiffness_n_per_m": null,
+      "runs": 3,
+      "schedule": "scalar translation PCR on every one of 10 local iterations",
+      "summary": {
+        "closure_rms_mm": {
+          "max": 0.14379090017405158,
+          "median": 0.1406718479034658,
+          "min": 0.13023414472318431
+        },
+        "final_lift_error_mm": {
+          "max": 7.684726715087891,
+          "median": 4.187960624694824,
+          "min": 3.0548167228698735
+        },
+        "median_force_ratio": {
+          "max": 20.78494840875215,
+          "median": 20.649897365581168,
+          "min": 20.58596649970153
+        },
+        "peak_pulley_speed_rad_s": {
+          "max": 642.741455078125,
+          "median": 547.3523559570312,
+          "min": 529.9214477539062
+        },
+        "pull_force_rms_n": {
+          "max": 5.074578636522217,
+          "median": 3.7199059152168794,
+          "min": 2.6534967723885106
+        },
+        "settled_lift_rms_mm": {
+          "max": 7.68073926823732,
+          "median": 4.187941618481273,
+          "min": 3.060384581140561
+        },
+        "trajectory_time_s": {
+          "max": 63.91311697335914,
+          "median": 63.657167586963624,
+          "min": 63.57765554310754
+        }
+      },
+      "trials": [
+        {
+          "closure_rms_mm": 0.1406718479034658,
+          "final_lift_error_mm": 4.187960624694824,
+          "median_force_ratio": 20.649897365581168,
+          "peak_pulley_speed_rad_s": 642.741455078125,
+          "pull_force_rms_n": 3.7199059152168794,
+          "settled_lift_rms_mm": 4.187941618481273,
+          "trajectory_time_s": 63.657167586963624,
+          "trial": 1
+        },
+        {
+          "closure_rms_mm": 0.14379090017405158,
+          "final_lift_error_mm": 3.0548167228698735,
+          "median_force_ratio": 20.58596649970153,
+          "peak_pulley_speed_rad_s": 529.9214477539062,
+          "pull_force_rms_n": 2.6534967723885106,
+          "settled_lift_rms_mm": 3.060384581140561,
+          "trajectory_time_s": 63.91311697335914,
+          "trial": 2
+        },
+        {
+          "closure_rms_mm": 0.13023414472318431,
+          "final_lift_error_mm": 7.684726715087891,
+          "median_force_ratio": 20.78494840875215,
+          "peak_pulley_speed_rad_s": 547.3523559570312,
+          "pull_force_rms_n": 5.074578636522217,
+          "settled_lift_rms_mm": 7.68073926823732,
+          "trajectory_time_s": 63.57765554310754,
+          "trial": 3
+        }
+      ],
+      "weight_kg": 30.0
+    },
+    {
+      "advantage": 20,
+      "cable_stretch_stiffness_n_per_m": 100000.0,
+      "contact_damping_scale": 1.4142135623730951,
+      "contact_stiffness_scale": 2.0,
+      "method": "g1",
+      "method_label": "Local\u2013Global VBD",
+      "non_cable_joint_damping": 0.0,
+      "non_cable_joint_stiffness_n_per_m": 200000.0,
+      "runs": 3,
+      "schedule": "one early 6D KKT/CR pass + 9 local sweeps",
+      "summary": {
+        "closure_rms_mm": {
+          "max": 0.15282739255614505,
+          "median": 0.15195928670764178,
+          "min": 0.15168518898362923
+        },
+        "final_lift_error_mm": {
+          "max": 1.0156822204589848,
+          "median": 0.9644222259521489,
+          "min": 0.3901910781860356
+        },
+        "median_force_ratio": {
+          "max": 20.121652972818293,
+          "median": 20.100494567767097,
+          "min": 19.99196660934628
+        },
+        "peak_pulley_speed_rad_s": {
+          "max": 3.5118627548217773,
+          "median": 3.1953206062316895,
+          "min": 3.189955711364746
+        },
+        "pull_force_rms_n": {
+          "max": 1.1479669856819572,
+          "median": 1.1133331749617945,
+          "min": 0.9041941775381712
+        },
+        "settled_lift_rms_mm": {
+          "max": 1.047681955544109,
+          "median": 0.9623663508208816,
+          "min": 0.4083978701546709
+        },
+        "trajectory_time_s": {
+          "max": 70.12613791786134,
+          "median": 69.8558479337953,
+          "min": 69.50473999092355
+        }
+      },
+      "trials": [
+        {
+          "closure_rms_mm": 0.15168518898362923,
+          "final_lift_error_mm": 1.0156822204589848,
+          "median_force_ratio": 20.121652972818293,
+          "peak_pulley_speed_rad_s": 3.189955711364746,
+          "pull_force_rms_n": 1.1479669856819572,
+          "settled_lift_rms_mm": 1.047681955544109,
+          "trajectory_time_s": 70.12613791786134,
+          "trial": 1
+        },
+        {
+          "closure_rms_mm": 0.15282739255614505,
+          "final_lift_error_mm": 0.3901910781860356,
+          "median_force_ratio": 19.99196660934628,
+          "peak_pulley_speed_rad_s": 3.5118627548217773,
+          "pull_force_rms_n": 0.9041941775381712,
+          "settled_lift_rms_mm": 0.4083978701546709,
+          "trajectory_time_s": 69.50473999092355,
+          "trial": 2
+        },
+        {
+          "closure_rms_mm": 0.15195928670764178,
+          "final_lift_error_mm": 0.9644222259521489,
+          "median_force_ratio": 20.100494567767097,
+          "peak_pulley_speed_rad_s": 3.1953206062316895,
+          "pull_force_rms_n": 1.1133331749617945,
+          "settled_lift_rms_mm": 0.9623663508208816,
+          "trajectory_time_s": 69.8558479337953,
+          "trial": 3
+        }
+      ],
+      "weight_kg": 30.0
+    }
+  ],
+  "vbd_iterations": 10
+}
