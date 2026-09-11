@@ -72903,9 +72903,9 @@
   "completed_at_utc": "2026-09-10T04:56:10.048099+00:00",
   "video": {
     "path": "reports/vbd_alm_comparison/targeted_solver_comparison/videos/droop_local_vs_global_latest.mp4",
-    "sha256": "a2cdf6ee16622266aca85fb04730794db842251ce999ca6c01d9ed95a4c64747",
+    "sha256": "45d4029d641062ace3d21a1523f8082bbced5e1dd2b904d5d07c4f1c58772b4f",
     "poster_path": "reports/vbd_alm_comparison/targeted_solver_comparison/videos/droop_local_vs_global_latest.jpg",
-    "poster_sha256": "26bc0ca6a82f608af77118e42471a3576c20f7f2c28ba4e99572c9855578a825"
+    "poster_sha256": "b5112b296cf048d8b74ec363fa62e14d6096bf109086a8533b4ef769163a2dbb"
   },
   "upstream_main_revalidation": {
     "path": "/home/jumyungc/JC/git/newton_second/newton/reports/vbd_fused_tree_levels/droop_20260910_upstream_latest_alm_i20.json",
@@ -72946,5 +72946,11 @@
     ],
     "note": "Latest-main nodes exactly equal the cached video trajectory at every recorded checkpoint."
   },
-  "reencoded_at_utc": "2026-09-10T10:00:51.719947+00:00"
+  "reencoded_at_utc": "2026-09-11T07:53:56.271095+00:00",
+  "render": {
+    "style": "newton_viewer_gl_replay",
+    "source": "verified cached CUDA trajectories",
+    "oracle_overlay": "independent nonlinear discrete equilibrium",
+    "layout": "stretch 1e4/1e6 by upstream-main I20/current I4-G1"
+  }
 }
