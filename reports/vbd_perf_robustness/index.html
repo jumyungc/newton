@@ -1,0 +1,785 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VBD Rigid + Cable: Perf & Robustness</title>
+  <style>
+:root {
+  color-scheme: light;
+  --ink: #17202a;
+  --muted: #5f6f82;
+  --line: #d9e0e8;
+  --panel: #f7f9fb;
+  --accent: #1f6f8b;
+  --good: #146c43;
+  --warn: #9a5b00;
+  --pending: #6b7280;
+  --max: 1280px;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #ffffff;
+  color: var(--ink);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+header { border-bottom: 1px solid var(--line); background: #fbfcfd; }
+main, .header-inner, footer { width: min(var(--max), calc(100vw - 32px)); margin: 0 auto; }
+.header-inner { padding: 36px 0 28px; }
+h1 { margin: 0 0 10px; font-size: clamp(2rem, 4vw, 3.35rem); line-height: 1.05; letter-spacing: 0; }
+.subtitle { max-width: 850px; margin: 0; color: var(--muted); font-size: 1.05rem; }
+.metric-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
+.metric { border: 1px solid var(--line); border-radius: 8px; background: #ffffff; padding: 14px 16px; }
+.metric .label { color: var(--muted); font-size: 0.82rem; font-weight: 650; text-transform: uppercase; }
+.metric .value { display: block; margin-top: 4px; font-size: 1.25rem; font-weight: 760; }
+.metric .value.pending { color: var(--pending); }
+.metric .value.warn { color: var(--warn); }
+.metric .value.good { color: var(--good); }
+main { padding: 28px 0 48px; }
+section { margin: 0 0 34px; }
+h2 { margin: 0 0 10px; font-size: 1.45rem; line-height: 1.2; letter-spacing: 0; }
+h3 { margin: 0 0 10px; font-size: 1rem; line-height: 1.25; }
+p { margin: 0 0 12px; }
+a { color: var(--accent); }
+code {
+  padding: 0.08em 0.25em;
+  border-radius: 4px;
+  background: #edf2f7;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+}
+pre { margin: 12px 0 0; padding: 14px 16px; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+pre code { padding: 0; background: transparent; }
+.plot-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 18px; }
+.breadcrumb { margin: 0 0 14px; font-size: 0.92rem; font-weight: 650; }
+.breadcrumb a { color: var(--accent); text-decoration: none; }
+.breadcrumb a:hover { text-decoration: underline; }
+.video-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; max-width: 1120px; margin: 18px auto 0; }
+figure { margin: 0; border: 1px solid var(--line); border-radius: 8px; background: #ffffff; overflow: hidden; }
+figure img, video { display: block; width: 100%; height: auto; }
+video { background: #111827; }
+figcaption { padding: 10px 12px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.92rem; }
+.card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+.card { border: 1px solid var(--line); border-radius: 8px; padding: 14px; background: #ffffff; display: block; color: inherit; text-decoration: none; }
+.card strong { display: block; margin-bottom: 6px; }
+.card.pending { background: var(--panel); }
+.card .badge { display: inline-block; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; padding: 2px 8px; border-radius: 999px; margin-top: 8px; }
+.badge.pending { background: #eef2f7; color: var(--pending); }
+.badge.in-progress { background: #fff4dc; color: var(--warn); }
+.badge.done { background: #d8f0e0; color: var(--good); }
+.note { border-left: 4px solid var(--accent); background: var(--panel); padding: 12px 14px; }
+.placeholder { border: 1px dashed var(--line); border-radius: 8px; padding: 22px; background: var(--panel); color: var(--muted); text-align: center; font-style: italic; }
+table { width: 100%; border-collapse: collapse; border: 1px solid var(--line); background: white; }
+th, td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+th { background: var(--panel); color: var(--muted); font-size: 0.86rem; text-transform: uppercase; }
+ul.compact { margin: 0; padding-left: 1.15rem; }
+ul.compact li { margin: 0.25rem 0; }
+footer { padding: 0 0 42px; color: var(--muted); font-size: 0.9rem; }
+@media (max-width: 820px) {
+  .metric-row, .card-grid, .plot-grid, .video-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <p class="breadcrumb"><a href="../">← Reports index</a></p>
+      <h1>VBD Rigid + Cable: Perf &amp; Robustness</h1>
+      <p class="subtitle">
+        A semantics-preserving performance and robustness pass on Newton's VBD solver for rigid bodies and cables.
+        Three stress workloads — contact-intensive, joint-intensive, and a mixed worst-case — measured fairly,
+        profiled, and improved with a strict no-math-change rule.
+      </p>
+      <div class="metric-row">
+        <div class="metric"><span class="label">Stage</span><span class="value warn">3 — Optimizing</span></div>
+        <div class="metric"><span class="label">A: contact pile</span><span class="value good">5.10 → <strong>4.79 ms</strong> (6.1%)</span></div>
+        <div class="metric"><span class="label">B: cantilevers</span><span class="value good">4.71 → <strong>4.48 ms</strong> (4.9%)</span></div>
+        <div class="metric"><span class="label">C: braided mix</span><span class="value good">5.31 → <strong>5.02 ms</strong> (5.5%)</span></div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+
+    <section>
+      <h2>What this report is</h2>
+      <p>
+        Newton's VBD solver (Vertex Block Descent, augmented Lagrangian variant for rigid bodies and cables) is the
+        target. This report tracks an effort to make the rigid + cable paths simultaneously the <strong>fastest</strong>
+        and <strong>most robust</strong>, scoped strictly to two source files:
+        <code>newton/_src/solvers/vbd/solver_vbd.py</code> and
+        <code>newton/_src/solvers/vbd/rigid_vbd_kernels.py</code>.
+      </p>
+      <p>
+        All optimizations must preserve the math — same energy, same residual, same penetration depth within
+        floating-point tolerance. The report grows as work lands; check back to see new sections fill in.
+      </p>
+      <div class="note">
+        <strong>Live progress.</strong> This page updates as each milestone is pushed. The status tiles above and
+        section badges below reflect the current state. Last updated: <code>2026-06-11 — <strong>P1 + P2 landed</strong> on top of Opt #5: per-substep <code>step_joint_C0_lambda</code> + <code>compute_cable_dahl_parameters</code> moved to the aux stream so they overlap with main's <code>apply_joint_forces</code> + <code>forward_step_rigid_bodies</code>; redundant <code>body_body_contact_stick_flag.zero_()</code> removed (kernel writes every active slot unconditionally). <strong>Final speedups: A: 6.1%, B: 4.9%, C: 5.5%</strong>. Math bit-exact preserved on B. P3 (lambda zero) turned out to be necessary in the no-history branch — not a redundancy.</code>
+      </div>
+    </section>
+
+    <section>
+      <h2>Workloads</h2>
+      <p>Three new VBD examples, designed to stress complementary code paths under fair, repeatable conditions.</p>
+      <div class="card-grid">
+        <a class="card" href="#workload-a">
+          <strong>A. Contact-intensive cable pile</strong>
+          <span>1152 bodies, 6 layers × 8 cables each, spacing <code>2.4 · radius</code>. Active-contact count settles at ~470 (peak 540); step time 27.5 ms p50 on L40. <em>See section below for plots and video.</em></span>
+          <span class="badge in-progress">Draft baseline</span>
+        </a>
+        <a class="card" href="#workload-b">
+          <strong>B. Joint-intensive cantilever cables</strong>
+          <span>8 horizontal cantilever cables × 200 segments each (1600 bodies). All joints loaded by gravity continuously, cables spaced 2m apart so contact path stays idle. 27.9 ms p50.</span>
+          <span class="badge in-progress">Draft baseline</span>
+        </a>
+        <a class="card" href="#workload-c">
+          <strong>C. Mixed worst-case (braided)</strong>
+          <span>4 layers × 4 lanes of long (100-segment) cables in a cross-stack — 1600 bodies AND ~2080 active contacts at steady state. Both paths heavily loaded. 28.7 ms p50.</span>
+          <span class="badge in-progress">Draft baseline</span>
+        </a>
+      </div>
+    </section>
+
+    <section>
+      <h2>Methodology</h2>
+      <h3>Metrics</h3>
+      <ul class="compact">
+        <li><strong>Time:</strong> wall time per step (p50 / p99 / std over N steps after warmup), per-kernel breakdown via <code>wp.ScopedTimer</code>.</li>
+        <li><strong>Quality:</strong> VBD residual at last iteration, max + mean penetration depth, energy drift (kinetic + elastic), active-contact count, NaN / divergence (hard fail).</li>
+        <li><strong>Determinism:</strong> same seed → re-run → bit-exact target, <code>np.allclose</code> at fp32 noise as a pass.</li>
+      </ul>
+      <h3>Fairness</h3>
+      <ul class="compact">
+        <li>Fixed seeds, warmup steps discarded, fixed iteration count (not fixed wall-time — "same work, less time" reads cleaner).</li>
+        <li>GPU clocks locked where possible.</li>
+        <li>Baseline measured on <code>vbd-perf</code> HEAD (== <code>vbd-cable-twist-bend-split</code> HEAD, commit <code>cdadc8a1</code>) before any code edits land.</li>
+      </ul>
+    </section>
+
+    <section id="workload-a">
+      <h2>Workload A — Contact-Intensive Cable Pile</h2>
+      <p>
+        A tight cable pile designed to saturate the body-body contact path. Cables alternate between X- and
+        Y-aligned orientation per layer, with inter-cable spacing of <code>2.4 · cable_radius</code> (existing
+        validation example uses ~6×, far too loose for a perf workload). The result is hundreds of simultaneous
+        body-body contacts as the pile settles under gravity.
+      </p>
+
+      <table style="margin: 14px 0;">
+        <tr><th>Parameter</th><th>Value</th></tr>
+        <tr><td>Layers × lanes</td><td>6 × 8</td></tr>
+        <tr><td>Elements per cable</td><td>24 (1152 bodies total)</td></tr>
+        <tr><td>Cable radius</td><td>0.012 m</td></tr>
+        <tr><td>Lane spacing</td><td>2.4 × radius = 0.0288 m</td></tr>
+        <tr><td>Layer vertical step</td><td>2.2 × radius = 0.0264 m</td></tr>
+        <tr><td>VBD iterations per substep</td><td>5</td></tr>
+        <tr><td>Substeps per frame</td><td>10</td></tr>
+        <tr><td>Contact mode</td><td>hard (augmented Lagrangian), <code>rigid_contact_history=True</code></td></tr>
+      </table>
+
+      <h3>Baseline measurement (180 frames, 20 warmup)</h3>
+      <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 12px 0;">
+        <div class="metric"><span class="label">Step time p50</span><span class="value good">27.48 ms</span></div>
+        <div class="metric"><span class="label">Step time p99</span><span class="value">29.22 ms</span></div>
+        <div class="metric"><span class="label">Contacts (steady)</span><span class="value">~470</span></div>
+        <div class="metric"><span class="label">Final hash</span><span class="value" style="font-family: ui-monospace; font-size: 0.95rem;">stable</span></div>
+      </div>
+
+      <figure class="video-main" style="max-width: 920px; margin: 14px auto;">
+        <video src="assets/workload_a.mp4" autoplay loop muted playsinline controls></video>
+        <figcaption>Workload A — top and side views of the pile as it settles. Cable polylines reconstructed from per-body positions snapshotted every 3 frames.</figcaption>
+      </figure>
+
+      <figure>
+        <img src="assets/workload_a_dashboard.png" alt="Workload A dashboard: step time, active contacts, penetration over time.">
+        <figcaption>Per-frame metrics. Step time is consistent (~27.5 ms p50, occasional spike at frame 6 likely first-iteration cache miss). Active contacts settle from ~200 to ~470. Penetration plot reveals an issue — see Findings below.</figcaption>
+      </figure>
+    </section>
+
+    <section id="workload-b">
+      <h2>Workload B — Joint-Intensive Cantilever Cables</h2>
+      <p>
+        Eight long cables, each anchored at one end and extending horizontally. Gravity bends every segment;
+        all bend and twist joint constraints are loaded continuously, exercising
+        <code>step_joint_C0_lambda</code> and the per-color rigid solve. Cables are spaced 2&nbsp;m apart in Y
+        — well outside the contact range — so the contact path stays effectively idle. Two transient ground-
+        contact bursts appear when the cables overshoot their settle point and graze the ground; those are
+        useful as a sanity check that the contact path is wired but otherwise irrelevant to the metric.
+      </p>
+
+      <table style="margin: 14px 0;">
+        <tr><th>Parameter</th><th>Value</th></tr>
+        <tr><td>Cables</td><td>8</td></tr>
+        <tr><td>Segments per cable</td><td>200 (1600 bodies, ~1592 joint slots)</td></tr>
+        <tr><td>Segment length</td><td>0.03 m (cable length 6 m)</td></tr>
+        <tr><td>Cable radius</td><td>0.006 m</td></tr>
+        <tr><td>Cable spacing (Y)</td><td>2.0 m</td></tr>
+        <tr><td>Anchor height</td><td>4.0 m</td></tr>
+        <tr><td>Initial droop (parabolic, +X)</td><td>0.04 × cable length</td></tr>
+        <tr><td>Bend stiffness / twist stiffness</td><td>100 / 70 (N·m²)</td></tr>
+        <tr><td>VBD iterations per substep</td><td>5</td></tr>
+        <tr><td>Substeps per frame</td><td>10</td></tr>
+      </table>
+
+      <h3>Baseline measurement (180 frames, 15 warmup)</h3>
+      <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 12px 0;">
+        <div class="metric"><span class="label">Step time p50</span><span class="value good">27.93 ms</span></div>
+        <div class="metric"><span class="label">Step time p99</span><span class="value">29.75 ms</span></div>
+        <div class="metric"><span class="label">Contacts (median)</span><span class="value">0</span></div>
+        <div class="metric"><span class="label">Penetration</span><span class="value good">0.000 mm</span></div>
+      </div>
+
+      <figure class="video-main" style="max-width: 920px; margin: 14px auto;">
+        <video src="assets/workload_b.mp4" autoplay loop muted playsinline controls></video>
+        <figcaption>Workload B — top and side views of the cantilever cables swinging under gravity. Anchors are at x=0 on each Y row; the side view shows the swing arc.</figcaption>
+      </figure>
+
+      <figure>
+        <img src="assets/workload_b_dashboard.png" alt="Workload B dashboard: step time, active contacts, penetration over time.">
+        <figcaption>Per-frame metrics. Step time steady at ~28 ms (one outlier at ~31 ms, likely a JIT/cache effect since it doesn't repeat). Contact bursts at frames ~38, ~90, ~160 are the swing-down ground grazes; penetration remains 0 throughout — an interesting contrast with Workload A (see Findings).</figcaption>
+      </figure>
+
+      <h3>A vs B per-body throughput comparison</h3>
+      <p>
+        Side-by-side: 1152 bodies + ~470 contacts → 27.48 ms (A) vs. 1600 bodies + 0 contacts → 27.93 ms (B).
+        The joint-heavy workload is <em>slightly</em> slower despite more bodies, which suggests a baseline
+        fixed cost (CUDA launch overhead, Python/Warp interop, contacts pipeline warm-up) that dominates over
+        the marginal cost of either contact accumulation or joint solving at these sizes. <strong>This is a
+        strong signal that CUDA graph capture is the first perf lever to investigate</strong> — neither
+        workload captures the substep loop into a graph, but <code>example_cable_pile.py</code> does, and
+        likely sees significantly lower step times.
+      </p>
+    </section>
+
+    <section id="workload-c">
+      <h2>Workload C — Braided (Mixed Worst-Case)</h2>
+      <p>
+        Fewer, much longer cables than Workload A, arranged in a tight cross-stack. Each cable has 100 segments
+        (versus 24 in A and 200 in B), so the per-cable joint workload is substantial, while the tight
+        inter-cable spacing keeps the body-body contact accumulation path saturated. Both VBD code paths are
+        exercised together — this is the closest thing to a real-world cable bundle stress test.
+      </p>
+
+      <table style="margin: 14px 0;">
+        <tr><th>Parameter</th><th>Value</th></tr>
+        <tr><td>Layers × lanes</td><td>4 × 4 = 16 cables</td></tr>
+        <tr><td>Segments per cable</td><td>100 (1600 bodies, ~1584 joint slots)</td></tr>
+        <tr><td>Cable radius</td><td>0.012 m</td></tr>
+        <tr><td>Lane spacing</td><td>2.4 × radius = 0.0288 m</td></tr>
+        <tr><td>Layer vertical step</td><td>2.2 × radius = 0.0264 m</td></tr>
+        <tr><td>Bend stiffness / twist stiffness</td><td>50 / 40 (N·m²)</td></tr>
+        <tr><td>VBD iterations per substep</td><td>5</td></tr>
+        <tr><td>Substeps per frame</td><td>10</td></tr>
+      </table>
+
+      <h3>Baseline measurement (180 frames, 15 warmup)</h3>
+      <div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 12px 0;">
+        <div class="metric"><span class="label">Step time p50</span><span class="value good">28.66 ms</span></div>
+        <div class="metric"><span class="label">Step time p99</span><span class="value">30.06 ms</span></div>
+        <div class="metric"><span class="label">Contacts (steady)</span><span class="value">~2080</span></div>
+        <div class="metric"><span class="label">Contacts peak</span><span class="value warn">2220</span></div>
+      </div>
+
+      <figure class="video-main" style="max-width: 920px; margin: 14px auto;">
+        <video src="assets/workload_c.mp4" autoplay loop muted playsinline controls></video>
+        <figcaption>Workload C — the cross-stacked cables settle, bending visibly where they cross under their own weight + the weight of higher layers. Top view shows the bend pattern clearly.</figcaption>
+      </figure>
+
+      <figure>
+        <img src="assets/workload_c_dashboard.png" alt="Workload C dashboard: step time, active contacts, penetration over time.">
+        <figcaption>Per-frame metrics. Step time consistent at ~28.7 ms. Active contact count starts at 2100 (cables initialized in tight contact), dips to near-zero in frames 2–4 as penalty forces push them apart, then ramps back to ~2080 as the stack settles. Penetration metric saturates at <code>2·radius</code> (same artifact as Workload A — see Finding 1).</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2>Baseline summary (current vbd-perf HEAD)</h2>
+      <p>
+        Commit: <code>cdadc8a1</code> ("Minor example polishment", top of <code>vbd-cable-twist-bend-split</code>).
+        Device: NVIDIA L40 (sm_89, 47 GiB), Warp 1.14.0, CUDA Toolkit 12.9, fp32. Measurement: 180 frames after
+        15-frame warmup; per-frame = 10 substeps × 5 VBD iterations. Determinism (same-seed repeat): not yet
+        measured (next step).
+      </p>
+      <table style="margin: 10px 0;">
+        <tr>
+          <th>Workload</th><th>Bodies</th><th>Contacts p50</th>
+          <th>Step time p50 (ms)</th><th>Step time p99 (ms)</th><th>Step time std (ms)</th>
+        </tr>
+        <tr><td>A. Contact pile</td><td>1152</td><td>466</td><td>27.48</td><td>29.22</td><td>0.43</td></tr>
+        <tr><td>B. Cantilever cables</td><td>1600</td><td>0</td><td>27.93</td><td>29.75</td><td>0.36</td></tr>
+        <tr><td>C. Braided mix</td><td>1600</td><td>2079</td><td>28.66</td><td>30.06</td><td>0.32</td></tr>
+      </table>
+
+      <p>
+        <strong>Headline observation (Finding 2 below):</strong> wildly different work profiles produce step times
+        within ~4% of each other. Going from 0 contacts to 2080 contacts costs ~0.7 ms of the 28 ms step.
+        That is the optimization handle for both Finding 2 (fixed-cost floor) and Finding 3 (graph capture
+        — neither of these examples captures the substep loop into a CUDA graph, while
+        <code>example_cable_pile.py</code> does).
+      </p>
+    </section>
+
+    <section>
+      <h2>Optimizations</h2>
+
+      <h3>Baseline framing — graph capture is assumed</h3>
+      <p>
+        Per the user, CUDA graph capture is the production-default mode for newton VBD. The captured numbers
+        below are the <strong>baseline</strong>, not an "optimization". The earlier uncaptured numbers
+        (27–29 ms) reflect a measurement bias from the harness, not a real workload setting.
+      </p>
+
+      <table style="margin: 10px 0;">
+        <tr>
+          <th>Workload</th><th>Bodies</th><th>Contacts p50</th>
+          <th>Step time p50</th><th>Step time p99</th><th>Step time std</th>
+        </tr>
+        <tr><td>A. Contact pile</td><td>1152</td><td>459</td><td><strong>5.12 ms</strong></td><td>5.17 ms</td><td>0.03 ms</td></tr>
+        <tr><td>B. Cantilever cables</td><td>1600</td><td>0</td><td><strong>4.70 ms</strong></td><td>5.14 ms</td><td>0.21 ms</td></tr>
+        <tr><td>C. Braided mix</td><td>1600</td><td>2096</td><td><strong>5.33 ms</strong></td><td>5.34 ms</td><td>0.05 ms</td></tr>
+      </table>
+
+      <p>
+        Per-contact marginal cost is now visible cleanly: going from 0 → 459 contacts costs ~0.4 ms;
+        459 → 2096 costs another ~0.2 ms. Roughly <strong>0.3 µs/contact·frame</strong> at small counts,
+        scaling sub-linearly thanks to kernel-level parallelism. Future contact-path optimizations get
+        measured against this.
+      </p>
+
+      <h3 style="margin-top: 22px;">Opt #2 — Fuse the per-iteration zero kernels (attempted)</h3>
+      <p>
+        At the top of every AVBD iteration, <code>_solve_rigid_body_iteration</code> zeroes five
+        accumulators (<code>body_forces</code>, <code>body_torques</code>, <code>body_hessian_aa</code>,
+        <code>body_hessian_al</code>, <code>body_hessian_ll</code>) via five separate
+        <code>wp.array.zero_()</code> calls. Fused them into a single <code>zero_rigid_iter_accumulators</code>
+        kernel: 5 launches → 1 per iteration, i.e. 200 fewer launches per frame at 5 iter × 10 substeps.
+      </p>
+      <p>
+        <strong>Result: no measurable perf gain at the production iteration count.</strong> Pre-opt vs.
+        post-opt step times across all three workloads sit within 0.02 ms (well inside the per-frame std).
+        Graph capture already amortizes per-launch overhead inside the recorded graph, so reducing the
+        node count doesn't move the wall clock. Kept the change as a small simplification (one launch is
+        easier to read than five), but it's a refactor, not a perf win.
+      </p>
+      <p>
+        <strong>Math preservation:</strong> bit-exact on Workload B (the deterministic one). Cannot be
+        verified on A or C because of Finding 5 below — but the new kernel writes literal zero to each
+        slot, so it is by construction equivalent to <code>zero_()</code>.
+      </p>
+
+      <h3 style="margin-top: 22px;">Opt #3 — Pass <code>contacts=None</code> for contact-free scenes (38% speedup on B)</h3>
+      <p>
+        Per-kernel profile of Workload B (1600 bodies, zero contacts) revealed something striking: the body-body
+        contact kernels are launched <strong>every substep regardless of whether there are any contacts</strong>.
+        Specifically:
+      </p>
+      <ul class="compact">
+        <li><code>accumulate_body_body_contacts_per_body</code>: 1.08 ms / frame across all three workloads — including B with zero contacts</li>
+        <li><code>update_duals_body_body_contacts</code>: 0.23 ms / frame, same pattern</li>
+        <li>Various contact-init kernels (build lists, contact materials, etc.): another ~0.5 ms / frame</li>
+      </ul>
+      <p>
+        Each kernel internally early-exits when the contact count is zero, but the GPU still pays launch
+        latency (10–20 µs × ~100 launches/frame). For a joint-only workload this is pure waste.
+      </p>
+      <p>
+        The fix turns out to require <strong>no solver code change</strong>: the solver already supports
+        <code>contacts=None</code>, which short-circuits all body-body contact processing in
+        <code>_initialize_rigid_bodies</code> and <code>_solve_rigid_body_iteration</code>. Production examples
+        that don't have contacts (cable-only, joint-only) should pass <code>None</code> instead of an empty
+        <code>Contacts</code> object.
+      </p>
+
+      <table style="margin: 10px 0;">
+        <tr>
+          <th>Workload</th><th>Before (contacts=valid)</th><th>After (contacts=None)</th><th>Speedup</th>
+          <th>Math preservation</th>
+        </tr>
+        <tr><td>B. Cantilever cables (joint-only)</td><td>4.71 ms p50</td><td><strong>2.90 ms p50</strong></td><td><strong>1.62×</strong></td><td>bit-exact (identical hash)</td></tr>
+        <tr><td>A. Contact pile</td><td colspan="4" style="color: var(--muted)">N/A — workload requires contacts</td></tr>
+        <tr><td>C. Braided</td><td colspan="4" style="color: var(--muted)">N/A — workload requires contacts</td></tr>
+      </table>
+
+      <figure>
+        <img src="assets/workload_b_no_contacts_dashboard.png" alt="Workload B optimized dashboard">
+        <figcaption>Workload B with <code>contacts=None</code>. Step time settles at 2.90 ms p50 with std of 0.001 ms (essentially clock-locked). The 1.8 ms saved is the entire contact-pipeline launch overhead.</figcaption>
+      </figure>
+
+      <p>
+        <strong>Implications:</strong>
+      </p>
+      <ul class="compact">
+        <li>For users of newton VBD building cable-only or joint-only scenes: pass <code>None</code> to <code>solver.step()</code> and gain ~38%.</li>
+        <li>For users with sparse-contact scenes (e.g., 5–20 active contacts of a 10k-cap buffer), the same launch overhead applies. A future optimization could expose a per-step "no contacts this substep" hint to skip the launches without changing the model.</li>
+        <li>This is the first <strong>quantitatively significant</strong> finding in this report. Captured-mode baseline assumed.</li>
+      </ul>
+
+      <h3 style="margin-top: 22px;">Iteration-count vs quality sweep</h3>
+      <p>
+        With the bit-exact requirement relaxed (user direction), the biggest single perf knob is
+        <code>SolverVBD.iterations</code> — VBD inner iteration count per substep. Per-iteration cost is
+        roughly 0.8 ms / frame on these workloads, so the linear trade is large. Quality measured as
+        max/mean per-body position deviation from <code>iter=10</code> after 60 frames of free settling.
+      </p>
+      <table style="margin: 10px 0; font-size: 0.92rem;">
+        <tr>
+          <th>iter</th>
+          <th colspan="2">A. contact pile</th>
+          <th colspan="2">B. cantilevers</th>
+          <th colspan="2">C. braided mix</th>
+        </tr>
+        <tr>
+          <th></th><th>step (ms)</th><th>vs iter=10 mean</th>
+          <th>step (ms)</th><th>vs iter=10 mean</th>
+          <th>step (ms)</th><th>vs iter=10 mean</th>
+        </tr>
+        <tr><td>1</td><td>2.09</td><td>11.6 mm</td><td>1.82</td><td><strong style="color:#a63d40">1341 mm</strong> (cables fly)</td><td>2.18</td><td>2.58 mm</td></tr>
+        <tr><td>2</td><td>2.85</td><td>11.5 mm</td><td>2.55</td><td>321 mm</td><td>2.96</td><td>2.03 mm</td></tr>
+        <tr><td>3</td><td>3.61</td><td>10.4 mm</td><td>3.27</td><td>100 mm</td><td>3.74</td><td>1.55 mm</td></tr>
+        <tr><td>5 <em>(default)</em></td><td>5.10</td><td>5.4 mm</td><td>4.71</td><td>142 mm</td><td>5.34</td><td>2.48 mm</td></tr>
+        <tr><td>10</td><td>8.88</td><td>baseline</td><td>8.33</td><td>baseline</td><td>9.21</td><td>baseline</td></tr>
+      </table>
+      <p>
+        <strong>Workload-dependent conclusions:</strong>
+      </p>
+      <ul class="compact">
+        <li><strong>Cable-joint-heavy workloads (B):</strong> iter=5 has ~140 mm error vs iter=10. You probably want iter ≥ 7 for cantilever-style cable scenes, accepting ~6 ms / frame.</li>
+        <li><strong>Mixed/contact-heavy workloads (A, C):</strong> iter=3 already gives mean error under 11 mm. Trading ~30% perf for a small quality dip is a reasonable knob.</li>
+        <li>The default of 5 is a reasonable compromise but is not optimal for any single workload. Adaptive iteration (early-exit on convergence, e.g. by sampling residual every 2 iters) would help — but requires device→host sync, which breaks captured graphs.</li>
+      </ul>
+
+      <h3 style="margin-top: 22px;">Solver-side changes attempted and reverted</h3>
+      <p>
+        Two speculative micro-optimizations attempted to <code>solver_vbd.py</code> /
+        <code>rigid_vbd_kernels.py</code>; both reverted because they didn't move the wall clock on these
+        workloads and added code complexity:
+      </p>
+      <ul class="compact">
+        <li><strong>Fuse five per-iteration <code>zero_()</code> calls into one kernel.</strong> 200 fewer launches per frame, but captured-graph launch overhead is already amortized. No measurable delta; reverted in favor of clearer original code.</li>
+        <li><strong>Sort per-body contact lists by global contact index after build.</strong> Aimed at improving cache locality in <code>accumulate_body_body_contacts_per_body</code>. Added a per-body insertion-sort kernel — slight regression on Workload C (5.39 vs 5.33 ms), no gain on A or B. Reverted.</li>
+      </ul>
+      <p>
+        Takeaway: the captured graph already does an excellent job pipelining the existing kernels. Real
+        wins now require either (a) bigger structural changes that reduce per-iteration work, (b) profiling
+        inside the hot kernels with Nsight Compute, or (c) accepting a small quality trade by reducing
+        iterations on tolerant workloads.
+      </p>
+
+      <h3 style="margin-top: 22px;">Opt #4 — Lift the joint loop out of <code>solve_rigid_body</code> (attempted, reverted)</h3>
+      <p>
+        <code>solve_rigid_body</code> is 42–69% of GPU time. Inside it, each body thread loops over its
+        adjacent joints (1–2 per cable body) and calls <code>evaluate_joint_force_hessian</code> — a heavy
+        function reading ~30 arrays. Two threads (one per endpoint body) re-do most of the joint-side
+        compute. Tried lifting the joint loop out into a separate per-joint kernel that
+        <code>atomic_add</code>s its contributions into the same body-indexed accumulator buffers that
+        <code>accumulate_body_body_contacts_per_body</code> writes to. <code>solve_rigid_body</code>
+        becomes a simple inertial + accumulated externals + 6×6 LDL^T.
+      </p>
+      <p>
+        At the same iteration count (5), this <strong>diverged into NaN by frame 3</strong> on every
+        workload. Cause: the new structure makes joint accumulation Jacobi-style — joints use
+        start-of-iteration poses for both endpoints — instead of Gauss-Seidel (color N's joints see
+        color N-1's just-updated poses). Cable joints are stiff (k≈10⁵), and Jacobi accumulation at
+        high stiffness is unconditionally unstable for few iterations.
+      </p>
+      <p>
+        At <code>iter=10</code> the refactor is stable but slower than the iter=5 baseline:
+      </p>
+      <table style="margin: 10px 0;">
+        <tr>
+          <th>Workload</th><th>Baseline (iter=5, GS joints)</th><th>Refactor (iter=10, Jacobi joints, stable)</th><th>Net</th>
+        </tr>
+        <tr><td>A. Contact pile</td><td>5.09 ms</td><td>8.56 ms</td><td style="color:#a63d40">−68%</td></tr>
+        <tr><td>B. Cantilevers</td><td>4.71 ms</td><td>7.93 ms</td><td style="color:#a63d40">−68%</td></tr>
+        <tr><td>C. Braided</td><td>5.31 ms</td><td>8.83 ms</td><td style="color:#a63d40">−66%</td></tr>
+      </table>
+      <p>
+        <strong>What this means.</strong> The current code structure (per-body kernel with an inline joint
+        loop and Gauss-Seidel per-color ordering) is doing real convergence work, not just leaving perf on
+        the table. The "obvious" decoupling — splitting joint accumulation from the body solve — fails
+        because cable joints are too stiff for Jacobi accumulation. Reverted.
+      </p>
+      <p>
+        <strong>What would unlock this.</strong> A per-joint kernel that respects color ordering
+        (e.g. partition joints by which color group their bodies belong to, accumulate before each
+        color's solve, possibly with joints whose endpoints span colors handled separately) could
+        preserve Gauss-Seidel and still get the per-joint thread uniformity. Substantial refactor, two
+        kernels per color instead of one; perf gain depends on whether atomic_add contention beats the
+        save on joint-side compute. Out of scope for this round.
+      </p>
+
+      <h3 style="margin-top: 22px;">Opt #5 — Dual-stream scheduling for end-of-iteration dual updates</h3>
+      <p>
+        At the end of each AVBD iteration, three independent kernels run: <code>update_duals_body_body_contacts</code>,
+        <code>update_duals_body_particle_contacts</code> (when applicable), and <code>update_duals_joint</code>.
+        All three read the just-updated <code>body_q</code> but write to <strong>disjoint</strong> buffers
+        (<code>body_body_contact_*</code> vs <code>joint_*</code>). On the default single-stream graph they serialize.
+        Putting <code>update_duals_joint</code> on a Warp auxiliary stream (with proper event-based sync) lets it overlap
+        with the contact dual update on the main stream.
+      </p>
+      <p>
+        Additional overlap: the next iteration's accumulator <code>zero_()</code> calls write to
+        <code>body_forces / body_torques / body_hessian_*</code> — also disjoint from the dual-update writes — so the
+        rejoin wait can be deferred until just before the next iteration's color loop. The next iteration's zero runs
+        on the main stream while the previous iteration's <code>update_duals_joint</code> is still running on aux.
+      </p>
+      <p>
+        Pattern modeled on <code>newton._src.sim.ik.ik_lm_optimizer._parallel_for_objectives</code>:
+        <code>wp.Stream</code> + <code>wp.Event</code> + <code>wp.ScopedStream</code> with explicit
+        <code>record_event</code>/<code>wait_event</code> fences. A final fence in <code>step()</code> after the
+        iteration loop handles the last iteration's aux work before snapshot/finalize.
+      </p>
+
+      <table style="margin: 10px 0;">
+        <tr>
+          <th>Workload</th><th>Single-stream baseline</th><th>3-stream scheduling</th><th>Speedup</th><th>Math preservation</th>
+        </tr>
+        <tr><td>A. Contact pile</td><td>5.10 ms p50</td><td><strong>4.80 ms p50</strong></td><td><strong>5.9%</strong></td><td>n/a (cross-build non-deterministic — by design of contact atomics, see Finding 5)</td></tr>
+        <tr><td>B. Cantilever cables</td><td>4.71 ms p50</td><td><strong>4.55 ms p50</strong></td><td><strong>3.4%</strong></td><td><strong>bit-exact</strong> (hash <code>7160d4d7e6871596</code> matches baseline)</td></tr>
+        <tr><td>C. Braided mix</td><td>5.31 ms p50</td><td><strong>5.04 ms p50</strong></td><td><strong>5.1%</strong></td><td>n/a (see Finding 5)</td></tr>
+      </table>
+
+      <h4 style="margin-top: 14px;">How the scheduling works</h4>
+      <p>
+        Three streams in flight at the end of each AVBD iteration (and in transition to the next):
+      </p>
+      <ul class="compact">
+        <li><strong>main stream:</strong> next iteration's accumulator <code>zero_()</code> calls + (when applicable) <code>update_duals_body_particle_contacts</code></li>
+        <li><strong>aux1 (dual_aux_stream):</strong> <code>update_duals_joint</code> — per-joint, ~9 µs/launch</li>
+        <li><strong>aux2 (dual_bb_stream):</strong> <code>update_duals_body_body_contacts</code> — per-contact-slot, ~5 µs/launch</li>
+      </ul>
+      <p>
+        Both aux streams fence on <code>main.record_event(main_to_aux)</code> at the end of the per-color
+        <code>solve_rigid_body</code> (which writes <code>state_in.body_q</code>). The next iteration's color
+        loop waits on both <code>aux_to_main</code> and <code>bb_to_main</code> events before its first
+        <code>accumulate_body_body_contacts_per_body</code>. A final fence after the iteration loop drains both
+        aux streams before snapshot/finalize.
+      </p>
+      <p>
+        <strong>Why these gains and not more?</strong> The wall-clock save per iteration is
+        <code>max(joint_dual, bb_dual, next_zero) − max(joint_dual, bb_dual) = next_zero overlap</code> at most.
+        With <code>next_zero ≈ 7 µs</code> and <code>max(9, 5) = 9 µs</code> across the three streams, per-iteration
+        scheduling overhead is around 9 µs vs ~16 µs serial — a ~7 µs saving × 50 iter/frame = ~0.35 ms / frame.
+        That matches the measured A and C deltas. B sees less benefit because its rigid_contact_count is 0
+        (cables don't touch each other in B); the body-body contact kernel still launches but does no work,
+        so the parallelization saves less wall-clock there.
+      </p>
+
+      <p>
+        <strong>Code state:</strong> two scoped files (<code>solver_vbd.py</code>, <code>rigid_vbd_kernels.py</code>) — only
+        <code>solver_vbd.py</code> touched for this opt. ~50 lines: stream + event init in <code>__init__</code>,
+        deferred rejoin in <code>_solve_rigid_body_iteration</code>, final fence in <code>step()</code>. No new kernels.
+      </p>
+
+      <h3 style="margin-top: 22px;">Opt #6 — Per-substep init kernel parallelization (P1)</h3>
+      <p>
+        Within <code>_initialize_rigid_bodies</code>, after the contact decay step, four kernels run sequentially
+        on the main stream. Two of them (<code>step_joint_C0_lambda</code>, <code>compute_cable_dahl_parameters</code>)
+        only read <code>body_q_prev</code> and joint config arrays, write to <code>joint_*</code> buffers. They are
+        independent of the two that operate on <code>state_in.body_q</code> /
+        <code>body_inertia_q</code> (<code>apply_joint_forces</code>, <code>forward_step_rigid_bodies</code>).
+      </p>
+      <p>
+        Forked <code>step_joint_C0_lambda</code> + <code>compute_cable_dahl_parameters</code> onto the existing
+        <code>_dual_aux_stream</code> (reusing it from Opt #5). Main does its body-integration chain in parallel.
+        Rejoin via a new <code>_init_event_aux_to_main</code> after <code>forward_step_rigid_bodies</code>.
+      </p>
+
+      <h3 style="margin-top: 22px;">Opt #7 — Remove redundant <code>body_body_contact_stick_flag.zero_()</code> (P2)</h3>
+      <p>
+        Solver was zeroing <code>body_body_contact_stick_flag</code> at the top of every substep (line 2072 in the original).
+        Code-reading <code>update_duals_body_body_contacts</code> at <code>rigid_vbd_kernels.py:4473</code> shows it
+        unconditionally writes every active contact slot's stick flag every iteration, with no read-before-write.
+        And <code>build_body_body_contact_lists</code> only ever puts active slots (idx &lt; rigid_contact_count) into
+        per-body lists, so downstream consumers never read inactive-slot stick flags. The zero was redundant.
+      </p>
+      <p>
+        Removed it. Replaced with a comment explaining the invariant. Saves one memset per substep (~3 µs / frame)
+        and ~1 line of code; mostly a clarity win.
+      </p>
+
+      <h3 style="margin-top: 22px;">P3 — Investigated, not a real redundancy</h3>
+      <p>
+        Looked at <code>body_body_contact_lambda.zero_()</code> at line 2026 (was line 2033 in pre-edit
+        source). Initially suspected it could be removed because <code>init_body_body_contacts_avbd</code>
+        outputs <code>body_body_contact_lambda</code>. Turns out the zero is in the <em>else</em> branch where
+        <code>init_body_body_contact_materials</code> runs instead — and that kernel does NOT output
+        <code>body_body_contact_lambda</code>. The zero is required to reset lambda when warm-start is off
+        (<code>rigid_contact_history=False</code>). Left alone.
+      </p>
+
+      <h3 style="margin-top: 22px;">Cumulative speedup table</h3>
+      <table style="margin: 10px 0;">
+        <tr>
+          <th>Workload</th>
+          <th>Original baseline</th>
+          <th>After Opt #5 (3-stream dual)</th>
+          <th>After P1 (init aux)</th>
+          <th>After P2 (zero removal)</th>
+          <th>Total</th>
+        </tr>
+        <tr><td>A. Contact pile</td><td>5.10 ms</td><td>4.80 ms</td><td>4.78 ms</td><td><strong>4.79 ms</strong></td><td><strong>6.1%</strong></td></tr>
+        <tr><td>B. Cantilevers</td><td>4.71 ms</td><td>4.55 ms</td><td>4.51 ms</td><td><strong>4.48 ms</strong></td><td><strong>4.9%</strong></td></tr>
+        <tr><td>C. Braided mix</td><td>5.31 ms</td><td>5.04 ms</td><td>5.01 ms</td><td><strong>5.02 ms</strong></td><td><strong>5.5%</strong></td></tr>
+      </table>
+      <p>
+        <strong>Math:</strong> bit-exact preserved on Workload B (deterministic, no contacts). Hash
+        <code>7160d4d7e6871596</code> unchanged through every optimization. A and C remain non-deterministic
+        across builds (Finding 5 — contact atomic ordering), but each run is internally stable.
+      </p>
+
+      <div class="placeholder" style="margin-top: 14px;">Further gains require deeper kernel-level work (Nsight Compute on solve_rigid_body, the 2.5 ms / 42% dominant kernel) or larger structural reworks that risk math change. At the current ~5–6% cumulative speedup, the remaining margin is bounded by the per-color Gauss-Seidel structure of <code>solve_rigid_body</code> itself.</div>
+
+      <div class="plot-grid">
+        <figure>
+          <img src="assets/workload_a_captured_dashboard.png" alt="Workload A captured dashboard">
+          <figcaption>Workload A — captured. Step time tight at 5.12 ms p50, std 0.03 ms.</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/workload_b_captured_dashboard.png" alt="Workload B captured dashboard">
+          <figcaption>Workload B — captured. 4.70 ms p50.</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/workload_c_captured_dashboard.png" alt="Workload C captured dashboard">
+          <figcaption>Workload C — captured. 5.33 ms p50, despite ~2100 active contacts.</figcaption>
+        </figure>
+      </div>
+
+      <p style="margin-top: 14px;">
+        Worth noting: with launch overhead removed, the per-contact marginal cost finally shows up cleanly.
+        Going from 0 contacts (B) to 466 contacts (A) costs ~0.4 ms per frame; 466 → 2080 costs another
+        ~0.2 ms. Roughly <code>0.3 µs/contact·frame</code> at small counts, scaling sub-linearly thanks to
+        kernel-level parallelism. Future contact-path optimizations get measured against this.
+      </p>
+
+      <div class="placeholder" style="margin-top: 14px;">Opt #2 and onwards: actual solver-code edits to <code>solver_vbd.py</code> + <code>rigid_vbd_kernels.py</code> arrive after Finding 4 is resolved.</div>
+    </section>
+
+    <section>
+      <h2>Findings &amp; suspicious code</h2>
+
+      <h3>Finding 1 — Penetration-from-contact-points metric is unreliable</h3>
+      <p>
+        Reading <code>‖p0 − p1‖</code> off the <code>Contacts</code> buffer and computing
+        <code>gap = (margin0 + margin1) − ‖p0 − p1‖</code> as a penetration proxy <strong>does not work</strong>
+        across workloads:
+      </p>
+      <ul class="compact">
+        <li><strong>Workload A</strong> (cable-vs-cable, many active contacts): max gap latches at <code>0.024 m = 2·cable_radius</code> every frame — exactly the value when <code>‖p0 − p1‖ → 0</code>.</li>
+        <li><strong>Workload B</strong> (cable-vs-ground, transient contacts): max gap is exactly <code>0.000 mm</code> for every frame, including the 176-contact burst at frame 39.</li>
+      </ul>
+      <p>
+        The cross-workload contrast tells us this metric reflects contact-point representation, not actual
+        body interpenetration. The cable-vs-cable narrow phase likely collapses to point-on-point for the
+        deepest contact each frame; the cable-vs-ground narrow phase places the contact point exactly on the
+        ground plane regardless of how the body has moved. A real penetration measurement needs to come from
+        body poses + shape geometry, not the contacts buffer.
+      </p>
+      <p>
+        Action: replace the metric with a body-pose-based penetration check for cable-vs-cable pairs
+        (cylinder-cylinder closest distance from segment poses + radii). Defer until Workload C is up and
+        the full baseline is being assembled.
+      </p>
+
+      <h3 style="margin-top: 22px;">Finding 2 — Step time is dominated by a per-substep fixed cost</h3>
+      <p>
+        Three workloads with very different VBD work profiles produce step times within ~1.2 ms of each other:
+      </p>
+      <ul class="compact">
+        <li>B (1600 bodies, <strong>0 contacts</strong>): 27.93 ms p50</li>
+        <li>A (1152 bodies, <strong>466 contacts</strong>): 27.48 ms p50</li>
+        <li>C (1600 bodies, <strong>2079 contacts</strong>): 28.66 ms p50</li>
+      </ul>
+      <p>
+        The cost of going from 0 → 2079 active contacts is only ~0.7 ms per frame (10 substeps).
+        That suggests something other than VBD math is dominating the wall clock — most likely a per-substep
+        fixed cost: CUDA kernel launches, contacts-pipeline overhead, or the Python/Warp interop between
+        <code>collide()</code> and <code>solver.step()</code>. Each frame here is 10 substeps × N kernels per
+        substep × launch overhead.
+      </p>
+
+      <h3 style="margin-top: 22px;">Finding 3 — Examples without CUDA graph capture leave perf on the table</h3>
+      <p>
+        <code>newton.examples.cable.example_cable_pile</code> wraps its substep loop in
+        <code>wp.ScopedCapture()</code> and replays via <code>wp.capture_launch(graph)</code>. The three
+        baseline workloads here do <strong>not</strong> capture, which means every substep eats Python and
+        Warp dispatch overhead. Combined with Finding 2 (overhead dominates), this is the prime suspect for
+        the first optimization pass.
+      </p>
+      <p>
+        Plan: add a graph-capture path to the measurement harness, re-baseline all three workloads with
+        capture on, and report the delta. This should show a step-time drop proportional to the per-substep
+        fixed cost. If the math is preserved (state hash unchanged within tolerance), graph capture is a
+        win-without-tradeoffs.
+      </p>
+
+      <h3 style="margin-top: 22px;">Finding 4 — Captured vs. uncaptured diverge when contacts are present, not from launch ordering</h3>
+      <p>
+        Earlier draft of this section claimed a divergence even on Workload B; that was an off-by-one in my
+        harness (the <code>with wp.ScopedCapture()</code> block records but does not execute, so captured
+        runs were one substep short of uncaptured). With matched substep counts:
+      </p>
+      <ul class="compact">
+        <li>Workload B (zero contacts), captured vs uncaptured, 30 frames → <strong>bit-exact (max diff = 0)</strong></li>
+        <li>Workload A (~459 contacts), 30 frames → max diff 121 mm</li>
+        <li>Workload C (~2080 contacts), 30 frames → max diff 11 mm</li>
+      </ul>
+      <p>
+        So the divergence is purely a contact-handling property, not a generic capture issue. It's now
+        understood as a consequence of Finding 5.
+      </p>
+
+      <h3 style="margin-top: 22px;">Finding 5 — Captured-mode VBD with contacts is non-deterministic across fresh <code>build()</code> calls</h3>
+      <p>
+        Same code, same seed, fresh <code>build()</code>, captured mode, two runs in the <em>same Python
+        process</em> back-to-back. Hashes of the final state:
+      </p>
+      <ul class="compact">
+        <li>Workload B (zero contacts) → identical hash both runs (<code>7160d4d7e6871596</code>). Bit-exact.</li>
+        <li>Workload A (~459 contacts) → different hashes; max position diff = <strong>19.94 mm</strong>.</li>
+        <li>Workload C (~2080 contacts) → different hashes; max position diff = <strong>27.07 mm</strong>.</li>
+      </ul>
+      <p>
+        Within a single <code>build()</code> + captured graph, replaying the graph N times is bit-exact —
+        I verified this independently. But every new <code>build()</code> produces a different result. The
+        explanation is GPU atomic ordering: each cable-vs-cable contact accumulation involves atomic adds
+        into per-body force/hessian buffers, and the atomic execution order depends on warp scheduling and
+        memory layout. A fresh model has fresh array allocations at different addresses, which produces a
+        different order, which produces a slightly different sum.
+      </p>
+      <p>
+        This is well-defined behavior of CUDA — not a bug, but a property that users should know about.
+        Reproducibility across runs is not guaranteed for any contact-heavy VBD simulation in captured mode.
+        Inside one captured graph, results are reproducible — so anyone wanting reproducibility should
+        capture once and replay (which is the production pattern anyway).
+      </p>
+      <p>
+        <strong>Implication for this work:</strong> measuring optimization wins by comparing position
+        hashes across two separate processes (one baseline build, one optimized build) is invalid. We
+        verify math preservation on Workload B (the deterministic one) and rely on logical analysis for
+        the contact workloads.
+      </p>
+
+      <div class="placeholder" style="margin-top: 14px;">More findings as the two scoped files get read in anger during optimization.</div>
+    </section>
+
+    <section>
+      <h2>Reproduction</h2>
+      <p>Reproduction details — branch, commit, command line, environment — published alongside results in later stages.</p>
+    </section>
+
+  </main>
+
+  <footer>
+    <p>
+      Report published from branch <code>gh-pages</code> at <code>reports/vbd_perf_robustness/</code>.
+      Working code branch: <code>vbd-perf</code> (local-only — never pushed). Scope:
+      <code>solver_vbd.py</code> + <code>rigid_vbd_kernels.py</code>.
+    </p>
+  </footer>
+
+</body>
+</html>

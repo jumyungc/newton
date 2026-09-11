@@ -1,0 +1,228 @@
+Running 3 test suites (36 total tests) across 3 processes
+Warp 1.16.0.dev20260716 initialized:
+   CUDA Toolkit 12.9, Driver 13.0
+   Devices:
+     "cpu"      : "x86_64"
+     "cuda:0"   : "NVIDIA GeForce RTX 5090" (31 GiB, sm_120, mempool enabled)
+   Kernel cache:
+     /home/jumyungc/.cache/warp/1.16.0.dev20260716
+Cleared Warp kernel cache: /home/jumyungc/.cache/warp/1.16.0.dev20260716
+##################################################################
+#  PXR_WORK_THREAD_LIMIT is overridden to '1'.  Default is '0'.  #
+##################################################################
+##################################################################
+#  PXR_WORK_THREAD_LIMIT is overridden to '1'.  Default is '0'.  #
+##################################################################
+##################################################################
+#  PXR_WORK_THREAD_LIMIT is overridden to '1'.  Default is '0'.  #
+##################################################################
+test_00_config_selection (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_00_config_selection) ...
+test_08b_dr_legs_contact_capacity_scales_with_world_count (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_08b_dr_legs_contact_capacity_scales_with_world_count) ...
+test_builder_accepts_closed_loop_articulation (test_vbd_sparse_articulation.TestVBDSparseArticulation.test_builder_accepts_closed_loop_articulation) ...
+test_00_config_selection (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_00_config_selection) ... ok
+test_00a_multiworld_status_reduction_requires_all_worlds_converged (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_00a_multiworld_status_reduction_requires_all_worlds_converged) ...
+test_00a_multiworld_status_reduction_requires_all_worlds_converged (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_00a_multiworld_status_reduction_requires_all_worlds_converged) ... ok
+test_01_dvi_solve_dense_dual_problem (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_01_dvi_solve_dense_dual_problem) ...
+test_builder_accepts_closed_loop_articulation (test_vbd_sparse_articulation.TestVBDSparseArticulation.test_builder_accepts_closed_loop_articulation) ... ok
+test_sparse_articulation_couples_revolute_armature (test_vbd_sparse_articulation.TestVBDSparseArticulation.test_sparse_articulation_couples_revolute_armature) ...
+test_sparse_articulation_couples_revolute_armature (test_vbd_sparse_articulation.TestVBDSparseArticulation.test_sparse_articulation_couples_revolute_armature) ... ok
+test_sparse_articulation_cuda_matches_cpu_serial (test_vbd_sparse_articulation.TestVBDSparseArticulation.test_sparse_articulation_cuda_matches_cpu_serial) ...
+test_08b_dr_legs_contact_capacity_scales_with_world_count (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_08b_dr_legs_contact_capacity_scales_with_world_count) ... ok
+test_09_dr_legs_dvi_first_contact_remains_finite (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_09_dr_legs_dvi_first_contact_remains_finite) ...
+test_09_dr_legs_dvi_first_contact_remains_finite (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_09_dr_legs_dvi_first_contact_remains_finite) ... ok
+test_11_dr_legs_dvi_contact_force_balances_weight (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_11_dr_legs_dvi_contact_force_balances_weight) ...
+test_01_dvi_solve_dense_dual_problem (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_01_dvi_solve_dense_dual_problem) ... ok
+test_02_public_solver_step_with_dvi (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_02_public_solver_step_with_dvi) ...
+[38;5;13m[KAMINO][0m[33;20m[2026-09-10 22:04:20,427][conversions.py:1383][WARNING]: Model has articulations whose root is not a free joint attached to the world, disabling floating base resets for those worlds.[0m
+test_02_public_solver_step_with_dvi (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_02_public_solver_step_with_dvi) ... ok
+test_03_dvi_solve_single_contact (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_03_dvi_solve_single_contact) ...
+test_11_dr_legs_dvi_contact_force_balances_weight (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_11_dr_legs_dvi_contact_force_balances_weight) ... ok
+test_03_dvi_solve_single_contact (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_03_dvi_solve_single_contact) ... ok
+test_03a_sparse_dvi_filtered_matvec_matches_full_rows (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_03a_sparse_dvi_filtered_matvec_matches_full_rows) ...
+test_03a_sparse_dvi_filtered_matvec_matches_full_rows (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_03a_sparse_dvi_filtered_matvec_matches_full_rows) ... ok
+test_03b_dvi_contact_block_preconditioner_smoke (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_03b_dvi_contact_block_preconditioner_smoke) ...
+test_03b_dvi_contact_block_preconditioner_smoke (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_03b_dvi_contact_block_preconditioner_smoke) ... ok
+test_03d2_dvi_direct_block_finishes_with_bilateral_solve (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_03d2_dvi_direct_block_finishes_with_bilateral_solve) ...
+test_03d2_dvi_direct_block_finishes_with_bilateral_solve (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_03d2_dvi_direct_block_finishes_with_bilateral_solve) ... ok
+test_03e_dvi_direct_block_no_unilateral_rows_reports_single_iteration (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_03e_dvi_direct_block_no_unilateral_rows_reports_single_iteration) ...
+test_03e_dvi_direct_block_no_unilateral_rows_reports_single_iteration (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_03e_dvi_direct_block_no_unilateral_rows_reports_single_iteration) ... ok
+test_03f_dvi_bilateral_only_solve_resets_stale_status (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_03f_dvi_bilateral_only_solve_resets_stale_status) ...
+test_03f_dvi_bilateral_only_solve_resets_stale_status (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_03f_dvi_bilateral_only_solve_resets_stale_status) ... ok
+test_03g_dvi_contact_coloring_separates_dynamic_conflicts (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_03g_dvi_contact_coloring_separates_dynamic_conflicts) ...
+test_03g_dvi_contact_coloring_separates_dynamic_conflicts (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_03g_dvi_contact_coloring_separates_dynamic_conflicts) ... ok
+test_03h_dvi_canonical_contact_solution_metrics (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_03h_dvi_canonical_contact_solution_metrics) ...
+test_03h_dvi_canonical_contact_solution_metrics (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_03h_dvi_canonical_contact_solution_metrics) ... ok
+test_03i_dvi_coldstart_is_repeatable (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_03i_dvi_coldstart_is_repeatable) ...
+test_03i_dvi_coldstart_is_repeatable (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_03i_dvi_coldstart_is_repeatable) ... ok
+test_04_dvi_solve_active_joint_limit (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_04_dvi_solve_active_joint_limit) ...
+test_04_dvi_solve_active_joint_limit (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_04_dvi_solve_active_joint_limit) ... ok
+test_05_dvi_solve_multi_world_contacts (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_05_dvi_solve_multi_world_contacts) ...
+test_05_dvi_solve_multi_world_contacts (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_05_dvi_solve_multi_world_contacts) ... ok
+test_06_dvi_warmstart_modes (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_06_dvi_warmstart_modes) ...
+test_06_dvi_warmstart_modes (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_06_dvi_warmstart_modes) ... ok
+test_06a_dvi_masked_reset_preserves_unselected_worlds (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_06a_dvi_masked_reset_preserves_unselected_worlds) ...
+test_06a_dvi_masked_reset_preserves_unselected_worlds (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_06a_dvi_masked_reset_preserves_unselected_worlds) ... ok
+test_07_dvi_singular_limit_rows_remain_finite (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_07_dvi_singular_limit_rows_remain_finite) ...
+test_07_dvi_singular_limit_rows_remain_finite (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_07_dvi_singular_limit_rows_remain_finite) ... ok
+test_08_public_solver_short_rollout_with_dvi (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_08_public_solver_short_rollout_with_dvi) ...
+[38;5;13m[KAMINO][0m[33;20m[2026-09-10 22:04:25,284][conversions.py:1383][WARNING]: Model has articulations whose root is not a free joint attached to the world, disabling floating base resets for those worlds.[0m
+test_08_public_solver_short_rollout_with_dvi (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_08_public_solver_short_rollout_with_dvi) ... ok
+test_08a_public_solver_heterogeneous_contact_rollout_with_dvi (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_08a_public_solver_heterogeneous_contact_rollout_with_dvi) ...
+[38;5;13m[KAMINO][0m[33;20m[2026-09-10 22:04:25,427][conversions.py:1383][WARNING]: Model has articulations whose root is not a free joint attached to the world, disabling floating base resets for those worlds.[0m
+test_08a_public_solver_heterogeneous_contact_rollout_with_dvi (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_08a_public_solver_heterogeneous_contact_rollout_with_dvi) ... ok
+test_12_dvi_opening_contact_releases_warmstarted_force (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_12_dvi_opening_contact_releases_warmstarted_force) ...
+[38;5;13m[KAMINO][0m[33;20m[2026-09-10 22:04:25,669][conversions.py:1383][WARNING]: Model has articulations whose root is not a free joint attached to the world, disabling floating base resets for those worlds.[0m
+test_12_dvi_opening_contact_releases_warmstarted_force (newton._src.solvers.kamino.tests.test_solvers_dvi.TestDVISolver.test_12_dvi_opening_contact_releases_warmstarted_force) ... ok
+test_sparse_articulation_cuda_matches_cpu_serial (test_vbd_sparse_articulation.TestVBDSparseArticulation.test_sparse_articulation_cuda_matches_cpu_serial) ... ok
+test_sparse_articulation_default_relaxation_is_tuned (test_vbd_sparse_articulation.TestVBDSparseArticulation.test_sparse_articulation_default_relaxation_is_tuned) ...
+test_sparse_articulation_default_relaxation_is_tuned (test_vbd_sparse_articulation.TestVBDSparseArticulation.test_sparse_articulation_default_relaxation_is_tuned) ... ok
+test_sparse_articulation_handles_joint_stiffness_ratio (test_vbd_sparse_articulation.TestVBDSparseArticulation.test_sparse_articulation_handles_joint_stiffness_ratio) ...
+test_sparse_articulation_handles_joint_stiffness_ratio (test_vbd_sparse_articulation.TestVBDSparseArticulation.test_sparse_articulation_handles_joint_stiffness_ratio) ... ok
+test_sparse_articulation_improves_cable_rods (test_vbd_sparse_articulation.TestVBDSparseArticulation.test_sparse_articulation_improves_cable_rods) ...
+test_sparse_articulation_improves_cable_rods (test_vbd_sparse_articulation.TestVBDSparseArticulation.test_sparse_articulation_improves_cable_rods) ... ok
+test_sparse_articulation_includes_xy_table_closure_joint (test_vbd_sparse_articulation.TestVBDSparseArticulation.test_sparse_articulation_includes_xy_table_closure_joint) ...
+test_sparse_articulation_includes_xy_table_closure_joint (test_vbd_sparse_articulation.TestVBDSparseArticulation.test_sparse_articulation_includes_xy_table_closure_joint) ... ok
+test_sparse_articulation_reduces_loop_residual (test_vbd_sparse_articulation.TestVBDSparseArticulation.test_sparse_articulation_reduces_loop_residual) ...
+test_sparse_articulation_reduces_loop_residual (test_vbd_sparse_articulation.TestVBDSparseArticulation.test_sparse_articulation_reduces_loop_residual) ... ok
+test_sparse_articulation_supports_projected_joint_types (test_vbd_sparse_articulation.TestVBDSparseArticulation.test_sparse_articulation_supports_projected_joint_types) ...
+test_sparse_articulation_supports_projected_joint_types (test_vbd_sparse_articulation.TestVBDSparseArticulation.test_sparse_articulation_supports_projected_joint_types) ... ok
+test_sparse_revolute_projector_uses_parent_frame (test_vbd_sparse_articulation.TestVBDSparseArticulation.test_sparse_revolute_projector_uses_parent_frame) ...
+test_sparse_revolute_projector_uses_parent_frame (test_vbd_sparse_articulation.TestVBDSparseArticulation.test_sparse_revolute_projector_uses_parent_frame) ... ok
+test_sparse_single_body_matches_local (test_vbd_sparse_articulation.TestVBDSparseArticulation.test_sparse_single_body_matches_local) ...
+test_sparse_single_body_matches_local (test_vbd_sparse_articulation.TestVBDSparseArticulation.test_sparse_single_body_matches_local) ... ok
+test_sparse_single_body_offset_com_matches_local (test_vbd_sparse_articulation.TestVBDSparseArticulation.test_sparse_single_body_offset_com_matches_local) ...
+test_sparse_single_body_offset_com_matches_local (test_vbd_sparse_articulation.TestVBDSparseArticulation.test_sparse_single_body_offset_com_matches_local) ... ok
+Warp 1.16.0.dev20260716 initialized:
+   CUDA Toolkit 12.9, Driver 13.0
+   Devices:
+     "cpu"      : "x86_64"
+     "cuda:0"   : "NVIDIA GeForce RTX 5090" (31 GiB, sm_120, mempool enabled)
+   Kernel cache:
+     /home/jumyungc/.cache/warp/1.16.0.dev20260716
+Module newton._src.geometry.inertia f54b3d2 load on device 'cuda:0' took 187.05 ms  (compiled)
+Module validate_and_correct_inertia_kernel_5e18b3cd 5e18b3c load on device 'cuda:0' took 42.06 ms  (compiled)
+Module newton._src.geometry.bvh cca3a6c load on device 'cuda:0' took 403.30 ms  (compiled)
+Module newton._src.solvers.kamino._src.core.conversions bd35029 load on device 'cuda:0' took 553.03 ms  (compiled)
+Module newton._src.solvers.kamino._src.core.bodies d68a2c9 load on device 'cuda:0' took 0.38 ms  (cached)
+Module newton._src.solvers.kamino._src.kinematics.constraints 3ececd4 load on device 'cuda:0' took 0.39 ms  (cached)
+Module newton._src.solvers.kamino._src.kinematics.jacobians 5ba57f4 load on device 'cuda:0' took 1263.77 ms  (compiled)
+Module newton._src.viewer.kernels 01f8575 load on device 'cuda:0' took 1382.10 ms  (compiled)
+Module newton._src.sim.collide fd54f63 load on device 'cuda:0' took 65.50 ms  (compiled)
+Module newton._src.geometry.broad_phase_nxn 68fddfc load on device 'cuda:0' took 42.47 ms  (compiled)
+Module narrow_phase_primitive_write_contact 49e95b3 load on device 'cuda:0' took 260.43 ms  (compiled)
+Module narrow_phase_gjk_mpr_True_write_contact_support_map_lean_post_process_minkowski_only 76071d8 load on device 'cuda:0' took 246.41 ms  (compiled)
+Module newton._src.geometry.narrow_phase 6a402c1 load on device 'cuda:0' took 87.70 ms  (compiled)
+Module make_convert_contacts_newton_to_kamino__locals___convert_contacts_newton_to_kamino_a5dbefdb a5dbefd load on device 'cuda:0' took 44.82 ms  (compiled)
+Module newton._src.solvers.kamino._src.integrators.moreau f66f94a load on device 'cuda:0' took 41.09 ms  (compiled)
+Module newton._src.solvers.kamino._src.kinematics.joints 89c0320 load on device 'cuda:0' took 0.65 ms  (cached)
+Module newton._src.solvers.kamino._src.kinematics.limits ff71a69 load on device 'cuda:0' took 0.34 ms  (cached)
+Module newton._src.solvers.kamino._src.dynamics.wrenches 113614d load on device 'cuda:0' took 315.08 ms  (compiled)
+Module newton._src.solvers.kamino._src.dynamics.dual d23b22f load on device 'cuda:0' took 0.52 ms  (cached)
+Module newton._src.solvers.kamino._src.geometry.keying 9c7ba35 load on device 'cuda:0' took 28.14 ms  (compiled)
+Module newton._src.solvers.kamino._src.solvers.warmstart ae6fac2 load on device 'cuda:0' took 68.87 ms  (compiled)
+Module newton._src.solvers.kamino._src.solvers.common 6f8783b load on device 'cuda:0' took 348.46 ms  (compiled)
+Module newton._src.solvers.kamino._src.solvers.dvi.kernels 2cff130 load on device 'cuda:0' took 1.01 ms  (cached)
+Module newton._src.solvers.kamino._src.dynamics.delassus 25a418f load on device 'cuda:0' took 0.43 ms  (cached)
+Module newton._src.solvers.kamino._src.solvers.dvi.sparse_kernels 7544d29 load on device 'cuda:0' took 642.51 ms  (compiled)
+Module newton._src.solvers.kamino._src.linalg.factorize.llt_blocked 1c7a351 load on device 'cuda:0' took 11412.92 ms  (compiled)
+Module newton._src.solvers.kamino._src.dynamics.delassus ed54b90 load on device 'cuda:0' took 224.51 ms  (compiled)
+Module newton._src.solvers.kamino._src.dynamics.delassus d23f1d4 load on device 'cuda:0' took 241.65 ms  (compiled)
+Module newton._src.solvers.kamino._src.linalg.blas 4db7fad load on device 'cuda:0' took 242.08 ms  (compiled)
+Module newton._src.solvers.kamino._src.linalg.blas 3efecee load on device 'cuda:0' took 264.41 ms  (compiled)
+Module newton._src.solvers.kamino._src.linalg.factorize.llt_blocked f39aa4c load on device 'cuda:0' took 10696.46 ms  (compiled)
+Module newton._src.solvers.kamino._src.dynamics.delassus 9f2a9f0 load on device 'cuda:0' took 275.35 ms  (compiled)
+Module newton._src.solvers.kamino._src.core.time 975fed5 load on device 'cuda:0' took 27.88 ms  (compiled)
+Module newton._src.solvers.kamino._src.kinematics.resets bc191de load on device 'cuda:0' took 424.34 ms  (compiled)
+Module newton._src.solvers.kamino._src.geometry.contacts e684c4d load on device 'cuda:0' took 102.48 ms  (compiled)
+Module newton._src.solvers.kamino._src.geometry.unified 8e187fb load on device 'cuda:0' took 64.55 ms  (compiled)
+Module narrow_phase_primitive__write_contact_unified_kamino a89b314 load on device 'cuda:0' took 149.74 ms  (compiled)
+Module narrow_phase_gjk_mpr_True__write_contact_unified_kamino_default_default 25c1616 load on device 'cuda:0' took 257.77 ms  (compiled)
+Module newton._src.geometry.narrow_phase 546c0a6 load on device 'cuda:0' took 106.42 ms  (compiled)
+Module newton._src.geometry.contact_reduction_global b2aa7b0 load on device 'cuda:0' took 69.43 ms  (compiled)
+Module newton._src.geometry.sdf_contact 573fd3b load on device 'cuda:0' took 35.53 ms  (compiled)
+Module narrow_phase_mesh_plane_write_contact_to_reducer_True 229ea7d load on device 'cuda:0' took 178.26 ms  (compiled)
+Module mesh_triangle_contacts_to_reducer_kernel_2ca9da70 7f42962 load on device 'cuda:0' took 424.95 ms  (compiled)
+Module newton._src.geometry.contact_reduction_global 801181b load on device 'cuda:0' took 65.24 ms  (compiled)
+Module sdf_contact_write_contact_to_reducer_False_True 39654cc load on device 'cuda:0' took 154.87 ms  (compiled)
+Module export_reduced_contacts__write_contact_unified_kamino e459957 load on device 'cuda:0' took 55.97 ms  (compiled)
+Module newton._src.sim.contacts dfd3564 load on device 'cuda:0' took 51.54 ms  (compiled)
+Module newton._src.solvers.kamino._src.geometry.aggregation 0f06f96 load on device 'cuda:0' took 109.56 ms  (compiled)
+Warp 1.16.0.dev20260716 initialized:
+   CUDA Toolkit 12.9, Driver 13.0
+   Devices:
+     "cpu"      : "x86_64"
+     "cuda:0"   : "NVIDIA GeForce RTX 5090" (31 GiB, sm_120, mempool enabled)
+   Kernel cache:
+     /home/jumyungc/.cache/warp/1.16.0.dev20260716
+Module newton._src.solvers.kamino._src.core.bodies d68a2c9 load on device 'cuda:0' took 277.87 ms  (compiled)
+Module newton._src.solvers.kamino._src.kinematics.joints 89c0320 load on device 'cuda:0' took 395.85 ms  (compiled)
+Module newton._src.solvers.kamino._src.kinematics.limits ff71a69 load on device 'cuda:0' took 63.66 ms  (compiled)
+Module newton._src.solvers.kamino._src.kinematics.constraints 3ececd4 load on device 'cuda:0' took 36.62 ms  (compiled)
+Module newton._src.solvers.kamino._src.kinematics.jacobians 5ba57f4 load on device 'cuda:0' took 1585.62 ms  (compiled)
+Module newton._src.solvers.kamino._src.dynamics.delassus 25a418f load on device 'cuda:0' took 206.89 ms  (compiled)
+Module newton._src.solvers.kamino._src.dynamics.dual d23b22f load on device 'cuda:0' took 264.96 ms  (compiled)
+Module newton._src.solvers.kamino._src.solvers.dvi.kernels 2cff130 load on device 'cuda:0' took 911.97 ms  (compiled)
+Module newton._src.solvers.kamino._src.linalg.factorize.llt_blocked 336d3b0 load on device 'cuda:0' took 19003.05 ms  (compiled)
+Module newton._src.solvers.kamino._src.linalg.factorize.llt_blocked 93d1eb7 load on device 'cuda:0' took 11063.17 ms  (compiled)
+Module validate_and_correct_inertia_kernel_5e18b3cd 5e18b3c load on device 'cuda:0' took 0.40 ms  (cached)
+Module newton._src.geometry.bvh cca3a6c load on device 'cuda:0' took 2.57 ms  (cached)
+Module newton._src.solvers.kamino._src.core.conversions bd35029 load on device 'cuda:0' took 1.63 ms  (cached)
+Module newton._src.solvers.kamino._src.dynamics.wrenches 113614d load on device 'cuda:0' took 2.23 ms  (cached)
+Module newton._src.solvers.kamino._src.geometry.keying 9c7ba35 load on device 'cuda:0' took 1.89 ms  (cached)
+Module newton._src.solvers.kamino._src.solvers.warmstart ae6fac2 load on device 'cuda:0' took 1.26 ms  (cached)
+Module newton._src.solvers.kamino._src.solvers.common 6f8783b load on device 'cuda:0' took 1.37 ms  (cached)
+Module newton._src.solvers.kamino._src.solvers.dvi.kernels 27e04df load on device 'cuda:0' took 1031.20 ms  (compiled)
+Module newton._src.solvers.kamino._src.integrators.euler 8476743 load on device 'cuda:0' took 40.57 ms  (compiled)
+Module newton._src.solvers.kamino._src.core.time 975fed5 load on device 'cuda:0' took 1.88 ms  (cached)
+Module newton._src.solvers.kamino._src.geometry.primitive.broadphase 881fbd2 load on device 'cuda:0' took 290.73 ms  (compiled)
+Module newton._src.solvers.kamino._src.geometry.primitive.narrowphase 9055185 load on device 'cuda:0' took 376.03 ms  (compiled)
+Module newton._src.solvers.kamino._src.dynamics.delassus ed54b90 load on device 'cuda:0' took 0.56 ms  (cached)
+Module newton._src.solvers.kamino._src.dynamics.delassus d23f1d4 load on device 'cuda:0' took 0.54 ms  (cached)
+Module newton._src.solvers.kamino._src.linalg.blas 4db7fad load on device 'cuda:0' took 0.45 ms  (cached)
+Module newton._src.solvers.kamino._src.linalg.blas 3efecee load on device 'cuda:0' took 0.50 ms  (cached)
+Module newton._src.solvers.kamino._src.dynamics.delassus 9f2a9f0 load on device 'cuda:0' took 0.49 ms  (cached)
+Module newton._src.solvers.kamino._src.solvers.dvi.sparse_kernels 7544d29 load on device 'cuda:0' took 0.75 ms  (cached)
+Module newton._src.solvers.kamino._src.solvers.metrics 1fcc717 load on device 'cuda:0' took 692.61 ms  (compiled)
+Module newton._src.solvers.kamino._src.linalg.blas eee09a4 load on device 'cuda:0' took 274.56 ms  (compiled)
+Module newton._src.solvers.kamino.tests.utils.make 58b2757 load on device 'cuda:0' took 40.59 ms  (compiled)
+Module newton._src.solvers.kamino._src.geometry.unified 8e187fb load on device 'cuda:0' took 0.47 ms  (cached)
+Module newton._src.geometry.broad_phase_nxn 68fddfc load on device 'cuda:0' took 0.34 ms  (cached)
+Module narrow_phase_primitive__write_contact_unified_kamino a89b314 load on device 'cuda:0' took 0.53 ms  (cached)
+Module narrow_phase_gjk_mpr_True__write_contact_unified_kamino_default_default 25c1616 load on device 'cuda:0' took 1.82 ms  (cached)
+Module newton._src.geometry.narrow_phase 6a402c1 load on device 'cuda:0' took 2.20 ms  (cached)
+Module newton._src.sim.articulation daa0137 load on device 'cuda:0' took 3.75 ms  (cached)
+Warp 1.16.0.dev20260716 initialized:
+   CUDA Toolkit 12.9, Driver 13.0
+   Devices:
+     "cpu"      : "x86_64"
+     "cuda:0"   : "NVIDIA GeForce RTX 5090" (31 GiB, sm_120, mempool enabled)
+   Kernel cache:
+     /home/jumyungc/.cache/warp/1.16.0.dev20260716
+Module validate_and_correct_inertia_kernel_5e18b3cd 2f0edb1 load on device 'cpu' took 1360.45 ms  (compiled)
+Module warp._src.coloring 0a2f0aa load on device 'cpu' took 84.57 ms  (compiled)
+Module newton._src.solvers.vbd.rigid_vbd_kernels f05fe39 load on device 'cpu' took 2108.63 ms  (compiled)
+Module newton._src.solvers.solver 2363fe6 load on device 'cpu' took 300.92 ms  (compiled)
+Module newton._src.solvers.xpbd.kernels a50d5ca load on device 'cpu' took 4242.98 ms  (compiled)
+Module newton._src.solvers.vbd.rigid_sparse_articulation_kernels 32519ca load on device 'cpu' took 3258.28 ms  (compiled)
+Module newton._src.sim.articulation 2bfe3a8 load on device 'cpu' took 2175.88 ms  (compiled)
+Module validate_and_correct_inertia_kernel_5e18b3cd 5e18b3c load on device 'cuda:0' took 0.38 ms  (cached)
+Module newton._src.sim.articulation daa0137 load on device 'cuda:0' took 6901.29 ms  (compiled)
+Module newton._src.solvers.solver 9ca414f load on device 'cuda:0' took 386.36 ms  (compiled)
+Module newton._src.solvers.xpbd.kernels 0edeb1e load on device 'cuda:0' took 10309.85 ms  (compiled)
+Module newton._src.solvers.vbd.rigid_vbd_kernels 1ca6c0b load on device 'cuda:0' took 7159.25 ms  (compiled)
+Module newton._src.solvers.vbd.rigid_sparse_articulation_kernels d551677 load on device 'cuda:0' took 1276.94 ms  (compiled)
+Module newton._src.solvers.vbd.rigid_sparse_articulation_kernels 6359bda load on device 'cuda:0' took 1212.08 ms  (compiled)
+Module newton._src.geometry.bvh 38d4777 load on device 'cpu' took 237.22 ms  (compiled)
+Module newton.examples.cable.example_cable_cross_slide_table 5534c54 load on device 'cpu' took 149.11 ms  (compiled)
+Module newton._src.viewer.kernels b978a3c load on device 'cpu' took 916.95 ms  (compiled)
+Module newton._src.sim.collide 1ad34df load on device 'cpu' took 179.50 ms  (compiled)
+Module newton._src.geometry.broad_phase_nxn f910460 load on device 'cpu' took 106.21 ms  (compiled)
+Module narrow_phase_primitive_write_contact 4440f20 load on device 'cpu' took 415.53 ms  (compiled)
+Module narrow_phase_gjk_mpr_True_write_contact_default_default d6f601e load on device 'cpu' took 880.96 ms  (compiled)
+Module newton._src.geometry.narrow_phase 5a6902d load on device 'cpu' took 282.84 ms  (compiled)
+Module test_vbd_sparse_articulation a14bd4c load on device 'cpu' took 130.33 ms  (compiled)
+
+----------------------------------------------------------------------
+Ran 36 tests in 47.900s
+
+OK

@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VBD Joint Reaction Readout</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #17202a;
+        --muted: #607086;
+        --line: #d8e0e8;
+        --panel: #f7f9fc;
+        --panel-strong: #eef3f7;
+        --blue: #2563a6;
+        --purple: #7c3aed;
+        --green: #2f7d55;
+        --orange: #b45309;
+        --max: 1080px;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: #ffffff;
+        color: var(--ink);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        line-height: 1.5;
+      }
+      a { color: var(--blue); }
+      main, .header-inner {
+        width: min(var(--max), calc(100vw - 32px));
+        margin: 0 auto;
+      }
+      header {
+        border-bottom: 1px solid var(--line);
+        background: #fbfcfd;
+      }
+      .header-inner { padding: 38px 0 30px; }
+      h1, h2, h3 { margin: 0; line-height: 1.12; letter-spacing: 0; }
+      h1 { max-width: 880px; font-size: clamp(2.1rem, 4vw, 3.6rem); }
+      h2 { margin-bottom: 12px; font-size: 1.58rem; }
+      h3 { font-size: 1.08rem; }
+      p { margin: 0; }
+      code {
+        padding: 0.08rem 0.28rem;
+        border: 1px solid #dce6ef;
+        border-radius: 4px;
+        background: #eef3f7;
+        font-size: 0.93em;
+      }
+      .eyebrow {
+        margin-bottom: 10px;
+        color: var(--blue);
+        font-size: 0.82rem;
+        font-weight: 760;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .report-nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 18px;
+      }
+      .button {
+        display: inline-flex;
+        align-items: center;
+        min-height: 34px;
+        padding: 7px 12px;
+        border: 1px solid #bfd2e7;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.78);
+        color: var(--blue);
+        font-weight: 650;
+        text-decoration: none;
+      }
+      .subtitle {
+        max-width: 940px;
+        margin-top: 14px;
+        color: var(--muted);
+        font-size: 1.06rem;
+      }
+      .card .subtitle {
+        margin-top: 8px;
+        font-size: 0.92rem;
+      }
+      main { padding: 34px 0 48px; }
+      section { margin-bottom: 38px; }
+      .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+      .media-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+      .cards { margin-top: 18px; }
+      .card, .note, .command-table {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+      }
+      .card { padding: 14px 16px; }
+      .label {
+        display: block;
+        color: var(--muted);
+        font-size: 0.78rem;
+        font-weight: 760;
+        text-transform: uppercase;
+      }
+      .value {
+        display: block;
+        margin-top: 6px;
+        font-size: 1.25rem;
+        font-weight: 760;
+      }
+      .note {
+        margin-top: 14px;
+        padding: 14px 16px;
+        color: var(--muted);
+      }
+      .figure {
+        margin-top: 16px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #ffffff;
+      }
+      .figure img, .figure video {
+        display: block;
+        width: 100%;
+        background: #ffffff;
+      }
+      .figure-body { padding: 14px 16px; }
+      .figure-body p { margin-top: 6px; color: var(--muted); }
+      .legend {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        min-height: 26px;
+        padding: 4px 8px;
+        border-radius: 6px;
+        background: var(--panel-strong);
+        color: #334155;
+        font-size: 0.82rem;
+        font-weight: 650;
+      }
+      .blue { color: var(--blue); }
+      .purple { color: var(--purple); }
+      .green { color: var(--green); }
+      .orange { color: var(--orange); }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { padding: 11px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+      th { background: var(--panel); }
+      tr:last-child td { border-bottom: 0; }
+      @media (max-width: 820px) {
+        .grid { grid-template-columns: 1fr 1fr; }
+        .media-grid { grid-template-columns: 1fr; }
+      }
+      @media (max-width: 560px) {
+        .grid { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="header-inner">
+        <nav class="report-nav" aria-label="report navigation">
+          <a class="button" href="../vbd_validation/index.html">VBD validation overview</a>
+        </nav>
+        <p class="eyebrow">Newton VBD validation</p>
+        <h1>Per-joint reaction readout in closed systems</h1>
+        <p class="subtitle">A closed four-bar linkage where two joints act on the green right link. The report checks that
+        <code>state.vbd.joint_reaction_f</code> keeps those joint loads separated while their sum matches
+        <code>state.body_parent_f</code>. A second scene applies equal and opposite pulls to two highlighted segments of a
+        standalone closed cable loop. The purple marker is the loop-closing joint; the plot compares
+        per-joint reactions against the cable-specific
+        <code>state.vbd.cable_tension</code> readout.</p>
+        <div class="grid cards">
+          <div class="card"><span class="label">Four-bar sum error</span><span class="value">0.00e+00 N</span></div>
+          <div class="card"><span class="label">Cable sum error</span><span class="value">0.00e+00 N</span></div>
+          <div class="card"><span class="label">Reaction vs tension</span><span class="value">1.49e-08 N</span></div>
+          <div class="card"><span class="label">Applied cable pull</span><span class="value">2.000 N</span></div>
+        </div>
+      </div>
+    </header>
+    <main>
+      <section>
+        <h2>Readout Contract</h2>
+        <div class="grid">
+          <div class="card">
+            <span class="label">Per-joint</span>
+            <span class="value">joint_reaction_f</span>
+            <p class="subtitle">One reaction wrench per joint, including loop-closing joints that cannot be represented by a tree-only parent chain.</p>
+          </div>
+          <div class="card">
+            <span class="label">Body-level</span>
+            <span class="value">net joint load</span>
+            <p class="subtitle">A body-indexed readout stored in <code>state.body_parent_f</code>. In closed loops it is the merged load on the body, not a substitute for per-joint reporting.</p>
+          </div>
+          <div class="card">
+            <span class="label">Cable check</span>
+            <span class="value">cable_tension</span>
+            <p class="subtitle">A scalar cable-specific tension readout used here as an independent check against the axial part of the per-joint reaction.</p>
+          </div>
+          <div class="card">
+            <span class="label">Reference frame</span>
+            <span class="value">world force</span>
+            <p class="subtitle">The plots show force magnitudes from the linear component of the reported world-frame reaction wrenches.</p>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Newton Rendered Videos</h2>
+        <div class="media-grid">
+          <article class="figure">
+            <video controls muted loop playsinline preload="metadata">
+              <source src="assets/vbd_joint_reaction_four_bar.mp4" type="video/mp4" />
+            </video>
+            <div class="figure-body">
+              <h3>Closed four-bar</h3>
+              <p>Blue, orange, and green links form a closed linkage. The clean plots below show the two separate joint-reaction magnitudes and the green-link vector-sum check.</p>
+            </div>
+          </article>
+          <article class="figure">
+            <video controls muted loop playsinline preload="metadata">
+              <source src="assets/vbd_joint_reaction_closed_cable.mp4" type="video/mp4" />
+            </video>
+            <div class="figure-body">
+              <h3>Closed cable loop</h3>
+              <p>Two red cable segments are pulled in opposite directions. The purple marker identifies the loop-closing cable joint used by the closure-joint reaction plot.</p>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2>Closed Four-Bar</h2>
+        <div class="grid cards">
+          <div class="card"><span class="label">Orange-green joint</span><span class="value">0.188 N</span></div>
+          <div class="card"><span class="label">Gray-green closure</span><span class="value">0.305 N</span></div>
+          <div class="card"><span class="label">Green body net</span><span class="value">0.301 N</span></div>
+          <div class="card"><span class="label">Sum check</span><span class="value">0.00e+00 N</span></div>
+        </div>
+        <p class="note">The upper plot is a separation view: two different joints act on the green link, and the plotted values are individual force magnitudes. They are not meant to add as scalars. The lower plot is the consistency check: the green link net load, read from <code>state.body_parent_f</code>, lands on top of the vector sum of the two green-link per-joint reactions.</p>
+        <div class="legend">
+          <span class="tag"><span class="blue">blue</span>&nbsp;internal joint reaction</span>
+          <span class="tag"><span class="purple">purple</span>&nbsp;closure joint reaction</span>
+          <span class="tag"><span class="green">green</span>&nbsp;body-level net load</span>
+        </div>
+        <div class="figure">
+          <img src="assets/fourbar_joint_reactions.png" alt="Four-bar joint reaction force plot" />
+        </div>
+      </section>
+      <section>
+        <h2>Closed Cable Loop</h2>
+        <div class="grid cards">
+          <div class="card"><span class="label">Mean per-joint reaction</span><span class="value">0.914 N</span></div>
+          <div class="card"><span class="label">Mean cable tension</span><span class="value">0.914 N</span></div>
+          <div class="card"><span class="label">Purple closure joint</span><span class="value">0.986 N</span></div>
+          <div class="card"><span class="label">Max red body load</span><span class="value">0.987 N</span></div>
+        </div>
+        <p class="note">The cable loop is pulled outward at the two red segments with equal and opposite forces, so the net external force on the whole loop is zero. The purple marker identifies the loop-closing joint. The mean per-joint reaction and mean cable tension agree to 1.49e-08 N; the max red-body load is the larger net joint-load magnitude over the two loaded red segments, read from <code>state.body_parent_f</code>.</p>
+        <div class="legend">
+          <span class="tag"><span class="blue">blue</span>&nbsp;mean per-joint reaction</span>
+          <span class="tag"><span class="orange">orange</span>&nbsp;mean cable tension</span>
+          <span class="tag"><span class="purple">purple</span>&nbsp;marked closure joint</span>
+          <span class="tag"><span class="green">green</span>&nbsp;max red-segment body load</span>
+        </div>
+        <div class="figure">
+          <img src="assets/closed_cable_joint_reactions.png" alt="Closed cable joint reaction and tension plot" />
+        </div>
+      </section>
+      <section>
+        <h2>Reproduce</h2>
+        <div class="command-table">
+          <table>
+            <thead>
+              <tr><th>Scene</th><th>Command</th><th>What to inspect</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Closed four-bar</td>
+                <td><code>uv run -m newton.examples vbd_joint_reaction_four_bar</code></td>
+                <td>Orange-green and gray-green reactions stay separated; the green link net load is their body-level sum.</td>
+              </tr>
+              <tr>
+                <td>Closed cable loop</td>
+                <td><code>uv run -m newton.examples vbd_joint_reaction_closed_cable</code></td>
+                <td>Red loaded segments, purple closure joint, reaction-tension agreement, and max red-segment net joint load.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

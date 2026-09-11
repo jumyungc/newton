@@ -1,0 +1,102 @@
+{
+  "frames": 61,
+  "generated_utc": "20260709T072809Z",
+  "hostname": "jumyungc-spock",
+  "owner_line_start": "OWNER: Team Fable (claimed 2026-07-09T07:19:27Z \u2014 round 7: ETC-VBD invention \u2014 N1 energy-certified corrections (fixes measured cadence instability), N2 saturation-triggered cadence, N3 space-time coarse; experiment-driven; prior-art gap web-checked)",
+  "pid": 2311155,
+  "results": {
+    "n1024_s1e6_b2500": {
+      "etc_r32_c10_pq": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 59,
+        "corrections_attempted": 60,
+        "energy_rejects": 3,
+        "energy_shrinks": 0,
+        "final_max_bend_rad": 1.8812881708145142,
+        "final_max_stretch_m": 191279808512.0,
+        "last_diag": {
+          "alpha": 1.00000000000763,
+          "alpha_star": 1.00000000000763,
+          "dE": -5.306172960863715e+29,
+          "delta_max_m": 519500147411.8828,
+          "delta_max_rad": 334897019308.6686,
+          "e_before": 8.610354126130954e+29,
+          "merit_after": 4.954423474133891e+29,
+          "merit_before": 8.544767098485274e+29
+        },
+        "max_bend_rad": 3.1415607929229736,
+        "max_stretch_m": 191279808512.0,
+        "n_substeps": 600,
+        "reject_worse_merit": 1,
+        "substep_ms_p50": 0.6980597972869873,
+        "trigger_fires": 0,
+        "wall_s": 5.068722248077393
+      },
+      "etc_r32_c5_pq": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 119,
+        "corrections_attempted": 120,
+        "energy_rejects": 3,
+        "energy_shrinks": 0,
+        "final_max_bend_rad": 0.08016183227300644,
+        "final_max_stretch_m": 0.000969907094258815,
+        "last_diag": {
+          "alpha": 1.0000000000053244,
+          "alpha_star": 1.0000000000053244,
+          "dE": -0.18201502542956405,
+          "delta_max_m": 0.0002467101494946575,
+          "delta_max_rad": 0.00010192780204426038,
+          "e_before": 536.0522433620904,
+          "merit_after": 191.0982696992284,
+          "merit_before": 191.19707173496965
+        },
+        "max_bend_rad": 0.08968145400285721,
+        "max_stretch_m": 0.0009718297515064478,
+        "n_substeps": 600,
+        "reject_worse_merit": 1,
+        "substep_ms_p50": 0.7040733471512794,
+        "trigger_fires": 0,
+        "wall_s": 9.122563123703003
+      }
+    },
+    "n1024_s1e7_b2500": {
+      "etc_r32_c10_pq": {
+        "error": "FloatingPointError('etc_r32_c10_pq: non-finite final state')"
+      },
+      "etc_r32_c5_pq": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 120,
+        "corrections_attempted": 120,
+        "energy_rejects": 0,
+        "energy_shrinks": 0,
+        "final_max_bend_rad": 2.056635856628418,
+        "final_max_stretch_m": 9.146050393459917e+17,
+        "last_diag": {
+          "alpha": 1.000000000008363,
+          "alpha_star": 1.000000000008363,
+          "dE": -4.005610599762875e+44,
+          "delta_max_m": 5.707800341657891e+18,
+          "delta_max_rad": 2.5775607559120026e+17,
+          "e_before": 4.4299303289764554e+44,
+          "merit_after": 6.891632820050963e+43,
+          "merit_before": 4.395747444816459e+44
+        },
+        "max_bend_rad": 3.1415278911590576,
+        "max_stretch_m": 9.146050393459917e+17,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 0.7092738524079323,
+        "trigger_fires": 0,
+        "wall_s": 7.005822658538818
+      }
+    }
+  },
+  "schema": "fable-mg-vbd-ladder/v1",
+  "semantics": "mg_rR_cK = requested-VBD2 smoother + certificate-gated coarse-companion BGN correction every K substeps at coarsening R; lra = known-art long-range attachment clamp witness; Track-B; descriptive timings",
+  "sources": {
+    "codex_bgn_global.py": "e20f2bbd65a5058b06c1c569405a9bc6333b950e02fc5d9bc0b79168b1190d93",
+    "fable_fast_step.py": "27ac986b6d82cabc3424905733c297b5653a2342099d2dde51504d1674041d8b",
+    "fable_ladder.py": "745327eed04050e7117c9c302924c71dd9c64fcbe92a3fe1286dfa0e3a86b4ca",
+    "fable_mg.py": "6c66d65634c29c3619fac7ba910704d3ed168b8c17080d4ae8ab390af75077f9"
+  }
+}

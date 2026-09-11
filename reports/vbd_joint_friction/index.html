@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VBD Joint Friction Validation</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #17202a;
+        --muted: #607086;
+        --line: #d8e0e8;
+        --panel: #f6f8fb;
+        --accent: #1f6f8b;
+        --accent-2: #6f8f2f;
+        --max: 1180px;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: #ffffff;
+        color: var(--ink);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        line-height: 1.5;
+      }
+      a { color: var(--accent); }
+      code {
+        padding: 0.08rem 0.28rem;
+        border: 1px solid #dce6ef;
+        border-radius: 4px;
+        background: #eef3f7;
+        font-size: 0.93em;
+      }
+      header { border-bottom: 1px solid var(--line); background: #fbfcfd; }
+      main, .header-inner { width: min(var(--max), calc(100vw - 32px)); margin: 0 auto; }
+      .header-inner { padding: 38px 0 30px; }
+      .report-nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 18px;
+      }
+      .button {
+        display: inline-flex;
+        align-items: center;
+        min-height: 34px;
+        padding: 7px 12px;
+        border: 1px solid #bfd2e7;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.78);
+        color: var(--accent);
+        font-weight: 650;
+        text-decoration: none;
+      }
+      .eyebrow {
+        margin: 0 0 10px;
+        color: var(--accent);
+        font-size: 0.82rem;
+        font-weight: 750;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      h1, h2 { margin: 0; line-height: 1.12; letter-spacing: 0; }
+      h1 { max-width: 900px; font-size: clamp(2.2rem, 4vw, 3.6rem); }
+      h2 { margin-bottom: 14px; font-size: 1.55rem; }
+      p { margin: 0; }
+      .subtitle { max-width: 920px; margin-top: 14px; color: var(--muted); font-size: 1.08rem; }
+      main { padding: 34px 0 48px; }
+      section { margin-bottom: 38px; }
+      .summary {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 24px;
+      }
+      .card, .note, .figure, .example-table {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #ffffff;
+      }
+      .card { padding: 14px 16px; }
+      .card .label { display: block; color: var(--muted); font-size: 0.78rem; font-weight: 750; text-transform: uppercase; }
+      .card .value { display: block; margin-top: 5px; font-size: 1.16rem; font-weight: 760; }
+      .figure { overflow: hidden; }
+      .figure img, .figure video { display: block; width: 100%; background: var(--panel); }
+      .note { padding: 16px 18px; background: var(--panel); color: var(--muted); }
+      table { width: 100%; border-collapse: collapse; }
+      th, td { padding: 11px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+      th { background: var(--panel); color: var(--ink); }
+      tr:last-child td { border-bottom: 0; }
+      @media (max-width: 880px) { .summary { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="header-inner">
+        <nav class="report-nav" aria-label="report navigation">
+          <a class="button" href="../vbd_validation/index.html">VBD validation overview</a>
+        </nav>
+        <p class="eyebrow">Newton VBD</p>
+        <h1>Joint friction validation</h1>
+        <p class="subtitle">
+          Validates per-DOF Coulomb joint friction in SolverVBD with revolute and prismatic coast-down,
+          subthreshold stick, super-threshold sliding, and energy dissipation checks.
+        </p>
+        <div class="summary" aria-label="summary">
+          <div class="card"><span class="label">Revolute coast error</span><span class="value">0.001 rad/s</span></div>
+          <div class="card"><span class="label">Prismatic coast error</span><span class="value">0.001 m/s</span></div>
+          <div class="card"><span class="label">Sliding drive error</span><span class="value">0.001 rad/s</span></div>
+          <div class="card"><span class="label">Energy drop</span><span class="value">95.8%</span></div>
+        </div>
+      </div>
+    </header>
+    <main>
+      <section>
+        <h2>Newton Rendered Video</h2>
+        <div class="figure">
+          <video controls muted loop playsinline preload="metadata">
+            <source src="assets/joint_friction_pendulums.mp4" type="video/mp4" />
+          </video>
+        </div>
+      </section>
+      <section>
+        <h2>Validation Plots</h2>
+        <div class="figure">
+          <img src="assets/joint_friction_validation.png" alt="Joint friction validation plots" />
+        </div>
+      </section>
+      <section>
+        <h2>Standalone Example</h2>
+        <div class="example-table">
+          <table>
+            <thead><tr><th>Feature</th><th>Run Command</th><th>What To Check</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><code>Model.joint_friction</code></td>
+                <td><code>uv run -m newton.examples basic_joint_friction</code></td>
+                <td>Five pendulums with different friction torques are compared against an RK4 reference.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

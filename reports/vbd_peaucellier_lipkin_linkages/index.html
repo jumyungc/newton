@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rigid VBD Peaucellier-Lipkin Linkage Verification</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17202a;
+      --muted: #5f6f82;
+      --line: #d9e0e8;
+      --max: 1120px;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #fff; color: var(--ink); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.5; }
+    header { border-bottom: 1px solid var(--line); background: #fbfcfd; }
+    main, .header-inner, footer { width: min(var(--max), calc(100vw - 32px)); margin: 0 auto; }
+    .header-inner { padding: 36px 0 28px; }
+    h1 { margin: 0 0 10px; font-size: clamp(2rem, 4vw, 3.35rem); line-height: 1.05; letter-spacing: 0; }
+    h2 { margin: 0 0 10px; font-size: 1.45rem; line-height: 1.2; letter-spacing: 0; }
+    h3 { margin: 0 0 8px; font-size: 1.1rem; line-height: 1.25; letter-spacing: 0; }
+    p { margin: 0 0 12px; }
+    code { padding: 0.08em 0.25em; border-radius: 4px; background: #edf2f7; font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: 0.92em; }
+    .subtitle { max-width: 880px; margin: 0; color: var(--muted); font-size: 1.05rem; }
+    .metric-row, .takeaways, .plot-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 22px;
+    }
+    .takeaways { margin-top: 14px; }
+    .plot-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-top: 0; }
+    .metric, .takeaway { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 14px 16px; }
+    .metric .label { color: var(--muted); font-size: 0.82rem; font-weight: 650; text-transform: uppercase; }
+    .metric .value { display: block; margin-top: 4px; font-size: 1.28rem; font-weight: 760; }
+    main { padding: 28px 0 48px; }
+    section { margin: 0 0 38px; }
+    .case { padding-top: 8px; border-top: 1px solid var(--line); }
+    .two-col { display: grid; grid-template-columns: minmax(0, 0.82fr) minmax(420px, 1fr); gap: 22px; align-items: start; }
+    figure { margin: 0 0 18px; border: 1px solid var(--line); border-radius: 8px; background: #fff; overflow: hidden; }
+    figure img, figure video { display: block; width: 100%; height: auto; }
+    figure video { background: #111827; }
+    figcaption { padding: 10px 12px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.92rem; }
+    .matrix { width: 100%; border-collapse: collapse; border: 1px solid var(--line); background: #fff; }
+    .matrix th, .matrix td { padding: 10px 12px; border-top: 1px solid var(--line); text-align: left; vertical-align: top; }
+    .matrix th { color: var(--muted); font-size: 0.86rem; font-weight: 700; text-transform: uppercase; }
+    footer { padding: 0 0 42px; color: var(--muted); font-size: 0.9rem; }
+    @media (max-width: 860px) {
+      .metric-row, .takeaways, .plot-grid, .two-col { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <h1>Rigid VBD Peaucellier-Lipkin Linkage Verification</h1>
+      <p class="subtitle">
+        Two planar straight-line mechanism checks for rigid-body VBD joint-loop
+        closure. The reports track whether tracer point <code>D</code> follows
+        the ideal Peaucellier line while revolute joint anchors stay coincident.
+      </p>
+      <div class="metric-row">
+        <div class="metric"><span class="label">Examples</span><span class="value">2 drivers</span></div>
+        <div class="metric"><span class="label">Reference Budget</span><span class="value">5 iters, 1 substep</span></div>
+        <div class="metric"><span class="label">Primary Metrics</span><span class="value">line error, joint gap</span></div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>Setup</h2>
+      <p>
+        Both cases use the same Peaucellier-Lipkin inversor geometry: fixed
+        pivots <code>O</code> and <code>P</code>, equal links <code>OA</code>
+        and <code>OC</code>, and rhombus <code>ABCD</code>. Gravity and contact
+        are disabled so the measurement isolates joint closure and mechanism
+        geometry.
+      </p>
+      <div class="takeaways">
+        <div class="takeaway">
+          <strong>Direct driver.</strong>
+          A kinematic rotating link <code>PB</code> drives point <code>B</code>
+          around the grounded pivot.
+        </div>
+        <div class="takeaway">
+          <strong>Slider driver.</strong>
+          A kinematic slider drives a coupler-rocker pair, which then drives the
+          Peaucellier cell.
+        </div>
+        <div class="takeaway">
+          <strong>Dependency axis.</strong>
+          The report sweeps <code>2</code>, <code>5</code>, and <code>10</code>
+          VBD iterations; substeps stay fixed at <code>1</code>.
+        </div>
+        <div class="takeaway">
+          <strong>No soft/hard split.</strong>
+          Contact and gravity are disabled, so the clean comparison is loop
+          closure versus solver budget.
+        </div>
+        <div class="takeaway">
+          <strong>Slider convention.</strong>
+          The slider guide's permitted rail displacement is not counted as a
+          joint-anchor closure error.
+        </div>
+        <div class="takeaway">
+          <strong>Scale context.</strong>
+          Peak errors are worst-frame samples. The direct 5-iteration peaks are
+          below <code>0.3%</code> of the <code>0.85 m</code> main-link length.
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Newton-Rendered Videos</h2>
+      <p>
+        These videos are captured through Newton's OpenGL viewer from the same
+        source snapshots used by the local validation reports.
+      </p>
+      <div class="plot-grid">
+        <figure>
+          <video controls preload="metadata" muted playsinline>
+            <source src="assets/lipkin_linkage_newton.mp4" type="video/mp4">
+          </video>
+          <figcaption>
+            Direct driver: kinematic crank <code>PB</code> drives the Peaucellier cell.
+          </figcaption>
+        </figure>
+        <figure>
+          <video controls preload="metadata" muted playsinline>
+            <source src="assets/lipkin_slider_driver_newton.mp4" type="video/mp4">
+          </video>
+          <figcaption>
+            Slider driver: kinematic slider and rocker/coupler drive point <code>B</code>.
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="case">
+      <h2>Direct Driver</h2>
+      <div class="two-col">
+        <div>
+          <p>
+            The direct case is the cleanest Peaucellier-Lipkin check: the crank
+            <code>PB</code> is kinematic, so the report mainly measures how well
+            the VBD revolute-loop constraints preserve the ideal inversor path.
+          </p>
+          <div class="takeaways">
+            <div class="takeaway">
+              <strong>5 iterations.</strong>
+              Peak straight-line error: <code>2.01 mm</code>;
+              RMS: <code>0.304 mm</code>.
+            </div>
+            <div class="takeaway">
+              <strong>5 iterations.</strong>
+              Peak joint-anchor gap: <code>2.28 mm</code>;
+              RMS: <code>0.381 mm</code>.
+            </div>
+            <div class="takeaway">
+              <strong>Iteration trend.</strong>
+              At <code>10</code> iterations, peak line error is <code>1.07 mm</code>
+              and peak joint gap is <code>1.16 mm</code>.
+            </div>
+          </div>
+        </div>
+        <figure>
+          <img src="assets/lipkin_linkage_scene_trace.png" alt="Direct Peaucellier-Lipkin tracer and driver paths.">
+          <figcaption>
+            Cyan is tracer point <code>D</code>; magenta is the ideal straight line.
+          </figcaption>
+        </figure>
+      </div>
+      <div class="plot-grid">
+        <figure>
+          <img src="assets/lipkin_linkage_iteration_sweep.png" alt="Direct Peaucellier-Lipkin iteration sweep.">
+          <figcaption>Iteration sensitivity for line error and joint-anchor gap.</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/lipkin_linkage_time_trace_iter_05.png" alt="Direct Peaucellier-Lipkin time trace at 5 iterations.">
+          <figcaption>Reference time trace at <code>5</code> iterations.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="case">
+      <h2>Slider Driver</h2>
+      <div class="two-col">
+        <div>
+          <p>
+            The slider-driver case adds a prismatic guide and coupler-rocker
+            driver before the same Peaucellier cell. It is useful because the
+            driver itself is a constrained mechanism, not only a prescribed
+            crank.
+          </p>
+          <div class="takeaways">
+            <div class="takeaway">
+              <strong>5 iterations.</strong>
+              Peak straight-line error: <code>0.104 mm</code>;
+              RMS: <code>0.041 mm</code>.
+            </div>
+            <div class="takeaway">
+              <strong>5 iterations.</strong>
+              Peak revolute joint gap: <code>0.17 mm</code>;
+              RMS: <code>0.092 mm</code>.
+            </div>
+            <div class="takeaway">
+              <strong>10 iterations.</strong>
+              Peak revolute joint gap is <code>0.152 mm</code>; the 5-iteration
+              budget is already visually accurate.
+            </div>
+          </div>
+        </div>
+        <figure>
+          <img src="assets/lipkin_slider_scene_trace.png" alt="Slider-driver Peaucellier-Lipkin tracer and driver paths.">
+          <figcaption>
+            The tracer remains on the ideal line while the slider-rocker drives point <code>B</code>.
+          </figcaption>
+        </figure>
+      </div>
+      <div class="plot-grid">
+        <figure>
+          <img src="assets/lipkin_slider_iteration_sweep.png" alt="Slider-driver Peaucellier-Lipkin iteration sweep.">
+          <figcaption>Iteration sensitivity for line error and revolute joint-anchor gap.</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/lipkin_slider_time_trace_iter_05.png" alt="Slider-driver Peaucellier-Lipkin time trace at 5 iterations.">
+          <figcaption>Reference time trace at <code>5</code> iterations.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section>
+      <h2>Summary</h2>
+      <table class="matrix">
+        <tr>
+          <th>Case</th>
+          <th>Driver</th>
+          <th>Line error at 5 iters</th>
+          <th>Joint gap at 5 iters</th>
+        </tr>
+        <tr>
+          <td>Direct Peaucellier-Lipkin</td>
+          <td>Kinematic rotating link <code>PB</code></td>
+          <td>peak <code>2.01 mm</code>, RMS <code>0.304 mm</code></td>
+          <td>peak <code>2.28 mm</code>, RMS <code>0.381 mm</code></td>
+        </tr>
+        <tr>
+          <td>Slider-driver Peaucellier-Lipkin</td>
+          <td>Kinematic slider plus rocker/coupler</td>
+          <td>peak <code>0.104 mm</code>, RMS <code>0.041 mm</code></td>
+          <td>peak <code>0.17 mm</code>, RMS <code>0.092 mm</code></td>
+        </tr>
+      </table>
+    </section>
+  </main>
+
+  <footer>
+    Report payload: this page, the Newton-rendered MP4 videos, and the PNGs in
+    <code>assets/</code>. Raw CSVs, scripts, and source snapshots stay in the
+    local verification folders.
+  </footer>
+</body>
+</html>

@@ -1,0 +1,1013 @@
+{
+  "generated_at": "2026-09-10T09:47:29.146933+00:00",
+  "records": [
+    {
+      "backend": "current-g1",
+      "case": "cross_slide_table",
+      "graph_captured": true,
+      "label": "Local\u2013Global VBD",
+      "repeat": 0,
+      "simulation_seconds": 6.634014050010592,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 1,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 11.791780008934438,
+      "step_time_p95_ms": 13.441385887563229
+    },
+    {
+      "backend": "pcr",
+      "case": "cross_slide_table",
+      "graph_captured": true,
+      "label": "Reference scalar PCR",
+      "repeat": 0,
+      "simulation_seconds": 4.193002393003553,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 1,
+          "pcr_enabled": true,
+          "pcr_node_count": 106
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 7.474826998077333,
+      "step_time_p95_ms": 9.069300431292504
+    },
+    {
+      "backend": "sparse-direct",
+      "case": "cross_slide_table",
+      "graph_captured": true,
+      "label": "VBD sparse direct",
+      "repeat": 0,
+      "simulation_seconds": 14.708581984974444,
+      "solver_instances": [
+        {
+          "articulation_solve": "block_sparse_joints",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 27.26536092814058,
+      "step_time_p95_ms": 28.650027641560882
+    },
+    {
+      "backend": "current-g1",
+      "case": "cross_slide_table",
+      "graph_captured": true,
+      "label": "Local\u2013Global VBD",
+      "repeat": 1,
+      "simulation_seconds": 6.631397312041372,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 1,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 11.819061008282006,
+      "step_time_p95_ms": 13.373352296184748
+    },
+    {
+      "backend": "pcr",
+      "case": "cross_slide_table",
+      "graph_captured": true,
+      "label": "Reference scalar PCR",
+      "repeat": 1,
+      "simulation_seconds": 4.154363445006311,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 1,
+          "pcr_enabled": true,
+          "pcr_node_count": 106
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 7.422789931297302,
+      "step_time_p95_ms": 8.93432532902807
+    },
+    {
+      "backend": "sparse-direct",
+      "case": "cross_slide_table",
+      "graph_captured": true,
+      "label": "VBD sparse direct",
+      "repeat": 1,
+      "simulation_seconds": 15.475669199950062,
+      "solver_instances": [
+        {
+          "articulation_solve": "block_sparse_joints",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 28.768423944711685,
+      "step_time_p95_ms": 29.612839163746685
+    },
+    {
+      "backend": "current-g1",
+      "case": "cross_slide_table",
+      "graph_captured": true,
+      "label": "Local\u2013Global VBD",
+      "repeat": 2,
+      "simulation_seconds": 6.650023152935319,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 1,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 11.817947961390018,
+      "step_time_p95_ms": 13.617664820048958
+    },
+    {
+      "backend": "pcr",
+      "case": "cross_slide_table",
+      "graph_captured": true,
+      "label": "Reference scalar PCR",
+      "repeat": 2,
+      "simulation_seconds": 4.159165890072472,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 1,
+          "pcr_enabled": true,
+          "pcr_node_count": 106
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 7.422531954944134,
+      "step_time_p95_ms": 8.997484343126416
+    },
+    {
+      "backend": "sparse-direct",
+      "case": "cross_slide_table",
+      "graph_captured": true,
+      "label": "VBD sparse direct",
+      "repeat": 2,
+      "simulation_seconds": 14.99570277996827,
+      "solver_instances": [
+        {
+          "articulation_solve": "block_sparse_joints",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 27.841534931212664,
+      "step_time_p95_ms": 28.81534582702443
+    },
+    {
+      "backend": "current-g1",
+      "case": "cable_pile",
+      "graph_captured": true,
+      "label": "Local\u2013Global VBD",
+      "repeat": 0,
+      "simulation_seconds": 1.483021812979132,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 1,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 5.885588936507702,
+      "step_time_p95_ms": 7.61508991708979
+    },
+    {
+      "backend": "pcr",
+      "case": "cable_pile",
+      "graph_captured": true,
+      "label": "Reference scalar PCR",
+      "repeat": 0,
+      "simulation_seconds": 1.4874550040112808,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 100,
+          "pcr_enabled": true,
+          "pcr_node_count": 4000
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 5.904079065658152,
+      "step_time_p95_ms": 7.576541043817997
+    },
+    {
+      "backend": "sparse-direct",
+      "case": "cable_pile",
+      "graph_captured": true,
+      "label": "VBD sparse direct",
+      "repeat": 0,
+      "simulation_seconds": 3.0216502469265833,
+      "solver_instances": [
+        {
+          "articulation_solve": "block_sparse_joints",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 12.124157976359129,
+      "step_time_p95_ms": 13.899874838534743
+    },
+    {
+      "backend": "current-g1",
+      "case": "cable_pile",
+      "graph_captured": true,
+      "label": "Local\u2013Global VBD",
+      "repeat": 1,
+      "simulation_seconds": 1.4835094859590754,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 1,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 5.886864033527672,
+      "step_time_p95_ms": 7.671228400431573
+    },
+    {
+      "backend": "pcr",
+      "case": "cable_pile",
+      "graph_captured": true,
+      "label": "Reference scalar PCR",
+      "repeat": 1,
+      "simulation_seconds": 1.497937367996201,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 100,
+          "pcr_enabled": true,
+          "pcr_node_count": 4000
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 5.901970085687935,
+      "step_time_p95_ms": 7.755545200780034
+    },
+    {
+      "backend": "sparse-direct",
+      "case": "cable_pile",
+      "graph_captured": true,
+      "label": "VBD sparse direct",
+      "repeat": 1,
+      "simulation_seconds": 3.05657583498396,
+      "solver_instances": [
+        {
+          "articulation_solve": "block_sparse_joints",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 12.191519956104457,
+      "step_time_p95_ms": 14.169246272649616
+    },
+    {
+      "backend": "current-g1",
+      "case": "cable_pile",
+      "graph_captured": true,
+      "label": "Local\u2013Global VBD",
+      "repeat": 2,
+      "simulation_seconds": 1.4834257810143754,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 1,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 5.883850040845573,
+      "step_time_p95_ms": 7.631022250279784
+    },
+    {
+      "backend": "pcr",
+      "case": "cable_pile",
+      "graph_captured": true,
+      "label": "Reference scalar PCR",
+      "repeat": 2,
+      "simulation_seconds": 1.4873268789378926,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 100,
+          "pcr_enabled": true,
+          "pcr_node_count": 4000
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 5.902732955291867,
+      "step_time_p95_ms": 7.591615593992174
+    },
+    {
+      "backend": "sparse-direct",
+      "case": "cable_pile",
+      "graph_captured": true,
+      "label": "VBD sparse direct",
+      "repeat": 2,
+      "simulation_seconds": 3.0259950420586392,
+      "solver_instances": [
+        {
+          "articulation_solve": "block_sparse_joints",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 12.040351051837206,
+      "step_time_p95_ms": 13.909929501824081
+    },
+    {
+      "backend": "current-g1",
+      "case": "y_junction_k1e9",
+      "graph_captured": true,
+      "label": "Local\u2013Global VBD",
+      "repeat": 0,
+      "simulation_seconds": 0.44867903704289347,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 1,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 3.517413977533579,
+      "step_time_p95_ms": 4.691136709880084
+    },
+    {
+      "backend": "pcr",
+      "case": "y_junction_k1e9",
+      "graph_captured": true,
+      "label": "Reference scalar PCR",
+      "repeat": 0,
+      "simulation_seconds": 0.3158937089610845,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": true,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 2.626674948260188,
+      "step_time_p95_ms": 3.465723420958965
+    },
+    {
+      "backend": "sparse-direct",
+      "case": "y_junction_k1e9",
+      "graph_captured": true,
+      "label": "VBD sparse direct",
+      "repeat": 0,
+      "simulation_seconds": 1.7334615850122645,
+      "solver_instances": [
+        {
+          "articulation_solve": "block_sparse_joints",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 14.12294595502317,
+      "step_time_p95_ms": 15.436099434737116
+    },
+    {
+      "backend": "current-g1",
+      "case": "y_junction_k1e9",
+      "graph_captured": true,
+      "label": "Local\u2013Global VBD",
+      "repeat": 1,
+      "simulation_seconds": 0.447825831011869,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 1,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 3.517201985232532,
+      "step_time_p95_ms": 4.778103448916227
+    },
+    {
+      "backend": "pcr",
+      "case": "y_junction_k1e9",
+      "graph_captured": true,
+      "label": "Reference scalar PCR",
+      "repeat": 1,
+      "simulation_seconds": 0.3155065909959376,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": true,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 2.6449179276823997,
+      "step_time_p95_ms": 3.35675465175882
+    },
+    {
+      "backend": "sparse-direct",
+      "case": "y_junction_k1e9",
+      "graph_captured": true,
+      "label": "VBD sparse direct",
+      "repeat": 1,
+      "simulation_seconds": 1.7319328350713477,
+      "solver_instances": [
+        {
+          "articulation_solve": "block_sparse_joints",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 14.08479199744761,
+      "step_time_p95_ms": 15.461321116890758
+    },
+    {
+      "backend": "current-g1",
+      "case": "y_junction_k1e9",
+      "graph_captured": true,
+      "label": "Local\u2013Global VBD",
+      "repeat": 2,
+      "simulation_seconds": 0.4489005299983546,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 1,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 3.517589997500181,
+      "step_time_p95_ms": 4.593785142060369
+    },
+    {
+      "backend": "pcr",
+      "case": "y_junction_k1e9",
+      "graph_captured": true,
+      "label": "Reference scalar PCR",
+      "repeat": 2,
+      "simulation_seconds": 0.31833290692884475,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": true,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 2.650839975103736,
+      "step_time_p95_ms": 3.3374983235262325
+    },
+    {
+      "backend": "sparse-direct",
+      "case": "y_junction_k1e9",
+      "graph_captured": true,
+      "label": "VBD sparse direct",
+      "repeat": 2,
+      "simulation_seconds": 1.7342010390711948,
+      "solver_instances": [
+        {
+          "articulation_solve": "block_sparse_joints",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 14.03167808894068,
+      "step_time_p95_ms": 15.54803978651762
+    },
+    {
+      "backend": "current-g1",
+      "case": "slinky",
+      "graph_captured": true,
+      "label": "Local\u2013Global VBD",
+      "repeat": 0,
+      "simulation_seconds": 8.287378211971372,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 1,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 13.780731940642,
+      "step_time_p95_ms": 15.761961322277784
+    },
+    {
+      "backend": "pcr",
+      "case": "slinky",
+      "graph_captured": true,
+      "label": "Reference scalar PCR",
+      "repeat": 0,
+      "simulation_seconds": 8.627734548063017,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 1,
+          "pcr_enabled": true,
+          "pcr_node_count": 360
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 14.467925997450948,
+      "step_time_p95_ms": 16.835062857717276
+    },
+    {
+      "backend": "sparse-direct",
+      "case": "slinky",
+      "graph_captured": true,
+      "label": "VBD sparse direct",
+      "repeat": 0,
+      "simulation_seconds": 119.85351805598475,
+      "solver_instances": [
+        {
+          "articulation_solve": "block_sparse_joints",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 199.8082409845665,
+      "step_time_p95_ms": 201.28086772747338
+    },
+    {
+      "backend": "current-g1",
+      "case": "slinky",
+      "graph_captured": true,
+      "label": "Local\u2013Global VBD",
+      "repeat": 1,
+      "simulation_seconds": 8.102375107933767,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 1,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 13.082963996566832,
+      "step_time_p95_ms": 15.083640697412193
+    },
+    {
+      "backend": "pcr",
+      "case": "slinky",
+      "graph_captured": true,
+      "label": "Reference scalar PCR",
+      "repeat": 1,
+      "simulation_seconds": 8.750194745021872,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 1,
+          "pcr_enabled": true,
+          "pcr_node_count": 360
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 14.398817904293537,
+      "step_time_p95_ms": 17.401041579432786
+    },
+    {
+      "backend": "sparse-direct",
+      "case": "slinky",
+      "graph_captured": true,
+      "label": "VBD sparse direct",
+      "repeat": 1,
+      "simulation_seconds": 119.77312242297921,
+      "solver_instances": [
+        {
+          "articulation_solve": "block_sparse_joints",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 199.67844407074153,
+      "step_time_p95_ms": 201.15507702575997
+    },
+    {
+      "backend": "current-g1",
+      "case": "slinky",
+      "graph_captured": true,
+      "label": "Local\u2013Global VBD",
+      "repeat": 2,
+      "simulation_seconds": 8.33898489002604,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 1,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 13.848782982677221,
+      "step_time_p95_ms": 16.03398738661781
+    },
+    {
+      "backend": "pcr",
+      "case": "slinky",
+      "graph_captured": true,
+      "label": "Reference scalar PCR",
+      "repeat": 2,
+      "simulation_seconds": 8.171613277983852,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 1,
+          "pcr_enabled": true,
+          "pcr_node_count": 360
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 13.516671024262905,
+      "step_time_p95_ms": 15.39371651597321
+    },
+    {
+      "backend": "sparse-direct",
+      "case": "slinky",
+      "graph_captured": true,
+      "label": "VBD sparse direct",
+      "repeat": 2,
+      "simulation_seconds": 120.46607463504188,
+      "solver_instances": [
+        {
+          "articulation_solve": "block_sparse_joints",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 200.65698691178113,
+      "step_time_p95_ms": 202.17335720080882
+    },
+    {
+      "backend": "upstream-main",
+      "case": "cross_slide_table",
+      "graph_captured": true,
+      "label": "Upstream main, local ALM",
+      "repeat": 0,
+      "simulation_seconds": 3.8818066079402342,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 7.117214030586183,
+      "step_time_p95_ms": 7.847764843609184
+    },
+    {
+      "backend": "upstream-main",
+      "case": "cross_slide_table",
+      "graph_captured": true,
+      "label": "Upstream main, local ALM",
+      "repeat": 1,
+      "simulation_seconds": 3.8821108079282567,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 7.117867935448885,
+      "step_time_p95_ms": 7.880280178505927
+    },
+    {
+      "backend": "upstream-main",
+      "case": "cross_slide_table",
+      "graph_captured": true,
+      "label": "Upstream main, local ALM",
+      "repeat": 2,
+      "simulation_seconds": 3.8841265230439603,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 7.116767927072942,
+      "step_time_p95_ms": 7.862066011875868
+    },
+    {
+      "backend": "upstream-main",
+      "case": "cable_pile",
+      "graph_captured": true,
+      "label": "Upstream main, local ALM",
+      "repeat": 0,
+      "simulation_seconds": 1.181815111078322,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 4.8376210033893585,
+      "step_time_p95_ms": 5.286736262496561
+    },
+    {
+      "backend": "upstream-main",
+      "case": "cable_pile",
+      "graph_captured": true,
+      "label": "Upstream main, local ALM",
+      "repeat": 1,
+      "simulation_seconds": 1.1785529489861801,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 4.794790991581976,
+      "step_time_p95_ms": 5.280409136321396
+    },
+    {
+      "backend": "upstream-main",
+      "case": "cable_pile",
+      "graph_captured": true,
+      "label": "Upstream main, local ALM",
+      "repeat": 2,
+      "simulation_seconds": 1.1879045640816912,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 4.89667896181345,
+      "step_time_p95_ms": 5.284919892437756
+    },
+    {
+      "backend": "upstream-main",
+      "case": "y_junction_k1e9",
+      "graph_captured": true,
+      "label": "Upstream main, local ALM",
+      "repeat": 0,
+      "simulation_seconds": 0.33874733094125986,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 2.761629060842097,
+      "step_time_p95_ms": 3.1567556085065007
+    },
+    {
+      "backend": "upstream-main",
+      "case": "y_junction_k1e9",
+      "graph_captured": true,
+      "label": "Upstream main, local ALM",
+      "repeat": 1,
+      "simulation_seconds": 0.3370034541003406,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 2.7611490804702044,
+      "step_time_p95_ms": 3.154712775722146
+    },
+    {
+      "backend": "upstream-main",
+      "case": "y_junction_k1e9",
+      "graph_captured": true,
+      "label": "Upstream main, local ALM",
+      "repeat": 2,
+      "simulation_seconds": 0.3384687789948657,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 2.761575044132769,
+      "step_time_p95_ms": 3.158913890365511
+    },
+    {
+      "backend": "upstream-main",
+      "case": "slinky",
+      "graph_captured": true,
+      "label": "Upstream main, local ALM",
+      "repeat": 0,
+      "simulation_seconds": 6.602682493044995,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 10.973526979796588,
+      "step_time_p95_ms": 12.870663835201414
+    },
+    {
+      "backend": "upstream-main",
+      "case": "slinky",
+      "graph_captured": true,
+      "label": "Upstream main, local ALM",
+      "repeat": 1,
+      "simulation_seconds": 6.7747439900413156,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 11.18059502914548,
+      "step_time_p95_ms": 12.762043054681273
+    },
+    {
+      "backend": "upstream-main",
+      "case": "slinky",
+      "graph_captured": true,
+      "label": "Upstream main, local ALM",
+      "repeat": 2,
+      "simulation_seconds": 6.976922138012014,
+      "solver_instances": [
+        {
+          "articulation_solve": "local",
+          "global_iterations": 0,
+          "iterations": 5,
+          "pcr_chain_count": 0,
+          "pcr_enabled": false,
+          "pcr_node_count": 0
+        }
+      ],
+      "status": "passed",
+      "step_time_median_ms": 11.204884038306773,
+      "step_time_p95_ms": 13.591680501122028
+    }
+  ]
+}

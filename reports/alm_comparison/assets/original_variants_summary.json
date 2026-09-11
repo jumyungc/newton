@@ -1,0 +1,450 @@
+{
+  "generated_at": "2026-06-13 23:59:34",
+  "frames": 600,
+  "notes": {
+    "fastest_stack_params": "Pyramid boxes use the fastest confirmed no-ball stack config; ball/static use isolated impact stiffness.",
+    "full_stack_params": "Pyramid boxes use the Full Contacts Stack config; ball/static use isolated impact stiffness."
+  },
+  "fastest_stack_params": {
+    "xpbd": {
+      "suite": "contacts_original_fastest_stack_params",
+      "mode": "xpbd",
+      "title": "XPBD",
+      "config": {
+        "substeps": 8,
+        "xpbd_iterations": 1,
+        "parameter_source": "fastest_stack_params_boxes_plus_impact_ball_static"
+      },
+      "frames": 600,
+      "stable": true,
+      "error": null,
+      "finite": true,
+      "ground_clearance": -0.0020166635513305664,
+      "ramp_clearance": -0.031568045812390366,
+      "ramp_samples": 403,
+      "ball_end": [
+        -0.12356671690940857,
+        -5.7175750732421875,
+        1.9999961853027344
+      ],
+      "top_xy_drift": 5.080696105957031,
+      "max_box_xy_drift": 39.70430374145508,
+      "min_z": 0.39876171946525574,
+      "max_abs_pos": 32.27976989746094,
+      "runtime_s": 3.1389472449664026
+    },
+    "old_soft": {
+      "suite": "contacts_original_fastest_stack_params",
+      "mode": "old_soft",
+      "title": "Old VBD soft penalty",
+      "config": {
+        "substeps": 8,
+        "iterations": 1,
+        "alpha": 0.95,
+        "legacy_scale": 0.1,
+        "parameter_source": "fastest_stack_params_boxes_plus_impact_ball_static",
+        "box_ke": 32768000.00000001,
+        "ball_ke": 5120000000.000001,
+        "static_ke": 5120000000.000001
+      },
+      "frames": 600,
+      "stable": false,
+      "error": null,
+      "finite": true,
+      "ground_clearance": -0.07176804542541504,
+      "ramp_clearance": -0.0767494211400348,
+      "ramp_samples": 429,
+      "ball_end": [
+        0.9828896522521973,
+        5.603888511657715,
+        4.575957298278809
+      ],
+      "top_xy_drift": 0.4942474067211151,
+      "max_box_xy_drift": 127.89509582519531,
+      "min_z": 0.3999995291233063,
+      "max_abs_pos": 111.56988525390625,
+      "runtime_s": 3.633610743971076
+    },
+    "old_hard_history": {
+      "suite": "contacts_original_fastest_stack_params",
+      "mode": "old_hard_history",
+      "title": "Old VBD hard ALM + history",
+      "config": {
+        "substeps": 4,
+        "iterations": 1,
+        "alpha": 0.0,
+        "legacy_scale": 0.1,
+        "parameter_source": "fastest_stack_params_boxes_plus_impact_ball_static",
+        "box_ke": 8192000.000000003,
+        "ball_ke": 512000000.0000001,
+        "static_ke": 512000000.0000001
+      },
+      "frames": 600,
+      "stable": false,
+      "error": null,
+      "finite": true,
+      "ground_clearance": -0.13382434844970703,
+      "ramp_clearance": -0.29139873181001086,
+      "ramp_samples": 381,
+      "ball_end": [
+        1.146641492843628,
+        1.1918069124221802,
+        1.9007785320281982
+      ],
+      "top_xy_drift": 33.79737854003906,
+      "max_box_xy_drift": 37.703948974609375,
+      "min_z": 0.3976757228374481,
+      "max_abs_pos": 31.203601837158203,
+      "runtime_s": 2.378229389025364
+    },
+    "new_alm_no_history_alpha0": {
+      "suite": "contacts_original_fastest_stack_params",
+      "mode": "new_alm_no_history_alpha0",
+      "title": "New compliant ALM, no history, alpha=0",
+      "config": {
+        "substeps": 4,
+        "iterations": 1,
+        "alpha": 0.0,
+        "ke": 3000000.0,
+        "parameter_source": "fastest_stack_params_boxes_plus_impact_ball_static",
+        "box_ke": 3000000.0,
+        "ball_ke": 3000000000000.0,
+        "static_ke": 3000000000000.0
+      },
+      "frames": 600,
+      "stable": true,
+      "error": null,
+      "finite": true,
+      "ground_clearance": -0.004464149475097656,
+      "ramp_clearance": -0.00214590876348586,
+      "ramp_samples": 403,
+      "ball_end": [
+        -0.024854352697730064,
+        -6.117290496826172,
+        1.9999278783798218
+      ],
+      "top_xy_drift": 3.132875919342041,
+      "max_box_xy_drift": 26.896089553833008,
+      "min_z": 0.3997313380241394,
+      "max_abs_pos": 18.132741928100586,
+      "runtime_s": 2.0028133669984527
+    },
+    "new_alm_no_history_alpha095": {
+      "suite": "contacts_original_fastest_stack_params",
+      "mode": "new_alm_no_history_alpha095",
+      "title": "New compliant ALM, no history, alpha=0.95",
+      "config": {
+        "substeps": 4,
+        "iterations": 1,
+        "alpha": 0.95,
+        "ke": 30000000.0,
+        "parameter_source": "fastest_stack_params_boxes_plus_impact_ball_static",
+        "box_ke": 30000000.0,
+        "ball_ke": 3000000000000.0,
+        "static_ke": 3000000000000.0
+      },
+      "frames": 600,
+      "stable": true,
+      "error": null,
+      "finite": true,
+      "ground_clearance": -0.006561994552612305,
+      "ramp_clearance": -0.023591258473012022,
+      "ramp_samples": 404,
+      "ball_end": [
+        -0.04176795482635498,
+        -5.469274997711182,
+        1.9985569715499878
+      ],
+      "top_xy_drift": 0.017931390553712845,
+      "max_box_xy_drift": 21.954334259033203,
+      "min_z": 0.3860008716583252,
+      "max_abs_pos": 15.864913940429688,
+      "runtime_s": 1.998619882040657
+    },
+    "new_alm_history_alpha0": {
+      "suite": "contacts_original_fastest_stack_params",
+      "mode": "new_alm_history_alpha0",
+      "title": "New compliant ALM + history, alpha=0",
+      "config": {
+        "substeps": 3,
+        "iterations": 1,
+        "alpha": 0.0,
+        "ke": 3000000.0,
+        "parameter_source": "fastest_stack_params_boxes_plus_impact_ball_static",
+        "box_ke": 3000000.0,
+        "ball_ke": 3000000000000.0,
+        "static_ke": 3000000000000.0
+      },
+      "frames": 600,
+      "stable": true,
+      "error": null,
+      "finite": true,
+      "ground_clearance": -0.00651240348815918,
+      "ramp_clearance": -0.0031834129647387854,
+      "ramp_samples": 401,
+      "ball_end": [
+        0.0017034972552210093,
+        -6.078879356384277,
+        1.999880075454712
+      ],
+      "top_xy_drift": 3.0003325939178467,
+      "max_box_xy_drift": 29.44403839111328,
+      "min_z": 0.3995766341686249,
+      "max_abs_pos": 18.000322341918945,
+      "runtime_s": 1.9005554710165597
+    },
+    "new_alm_history_alpha095": {
+      "suite": "contacts_original_fastest_stack_params",
+      "mode": "new_alm_history_alpha095",
+      "title": "New compliant ALM + history, alpha=0.95",
+      "config": {
+        "substeps": 4,
+        "iterations": 1,
+        "alpha": 0.95,
+        "ke": 10000000.0,
+        "parameter_source": "fastest_stack_params_boxes_plus_impact_ball_static",
+        "box_ke": 10000000.0,
+        "ball_ke": 3000000000000.0,
+        "static_ke": 3000000000000.0
+      },
+      "frames": 600,
+      "stable": true,
+      "error": null,
+      "finite": true,
+      "ground_clearance": -0.003148198127746582,
+      "ramp_clearance": -0.018675317793745094,
+      "ramp_samples": 403,
+      "ball_end": [
+        -0.02920101396739483,
+        -5.588602542877197,
+        1.9985592365264893
+      ],
+      "top_xy_drift": 0.00687691243365407,
+      "max_box_xy_drift": 22.624921798706055,
+      "min_z": 0.39968955516815186,
+      "max_abs_pos": 16.390480041503906,
+      "runtime_s": 2.4544390930095688
+    }
+  },
+  "full_stack_params": {
+    "xpbd": {
+      "suite": "contacts_original_full_stack_params",
+      "mode": "xpbd",
+      "title": "XPBD",
+      "config": {
+        "substeps": 10,
+        "xpbd_iterations": 2,
+        "parameter_source": "full_stack_params_boxes_plus_impact_ball_static"
+      },
+      "frames": 600,
+      "stable": true,
+      "error": null,
+      "finite": true,
+      "ground_clearance": -1.1205673217773438e-05,
+      "ramp_clearance": -0.02391477731755698,
+      "ramp_samples": 404,
+      "ball_end": [
+        0.08666844666004181,
+        -4.356142997741699,
+        1.9999996423721313
+      ],
+      "top_xy_drift": 4.746941566467285,
+      "max_box_xy_drift": 24.50959014892578,
+      "min_z": 0.3993748128414154,
+      "max_abs_pos": 19.721214294433594,
+      "runtime_s": 4.251898995018564
+    },
+    "old_soft": {
+      "suite": "contacts_original_full_stack_params",
+      "mode": "old_soft",
+      "title": "Old VBD soft penalty",
+      "config": {
+        "substeps": 10,
+        "iterations": 2,
+        "alpha": 0.95,
+        "legacy_scale": 0.01,
+        "parameter_source": "full_stack_params_boxes_plus_impact_ball_static",
+        "box_ke": 5120000.000000001,
+        "ball_ke": 5120000000.000001,
+        "static_ke": 5120000000.000001
+      },
+      "frames": 600,
+      "stable": false,
+      "error": null,
+      "finite": true,
+      "ground_clearance": -0.1931931972503662,
+      "ramp_clearance": -0.07499288456851927,
+      "ramp_samples": 423,
+      "ball_end": [
+        -3.2721076011657715,
+        -0.7823647260665894,
+        4.53079080581665
+      ],
+      "top_xy_drift": 4.241106033325195,
+      "max_box_xy_drift": 45.27776336669922,
+      "min_z": 0.3998905122280121,
+      "max_abs_pos": 27.09161376953125,
+      "runtime_s": 5.27328436402604
+    },
+    "old_hard_history": {
+      "suite": "contacts_original_full_stack_params",
+      "mode": "old_hard_history",
+      "title": "Old VBD hard ALM + history",
+      "config": {
+        "substeps": 10,
+        "iterations": 2,
+        "alpha": 0.0,
+        "legacy_scale": 0.01,
+        "parameter_source": "full_stack_params_boxes_plus_impact_ball_static",
+        "box_ke": 5120000.000000001,
+        "ball_ke": 512000000.0000001,
+        "static_ke": 512000000.0000001
+      },
+      "frames": 600,
+      "stable": false,
+      "error": null,
+      "finite": true,
+      "ground_clearance": -0.20514941215515137,
+      "ramp_clearance": -0.19115522993321976,
+      "ramp_samples": 359,
+      "ball_end": [
+        -1.7574518918991089,
+        -4.7502875328063965,
+        2.15270733833313
+      ],
+      "top_xy_drift": 3.938439130783081,
+      "max_box_xy_drift": 28.88018035888672,
+      "min_z": 0.39998310804367065,
+      "max_abs_pos": 36.80809783935547,
+      "runtime_s": 6.363969194004312
+    },
+    "new_alm_no_history_alpha0": {
+      "suite": "contacts_original_full_stack_params",
+      "mode": "new_alm_no_history_alpha0",
+      "title": "New compliant ALM, no history, alpha=0",
+      "config": {
+        "substeps": 10,
+        "iterations": 2,
+        "alpha": 0.0,
+        "ke": 30000000.0,
+        "parameter_source": "full_stack_params_boxes_plus_impact_ball_static",
+        "box_ke": 30000000.0,
+        "ball_ke": 3000000000000.0,
+        "static_ke": 3000000000000.0
+      },
+      "frames": 600,
+      "stable": true,
+      "error": null,
+      "finite": true,
+      "ground_clearance": -0.0009167194366455078,
+      "ramp_clearance": -0.0004983665822773098,
+      "ramp_samples": 414,
+      "ball_end": [
+        0.07846042513847351,
+        -2.7778420448303223,
+        1.9999878406524658
+      ],
+      "top_xy_drift": 6.020812034606934,
+      "max_box_xy_drift": 26.089426040649414,
+      "min_z": 0.3999965190887451,
+      "max_abs_pos": 18.52973747253418,
+      "runtime_s": 5.381421203026548
+    },
+    "new_alm_no_history_alpha095": {
+      "suite": "contacts_original_full_stack_params",
+      "mode": "new_alm_no_history_alpha095",
+      "title": "New compliant ALM, no history, alpha=0.95",
+      "config": {
+        "substeps": 10,
+        "iterations": 2,
+        "alpha": 0.95,
+        "ke": 3000000.0,
+        "parameter_source": "full_stack_params_boxes_plus_impact_ball_static",
+        "box_ke": 3000000.0,
+        "ball_ke": 3000000000000.0,
+        "static_ke": 3000000000000.0
+      },
+      "frames": 600,
+      "stable": true,
+      "error": null,
+      "finite": true,
+      "ground_clearance": -0.002414107322692871,
+      "ramp_clearance": -0.0028018446715969425,
+      "ramp_samples": 405,
+      "ball_end": [
+        0.4497296214103699,
+        -4.917341709136963,
+        1.9997361898422241
+      ],
+      "top_xy_drift": 0.17549274861812592,
+      "max_box_xy_drift": 22.87116813659668,
+      "min_z": 0.39991629123687744,
+      "max_abs_pos": 17.66990089416504,
+      "runtime_s": 5.359031971020158
+    },
+    "new_alm_history_alpha0": {
+      "suite": "contacts_original_full_stack_params",
+      "mode": "new_alm_history_alpha0",
+      "title": "New compliant ALM + history, alpha=0",
+      "config": {
+        "substeps": 10,
+        "iterations": 2,
+        "alpha": 0.0,
+        "ke": 30000000.0,
+        "parameter_source": "full_stack_params_boxes_plus_impact_ball_static",
+        "box_ke": 30000000.0,
+        "ball_ke": 3000000000000.0,
+        "static_ke": 3000000000000.0
+      },
+      "frames": 600,
+      "stable": true,
+      "error": null,
+      "finite": true,
+      "ground_clearance": -0.0003757476806640625,
+      "ramp_clearance": -0.0004983665822773098,
+      "ramp_samples": 414,
+      "ball_end": [
+        -0.05551810562610626,
+        -2.2392263412475586,
+        1.999993920326233
+      ],
+      "top_xy_drift": 3.9701359272003174,
+      "max_box_xy_drift": 31.35490608215332,
+      "min_z": 0.39594602584838867,
+      "max_abs_pos": 18.61039161682129,
+      "runtime_s": 6.415818481997121
+    },
+    "new_alm_history_alpha095": {
+      "suite": "contacts_original_full_stack_params",
+      "mode": "new_alm_history_alpha095",
+      "title": "New compliant ALM + history, alpha=0.95",
+      "config": {
+        "substeps": 10,
+        "iterations": 2,
+        "alpha": 0.95,
+        "ke": 10000000.0,
+        "parameter_source": "full_stack_params_boxes_plus_impact_ball_static",
+        "box_ke": 10000000.0,
+        "ball_ke": 3000000000000.0,
+        "static_ke": 3000000000000.0
+      },
+      "frames": 600,
+      "stable": true,
+      "error": null,
+      "finite": true,
+      "ground_clearance": -0.0009006261825561523,
+      "ramp_clearance": -0.0028018446715969425,
+      "ramp_samples": 405,
+      "ball_end": [
+        -0.1407104879617691,
+        -3.722409248352051,
+        1.9998129606246948
+      ],
+      "top_xy_drift": 0.004108629189431667,
+      "max_box_xy_drift": 20.992101669311523,
+      "min_z": 0.3963790535926819,
+      "max_abs_pos": 15.922698020935059,
+      "runtime_s": 6.444357363972813
+    }
+  }
+}

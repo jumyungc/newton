@@ -1,0 +1,178 @@
+{
+  "candidate_order": [
+    "hard_default_canonical",
+    "hard_alpha0_nohistory_latest_r0",
+    "penalty_only_nohistory"
+  ],
+  "candidate_pass_count": 2,
+  "claim_boundary": "one exact authored dense scene and unchanged 12/10 mm accuracy gates; hard-latest is a hard-contact settings change, penalty-only is a discrete contact-formulation change; no timing, universal, or paper-best claim",
+  "desktop": {
+    "encoding": {
+      "command_semantics": "raw RGB24 -> H.264/libx264, yuv420p, threads=1, no audio",
+      "fps": 60,
+      "height": 726,
+      "input_frames": 121,
+      "width": 1920
+    },
+    "full_decode": {
+      "codec_h264": true,
+      "decoded_frame_count": 121,
+      "expected_frame_count": 121,
+      "framehash_stream_sha256": "1c126980ec1462e6e2981f03003314187d7f8dc8b55a7ae04d9158a0406ffc75",
+      "pass": true,
+      "pixel_format_yuv420p": true,
+      "resolution_ok": true,
+      "return_code": 0,
+      "stderr_tail": "ressive), 1920x726, 9445 kb/s, 60 fps, 60 tbr, 15360 tbn (default)\n      Metadata:\n        handler_name    : VideoHandler\n        vendor_id       : [0][0][0][0]\n        encoder         : Lavc61.3.100 libx264\nStream mapping:\n  Stream #0:0 -> #0:0 (h264 (native) -> rawvideo (native))\nPress [q] to stop, [?] for help\nOutput #0, framehash, to 'pipe:':\n  Metadata:\n    major_brand     : isom\n    minor_version   : 512\n    compatible_brands: isomiso2avc1mp41\n    encoder         : Lavf61.1.100\n  Stream #0:0(und): Video: rawvideo (I420 / 0x30323449), yuv420p(progressive), 1920x726, q=2-31, 1003622 kb/s, 60 fps, 60 tbn (default)\n      Metadata:\n        handler_name    : VideoHandler\n        vendor_id       : [0][0][0][0]\n        encoder         : Lavc61.3.100 rawvideo\nframe=   53 fps=0.0 q=-0.0 size=       6KiB time=00:00:01.01 bitrate=  47.5kbits/s speed=2.03x    \rframe=  110 fps=110 q=-0.0 size=      12KiB time=00:00:01.96 bitrate=  50.5kbits/s speed=1.97x    \r[out#0/framehash @ 0x690d800] video:247067KiB audio:0KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown\nframe=  121 fps=109 q=-0.0 Lsize=      13KiB time=00:00:02.01 bitrate=  54.6kbits/s speed=1.82x    \n"
+    },
+    "sample_rendered_rgb_sha256": {
+      "0": "7a3a1ba155d12805f5b88bcd120e3c1d23be41c1638b41a0b42d4e4a18d3ff8e",
+      "120": "d679adfab75e044bf82728b2a76b2e71c66d7420754a56ef5293c696e9dbec82",
+      "60": "f8cd8bc7ee32e056f34673af15848e8418f882597ca940144393f6328ee83a4e"
+    }
+  },
+  "exact_output_files": [
+    "comparison_fragment.html",
+    "comparison_table.json",
+    "dense_contact_comparison.mp4",
+    "dense_contact_comparison_mobile.mp4",
+    "dense_contact_comparison_mobile_poster.png",
+    "dense_contact_comparison_poster.png",
+    "input_contract.json",
+    "manifest.json"
+  ],
+  "ffmpeg": {
+    "executable": {
+      "bytes": 79826272,
+      "path": "/home/horde/JC/newton/.venv/lib/python3.12/site-packages/imageio_ffmpeg/binaries/ffmpeg-linux-x86_64-v7.0.2",
+      "sha256": "e7e7fb30477f717e6f55f9180a70386c62677ef8a4d4d1a5d948f4098aa3eb99"
+    },
+    "version": "ffmpeg version 7.0.2-static https://johnvansickle.com/ffmpeg/  Copyright (c) 2000-2024 the FFmpeg developers"
+  },
+  "input_contract_sha256": "53124ece211d896003c535504e9e3fcfea75b89bb72f417247053c27d801fa1d",
+  "manifest_self_hash": null,
+  "manifest_self_hash_reason": "self-referential hash excluded; hash manifest externally",
+  "matched_invariants": {
+    "body_counts_equal": true,
+    "cable_groups_bitwise_equal": true,
+    "frame_counts_equal": true,
+    "initial_positions_bitwise_equal": true
+  },
+  "mobile": {
+    "encoding": {
+      "command_semantics": "raw RGB24 -> H.264/libx264, yuv420p, threads=1, no audio",
+      "fps": 60,
+      "height": 1684,
+      "input_frames": 121,
+      "width": 540
+    },
+    "full_decode": {
+      "codec_h264": true,
+      "decoded_frame_count": 121,
+      "expected_frame_count": 121,
+      "framehash_stream_sha256": "2f2981aac4d74abe37e3c294a648dc094e7270fc09ca6b340f1bfa541bb0a0be",
+      "pass": true,
+      "pixel_format_yuv420p": true,
+      "resolution_ok": true,
+      "return_code": 0,
+      "stderr_tail": "00, bitrate: 6507 kb/s\n  Stream #0:0[0x1](und): Video: h264 (High) (avc1 / 0x31637661), yuv420p(progressive), 540x1684, 6498 kb/s, 60 fps, 60 tbr, 15360 tbn (default)\n      Metadata:\n        handler_name    : VideoHandler\n        vendor_id       : [0][0][0][0]\n        encoder         : Lavc61.3.100 libx264\nStream mapping:\n  Stream #0:0 -> #0:0 (h264 (native) -> rawvideo (native))\nPress [q] to stop, [?] for help\nOutput #0, framehash, to 'pipe:':\n  Metadata:\n    major_brand     : isom\n    minor_version   : 512\n    compatible_brands: isomiso2avc1mp41\n    encoder         : Lavf61.1.100\n  Stream #0:0(und): Video: rawvideo (I420 / 0x30323449), yuv420p(progressive), 540x1684, q=2-31, 654739 kb/s, 60 fps, 60 tbn (default)\n      Metadata:\n        handler_name    : VideoHandler\n        vendor_id       : [0][0][0][0]\n        encoder         : Lavc61.3.100 rawvideo\nframe=   83 fps=0.0 q=-0.0 size=       9KiB time=00:00:01.51 bitrate=  49.6kbits/s speed=3.03x    \r[out#0/framehash @ 0x6996dc0] video:161181KiB audio:0KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: unknown\nframe=  121 fps=0.0 q=-0.0 Lsize=      13KiB time=00:00:02.01 bitrate=  54.6kbits/s speed=2.79x    \n"
+    },
+    "sample_rendered_rgb_sha256": {
+      "0": "02d998207530ffd3472f81ac6e9ded42db09b556e77b93a6c76246811fdddba6",
+      "120": "7a769a3fcb421ca73f36002c3129e5422dde6e987f5e47075d643edec37e7614",
+      "60": "1aa15882784def6ef7e67fd321cf40cb0b80cb5933806b5f28eb2b1fe4e38876"
+    }
+  },
+  "owner_line_at_build": "OWNER: Team Codex-Remote \u2014 2026-07-05T02:00Z \u2014 contact-global solver + visual comparison round",
+  "payload_files": [
+    {
+      "bytes": 3743,
+      "path": "comparison_fragment.html",
+      "sha256": "a08e9b54fe2458b74a1e3dc81d729cb5be46292d48e5e5bfeb6807d594ae62f5"
+    },
+    {
+      "bytes": 3488,
+      "path": "comparison_table.json",
+      "sha256": "d5d62005eceeb6da8cf399eaf5a0445c555b0073277b575584d1d1225901eb9a"
+    },
+    {
+      "bytes": 2383457,
+      "path": "dense_contact_comparison.mp4",
+      "sha256": "788508ab54f1893ba2be723f8e12169b8ea4698e773a23c3242e5d2bf9e0d338"
+    },
+    {
+      "bytes": 1640519,
+      "path": "dense_contact_comparison_mobile.mp4",
+      "sha256": "9a5011702d7530e7eccb17c6798203aaba4a6e78f8fd5602dfac5123a08edf1b"
+    },
+    {
+      "bytes": 130079,
+      "path": "dense_contact_comparison_mobile_poster.png",
+      "sha256": "179a4864b33b42de629ddf6379469bec2ce3faa7f073de2e647f7cfbefd577c6"
+    },
+    {
+      "bytes": 150081,
+      "path": "dense_contact_comparison_poster.png",
+      "sha256": "d84b7a8e576c0cf55641a3165008f530ff0f7c9bd4229f5aedcd7e78f21ac3d8"
+    },
+    {
+      "bytes": 4024,
+      "path": "input_contract.json",
+      "sha256": "53124ece211d896003c535504e9e3fcfea75b89bb72f417247053c27d801fa1d"
+    }
+  ],
+  "quality_gates": {
+    "desktop_h264_yuv420p_full_decode": true,
+    "initial_positions_and_groups_bitwise_equal": true,
+    "mobile_390px_gate_readouts": true,
+    "mobile_h264_yuv420p_full_decode": true,
+    "no_pose_interpolation_or_endpoint_repeat": true,
+    "no_timing_claim": true,
+    "responsive_html_fragment_and_table": true,
+    "same_camera_time_and_frame_index": true,
+    "settings_vs_formulation_labels_explicit": true,
+    "source_hashes_exact": true,
+    "strict_json_boolean_and_finite_types": true,
+    "three_exact_121_frame_7680_body_trajectories": true,
+    "unchanged_12mm_10mm_gates": true
+  },
+  "schema": "codex-bgn-dense-contact-visual-comparison/v1",
+  "source_files": [
+    {
+      "bytes": 35339,
+      "path": "bench/global_cable/codex_bgn_dense_comparison.py",
+      "sha256": "c22397df7447d6e63c7e2f0eea2f424dd043f045747e875c7cfba4d9aaeb2218"
+    },
+    {
+      "bytes": 6027,
+      "path": "bench/global_cable/test_codex_bgn_dense_comparison.py",
+      "sha256": "f71e40f833f0cb1a54cee1f5f3325c254915f5a98cb22d7546d12cad7ffc2924"
+    },
+    {
+      "bytes": 53733,
+      "path": "bench/global_cable/codex_bgn_pile_comparison.py",
+      "sha256": "523ef8807a4b8af6b7e028a2fe0fe52ce3ce08bfc86b5bce78f2c46610440dc6"
+    },
+    {
+      "bytes": 757076,
+      "path": "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+      "sha256": "690243adfefe0ce154b547db6205794bd30ac4277275179517a90994f4980648"
+    },
+    {
+      "bytes": 705684,
+      "path": "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+      "sha256": "d1c3ff99f1e1ce1827a33efd4dad81f40babda06bff9e43bd7591c86662a287b"
+    },
+    {
+      "bytes": 340712,
+      "path": "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+      "sha256": "39c29931201f08dd89fdba4129c76288e6baeecf7c94fe4f6a757f2b50718b1b"
+    }
+  ],
+  "status": "VALID_EXACT_DENSE_CONTACT_VISUAL_EVIDENCE",
+  "trajectory_array_content_sha256": {
+    "hard_alpha0_nohistory_latest_r0": "24a6e7f5078e2d666681c1f61cbb45b0395e1b96092076f4c88638882a786e3c",
+    "hard_default_canonical": "5fc747f50290efc56ae32f81a4d04cbc80f6a0ae16624bfef8f7ea2e0b443a6d",
+    "penalty_only_nohistory": "3bd5a0ee5a078425017900e86d776ed072e632c8e6085c28049f7917b3939465"
+  }
+}

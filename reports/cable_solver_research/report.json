@@ -1,0 +1,877 @@
+{
+  "archive": {
+    "immutable_commit": "76483b1df266bf15ade2eb3397005cbe630d6fec",
+    "label": "full previous v5 report and evidence",
+    "url": "https://github.com/jumyungc/newton/tree/76483b1df266bf15ade2eb3397005cbe630d6fec/reports/cable_solver_research"
+  },
+  "ccdsn_oracle": {
+    "analytic": {
+      "friction_work_Nm": -1.0,
+      "maximum_force_error_N": 4.440892098500626e-16,
+      "natural_map_inf": 0.0,
+      "stationarity_inf": 0.0,
+      "stretch_residual_inf_m": 0.0
+    },
+    "claim_boundary": "small dense exact-law and constrained-response oracle only; no collision discovery, swept safety, long-chain scale, pile, or GPU claim",
+    "mixed": {
+      "friction_work_Nm": -0.9600000000000002,
+      "natural_map_inf": 4.440892098500626e-16,
+      "sliding_contacts": 1,
+      "stationarity_inf": 2.220446049250313e-16,
+      "sticking_contacts": 1,
+      "stretch_residual_inf_m": 0.0
+    },
+    "pass": true
+  },
+  "claim_boundaries": [
+    "Hard and finite rows use different material semantics; their visual gap contrast is not a same-physics accuracy ranking.",
+    "The hard N128 result is accurate but not fast: timing is a single-process CPU diagnostic and no contact is present.",
+    "N512 passes its first 600 steps; K24 rescues step 1205 but fails closed at step 1209, so it remains a scale boundary.",
+    "The soft smooth speed claim is inherited from five matched Y targets; broad rows are accuracy audits.",
+    "The dense contact result is one authored scene under frozen 12/10-mm gates and is not bitwise repeatable.",
+    "Unified contact v5 passes only a 48-body, 60-step endpoint-safe smoke and is 34× slower; no swept path is certified.",
+    "CCDSN is exact-law on small dense oracles; v2 and v3 remain failed partial trajectories.",
+    "No K32 or N1024 probe was run; no universal, production, GPU, long-chain-contact, novelty, or paper-best claim is made."
+  ],
+  "contact_negatives": [
+    {
+      "certified_steps": 32,
+      "failure": "solver gate failure at attempted step 33",
+      "failure_attempted_step": 33,
+      "peak_penetration_m": 0.0003275905342154245,
+      "peak_stretch_m": 7.112634066226697e-06,
+      "requested": 60,
+      "solver_ms": 4181.491129,
+      "status": "FAIL",
+      "version": "v2"
+    },
+    {
+      "certified_steps": 45,
+      "failure": "solver_gate_failure at attempted step 46",
+      "failure_attempted_step": 46,
+      "peak_penetration_m": 2.500100208174122e-06,
+      "peak_stretch_m": 1.033890281887384e-06,
+      "requested": 60,
+      "solver_ms": 13486.915670000002,
+      "status": "FAIL",
+      "version": "v3"
+    }
+  ],
+  "dense_contact": [
+    {
+      "label": "hard/default canonical",
+      "pass": false,
+      "peak_contacts": 5830,
+      "penetration_m": 0.02389240747752193,
+      "repeats": "1/1 FAIL",
+      "scope": "old hard-contact settings",
+      "stretch_m": 0.12065954378920221
+    },
+    {
+      "label": "hard alpha0 / history off / latest",
+      "pass": true,
+      "peak_contacts": 6735.0,
+      "penetration_m": 0.011357259825265593,
+      "repeats": "5/5 pass",
+      "scope": "hard-contact formulation",
+      "stretch_m": 0.0007686922446790215
+    },
+    {
+      "label": "penalty-only / history off",
+      "pass": true,
+      "peak_contacts": 11079.0,
+      "penetration_m": 0.006853466978604561,
+      "repeats": "5/5 pass",
+      "scope": "same authored scene/material; different discrete contact mode",
+      "stretch_m": 0.0004630145287167972
+    }
+  ],
+  "evidence": [
+    {
+      "bytes": 246056,
+      "label": "v5 results archive index",
+      "path": "data/legacy/v5_report.json",
+      "sha256": "27c22e17ee85b9542fef15858eca86a09e2cfb6d9ea0a4ba223d2205cfaa3724"
+    },
+    {
+      "bytes": 11160,
+      "label": "v5 exact-set manifest",
+      "path": "data/legacy/v5_manifest.json",
+      "sha256": "e92ec18f60ba78a38dbba62c20e21396149f8e830b2ae7bfb6e83c86d84bd517"
+    },
+    {
+      "bytes": 31019,
+      "label": "soft smooth portfolio result",
+      "path": "data/smooth/base_report.json",
+      "sha256": "98c61e348234b3b2cfb0b1f1f1d63a8ea8144cd1f4a05951bb18419112828460"
+    },
+    {
+      "bytes": 39810,
+      "label": "smooth coverage campaign",
+      "path": "data/smooth/coverage_manifest.json",
+      "sha256": "557339dd10bbd26b30ac9e3276e2c7400b5eed61f4697119326fd52f1a18a535"
+    },
+    {
+      "bytes": 5973,
+      "label": "Y127 visual provenance",
+      "path": "data/smooth/y127_render_manifest.json",
+      "sha256": "8a891a390424dba2380332f1b56cddc5cf4fda215cf5fbdbaa303b214d99ee7f"
+    },
+    {
+      "bytes": 24003,
+      "label": "7,680-body robustness result",
+      "path": "data/contact/dense_robustness.json",
+      "sha256": "789055c31ef4bb35b87265e87700255cf36a481075c57da5af899f61013ad83f"
+    },
+    {
+      "bytes": 9202,
+      "label": "dense visual provenance",
+      "path": "data/contact/dense_visual_manifest.json",
+      "sha256": "c8553c992363ad69f29f820d44401e06dfc0bcbcc5699fa1e63471730384d8ea"
+    },
+    {
+      "bytes": 19576,
+      "label": "N128 hard trajectory",
+      "path": "data/hard/n128_trajectory.json",
+      "sha256": "597305e713f3f0ac24b3829126d3d9c2fd61168c530acf35c8a0f68120e3be56"
+    },
+    {
+      "bytes": 41227,
+      "label": "N128 same-hard parity",
+      "path": "data/hard/n128_same_hard_parity.json",
+      "sha256": "febfce298a81e358accc318a142b85ca1608c92fa39d836147cea32433b878ff"
+    },
+    {
+      "bytes": 19945,
+      "label": "N512 adaptive scale boundary",
+      "path": "data/hard/n512_adaptive_scale_boundary.json",
+      "sha256": "988f83b688350d5f561e79e96e862eb7be583eb0e1e0461a594a4178cd0562d7"
+    },
+    {
+      "bytes": 47511,
+      "label": "N512 preregistered K24 probe",
+      "path": "data/hard/n512_preregistered_k24_probe.json",
+      "sha256": "6a19861f2110df1c73becfbb9ef75ef074db9cd80a367f2fb25629fa661c8f31"
+    },
+    {
+      "bytes": 5690,
+      "label": "N128 hard visual provenance",
+      "path": "data/hard/visual_manifest.json",
+      "sha256": "e9d1853d1ff7423ae619809c8510e76b0edf7ebdd11c3668193f83dc30e9938c"
+    },
+    {
+      "bytes": 7974,
+      "label": "CCDSN exact-law oracle",
+      "path": "data/ccdsn/exact_law_oracle.json",
+      "sha256": "7982dc5bd88e3b21ea53746152a6da38b29bde76bfefc032307b910e21c91f38"
+    },
+    {
+      "bytes": 102205,
+      "label": "contact KKT v2 negative",
+      "path": "data/contact/kkt_v2_negative.json",
+      "sha256": "bd30d94f6de25a4c85120e892f799099b05c90a40eae69015d8692d47dc8ec8c"
+    },
+    {
+      "bytes": 282356,
+      "label": "contact KKT v3 negative",
+      "path": "data/contact/kkt_v3_negative.json",
+      "sha256": "03d93f47ec4d1f97d70371fa558ad517154d2b986f7f97aeadcc9e3e68650060"
+    },
+    {
+      "bytes": 452028,
+      "label": "contact KKT v5 small full pass",
+      "path": "data/contact/kkt_v5_small_full_pass.json",
+      "sha256": "640cf7fc826ae1dcda3aae38cb598a0f20cda06467d22dd14b9a5f1732238941"
+    },
+    {
+      "bytes": 246431,
+      "label": "N128 hard comparison video",
+      "path": "media/hard/n128_hard_vs_finite.mp4",
+      "sha256": "2f89d0fcf515775fae0058e8df37f790bd6eff6d95c55df350c6d8affdc714d9"
+    },
+    {
+      "bytes": 143214,
+      "label": "N128 hard comparison poster",
+      "path": "media/hard/n128_hard_vs_finite_poster.png",
+      "sha256": "9b414ed15d745027c79bf30036da9ea8e6e8f554687302c46c517df34bdb0f31"
+    },
+    {
+      "bytes": 1133740,
+      "label": "Y127 smooth comparison video",
+      "path": "media/smooth/y127.mp4",
+      "sha256": "4c02c0a4a9860730e161a350d0e2267f5334c5545bb17187999c5876bc717750"
+    },
+    {
+      "bytes": 74266,
+      "label": "Y127 smooth comparison poster",
+      "path": "media/smooth/y127_poster.png",
+      "sha256": "689840dc2d4f09d48bfbe24847d02b749df87885172f5c10021829eb9c66eafc"
+    },
+    {
+      "bytes": 2383457,
+      "label": "dense contact comparison video",
+      "path": "media/contact/dense.mp4",
+      "sha256": "788508ab54f1893ba2be723f8e12169b8ea4698e773a23c3242e5d2bf9e0d338"
+    },
+    {
+      "bytes": 150081,
+      "label": "dense contact comparison poster",
+      "path": "media/contact/dense_poster.png",
+      "sha256": "d84b7a8e576c0cf55641a3165008f530ff0f7c9bd4229f5aedcd7e78f21ac3d8"
+    },
+    {
+      "bytes": 69084,
+      "label": "source codex_cable_report_v6.py",
+      "path": "source/codex_cable_report_v6.py",
+      "sha256": "632720a77d0ff90c07ebfb27fdb323cba27bdc17079b19652ad921a3d6a3412c"
+    },
+    {
+      "bytes": 38268,
+      "label": "source codex_ccdsn.py",
+      "path": "source/codex_ccdsn.py",
+      "sha256": "4745497a074e00f8bde67125ed28a40f7c91000ab8937f7112b042a0c53b2ae0"
+    },
+    {
+      "bytes": 7847,
+      "label": "source codex_ccdsn_reference_benchmark.py",
+      "path": "source/codex_ccdsn_reference_benchmark.py",
+      "sha256": "60deb73d9d21bc73db9bb7e94c5742f772226f19a05045e4d17d9d3093493d62"
+    },
+    {
+      "bytes": 39336,
+      "label": "source codex_contact_kkt_v2.py",
+      "path": "source/codex_contact_kkt_v2.py",
+      "sha256": "b0bebe8b2956e74f1de2960e7a9888eec8bdc6153b4ed86a872db78bc699306b"
+    },
+    {
+      "bytes": 4872,
+      "label": "source codex_contact_kkt_v2_pile.py",
+      "path": "source/codex_contact_kkt_v2_pile.py",
+      "sha256": "a4695fb21d7faff7561cea16bf0ed681acc1c1bda41253367b5756ab94a8d8e0"
+    },
+    {
+      "bytes": 16831,
+      "label": "source codex_contact_kkt_v3.py",
+      "path": "source/codex_contact_kkt_v3.py",
+      "sha256": "cea6f2670aed973efd9f0adac814743cdfe75289ba7a8b5d903d09cf1c8df3e4"
+    },
+    {
+      "bytes": 23741,
+      "label": "source codex_contact_kkt_v3_pile.py",
+      "path": "source/codex_contact_kkt_v3_pile.py",
+      "sha256": "e1cc02f806ff254407f48a118d3130ffbeeae503e24f2f3e9bc4dbdf4872dd7a"
+    },
+    {
+      "bytes": 12368,
+      "label": "source codex_contact_kkt_v5.py",
+      "path": "source/codex_contact_kkt_v5.py",
+      "sha256": "9234a23ad5be1297adc5632fb8d3feb0b8f1ce7c5668084e8bf8fbd07a77cbbd"
+    },
+    {
+      "bytes": 5247,
+      "label": "source codex_contact_kkt_v5_pile.py",
+      "path": "source/codex_contact_kkt_v5_pile.py",
+      "sha256": "54020c73fd29416fc08cc9214260ec622d8e8b0ccc0e6b1283f6d7944eaf3016"
+    },
+    {
+      "bytes": 11434,
+      "label": "source codex_contact_safe_predictor.py",
+      "path": "source/codex_contact_safe_predictor.py",
+      "sha256": "f0532771a2299467afff057054d3015991a414298233b27dc0c93d7445fc9c58"
+    },
+    {
+      "bytes": 14643,
+      "label": "source codex_desaxce.py",
+      "path": "source/codex_desaxce.py",
+      "sha256": "afaa83a37399690dce8c656136271562adbafb1b5954faf6883fc932f5ec6fe5"
+    },
+    {
+      "bytes": 28523,
+      "label": "source codex_hard_kkt_adaptive_n512.py",
+      "path": "source/codex_hard_kkt_adaptive_n512.py",
+      "sha256": "cbac9b4130cbc67fad04d43d3a6513d367c93e2006a2e8b7875934526ec2c61c"
+    },
+    {
+      "bytes": 31913,
+      "label": "source codex_hard_kkt_bgn.py",
+      "path": "source/codex_hard_kkt_bgn.py",
+      "sha256": "0e6d848c483ce146b558efcb1d3078db88347a70dca6798c50b58e1f8afae604"
+    },
+    {
+      "bytes": 21028,
+      "label": "source codex_hard_kkt_k24_probe.py",
+      "path": "source/codex_hard_kkt_k24_probe.py",
+      "sha256": "c9ed41fffac32e275dacbed1440ffbb1f095a0c3809660c9050b198da780c448"
+    },
+    {
+      "bytes": 22901,
+      "label": "source codex_hard_kkt_parity.py",
+      "path": "source/codex_hard_kkt_parity.py",
+      "sha256": "40c4dbf9c17982dc728f1d94a31d4ab1d6889930aa6a7f10cb159850e9da47a4"
+    },
+    {
+      "bytes": 19279,
+      "label": "source codex_hard_kkt_review_render.py",
+      "path": "source/codex_hard_kkt_review_render.py",
+      "sha256": "82003cbf0609bacfe896a17d67c92356d85174d9b1d7b989d749680910cd686e"
+    },
+    {
+      "bytes": 30189,
+      "label": "source codex_hard_kkt_trajectory.py",
+      "path": "source/codex_hard_kkt_trajectory.py",
+      "sha256": "d0904f2babb5fec06efc35652035e0c89b6b92ac36fb92ccf0f3613ace35f8b5"
+    },
+    {
+      "bytes": 7031,
+      "label": "source test_codex_cable_report_v6.py",
+      "path": "source/test_codex_cable_report_v6.py",
+      "sha256": "b51c6176f099b674f29368efe3cd264bf36bdea25723f184bedfc51a27ed2b3f"
+    },
+    {
+      "bytes": 16022,
+      "label": "source test_codex_ccdsn.py",
+      "path": "source/test_codex_ccdsn.py",
+      "sha256": "9bc535ee631b93ccb6e2157bf5de55b8e7046ac5a213820c8d2e71e66f24e3be"
+    },
+    {
+      "bytes": 8161,
+      "label": "source test_codex_contact_kkt_v2.py",
+      "path": "source/test_codex_contact_kkt_v2.py",
+      "sha256": "4420c3ca2a2d82d2144ad3620e9029bc4aec47e68437c7cf53c4f6aa2ab86662"
+    },
+    {
+      "bytes": 8829,
+      "label": "source test_codex_contact_kkt_v3.py",
+      "path": "source/test_codex_contact_kkt_v3.py",
+      "sha256": "f80c587bc88a949e4575ee83c3d1b0b26222192eea3674ad5bd5167581bd265e"
+    },
+    {
+      "bytes": 4893,
+      "label": "source test_codex_contact_kkt_v5.py",
+      "path": "source/test_codex_contact_kkt_v5.py",
+      "sha256": "7a99088d9a8a5067b85922cccd1ec988eaa9f8312107b94847ef47042f51eae2"
+    },
+    {
+      "bytes": 4320,
+      "label": "source test_codex_contact_safe_predictor.py",
+      "path": "source/test_codex_contact_safe_predictor.py",
+      "sha256": "d3704544eebb3d3bab364d0d7724da3b0bda64daa49b11705465bc01e96c4289"
+    },
+    {
+      "bytes": 2356,
+      "label": "v6 build contract",
+      "path": "build_contract.json",
+      "sha256": "fd46ff1396efcc42374c1b491ed6fe9982ab7a64c222ae6201a149b25bdc4c03"
+    }
+  ],
+  "hard_n128": {
+    "cross_semantics_gate_pass": false,
+    "finite_bgn": {
+      "axial_abs_m": {
+        "final_joint_rms": 0.00438525612163154,
+        "final_max": 0.006130222701715507,
+        "trajectory_max": 0.006130222701715507,
+        "trajectory_rms_of_joint_rms": 0.0021323638418288045
+      },
+      "bend_rest_angle_rad": {
+        "final_joint_rms": 0.06450489864227892,
+        "final_max": 0.5823930462420411,
+        "trajectory_max": 0.5823930462420411,
+        "trajectory_rms_of_joint_rms": 0.03753755227271404
+      },
+      "completed_render_frames": 60,
+      "completed_substeps": 600,
+      "duration_s": 1.0,
+      "energy_work": {
+        "change_minus_gravity_work_J": -87.54989982432258,
+        "final": {
+          "elastic_bend_J": 1.3210800187600895,
+          "elastic_stretch_J": 12.401287742200157,
+          "kinetic_angular_J": 0.010466907865325854,
+          "kinetic_linear_J": 69.4985932008639,
+          "mechanical_total_J": 29.403390736149937,
+          "potential_gravity_J": -53.828037133539524
+        },
+        "gravity_work_J": 85.39066384700605,
+        "initial": {
+          "elastic_bend_J": 0.0,
+          "elastic_stretch_J": 2.407412430484045e-31,
+          "kinetic_angular_J": 0.0,
+          "kinetic_linear_J": 0.0,
+          "mechanical_total_J": 31.562626713466464,
+          "potential_gravity_J": 31.562626713466464
+        },
+        "mechanical_energy_change_J": -2.159235977316527,
+        "note": "negative balance includes authored damping and implicit-integration loss; this is a diagnostic, not a conservation claim"
+      },
+      "failure": null,
+      "gap_3d_m": {
+        "final_joint_rms": 0.004419229230939578,
+        "final_max": 0.006245419703156625,
+        "trajectory_max": 0.006245419703156625,
+        "trajectory_rms_of_joint_rms": 0.002149991763502948
+      },
+      "method": "finite_compact_bgn_k5",
+      "pass": true,
+      "quaternion_norm_max_error": 4.210504211954458e-08,
+      "requested_render_frames": 60,
+      "requested_substeps": 600,
+      "semantics": "same authored finite compliance; compact global Track-B solver path",
+      "state_finite_all_steps": true,
+      "timing_descriptive": {
+        "setup_ms_total": 106.156155,
+        "solve_ms_total": 25276.282701999997,
+        "stage_ms_p50": 42.1920995,
+        "stage_ms_p95": 44.042017449999996,
+        "stage_ms_total": 25382.438857
+      },
+      "transverse_m": {
+        "final_joint_rms": 0.0005469147495578341,
+        "final_max": 0.004974193019039253,
+        "trajectory_max": 0.004974193019039253,
+        "trajectory_rms_of_joint_rms": 0.00027475266912555733
+      }
+    },
+    "finite_vbd10": {
+      "axial_abs_m": {
+        "final_joint_rms": 0.0043815561476071106,
+        "final_max": 0.0061240846818935765,
+        "trajectory_max": 0.0061240846818935765,
+        "trajectory_rms_of_joint_rms": 0.0021340678897038474
+      },
+      "bend_rest_angle_rad": {
+        "final_joint_rms": 0.06468236826194032,
+        "final_max": 0.5817891084362182,
+        "trajectory_max": 0.5817891084362182,
+        "trajectory_rms_of_joint_rms": 0.037494677262819465
+      },
+      "completed_render_frames": 60,
+      "completed_substeps": 600,
+      "duration_s": 1.0,
+      "energy_work": {
+        "change_minus_gravity_work_J": -87.70630849451994,
+        "final": {
+          "elastic_bend_J": 1.3283592825615116,
+          "elastic_stretch_J": 12.380479821588459,
+          "kinetic_angular_J": 0.009783267075958193,
+          "kinetic_linear_J": 69.2367810523827,
+          "mechanical_total_J": 29.187174178010803,
+          "potential_gravity_J": -53.76822924559782
+        },
+        "gravity_work_J": 85.33085595906428,
+        "initial": {
+          "elastic_bend_J": 0.0,
+          "elastic_stretch_J": 2.407412430484045e-31,
+          "kinetic_angular_J": 0.0,
+          "kinetic_linear_J": 0.0,
+          "mechanical_total_J": 31.562626713466464,
+          "potential_gravity_J": 31.562626713466464
+        },
+        "mechanical_energy_change_J": -2.3754525354556613,
+        "note": "negative balance includes authored damping and implicit-integration loss; this is a diagnostic, not a conservation claim"
+      },
+      "failure": null,
+      "gap_3d_m": {
+        "final_joint_rms": 0.004415520197742814,
+        "final_max": 0.0062390268622609015,
+        "trajectory_max": 0.0062390268622609015,
+        "trajectory_rms_of_joint_rms": 0.002151645492595449
+      },
+      "method": "requested_vbd_10",
+      "pass": true,
+      "quaternion_norm_max_error": 1.3199364512495038e-07,
+      "requested_render_frames": 60,
+      "requested_substeps": 600,
+      "semantics": "authored finite stretch/bend penalty; requested local VBD baseline",
+      "state_finite_all_steps": true,
+      "timing_descriptive": {
+        "setup_ms_total": 0.0,
+        "solve_ms_total": 1482.65125,
+        "stage_ms_p50": 2.4623295,
+        "stage_ms_p95": 2.58520825,
+        "stage_ms_total": 1482.65125
+      },
+      "transverse_m": {
+        "final_joint_rms": 0.0005466116921920664,
+        "final_max": 0.0049679559349009045,
+        "trajectory_max": 0.0049679559349009045,
+        "trajectory_rms_of_joint_rms": 0.0002744677903530388
+      }
+    },
+    "hard": {
+      "axial_abs_m": {
+        "final_joint_rms": 6.45685561689417e-08,
+        "final_max": 2.1052700635281168e-07,
+        "trajectory_max": 4.766641924196445e-07,
+        "trajectory_rms_of_joint_rms": 6.196544999486387e-08
+      },
+      "bend_rest_angle_rad": {
+        "final_joint_rms": 0.07055602989550191,
+        "final_max": 0.6713442617644698,
+        "trajectory_max": 0.6713442617644698,
+        "trajectory_rms_of_joint_rms": 0.039758922591354225
+      },
+      "completed_render_frames": 60,
+      "completed_substeps": 600,
+      "duration_s": 1.0,
+      "energy_work": {
+        "change_minus_gravity_work_J": -81.00018058332759,
+        "final": {
+          "elastic_bend_J": 1.5805636900902502,
+          "elastic_stretch_J": 2.9597922583761182e-09,
+          "kinetic_angular_J": 0.01759760114143456,
+          "kinetic_linear_J": 73.66789456670256,
+          "mechanical_total_J": 28.695564352249708,
+          "potential_gravity_J": -46.570491508644324
+        },
+        "gravity_work_J": 78.13311822211084,
+        "initial": {
+          "elastic_bend_J": 0.0,
+          "elastic_stretch_J": 2.407412430484045e-31,
+          "kinetic_angular_J": 0.0,
+          "kinetic_linear_J": 0.0,
+          "mechanical_total_J": 31.562626713466464,
+          "potential_gravity_J": 31.562626713466464
+        },
+        "mechanical_energy_change_J": -2.8670623612167567,
+        "note": "negative balance includes authored damping and implicit-integration loss; this is a diagnostic, not a conservation claim"
+      },
+      "failure": null,
+      "gap_3d_m": {
+        "final_joint_rms": 6.827217713440118e-08,
+        "final_max": 2.188223005373674e-07,
+        "trajectory_max": 4.768154092846391e-07,
+        "trajectory_rms_of_joint_rms": 7.003001648765428e-08
+      },
+      "hard_kkt_worst": {
+        "caller_state_unchanged_all": true,
+        "constraint_max_m": 8.882055243408597e-16,
+        "internal_time_substeps_max": 0,
+        "linear_original_kkt_residual": 1.8762474033468844e-14,
+        "physical_advances_max": 1,
+        "physical_advances_min": 1,
+        "predictor_evaluations_max": 1,
+        "predictor_evaluations_min": 1,
+        "stationarity_relative": 6.190887259826093e-07,
+        "translation_restoration_max_m": 0.0005213949795874754
+      },
+      "method": "hard_equality_kkt_k2",
+      "pass": true,
+      "quaternion_norm_max_error": 4.160360500549132e-08,
+      "requested_render_frames": 60,
+      "requested_substeps": 600,
+      "semantics": "Track B hard/inextensible stretch from feasible authored rest state",
+      "state_finite_all_steps": true,
+      "timing_descriptive": {
+        "setup_ms_total": 107.622286,
+        "solve_ms_total": 28356.327142,
+        "stage_ms_p50": 47.2497445,
+        "stage_ms_p95": 48.25619759999999,
+        "stage_ms_total": 28463.949428
+      },
+      "transverse_m": {
+        "final_joint_rms": 2.21808864775345e-08,
+        "final_max": 5.967896454018894e-08,
+        "trajectory_max": 2.4503292958276455e-07,
+        "trajectory_rms_of_joint_rms": 3.262646496626863e-08
+      }
+    },
+    "same_hard": {
+      "k2_vs_k12": {
+        "bend_absolute_differences_rad": {
+          "final_joint_rms": 1.671543857495461e-08,
+          "final_max": 1.073558599795632e-07,
+          "trajectory_max": 1.073558599795632e-07,
+          "trajectory_rms_of_joint_rms": 7.09035358203991e-10
+        },
+        "bend_relative_differences": {
+          "final_joint_rms": 2.3691019123055848e-07,
+          "final_max": 1.599118116610898e-07,
+          "trajectory_max": 1.599118116610898e-07,
+          "trajectory_rms_of_joint_rms": 1.7833364169523257e-08
+        },
+        "complete_gate": true,
+        "curvature_absolute_gate": true,
+        "curvature_relative_gate": true,
+        "energy_gate": true,
+        "final_energy_absolute_difference_J": 2.2126715894188465e-05,
+        "final_energy_relative_difference": 7.710854780259113e-07,
+        "finite_state_gate": true,
+        "full_state": {
+          "full_state_relative_l2": 8.999593878649365e-06,
+          "position_max_m": 7.539457464619588e-07,
+          "position_rms_m": 6.974982707865251e-08,
+          "rotation_max_rad": 0.0008047965840387363,
+          "rotation_rms_rad": 0.00032700568518270176,
+          "velocity_max": 0.000659895251618804,
+          "velocity_relative_l2": 1.0291786669018557e-05
+        },
+        "full_state_relative_gate": true,
+        "gravity_work_absolute_difference_J": 1.0007928352706585e-06,
+        "gravity_work_relative_difference": 1.2808817449786838e-08,
+        "hard_feasibility_gate": true,
+        "hard_stationarity_gate": true,
+        "linear_original_kkt_gate": true,
+        "one_dt_gate": true,
+        "pass": true,
+        "position_gate": true,
+        "rotation_gate": true,
+        "velocity_gate": true,
+        "work_gate": true
+      },
+      "k5_vs_k12": {
+        "bend_absolute_differences_rad": {
+          "final_joint_rms": 0.0,
+          "final_max": 0.0,
+          "trajectory_max": 0.0,
+          "trajectory_rms_of_joint_rms": 0.0
+        },
+        "bend_relative_differences": {
+          "final_joint_rms": 0.0,
+          "final_max": 0.0,
+          "trajectory_max": 0.0,
+          "trajectory_rms_of_joint_rms": 0.0
+        },
+        "complete_gate": true,
+        "curvature_absolute_gate": true,
+        "curvature_relative_gate": true,
+        "energy_gate": true,
+        "final_energy_absolute_difference_J": 0.0,
+        "final_energy_relative_difference": 0.0,
+        "finite_state_gate": true,
+        "full_state": {
+          "full_state_relative_l2": 0.0,
+          "position_max_m": 0.0,
+          "position_rms_m": 0.0,
+          "rotation_max_rad": 0.0008080767211341148,
+          "rotation_rms_rad": 0.00035769777518032935,
+          "velocity_max": 0.0,
+          "velocity_relative_l2": 0.0
+        },
+        "full_state_relative_gate": true,
+        "gravity_work_absolute_difference_J": 0.0,
+        "gravity_work_relative_difference": 0.0,
+        "hard_feasibility_gate": true,
+        "hard_stationarity_gate": true,
+        "linear_original_kkt_gate": true,
+        "one_dt_gate": true,
+        "pass": true,
+        "position_gate": true,
+        "rotation_gate": true,
+        "velocity_gate": true,
+        "work_gate": true
+      },
+      "pass": true
+    }
+  },
+  "hard_n512_scale_boundary": {
+    "continuation_completed_steps": 604,
+    "failed_total_step": 1205,
+    "full_gate": false,
+    "k24_failure_accepted_attempts": 18,
+    "k24_failure_budget": 24,
+    "k24_failure_global_step": 1209,
+    "k24_failure_stationarity": 5.840097219254875e-05,
+    "k24_full_gate": false,
+    "k24_step1205_pass": true,
+    "k24_step1205_stationarity": 3.964431578733684e-05,
+    "phase1_budget_counts": {
+      "k12": 0,
+      "k2": 519,
+      "k5": 81
+    },
+    "phase1_p50_ms": 116.27774199999999,
+    "phase1_p95_ms": 215.27242329999996,
+    "phase1_pass": true,
+    "phase1_peak_gap_m": 9.78315363429911e-07,
+    "phase1_steps": 600,
+    "stationarity_limit": 5e-05,
+    "terminal_budget": 12,
+    "terminal_stationarity": 5.600517523373341e-05,
+    "total_completed_steps": 1204,
+    "total_completed_time_s": 2.006666666666667
+  },
+  "immutable_stage": true,
+  "publication_ready": false,
+  "routing": [
+    {
+      "boundary": "accuracy specialist; 47.25 ms/substep p50 CPU diagnostic; no contact or N1024 claim",
+      "measured": "600/600 steps; 0.477 µm peak axial error; same-hard K12 parity passes",
+      "regime": "Hard/inextensible, no contact (N128 evidence)",
+      "route": "hard equality KKT K2"
+    },
+    {
+      "boundary": "soft-material semantics; matched speed evidence is five Y systems",
+      "measured": "3.065–5.046× over five matched targets; 20/20 broad executions",
+      "regime": "Authored finite-compliance smooth cable",
+      "route": "prepared compact BGN"
+    },
+    {
+      "boundary": "selected scene specialist; discrete contact-mode change; not bitwise repeatable",
+      "measured": "5/5 gate passes; 6.853 mm worst penetration; 0.463 mm worst stretch",
+      "regime": "7,680-body dense contact",
+      "route": "VBD10 penalty-only, contact history off"
+    },
+    {
+      "boundary": "34× slower than VBD10; no swept CCD, dense pile, or scale claim",
+      "measured": "48-body endpoint-safe smoke passes 60/60; exact-law certificates pass",
+      "regime": "Exact coupled stretch + Coulomb law",
+      "route": "contact KKT v5 + CCDSN oracle"
+    }
+  ],
+  "schema": "codex-cable-results-review/v6",
+  "soft_smooth": {
+    "broad_pass": 20,
+    "broad_total": 20,
+    "largest_dynamic_bodies": 8191,
+    "matched_speed": [
+      {
+        "case": "y12_softbend",
+        "cold_global_ci95": [
+          2.689802872812868,
+          2.713204158955312
+        ],
+        "cold_global_speedup": 2.701059333916342,
+        "cold_routed_speedup": 2.239416982773428,
+        "label": "Y-12 soft bend",
+        "objective_r": 0.01328694149017449,
+        "prepared_global_ci95": [
+          3.0549879865829483,
+          3.076731630726505
+        ],
+        "prepared_global_speedup": 3.06497151850221,
+        "prepared_routed_speedup": 2.4206944412147924,
+        "samples_each": 50,
+        "target_met": true,
+        "target_r": 0.1
+      },
+      {
+        "case": "y24_stiff_alltips",
+        "cold_global_ci95": [
+          3.416689688197181,
+          3.527693634017876
+        ],
+        "cold_global_speedup": 3.4424922695887767,
+        "cold_routed_speedup": 2.6990063836151648,
+        "label": "Y-24 stiff / all tips pinned",
+        "objective_r": 0.01001395817137193,
+        "prepared_global_ci95": [
+          3.877899920331634,
+          3.923525787606278
+        ],
+        "prepared_global_speedup": 3.899094692260433,
+        "prepared_routed_speedup": 2.9148834247136746,
+        "samples_each": 50,
+        "target_met": true,
+        "target_r": 0.1
+      },
+      {
+        "case": "y127_default",
+        "cold_global_ci95": [
+          4.303630169465844,
+          4.385966144574376
+        ],
+        "cold_global_speedup": 4.377470312743085,
+        "cold_routed_speedup": 3.295082383877101,
+        "label": "Y-127",
+        "objective_r": 0.011652814014715844,
+        "prepared_global_ci95": [
+          4.831050297366384,
+          5.083218254494296
+        ],
+        "prepared_global_speedup": 5.045805894140538,
+        "prepared_routed_speedup": 3.6051133606744403,
+        "samples_each": 50,
+        "target_met": true,
+        "target_r": 0.1
+      },
+      {
+        "case": "holdout_y17_bend6000",
+        "cold_global_ci95": [
+          3.0729055304038044,
+          3.0885488734903728
+        ],
+        "cold_global_speedup": 3.084584811095948,
+        "cold_routed_speedup": 2.4690305197972666,
+        "label": "Y-17 holdout",
+        "objective_r": 0.013705388569979394,
+        "prepared_global_ci95": [
+          3.4835526116776503,
+          3.5047687512381334
+        ],
+        "prepared_global_speedup": 3.4895756684063803,
+        "prepared_routed_speedup": 2.676199700505414,
+        "samples_each": 50,
+        "target_met": true,
+        "target_r": 0.12
+      },
+      {
+        "case": "holdout_y31_pinned_bend8000",
+        "cold_global_ci95": [
+          3.717666368433323,
+          3.7394031006999326
+        ],
+        "cold_global_speedup": 3.725334696148796,
+        "cold_routed_speedup": 2.8819456002864787,
+        "label": "Y-31 pinned holdout",
+        "objective_r": 0.011669776959426004,
+        "prepared_global_ci95": [
+          4.247930060081647,
+          4.295928762044411
+        ],
+        "prepared_global_speedup": 4.28109085157687,
+        "prepared_routed_speedup": 3.139463393399884,
+        "samples_each": 50,
+        "target_met": true,
+        "target_r": 0.1
+      }
+    ],
+    "visual_claim": "qualitative Track-B trajectory; overlays are not canonical R"
+  },
+  "summary": {
+    "ccdsn_small_oracle_pass": true,
+    "contact_v3_certified_steps": 45,
+    "contact_v3_requested_steps": 60,
+    "dense_selected_repeats": "5/5 pass",
+    "hard_k2_vs_k12_full_state_relative_l2": 8.999593878649365e-06,
+    "hard_k2_vs_k12_position_rms_m": 6.974982707865251e-08,
+    "hard_n128_peak_axial_m": 4.766641924196445e-07,
+    "hard_n128_substeps": 600,
+    "hard_n512_full_gate": false,
+    "hard_n512_phase1_pass": true,
+    "largest_soft_smooth_dynamic": 8191,
+    "soft_prepared_speedup_max": 5.045805894140538,
+    "soft_prepared_speedup_min": 3.06497151850221,
+    "soft_smooth_executed": 20,
+    "soft_smooth_passes": 20,
+    "unified_contact_v5_pass": true,
+    "unified_contact_v5_steps": 60,
+    "visible_videos": 3
+  },
+  "unified_contact_v5": {
+    "body_count": 48,
+    "certified_steps": 60,
+    "claim_boundary": "full trajectory claims require all 60 physical steps, both real contact classes, unchanged frozen gates, v2 algebraic gates, caller isolation, and one-dt certificates; predictor and line search certify endpoints only, not swept paths; De Saxce solve tightens until normalized natural-map and every absolute 1e-8 law certificate pass; no associated fallback",
+    "continuous_path_certified": false,
+    "final_exact_law": {
+      "complementarity_inf": 1.9348166616216472e-19,
+      "dual_cone_violation": 1.0842021724855044e-19,
+      "natural_map_relative_inf": 1.3589515126014912e-16,
+      "primal_cone_violation": 0.0,
+      "stationarity_inf": 1.297850715786808e-13
+    },
+    "final_stretch_m": 2.687157186390121e-06,
+    "pass": true,
+    "peak_penetration_m": 2.5009271341289163e-06,
+    "penetration_improvement": 8344.782621943128,
+    "requested_steps": 60,
+    "setup_inclusive_ms": 19023.717445,
+    "slowdown": 34.03292750563556,
+    "stretch_improvement": 501.2740853591856,
+    "vbd10_final_stretch_m": 0.0013470022608240706,
+    "vbd10_peak_penetration_m": 0.020869693287625012,
+    "vbd10_setup_inclusive_ms": 558.979754
+  },
+  "universal_solver_established": false,
+  "verdict": "BEST VERIFIED RESULT IS A ROUTER, NOT ONE UNIVERSAL SOLVER"
+}

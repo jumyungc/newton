@@ -1,0 +1,1425 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ALM Full-Scene Comparison</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17202a;
+      --muted: #5d6c7c;
+      --line: #d9e0e8;
+      --panel: #f7f9fb;
+      --accent: #176b61;
+      --accent-soft: #e8f4f1;
+      --warn: #8a5a00;
+      --warn-soft: #fff4d8;
+      --bad: #a33a2b;
+      --bad-soft: #fdecea;
+      --max: 1380px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: #fff;
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+    }
+
+    header {
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfd;
+    }
+
+    main,
+    .header-inner,
+    footer {
+      width: min(var(--max), calc(100vw - 32px));
+      margin: 0 auto;
+    }
+
+    .header-inner {
+      padding: 36px 0 28px;
+    }
+
+    main {
+      padding: 28px 0 48px;
+    }
+
+    section {
+      margin: 0 0 40px;
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: clamp(2rem, 4vw, 3.35rem);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 0 0 10px;
+      font-size: 1.45rem;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 1.08rem;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 12px;
+    }
+
+    a {
+      color: var(--accent);
+      text-underline-offset: 2px;
+    }
+
+    code {
+      padding: 0.08em 0.25em;
+      border-radius: 4px;
+      background: #edf2f7;
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+    }
+
+    ul {
+      margin: 10px 0 0;
+      padding-left: 20px;
+    }
+
+    li {
+      margin: 4px 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 16px 0 0;
+      font-size: 0.92rem;
+    }
+
+    th,
+    td {
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--panel);
+      font-weight: 700;
+    }
+
+    video {
+      display: block;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: #111827;
+    }
+
+    .subtitle {
+      max-width: 980px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 1.05rem;
+    }
+
+    .metric-row,
+    .analysis-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 22px;
+    }
+
+    .quick-nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 20px;
+    }
+
+    .quick-nav a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 32px;
+      padding: 5px 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: var(--ink);
+      font-size: 0.88rem;
+      font-weight: 650;
+      text-decoration: none;
+    }
+
+    .quick-nav a:hover {
+      border-color: #9fc9c2;
+      background: var(--accent-soft);
+      color: #14594f;
+    }
+
+    .analysis-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      margin-top: 14px;
+    }
+
+    .metric,
+    .callout,
+    .video-card,
+    .analysis-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+
+    .metric {
+      padding: 14px 16px;
+    }
+
+    .metric .label,
+    .analysis-card .label {
+      color: var(--muted);
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .metric .value {
+      display: block;
+      margin-top: 4px;
+      font-size: 1.12rem;
+      font-weight: 760;
+      overflow-wrap: anywhere;
+    }
+
+    .callout {
+      padding: 15px 16px;
+      background: var(--accent-soft);
+      border-color: #bddbd4;
+    }
+
+    .callout.warning {
+      background: var(--warn-soft);
+      border-color: #efd189;
+    }
+
+    .video-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      align-items: start;
+      margin-top: 14px;
+    }
+
+    .video-grid.two {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .video-card {
+      overflow: hidden;
+    }
+
+    .video-card-body {
+      min-height: 150px;
+      padding: 14px 14px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .video-card-body p,
+    .analysis-card p,
+    .note {
+      color: var(--muted);
+      font-size: 0.94rem;
+    }
+
+    .config {
+      margin-top: 8px;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-size: 0.82rem;
+      overflow-wrap: anywhere;
+    }
+
+    .status {
+      display: inline-flex;
+      width: fit-content;
+      margin-bottom: 8px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: #edf2f7;
+      color: #425466;
+      font-size: 0.76rem;
+      font-weight: 750;
+      text-transform: uppercase;
+    }
+
+    .status.good {
+      background: var(--accent-soft);
+      color: #14594f;
+    }
+
+    .status.warn {
+      background: var(--warn-soft);
+      color: var(--warn);
+    }
+
+    .status.bad {
+      background: var(--bad-soft);
+      color: var(--bad);
+    }
+
+    .analysis-card {
+      padding: 16px;
+    }
+
+    .subsection-title {
+      margin-top: 22px;
+    }
+
+    .table-scroll {
+      overflow-x: auto;
+    }
+
+    footer {
+      padding: 0 0 42px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    @media (max-width: 1120px) {
+      .metric-row,
+      .analysis-grid,
+      .video-grid,
+      .video-grid.two {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 760px) {
+      .metric-row,
+      .analysis-grid,
+      .video-grid,
+      .video-grid.two {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <h1>ALM Full-Scene Comparison</h1>
+      <p class="subtitle">
+        Updated local report using the full 20-row contacts pyramid for long stack stability and a separate
+        isolated ball/ramp/plane path for penetration. Videos are longer and recorded at 60 fps; cable pile now
+        uses the original 10-layer, 10-lane example instead of the reduced shortcut. Cable bundle hysteresis,
+        twist, and Y-junction are grouped together as tracked cable scenes. New ALM is split into the four
+        history/alpha combinations.
+      </p>
+      <div class="metric-row">
+        <div class="metric">
+          <span class="label">Contacts stack</span>
+          <span class="value" id="metric-stack">loading</span>
+        </div>
+        <div class="metric">
+          <span class="label">Ball/ramp impact</span>
+          <span class="value" id="metric-impact">loading</span>
+        </div>
+        <div class="metric">
+          <span class="label">Video cadence</span>
+          <span class="value">60 fps</span>
+        </div>
+        <div class="metric">
+          <span class="label">Generated</span>
+          <span class="value" id="metric-generated">loading</span>
+        </div>
+      </div>
+      <nav class="quick-nav" aria-label="Report sections">
+        <a href="#answer">Answer</a>
+        <a href="#contacts-stack">Contacts Stack</a>
+        <a href="#impact">Ball/Ramp</a>
+        <a href="#original">Original Pyramid</a>
+        <a href="#budgets">Budgets</a>
+        <a href="#cables">Cable Scenes</a>
+        <a href="#same-ke">Same-ke</a>
+        <a href="#measured">Measured</a>
+        <a href="#notes">Notes</a>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section id="answer">
+      <div class="callout">
+        <h2>Current Answer</h2>
+        <p>
+          The sampled-drift 2400-frame recheck changes the answer: the earlier 600/1200-frame winners are not all
+          long-run stable. XPBD needs <code>4x8</code> to stay quiet for the full horizon. Old soft penalty can be
+          made stable with direct contact <code>ke</code>, but the fastest sampled-drift pass found here is
+          <code>8x2</code> with <code>ke=1e7</code>, and the best low-substep pass is <code>6x4</code> with
+          <code>ke=1e7</code>. Old hard/history settles at <code>4x1</code>. New compliant ALM contact variants
+          settle at budget <code>4</code> for alpha <code>0</code>, while alpha <code>0.95</code> can stay
+          low-substep with <code>3x3</code> and <code>ke=3e6</code>.
+          A targeted old-soft budget-&lt;10 damping sweep found short-screen candidates, but no sampled-drift
+          2400-frame pass; damping helps transients, but does not remove the old-soft substep requirement here.
+        </p>
+      </div>
+    </section>
+
+    <section id="contacts-stack">
+      <h2>Full Contacts Stack</h2>
+      <p class="note">
+        One full 20-row pyramid, no wrecking ball, 600 simulation frames. Pass criteria use finite state, minimum
+        height, top horizontal drift, and maximum box horizontal drift, instead of the old 3-row approximation.
+      </p>
+      <div class="video-grid" id="stack-videos"></div>
+      <h3 class="subsection-title">Fastest stable no-ball stack search</h3>
+      <div class="video-grid" id="stack-fastest-videos"></div>
+      <h3 class="subsection-title">Low-substep, high-iteration stack search</h3>
+      <p class="note">
+        Same no-ball stack, but selection first prefers fewer substeps and then lower
+        <code>substeps x iterations</code>. VBD rows sweep contact stiffness or legacy scale; ALM rows use default
+        <code>rho</code> and sweep <code>ke</code>. The old-soft row in this table is the original legacy-scale
+        sweep, so it can still select a substep-heavy <code>8x1</code> row. The direct material-<code>ke</code>
+        old-soft recheck below is the corrected low-substep/high-iteration old-soft result.
+      </p>
+      <div class="video-grid" id="stack-low-substep-videos"></div>
+      <div class="table-scroll">
+        <table id="low-substep-table"></table>
+      </div>
+      <h3 class="subsection-title">Endpoint 2400-frame settlement check</h3>
+      <p class="note">
+        Same no-ball stack, but checked for 2400 frames. The final 600-frame window must be quiet:
+        maximum sampled body displacement below <code>0.1</code> and top-height range below <code>0.08</code>.
+        XPBD is extended beyond the original budget cap. The sampled-drift rechecks below are the authoritative
+        stay-stacked checks because they reject rows that drift away during the run and later return near the endpoint.
+      </p>
+      <div class="video-grid" id="stack-settled-videos"></div>
+      <div class="table-scroll">
+        <table id="stack-settlement-table"></table>
+      </div>
+      <h3 class="subsection-title">Sampled-drift recheck</h3>
+      <p class="note">
+        This rerun fixes the endpoint-only issue: a row must remain within drift bounds at every sampled point, not
+        just at the final frame. It rechecks representative old-soft failures and ALM alpha <code>0.95</code>
+        low-substep alternatives.
+      </p>
+      <div class="table-scroll">
+        <table id="sampled-recheck-table"></table>
+      </div>
+      <h3 class="subsection-title">Expanded old-soft direct-ke recheck</h3>
+      <p class="note">
+        This wider pass screens old soft penalty over direct contact <code>ke</code>, including low-substep,
+        high-iteration rows such as <code>1x16</code>, <code>1x24</code>, <code>3x6</code>, <code>3x8</code>,
+        <code>4x3</code>, <code>4x6</code>, and <code>4x8</code>. Stable 600-frame rows are long-checked for
+        2400 frames with sampled drift. The fastest long-run pass found is <code>8x2, ke=1e7</code>; the best
+        lower-substep pass found is <code>6x4, ke=1e7</code>. Lower-substep candidates that screened at 600 frames
+        did not stay stacked over the sampled 2400-frame check.
+      </p>
+      <div class="video-grid" id="old-soft-wide-videos"></div>
+      <div class="table-scroll">
+        <table id="old-soft-wide-table"></table>
+      </div>
+      <h3 class="subsection-title">Old-soft under-10 damping recheck</h3>
+      <p class="note">
+        Targeted old-soft sweep with <code>substeps x iterations &lt; 10</code>, direct contact <code>ke</code>, and
+        Rayleigh-style contact damping <code>kd</code>. Eighteen rows passed the 600-frame screen, but none stayed
+        stacked over the sampled 2400-frame check.
+      </p>
+      <div class="table-scroll">
+        <table id="old-soft-under10-damping-table"></table>
+      </div>
+    </section>
+
+    <section id="impact">
+      <h2>Ball/Ramp Impact</h2>
+      <p class="note">
+        Isolated heavy sphere, ramp, and infinite plane, 600 simulation frames. Pass threshold is 5 cm maximum
+        allowed overlap against the ramp top surface or ground plane, matching the finite contact slop seen even in
+        XPBD.
+      </p>
+      <div class="video-grid" id="impact-videos"></div>
+    </section>
+
+    <section id="original">
+      <h2>Original Pyramid With Ball</h2>
+      <p class="note">
+        Existing <code>example_pyramid</code> scene with one full 20-row pyramid plus the original ball/ramp path,
+        600 simulation frames. Both rows use impact-selected ball/ramp/ground stiffness, while pyramid boxes and
+        solver budget come from the named no-ball stack source.
+      </p>
+      <h3 class="subsection-title">Using fastest no-ball stack parameters</h3>
+      <div class="video-grid" id="original-fastest-videos"></div>
+      <h3 class="subsection-title">Using Full Contacts Stack parameters</h3>
+      <div class="video-grid" id="original-full-stack-videos"></div>
+    </section>
+
+    <section id="budgets">
+      <h2>Full Stack Budget Search</h2>
+      <p class="note">
+        Same full 20-row stack, but with lower substep/iteration budgets. Cost is reported as substeps times
+        solver iterations. XPBD now reports <code>xpbd_iterations</code> explicitly; the default is <code>2</code>.
+        The targeted table sweeps VBD stiffness, legacy scale, and ALM <code>rho</code> at exactly
+        <code>1x10</code>, <code>2x5</code>, and <code>5x2</code>. The split-confirmation table rechecks
+        lower-cost candidates such as <code>1x4</code>, <code>2x2</code>, and <code>4x1</code> for 1200 frames,
+        with ALM recommendations preferring default <code>rho</code> when it confirms.
+      </p>
+      <div class="table-scroll">
+        <table id="budget-table"></table>
+      </div>
+      <h3 class="subsection-title">Targeted 10-cost budgets with stiffness sweep</h3>
+      <div class="table-scroll">
+        <table id="targeted-budget-table"></table>
+      </div>
+      <h3 class="subsection-title">Low-budget confirmed winners</h3>
+      <div class="table-scroll">
+        <table id="low-budget-table"></table>
+      </div>
+      <h3 class="subsection-title">Budget split confirmation</h3>
+      <div class="table-scroll">
+        <table id="budget-split-table"></table>
+      </div>
+    </section>
+
+    <section id="cables">
+      <h2>Cable Scene Comparisons</h2>
+      <p class="note">
+        Tracked cable scenes are grouped here so cable behavior can be read separately from the rigid-contact stack
+        tuning. Pile uses the original heavy pile setup; bundle hysteresis, twist, and Y-junction compare the same
+        authored examples through the legacy VBD path and compliant ALM path.
+      </p>
+      <h3 class="subsection-title">Original Cable Pile</h3>
+      <p class="note">
+        Original <code>example_cable_pile</code> with 10 layers and 10 lanes per layer. The current branch's
+        unmodified default is shown separately from explicit legacy overrides. The legacy pile rows now copy main's
+        material stiffness, <code>shape_ke=1e5</code>, and preserve the original friction layout.
+      </p>
+      <div class="video-grid two" id="pile-videos"></div>
+      <div class="table-scroll">
+        <table id="pile-table"></table>
+      </div>
+      <h3 class="subsection-title">Cable Bundle Hysteresis</h3>
+      <p class="note">
+        Tracked <code>example_cable_bundle_hysteresis</code> with Dahl bending hysteresis enabled. The videos compare
+        the legacy VBD path and the compliant ALM path using the same seven-cable bundle and moving-obstacle loading.
+      </p>
+      <div class="video-grid two" id="bundle-videos"></div>
+      <h3 class="subsection-title">Cable Twist And Y-Junction</h3>
+      <p class="note">
+        Twist videos are now 120 fps, 1800 simulation frames, and 15 seconds long. Y-junction videos remain the
+        earlier 60 fps comparison.
+      </p>
+      <div class="video-grid two" id="cable-videos"></div>
+    </section>
+
+    <section id="same-ke">
+      <h2>Same-ke Soft Penalty Check</h2>
+      <p class="note">
+        These clips use the selected finite <code>ke</code> from each compliant ALM history/alpha case, then run
+        legacy soft penalty contact with the same explicit shape material <code>ke</code>. Cable clips are included
+        here as same-authored-setup comparisons between old VBD and compliant ALM.
+      </p>
+      <h3>Full contacts stack</h3>
+      <div class="video-grid" id="same-ke-stack-videos"></div>
+      <h3 class="subsection-title">Ball/ramp impact</h3>
+      <div class="video-grid" id="same-ke-impact-videos"></div>
+      <h3 class="subsection-title">Tracked cable examples</h3>
+      <div class="video-grid two" id="same-ke-cable-videos"></div>
+    </section>
+
+    <section id="measured">
+      <h2>Measured Results</h2>
+      <div class="analysis-grid">
+        <article class="analysis-card">
+          <span class="label">Stack result</span>
+          <p id="stack-summary">loading</p>
+        </article>
+        <article class="analysis-card">
+          <span class="label">Impact result</span>
+          <p id="impact-summary">loading</p>
+        </article>
+        <article class="analysis-card">
+          <span class="label">Main tuning conflict</span>
+          <p>
+            Stack stability prefers moderate stiffness; heavy impact needs much larger stiffness. A single global
+            <code>ke</code> is therefore not a good long-term user-facing enforcement control.
+          </p>
+        </article>
+      </div>
+      <div class="table-scroll">
+        <table id="selected-table"></table>
+      </div>
+    </section>
+
+    <section id="notes">
+      <h2>Analysis Notes</h2>
+      <ul>
+        <li>The contacts example now supports separate VBD box, ball, and static contact stiffness overrides, so the combined scene can avoid one global <code>ke</code>.</li>
+        <li>The isolated stack, isolated ball/ramp, and combined pyramid-plus-ball checks all instantiate the existing <code>example_pyramid</code> with different scene arguments; the combined scene is not a separate custom reconstruction.</li>
+        <li>XPBD iteration count is explicit in the report. The old implicit value was <code>2</code> iterations per substep; <code>1x10</code> XPBD still fails the 600-frame full-stack drift threshold.</li>
+        <li>The low-budget sweep separates 600-frame pass/fail from 1200-frame confirmation. XPBD <code>3x2</code> passes at 600 frames but fails the longer confirmation, so the fastest confirmed XPBD row in that sweep is <code>8x1</code>.</li>
+        <li>Old soft penalty's fastest confirmed full-stack row is <code>8x1</code> with <code>legacy_scale=0.1</code>. <code>1x4</code> with <code>legacy_scale=3e-5</code> short-passes, then fails the 1200-frame run with large drift and negative minimum height.</li>
+        <li>Old hard ALM and most compliant ALM variants confirm at <code>4x1</code>. Compliant ALM with history and alpha <code>0</code> confirms at <code>3x1</code> using default <code>rho</code> and <code>ke=3e6</code>.</li>
+        <li>Across the split confirmation, substep-heavy splits such as <code>4x1</code> were consistently more reliable than iteration-heavy splits such as <code>1x4</code> for the full contact stack.</li>
+        <li>The low-substep/high-iteration sweep shows where more iterations do help: old hard/history confirms at <code>1x10</code>, new ALM alpha <code>0</code> confirms at <code>2x4</code> without history and <code>2x2</code> with history, while alpha <code>0.95</code> variants need <code>3x2</code>.</li>
+        <li>The strict 2400-frame settlement pass is harder than the 1200-frame confirmation. XPBD needs <code>4x8</code> to settle, old soft did not settle in the tested probes, and old hard/history plus all new ALM variants settle at budget <code>4</code>.</li>
+        <li>For old soft, increasing iterations at one substep did not fix the stack; the long confirmations showed contact-buffer overflow and large drift. Higher substep probes also drifted far before becoming quiet.</li>
+        <li>The targeted stack sweep checks exactly <code>1x10</code>, <code>2x5</code>, and <code>5x2</code>. VBD <code>1x10</code> works once legacy scale or compliant-ALM <code>rho</code> is tuned, but alpha <code>0.95</code> <code>1x10</code> rows failed a stricter 1200-frame spot check.</li>
+        <li><code>rigid_contact_rho</code> is exposed in the example. It can rescue some exact-budget rows such as <code>1x10</code>, but the fastest confirmed split recommendations prefer default <code>rho</code> when available.</li>
+        <li>New ALM is measured as four combinations: no history/history crossed with <code>alpha=0</code>/<code>alpha=0.95</code>.</li>
+        <li>Same-<code>ke</code> soft penalty cases now set the same explicit shape material <code>ke</code> as the matched ALM row, while also reporting the equivalent legacy scale.</li>
+        <li>Legacy contact stiffness scale is dimensionless: the example applies <code>ke = legacy_scale * cube_mass / sim_dt^2</code>. Changing substeps changes <code>sim_dt</code>, so the same scale implies a different physical <code>ke</code>.</li>
+        <li>Old hard ALM with <code>legacy_scale=1.0</code> is not equivalent to the new compliant ALM impact row in this run; the isolated ball/ramp test still exceeds the clearance threshold.</li>
+        <li>For the full stack, same-<code>ke</code> soft penalty remains stable but generally has larger horizontal drift than the matched compliant ALM row.</li>
+        <li>For the isolated ball/ramp path, same-<code>ke</code> soft penalty also passes once it uses the ALM-selected <code>ke=3e12</code>, which corresponds to a very large legacy scale.</li>
+        <li>Combined pyramid-plus-ball runs are shown twice: one row uses fastest no-ball stack parameters for pyramid boxes, and another row uses the Full Contacts Stack parameters; both use impact-selected ball/static stiffness.</li>
+        <li>The cable pile default on this branch is compliant ALM with history and passes. Legacy soft and legacy hard/history also pass when copied from main with <code>shape_ke=1e5</code>.</li>
+        <li>Cable bundle hysteresis now appears beside twist and Y-junction, using Dahl hysteresis enabled in both old and new solver-path videos.</li>
+        <li>The selected <code>ke</code>, pass/fail state, and penetration metrics for each combination are listed in the measured table.</li>
+        <li>Contact history controls lambda/contact continuity. It is not the same thing as <code>alpha</code>, and neither one removes the need to tune physical stiffness for the scenario.</li>
+      </ul>
+    </section>
+
+    <section id="references">
+      <h2>Background References</h2>
+      <ul>
+        <li><a href="https://matthias-research.github.io/pages/publications/XPBD.pdf">XPBD: Position-Based Simulation of Compliant Constrained Dynamics</a></li>
+        <li><a href="https://mmacklin.com/smallsteps.pdf">Small Steps in Physics Simulation</a></li>
+        <li><a href="https://www.scielo.org.ar/pdf/laar/v42n3/v42n3a10.pdf">An augmented Lagrangian method to solve three-dimensional contact problems</a></li>
+        <li><a href="https://hal.science/hal-01310670v1/file/BMPb.pdf">The adapted augmented Lagrangian method for frictional contact</a></li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    Assets live under <code>reports/alm_comparison/assets/</code>. Rebuild metrics with
+    <code>uv run python reports/alm_comparison/run_sweeps.py</code>, low-budget metrics with
+    <code>uv run python reports/alm_comparison/run_low_budget.py --max-cost 20</code>, low-substep metrics with
+    <code>uv run python reports/alm_comparison/run_low_substep_stack.py</code>, strict settlement with
+    <code>uv run python reports/alm_comparison/run_stack_settlement.py --seed-only</code>, original variants with
+    <code>uv run python reports/alm_comparison/run_original_variants.py</code>, and videos with
+    <code>uv run python reports/alm_comparison/record_videos.py --suite all</code>.
+  </footer>
+
+  <script>
+    const stackVideos = [
+      ["xpbd", "XPBD", "Full 20-row stack baseline.", "contacts_stack_xpbd.mp4"],
+      ["old_soft", "Old VBD soft penalty", "Best old-soft stack setting in the same 10x2 budget.", "contacts_stack_old_vbd_soft.mp4"],
+      ["old_hard_history", "Old VBD hard ALM + history", "Best old-hard/history stack setting.", "contacts_stack_old_vbd_hard_history.mp4"],
+      ["new_alm_no_history_alpha0", "New ALM, no history, alpha=0", "Best stack setting without history and without C0 stabilization.", "contacts_stack_new_alm_no_history_alpha0.mp4"],
+      ["new_alm_no_history_alpha095", "New ALM, no history, alpha=0.95", "Best stack setting without history and with C0 stabilization.", "contacts_stack_new_alm_no_history_alpha095.mp4"],
+      ["new_alm_history_alpha0", "New ALM + history, alpha=0", "Best stack setting with contact history and alpha=0.", "contacts_stack_new_alm_history_alpha0.mp4"],
+      ["new_alm_history_alpha095", "New ALM + history, alpha=0.95", "Best stack setting with contact history and alpha=0.95.", "contacts_stack_new_alm_history_alpha095.mp4"],
+    ];
+
+    const stackFastestVideos = [
+      ["xpbd", "XPBD", "Lowest-cost confirmed XPBD row from the split confirmation.", "contacts_stack_fastest_xpbd.mp4"],
+      ["old_soft", "Old VBD soft penalty", "Lowest-cost confirmed old-soft row from the split confirmation.", "contacts_stack_fastest_old_vbd_soft.mp4"],
+      ["old_hard_history", "Old VBD hard ALM + history", "Lowest-cost confirmed old-hard/history row from the split confirmation.", "contacts_stack_fastest_old_vbd_hard_history.mp4"],
+      ["new_alm_no_history_alpha0", "New ALM, no history, alpha=0", "Lowest-cost default-rho confirmed no-history alpha=0 row.", "contacts_stack_fastest_new_alm_no_history_alpha0.mp4"],
+      ["new_alm_no_history_alpha095", "New ALM, no history, alpha=0.95", "Lowest-cost default-rho confirmed no-history alpha=0.95 row.", "contacts_stack_fastest_new_alm_no_history_alpha095.mp4"],
+      ["new_alm_history_alpha0", "New ALM + history, alpha=0", "Lowest-cost default-rho confirmed history alpha=0 row.", "contacts_stack_fastest_new_alm_history_alpha0.mp4"],
+      ["new_alm_history_alpha095", "New ALM + history, alpha=0.95", "Lowest-cost default-rho confirmed history alpha=0.95 row.", "contacts_stack_fastest_new_alm_history_alpha095.mp4"],
+    ];
+
+    const stackLowSubstepVideos = [
+      ["xpbd", "XPBD", "Fewest-substeps confirmed XPBD row.", "contacts_stack_low_substep_xpbd.mp4"],
+      ["old_soft", "Old VBD soft penalty", "Low-substep search result for old soft penalty.", "contacts_stack_low_substep_old_vbd_soft.mp4"],
+      ["old_hard_history", "Old VBD hard ALM + history", "Low-substep search result for legacy hard/history contact.", "contacts_stack_low_substep_old_vbd_hard_history.mp4"],
+      ["new_alm_no_history_alpha0", "New ALM, no history, alpha=0", "Low-substep default-rho ke-sweep result.", "contacts_stack_low_substep_new_alm_no_history_alpha0.mp4"],
+      ["new_alm_no_history_alpha095", "New ALM, no history, alpha=0.95", "Low-substep default-rho ke-sweep result.", "contacts_stack_low_substep_new_alm_no_history_alpha095.mp4"],
+      ["new_alm_history_alpha0", "New ALM + history, alpha=0", "Low-substep default-rho ke-sweep result.", "contacts_stack_low_substep_new_alm_history_alpha0.mp4"],
+      ["new_alm_history_alpha095", "New ALM + history, alpha=0.95", "Low-substep default-rho ke-sweep result.", "contacts_stack_low_substep_new_alm_history_alpha095.mp4"],
+    ];
+
+    const oldSoftWideVideos = [
+      [
+        "Old soft direct-ke fastest",
+        "Fastest sampled-drift pass found in the expanded old-soft search: 8 substeps, 2 iterations, ke=1e7.",
+        "contacts_stack_old_soft_direct_fastest_8x2.mp4",
+      ],
+      [
+        "Old soft direct-ke low-substep",
+        "Cleanest lower-substep sampled-drift pass found in the expanded old-soft search: 6 substeps, 4 iterations, ke=1e7.",
+        "contacts_stack_old_soft_direct_low_substep_6x4.mp4",
+      ],
+    ];
+
+    const stackSettledVideos = [
+      ["xpbd", "XPBD", "Fastest 2400-frame settled XPBD row found in the extended probe.", "contacts_stack_settled_xpbd.mp4"],
+      ["old_hard_history", "Old VBD hard ALM + history", "Fastest strict-settled legacy hard/history row.", "contacts_stack_settled_old_vbd_hard_history.mp4"],
+      ["new_alm_no_history_alpha0", "New ALM, no history, alpha=0", "Fastest strict-settled default-rho row.", "contacts_stack_settled_new_alm_no_history_alpha0.mp4"],
+      ["new_alm_no_history_alpha095", "New ALM, no history, alpha=0.95", "Fastest strict-settled default-rho row.", "contacts_stack_settled_new_alm_no_history_alpha095.mp4"],
+      ["new_alm_history_alpha0", "New ALM + history, alpha=0", "Fastest strict-settled default-rho row.", "contacts_stack_settled_new_alm_history_alpha0.mp4"],
+      ["new_alm_history_alpha095", "New ALM + history, alpha=0.95", "Fastest strict-settled default-rho row.", "contacts_stack_settled_new_alm_history_alpha095.mp4"],
+    ];
+
+    const impactVideos = [
+      ["xpbd", "XPBD", "Isolated ball/ramp/ground baseline.", "contacts_impact_xpbd.mp4"],
+      ["old_soft", "Old VBD soft penalty", "Best old-soft impact setting; still fails the 5 cm threshold.", "contacts_impact_old_vbd_soft.mp4"],
+      ["old_hard_history", "Old VBD hard ALM + history", "Best old-hard/history impact setting; near threshold but still fails.", "contacts_impact_old_vbd_hard_history.mp4"],
+      ["new_alm_no_history_alpha0", "New ALM, no history, alpha=0", "Best impact setting without history and without C0 stabilization.", "contacts_impact_new_alm_no_history_alpha0.mp4"],
+      ["new_alm_no_history_alpha095", "New ALM, no history, alpha=0.95", "Best impact setting without history and with C0 stabilization.", "contacts_impact_new_alm_no_history_alpha095.mp4"],
+      ["new_alm_history_alpha0", "New ALM + history, alpha=0", "Best impact setting with contact history and alpha=0.", "contacts_impact_new_alm_history_alpha0.mp4"],
+      ["new_alm_history_alpha095", "New ALM + history, alpha=0.95", "Best impact setting with contact history and alpha=0.95.", "contacts_impact_new_alm_history_alpha095.mp4"],
+    ];
+
+    const sameKeStackVideos = [
+      ["soft_same_ke_no_history_alpha0", "Soft same-ke as no-history ALM, alpha=0", "Legacy soft contact using the selected no-history ALM stiffness.", "contacts_stack_soft_same_ke_no_history_alpha0.mp4"],
+      ["soft_same_ke_no_history_alpha095", "Soft same-ke as no-history ALM, alpha=0.95", "Legacy soft contact using the selected no-history ALM stiffness.", "contacts_stack_soft_same_ke_no_history_alpha095.mp4"],
+      ["soft_same_ke_history_alpha0", "Soft same-ke as history ALM, alpha=0", "Legacy soft contact using the selected history ALM stiffness.", "contacts_stack_soft_same_ke_history_alpha0.mp4"],
+      ["soft_same_ke_history_alpha095", "Soft same-ke as history ALM, alpha=0.95", "Legacy soft contact using the selected history ALM stiffness.", "contacts_stack_soft_same_ke_history_alpha095.mp4"],
+    ];
+
+    const sameKeImpactVideos = [
+      ["soft_same_ke_no_history_alpha0", "Soft same-ke as no-history ALM, alpha=0", "Legacy soft contact using the selected no-history ALM stiffness.", "contacts_impact_soft_same_ke_no_history_alpha0.mp4"],
+      ["soft_same_ke_no_history_alpha095", "Soft same-ke as no-history ALM, alpha=0.95", "Legacy soft contact using the selected no-history ALM stiffness.", "contacts_impact_soft_same_ke_no_history_alpha095.mp4"],
+      ["soft_same_ke_history_alpha0", "Soft same-ke as history ALM, alpha=0", "Legacy soft contact using the selected history ALM stiffness.", "contacts_impact_soft_same_ke_history_alpha0.mp4"],
+      ["soft_same_ke_history_alpha095", "Soft same-ke as history ALM, alpha=0.95", "Legacy soft contact using the selected history ALM stiffness.", "contacts_impact_soft_same_ke_history_alpha095.mp4"],
+    ];
+
+    const originalMixedVideos = [
+      ["xpbd", "XPBD", "Combined scene using the lowest-cost stack-selected XPBD row.", "contacts_original_mixed_params_xpbd.mp4"],
+      ["old_soft", "Old VBD soft penalty", "Split material: stack-selected boxes plus impact-selected ball/static.", "contacts_original_mixed_params_old_vbd_soft.mp4"],
+      ["old_hard_history", "Old VBD hard ALM + history", "Split material: stack-selected boxes plus legacy_scale=1 impact ball/static.", "contacts_original_mixed_params_old_vbd_hard_history.mp4"],
+      ["new_alm_no_history_alpha0", "New ALM, no history, alpha=0", "Split material: stack-selected box ke plus impact-selected ball/static ke.", "contacts_original_mixed_params_new_alm_no_history_alpha0.mp4"],
+      ["new_alm_no_history_alpha095", "New ALM, no history, alpha=0.95", "Split material: stack-selected box ke plus impact-selected ball/static ke.", "contacts_original_mixed_params_new_alm_no_history_alpha095.mp4"],
+      ["new_alm_history_alpha0", "New ALM + history, alpha=0", "Split material: stack-selected box ke plus impact-selected ball/static ke.", "contacts_original_mixed_params_new_alm_history_alpha0.mp4"],
+      ["new_alm_history_alpha095", "New ALM + history, alpha=0.95", "Split material: stack-selected box ke plus impact-selected ball/static ke.", "contacts_original_mixed_params_new_alm_history_alpha095.mp4"],
+    ];
+
+    const originalFastestVideos = [
+      ["xpbd", "XPBD", "Pyramid budget from fastest no-ball stack; impact-selected ball/static.", "contacts_original_fastest_stack_params_xpbd.mp4"],
+      ["old_soft", "Old VBD soft penalty", "Pyramid budget from fastest no-ball stack; impact-selected ball/static.", "contacts_original_fastest_stack_params_old_vbd_soft.mp4"],
+      ["old_hard_history", "Old VBD hard ALM + history", "Pyramid budget from fastest no-ball stack; impact-selected ball/static.", "contacts_original_fastest_stack_params_old_vbd_hard_history.mp4"],
+      ["new_alm_no_history_alpha0", "New ALM, no history, alpha=0", "Pyramid budget from fastest no-ball stack; impact-selected ball/static.", "contacts_original_fastest_stack_params_new_alm_no_history_alpha0.mp4"],
+      ["new_alm_no_history_alpha095", "New ALM, no history, alpha=0.95", "Pyramid budget from fastest no-ball stack; impact-selected ball/static.", "contacts_original_fastest_stack_params_new_alm_no_history_alpha095.mp4"],
+      ["new_alm_history_alpha0", "New ALM + history, alpha=0", "Pyramid budget from fastest no-ball stack; impact-selected ball/static.", "contacts_original_fastest_stack_params_new_alm_history_alpha0.mp4"],
+      ["new_alm_history_alpha095", "New ALM + history, alpha=0.95", "Pyramid budget from fastest no-ball stack; impact-selected ball/static.", "contacts_original_fastest_stack_params_new_alm_history_alpha095.mp4"],
+    ];
+
+    const originalFullStackVideos = [
+      ["xpbd", "XPBD", "Pyramid budget from Full Contacts Stack; impact-selected ball/static.", "contacts_original_full_stack_params_xpbd.mp4"],
+      ["old_soft", "Old VBD soft penalty", "Pyramid budget from Full Contacts Stack; impact-selected ball/static.", "contacts_original_full_stack_params_old_vbd_soft.mp4"],
+      ["old_hard_history", "Old VBD hard ALM + history", "Pyramid budget from Full Contacts Stack; impact-selected ball/static.", "contacts_original_full_stack_params_old_vbd_hard_history.mp4"],
+      ["new_alm_no_history_alpha0", "New ALM, no history, alpha=0", "Pyramid budget from Full Contacts Stack; impact-selected ball/static.", "contacts_original_full_stack_params_new_alm_no_history_alpha0.mp4"],
+      ["new_alm_no_history_alpha095", "New ALM, no history, alpha=0.95", "Pyramid budget from Full Contacts Stack; impact-selected ball/static.", "contacts_original_full_stack_params_new_alm_no_history_alpha095.mp4"],
+      ["new_alm_history_alpha0", "New ALM + history, alpha=0", "Pyramid budget from Full Contacts Stack; impact-selected ball/static.", "contacts_original_full_stack_params_new_alm_history_alpha0.mp4"],
+      ["new_alm_history_alpha095", "New ALM + history, alpha=0.95", "Pyramid budget from Full Contacts Stack; impact-selected ball/static.", "contacts_original_full_stack_params_new_alm_history_alpha095.mp4"],
+    ];
+
+    const pileVideos = [
+      ["main_default", "Current branch default", "Unmodified example_cable_pile solver path.", "cable_pile_main_default.mp4"],
+      ["old_soft", "Old soft penalty", "Legacy soft contact copied from main material stiffness, shape_ke=1e5.", "cable_pile_old_vbd_soft.mp4"],
+      ["old_hard_history_alpha095", "Old hard/history alpha=0.95", "Legacy hard/history contact copied from main material stiffness, shape_ke=1e5.", "cable_pile_old_vbd_hard_history.mp4"],
+      ["new_alm_no_history_alpha0", "New ALM, no history, alpha=0", "Compliant ALM without contact history and without C0 stabilization.", "cable_pile_new_alm_no_history_alpha0.mp4"],
+      ["new_alm_no_history_alpha095", "New ALM, no history, alpha=0.95", "Compliant ALM without contact history and with C0 stabilization.", "cable_pile_new_alm_no_history_alpha095.mp4"],
+      ["new_alm_history_alpha0", "New ALM + history, alpha=0", "Compliant ALM with contact history and alpha=0.", "cable_pile_new_alm_history_alpha0.mp4"],
+      ["new_alm_history_alpha095", "New ALM + history, alpha=0.95", "Compliant ALM with contact history and alpha=0.95.", "cable_pile_new_alm_history_alpha095.mp4"],
+    ];
+
+    const bundleVideos = [
+      [
+        "Cable bundle hysteresis, old VBD",
+        "Legacy VBD path for the Dahl hysteresis bundle with moving obstacle loading.",
+        "cable_bundle_hysteresis_old_vbd.mp4",
+      ],
+      [
+        "Cable bundle hysteresis, new ALM",
+        "Compliant ALM path for the Dahl hysteresis bundle with the same authored loading.",
+        "cable_bundle_hysteresis_new_alm.mp4",
+      ],
+    ];
+
+    const cableVideos = [
+      ["Cable twist, old VBD", "Legacy VBD path for twist propagation.", "cable_twist_old_vbd.mp4"],
+      ["Cable twist, new ALM", "Compliant ALM path for twist propagation.", "cable_twist_new_alm.mp4"],
+      ["Y-junction, old VBD", "Legacy VBD path for the branching cable scene.", "cable_y_junction_old_vbd.mp4"],
+      ["Y-junction, new ALM", "Compliant ALM path for the branching cable scene.", "cable_y_junction_new_alm.mp4"],
+    ];
+
+    const sameKeCableVideos = [
+      ["Cable bundle hysteresis, old VBD", "Same authored Dahl hysteresis bundle through the legacy VBD path.", "cable_bundle_hysteresis_old_vbd.mp4"],
+      ["Cable bundle hysteresis, new ALM", "Same authored Dahl hysteresis bundle through compliant ALM.", "cable_bundle_hysteresis_new_alm.mp4"],
+      ["Cable twist, old VBD", "Same authored cable setup through the legacy VBD path.", "cable_twist_old_vbd.mp4"],
+      ["Cable twist, new ALM", "Same authored cable setup through compliant ALM.", "cable_twist_new_alm.mp4"],
+      ["Y-junction, old VBD", "Same authored Y-junction setup through the legacy VBD path.", "cable_y_junction_old_vbd.mp4"],
+      ["Y-junction, new ALM", "Same authored Y-junction setup through compliant ALM.", "cable_y_junction_new_alm.mp4"],
+    ];
+
+    function fmt(value, digits = 3) {
+      if (value === null || value === undefined) return "-";
+      if (typeof value === "number") {
+        if (!Number.isFinite(value)) return String(value);
+        if (Math.abs(value) >= 1000 || (Math.abs(value) < 0.001 && value !== 0)) return value.toExponential(2);
+        return value.toFixed(digits).replace(/\.?0+$/, "");
+      }
+      return String(value);
+    }
+
+    function configText(config) {
+      return Object.entries(config || {}).map(([key, value]) => `${key}=${fmt(value, 4)}`).join(", ");
+    }
+
+    function stableText(summary, suite) {
+      const stable = summary.stable_counts[suite];
+      const totals = summary.total_counts[suite];
+      return Object.keys(stable).map((mode) => `${mode}: ${stable[mode]}/${totals[mode]}`).join("; ");
+    }
+
+    function selectedPassText(summary, suite) {
+      const modes = Object.values(summary.selected[suite] || {});
+      const passed = modes.filter((result) => result.stable).length;
+      return `${passed}/${modes.length} selected modes pass`;
+    }
+
+    function statusFor(result) {
+      if (!result) return ["warn", "not measured"];
+      return result.stable ? ["good", "pass"] : ["bad", "fail"];
+    }
+
+    function metricLine(result) {
+      if (!result) return "";
+      if (result.suite === "contacts_stack") {
+        return `top xy=${fmt(result.top_xy_drift, 4)}, max box xy=${fmt(result.max_box_xy_drift, 4)}`;
+      }
+      if (result.suite && result.suite.startsWith("contacts_stack_settlement")) {
+        return `max box xy=${fmt(result.max_box_xy_drift, 4)}, quiet step=${fmt(result.last_window_max_sample_displacement, 4)}`;
+      }
+      if (result.suite === "contacts_impact") {
+        return `ground=${fmt(result.ground_clearance, 4)}, ramp=${fmt(result.ramp_clearance, 4)}`;
+      }
+      if (result.suite && result.suite.startsWith("contacts_original")) {
+        return `ground=${fmt(result.ground_clearance, 4)}, ramp=${fmt(result.ramp_clearance, 4)}, max=${fmt(result.max_abs_pos, 4)}`;
+      }
+      return "";
+    }
+
+    function makeMeasuredCard(item, summary, suite) {
+      const [key, title, description, filename] = item;
+      const selected = summary.selected[suite][key];
+      const [statusClass, statusText] = statusFor(selected);
+      const poster = `assets/previews/${filename.replace(".mp4", ".jpg")}`;
+      return `
+        <article class="video-card">
+          <div class="video-card-body">
+            <span class="status ${statusClass}">${statusText}</span>
+            <h3>${title}</h3>
+            <p>${description}</p>
+            <div class="config">${configText(selected.config)}</div>
+            <div class="config">${metricLine(selected)}</div>
+          </div>
+          <video controls muted loop preload="metadata" poster="${poster}">
+            <source src="assets/${filename}" type="video/mp4">
+          </video>
+        </article>
+      `;
+    }
+
+    function makePlainCard(item) {
+      const [title, description, filename] = item;
+      const poster = `assets/previews/${filename.replace(".mp4", ".jpg")}`;
+      return `
+        <article class="video-card">
+          <div class="video-card-body">
+            <span class="status good">rendered</span>
+            <h3>${title}</h3>
+            <p>${description}</p>
+          </div>
+          <video controls muted loop preload="metadata" poster="${poster}">
+            <source src="assets/${filename}" type="video/mp4">
+          </video>
+        </article>
+      `;
+    }
+
+    function makeExtendedCard(item, group) {
+      const [key, title, description, filename] = item;
+      const selected = group[key];
+      const [statusClass, statusText] = statusFor(selected);
+      const poster = `assets/previews/${filename.replace(".mp4", ".jpg")}`;
+      return `
+        <article class="video-card">
+          <div class="video-card-body">
+            <span class="status ${statusClass}">${statusText}</span>
+            <h3>${title}</h3>
+            <p>${description}</p>
+            <div class="config">${configText(selected.config || selected.overrides)}</div>
+            <div class="config">${metricLine(selected)}</div>
+          </div>
+          <video controls muted loop preload="metadata" poster="${poster}">
+            <source src="assets/${filename}" type="video/mp4">
+          </video>
+        </article>
+      `;
+    }
+
+    function mergedSettlementSelected(summary, extras) {
+      return {
+        ...(summary.selected || {}),
+        ...(extras.selected || {}),
+      };
+    }
+
+    function bestFailedOldSoft(summary, extras) {
+      const rows = [
+        ...((summary.searches?.old_soft?.long_results) || []),
+        ...((extras.extra_results?.old_soft) || []),
+      ];
+      return rows
+        .filter((row) => !row.settled)
+        .sort((a, b) => {
+          const stableDelta = Number(Boolean(b.stable)) - Number(Boolean(a.stable));
+          if (stableDelta) return stableDelta;
+          return (a.max_box_xy_drift ?? 1e30) - (b.max_box_xy_drift ?? 1e30);
+        })[0];
+    }
+
+    function settlementTable(summary, extras) {
+      const selected = mergedSettlementSelected(summary, extras);
+      const rows = [
+        ["xpbd", selected.xpbd, "extended"],
+        ["old_soft", bestFailedOldSoft(summary, extras), "no settled row found"],
+        ["old_hard_history", selected.old_hard_history, "strict"],
+        ["new_alm_no_history_alpha0", selected.new_alm_no_history_alpha0, "strict"],
+        ["new_alm_no_history_alpha095", selected.new_alm_no_history_alpha095, "strict"],
+        ["new_alm_history_alpha0", selected.new_alm_history_alpha0, "strict"],
+        ["new_alm_history_alpha095", selected.new_alm_history_alpha095, "strict"],
+      ].map(([mode, result, source]) => `
+        <tr>
+          <td>${mode}</td>
+          <td>${result?.settled ? "yes" : "no"}</td>
+          <td>${source}</td>
+          <td>${result?.budget_cost ?? "-"}</td>
+          <td>${configText(result?.config)}</td>
+          <td>${fmt(result?.max_box_xy_drift, 4)}</td>
+          <td>${fmt(result?.top_xy_drift, 4)}</td>
+          <td>${fmt(result?.last_window_max_sample_displacement, 4)}</td>
+          <td>${fmt(result?.last_window_top_z_range, 4)}</td>
+        </tr>
+      `);
+      return `
+        <thead>
+          <tr>
+            <th>Mode</th>
+            <th>Settled</th>
+            <th>Source</th>
+            <th>Budget</th>
+            <th>Config</th>
+            <th>Max box xy</th>
+            <th>Top xy</th>
+            <th>Quiet-window max step</th>
+            <th>Quiet-window top z range</th>
+          </tr>
+        </thead>
+        <tbody>${rows.join("")}</tbody>
+      `;
+    }
+
+    function sampledRecheckTable(summary) {
+      const order = [
+        "xpbd_settled",
+        "old_soft_legacy_8x1",
+        "old_soft_direct_8x1",
+        "old_soft_direct_4x4",
+        "old_hard_history_4x1",
+        "new_nohist_a0_4x1",
+        "new_nohist_a0_low_2x4",
+        "new_nohist_a095_4x1",
+        "new_nohist_a095_low_3x3",
+        "new_hist_a0_2x2",
+        "new_hist_a095_4x1",
+        "new_hist_a095_low_3x3",
+      ];
+      const rows = order.map((key) => {
+        const result = summary.results?.[key];
+        return `
+          <tr>
+            <td>${key}</td>
+            <td>${result?.settled ? "yes" : "no"}</td>
+            <td>${result?.budget_cost ?? "-"}</td>
+            <td>${configText(result?.config)}</td>
+            <td>${fmt(result?.sampled_max_box_xy_drift, 4)}</td>
+            <td>${fmt(result?.sampled_max_top_xy_drift, 4)}</td>
+            <td>${fmt(result?.last_window_max_sample_displacement, 4)}</td>
+            <td>${fmt(result?.max_box_xy_drift, 4)}</td>
+          </tr>
+        `;
+      });
+      return `
+        <thead>
+          <tr>
+            <th>Case</th>
+            <th>Stays stacked</th>
+            <th>Budget</th>
+            <th>Config</th>
+            <th>Sampled max box xy</th>
+            <th>Sampled max top xy</th>
+            <th>Final-window max step</th>
+            <th>Final max box xy</th>
+          </tr>
+        </thead>
+        <tbody>${rows.join("")}</tbody>
+      `;
+    }
+
+    function oldSoftWideTable(summary) {
+      const rows = ((summary.long_results) || [])
+        .slice()
+        .sort((a, b) => {
+          const settledDelta = Number(Boolean(b.settled)) - Number(Boolean(a.settled));
+          if (settledDelta) return settledDelta;
+          const budgetDelta = (a.budget_cost ?? 1e30) - (b.budget_cost ?? 1e30);
+          if (budgetDelta) return budgetDelta;
+          const substepDelta = (a.config?.substeps ?? 1e30) - (b.config?.substeps ?? 1e30);
+          if (substepDelta) return substepDelta;
+          return (a.sampled_max_box_xy_drift ?? 1e30) - (b.sampled_max_box_xy_drift ?? 1e30);
+        })
+        .map((result) => `
+          <tr>
+            <td>${result.settled ? "yes" : "no"}</td>
+            <td>${result.budget_cost ?? "-"}</td>
+            <td>${configText(result.config)}</td>
+            <td>${fmt(result.short_screen?.max_box_xy_drift, 4)}</td>
+            <td>${fmt(result.sampled_max_box_xy_drift, 4)}</td>
+            <td>${fmt(result.sampled_max_top_xy_drift, 4)}</td>
+            <td>${fmt(result.last_window_max_sample_displacement, 4)}</td>
+            <td>${fmt(result.max_box_xy_drift, 4)}</td>
+          </tr>
+        `);
+      return `
+        <thead>
+          <tr>
+            <th>Stays stacked</th>
+            <th>Budget</th>
+            <th>Config</th>
+            <th>600f max box xy</th>
+            <th>Sampled max box xy</th>
+            <th>Sampled max top xy</th>
+            <th>Final-window max step</th>
+            <th>Final max box xy</th>
+          </tr>
+        </thead>
+        <tbody>${rows.join("")}</tbody>
+      `;
+    }
+
+    function makePileCard(item, pileSummary) {
+      const [key, title, description, filename] = item;
+      const selected = pileSummary[key];
+      const [statusClass, statusText] = statusFor(selected);
+      const poster = `assets/previews/${filename.replace(".mp4", ".jpg")}`;
+      return `
+        <article class="video-card">
+          <div class="video-card-body">
+            <span class="status ${statusClass}">${statusText}</span>
+            <h3>${title}</h3>
+            <p>${description}</p>
+            <div class="config">${configText(selected.overrides)}</div>
+            <div class="config">min z=${fmt(selected.min_z, 4)}, max z=${fmt(selected.max_z, 4)}, max vel=${fmt(selected.max_abs_vel, 4)}</div>
+          </div>
+          <video controls muted loop preload="metadata" poster="${poster}">
+            <source src="assets/${filename}" type="video/mp4">
+          </video>
+        </article>
+      `;
+    }
+
+    function selectedTable(summary) {
+      const rows = [];
+      for (const [suite, modes] of Object.entries(summary.selected)) {
+        for (const [mode, result] of Object.entries(modes)) {
+          rows.push(`
+            <tr>
+              <td>${suite}</td>
+              <td>${mode}</td>
+              <td>${result.stable ? "yes" : "no"}</td>
+              <td>${configText(result.config)}</td>
+              <td>${fmt(result.runtime_s, 3)}</td>
+              <td>${fmt(result.top_xy_drift, 4)}</td>
+              <td>${fmt(result.max_box_xy_drift, 4)}</td>
+              <td>${fmt(result.ground_clearance, 4)}</td>
+              <td>${fmt(result.ramp_clearance, 4)}</td>
+            </tr>
+          `);
+        }
+      }
+      return `
+        <thead>
+          <tr>
+            <th>Suite</th>
+            <th>Mode</th>
+            <th>Pass</th>
+            <th>Selected config</th>
+            <th>Runtime s</th>
+            <th>Top xy</th>
+            <th>Max box xy</th>
+            <th>Ground clearance</th>
+            <th>Ramp clearance</th>
+          </tr>
+        </thead>
+        <tbody>${rows.join("")}</tbody>
+      `;
+    }
+
+    function budgetTable(extended) {
+      const rows = Object.entries(extended.stack_budget.selected).map(([mode, result]) => `
+        <tr>
+          <td>${mode}</td>
+          <td>${result.stable ? "yes" : "no"}</td>
+          <td>${result.budget_cost}</td>
+          <td>${configText(result.config)}</td>
+          <td>${fmt(result.max_box_xy_drift, 4)}</td>
+          <td>${fmt(result.top_xy_drift, 4)}</td>
+          <td>${fmt(result.runtime_s, 3)}</td>
+        </tr>
+      `);
+      return `
+        <thead>
+          <tr>
+            <th>Mode</th>
+            <th>Pass</th>
+            <th>Budget</th>
+            <th>Config</th>
+            <th>Max box xy</th>
+            <th>Top xy</th>
+            <th>Runtime s</th>
+          </tr>
+        </thead>
+        <tbody>${rows.join("")}</tbody>
+      `;
+    }
+
+    function targetedBudgetTable(extended) {
+      const rows = Object.entries(extended.targeted_stack_budget.selected).map(([mode, result]) => `
+        <tr>
+          <td>${mode}</td>
+          <td>${result.stable ? "yes" : "no"}</td>
+          <td>${result.budget_cost}</td>
+          <td>${configText(result.config)}</td>
+          <td>${fmt(result.max_box_xy_drift, 4)}</td>
+          <td>${fmt(result.top_xy_drift, 4)}</td>
+          <td>${fmt(result.runtime_s, 3)}</td>
+        </tr>
+      `);
+      return `
+        <thead>
+          <tr>
+            <th>Mode</th>
+            <th>Pass</th>
+            <th>Budget</th>
+            <th>Best exact-budget config</th>
+            <th>Max box xy</th>
+            <th>Top xy</th>
+            <th>Runtime s</th>
+          </tr>
+        </thead>
+        <tbody>${rows.join("")}</tbody>
+      `;
+    }
+
+    function lowBudgetTable(summary) {
+      const rows = Object.entries(summary.selected || {}).map(([mode, result]) => {
+        const confirmation = result.confirmation || {};
+        const withinReference = result.matches_or_beats_xpbd_budget ? "yes" : "no";
+        return `
+          <tr>
+            <td>${mode}</td>
+            <td>${result.stable ? "yes" : "no"}</td>
+            <td>${confirmation.stable ? "yes" : "no"}</td>
+            <td>${result.budget_cost}</td>
+            <td>${withinReference}</td>
+            <td>${configText(result.config)}</td>
+            <td>${fmt(result.max_box_xy_drift, 4)}</td>
+            <td>${fmt(confirmation.max_box_xy_drift, 4)}</td>
+            <td>${fmt(confirmation.top_xy_drift, 4)}</td>
+          </tr>
+        `;
+      });
+      return `
+        <thead>
+          <tr>
+            <th>Mode</th>
+            <th>600 pass</th>
+            <th>1200 pass</th>
+            <th>Budget</th>
+            <th>Budget <= 6</th>
+            <th>Confirmed config</th>
+            <th>600 max box xy</th>
+            <th>1200 max box xy</th>
+            <th>1200 top xy</th>
+          </tr>
+        </thead>
+        <tbody>${rows.join("")}</tbody>
+      `;
+    }
+
+    function resultPassText(result) {
+      if (!result) return "-";
+      const confirmation = result.confirmation || {};
+      return confirmation.stable ? "yes" : "no";
+    }
+
+    function resultConfirmMetric(result) {
+      if (!result) return "-";
+      const confirmation = result.confirmation || {};
+      if (confirmation.max_box_xy_drift !== undefined) return fmt(confirmation.max_box_xy_drift, 4);
+      return "-";
+    }
+
+    function budgetSplitTable(summary) {
+      const rows = [];
+      for (const [mode, splits] of Object.entries(summary.splits || {})) {
+        for (const [split, result] of Object.entries(splits)) {
+          if (!result.short_best && !result.confirmed_best && !result.default_rho_confirmed_best) continue;
+          const confirmed = result.default_rho_confirmed_best || result.confirmed_best;
+          rows.push(`
+            <tr>
+              <td>${mode}</td>
+              <td>${split}</td>
+              <td>${result.stable_600_count}</td>
+              <td>${configText(result.short_best?.config)}</td>
+              <td>${fmt(result.short_best?.max_box_xy_drift, 4)}</td>
+              <td>${resultPassText(result.short_best)}</td>
+              <td>${resultConfirmMetric(result.short_best)}</td>
+              <td>${confirmed ? configText(confirmed.config) : "-"}</td>
+              <td>${confirmed ? resultConfirmMetric(confirmed) : "-"}</td>
+            </tr>
+          `);
+        }
+      }
+      return `
+        <thead>
+          <tr>
+            <th>Mode</th>
+            <th>Split</th>
+            <th>600 stable configs</th>
+            <th>Best 600 config</th>
+            <th>600 max box xy</th>
+            <th>Best 600 confirms</th>
+            <th>Best 600 max box xy at 1200</th>
+            <th>Recommended confirmed config</th>
+            <th>Recommended 1200 max box xy</th>
+          </tr>
+        </thead>
+        <tbody>${rows.join("")}</tbody>
+      `;
+    }
+
+    function lowSubstepTable(summary) {
+      const rows = Object.entries(summary.selected || {}).map(([mode, result]) => {
+        const confirmation = result.confirmation || {};
+        const displayMode = mode === "old_soft" ? "old_soft (legacy-scale)" : mode;
+        return `
+          <tr>
+            <td>${displayMode}</td>
+            <td>${confirmation.stable ? "yes" : "no"}</td>
+            <td>${result.budget_cost}</td>
+            <td>${configText(result.config)}</td>
+            <td>${fmt(result.max_box_xy_drift, 4)}</td>
+            <td>${fmt(confirmation.max_box_xy_drift, 4)}</td>
+            <td>${fmt(confirmation.top_xy_drift, 4)}</td>
+            <td>${fmt(confirmation.min_z, 4)}</td>
+          </tr>
+        `;
+      });
+      return `
+        <thead>
+          <tr>
+            <th>Mode</th>
+            <th>1200 pass</th>
+            <th>Budget</th>
+            <th>Selected low-substep config</th>
+            <th>600 max box xy</th>
+            <th>1200 max box xy</th>
+            <th>1200 top xy</th>
+            <th>1200 min z</th>
+          </tr>
+        </thead>
+        <tbody>${rows.join("")}</tbody>
+      `;
+    }
+
+    function pileTable(extended) {
+      const rows = Object.entries(extended.pile).map(([mode, result]) => `
+        <tr>
+          <td>${mode}</td>
+          <td>${result.stable ? "yes" : "no"}</td>
+          <td>${result.test_final_pass ? "yes" : "no"}</td>
+          <td>${fmt(result.min_z, 4)}</td>
+          <td>${fmt(result.max_z, 4)}</td>
+          <td>${fmt(result.max_abs_vel, 4)}</td>
+          <td>${configText(result.overrides)}</td>
+          <td>${result.error || result.test_final_error || ""}</td>
+        </tr>
+      `);
+      return `
+        <thead>
+          <tr>
+            <th>Mode</th>
+            <th>Healthy</th>
+            <th>test_final</th>
+            <th>Min z</th>
+            <th>Max z</th>
+            <th>Max velocity</th>
+            <th>Overrides</th>
+            <th>Error</th>
+          </tr>
+        </thead>
+        <tbody>${rows.join("")}</tbody>
+      `;
+    }
+
+    fetch("assets/sweep_summary.json")
+      .then((response) => response.json())
+      .then((summary) => {
+        document.getElementById("metric-generated").textContent = summary.generated_at || "unknown";
+        document.getElementById("metric-stack").textContent = selectedPassText(summary, "contacts_stack");
+        document.getElementById("metric-impact").textContent = selectedPassText(summary, "contacts_impact");
+        document.getElementById("stack-summary").textContent = stableText(summary, "contacts_stack");
+        document.getElementById("impact-summary").textContent = stableText(summary, "contacts_impact");
+        document.getElementById("stack-videos").innerHTML = stackVideos
+          .map((item) => makeMeasuredCard(item, summary, "contacts_stack"))
+          .join("");
+        document.getElementById("impact-videos").innerHTML = impactVideos
+          .map((item) => makeMeasuredCard(item, summary, "contacts_impact"))
+          .join("");
+        document.getElementById("same-ke-stack-videos").innerHTML = sameKeStackVideos
+          .map((item) => makeMeasuredCard(item, summary, "contacts_stack"))
+          .join("");
+        document.getElementById("same-ke-impact-videos").innerHTML = sameKeImpactVideos
+          .map((item) => makeMeasuredCard(item, summary, "contacts_impact"))
+          .join("");
+        document.getElementById("pile-videos").innerHTML = pileVideos
+          .map(([key, title, description, filename]) => makePlainCard([title, description, filename]))
+          .join("");
+        document.getElementById("bundle-videos").innerHTML = bundleVideos.map(makePlainCard).join("");
+        document.getElementById("cable-videos").innerHTML = cableVideos.map(makePlainCard).join("");
+        document.getElementById("same-ke-cable-videos").innerHTML = sameKeCableVideos.map(makePlainCard).join("");
+        document.getElementById("selected-table").innerHTML = selectedTable(summary);
+      })
+      .catch((error) => {
+        document.getElementById("metric-generated").textContent = "failed";
+        document.getElementById("stack-summary").textContent = `Could not load assets/sweep_summary.json: ${error}`;
+      });
+
+    fetch("assets/extended_summary.json")
+      .then((response) => response.json())
+      .then((extended) => {
+        document.getElementById("budget-table").innerHTML = budgetTable(extended);
+        document.getElementById("targeted-budget-table").innerHTML = targetedBudgetTable(extended);
+        document.getElementById("pile-videos").innerHTML = pileVideos
+          .map((item) => makePileCard(item, extended.pile))
+          .join("");
+        document.getElementById("pile-table").innerHTML = pileTable(extended);
+      })
+      .catch((error) => {
+        document.getElementById("budget-table").innerHTML = `<tbody><tr><td>Could not load assets/extended_summary.json: ${error}</td></tr></tbody>`;
+      });
+
+    fetch("assets/low_budget_summary.json")
+      .then((response) => response.json())
+      .then((summary) => {
+        document.getElementById("low-budget-table").innerHTML = lowBudgetTable(summary);
+      })
+      .catch((error) => {
+        document.getElementById("low-budget-table").innerHTML = `<tbody><tr><td>Could not load assets/low_budget_summary.json: ${error}</td></tr></tbody>`;
+      });
+
+    fetch("assets/budget_split_summary.json")
+      .then((response) => response.json())
+      .then((summary) => {
+        document.getElementById("stack-fastest-videos").innerHTML = stackFastestVideos
+          .map((item) => makeExtendedCard(item, summary.selected))
+          .join("");
+        document.getElementById("budget-split-table").innerHTML = budgetSplitTable(summary);
+      })
+      .catch((error) => {
+        document.getElementById("budget-split-table").innerHTML = `<tbody><tr><td>Could not load assets/budget_split_summary.json: ${error}</td></tr></tbody>`;
+      });
+
+    fetch("assets/low_substep_stack_summary.json")
+      .then((response) => response.json())
+      .then((summary) => {
+        document.getElementById("stack-low-substep-videos").innerHTML = stackLowSubstepVideos
+          .map((item) => makeExtendedCard(item, summary.selected))
+          .join("");
+        document.getElementById("low-substep-table").innerHTML = lowSubstepTable(summary);
+      })
+      .catch((error) => {
+        document.getElementById("low-substep-table").innerHTML = `<tbody><tr><td>Could not load assets/low_substep_stack_summary.json: ${error}</td></tr></tbody>`;
+      });
+
+    Promise.all([
+      fetch("assets/stack_settlement_summary.json").then((response) => response.json()),
+      fetch("assets/stack_settlement_extras_summary.json").then((response) => response.json()),
+    ])
+      .then(([summary, extras]) => {
+        const selected = mergedSettlementSelected(summary, extras);
+        document.getElementById("stack-settled-videos").innerHTML = stackSettledVideos
+          .map((item) => makeExtendedCard(item, selected))
+          .join("");
+        document.getElementById("stack-settlement-table").innerHTML = settlementTable(summary, extras);
+      })
+      .catch((error) => {
+        document.getElementById("stack-settlement-table").innerHTML = `<tbody><tr><td>Could not load strict settlement assets: ${error}</td></tr></tbody>`;
+      });
+
+    fetch("assets/sampled_settlement_recheck.json")
+      .then((response) => response.json())
+      .then((summary) => {
+        document.getElementById("sampled-recheck-table").innerHTML = sampledRecheckTable(summary);
+      })
+      .catch((error) => {
+        document.getElementById("sampled-recheck-table").innerHTML = `<tbody><tr><td>Could not load assets/sampled_settlement_recheck.json: ${error}</td></tr></tbody>`;
+      });
+
+    fetch("assets/old_soft_low_substep_direct_ke_broad_recheck.json")
+      .then((response) => response.json())
+      .then((summary) => {
+        document.getElementById("old-soft-wide-videos").innerHTML = oldSoftWideVideos.map(makePlainCard).join("");
+        document.getElementById("old-soft-wide-table").innerHTML = oldSoftWideTable(summary);
+      })
+      .catch((error) => {
+        document.getElementById("old-soft-wide-table").innerHTML = `<tbody><tr><td>Could not load assets/old_soft_low_substep_direct_ke_broad_recheck.json: ${error}</td></tr></tbody>`;
+      });
+
+    fetch("assets/old_soft_under10_damping_recheck.json")
+      .then((response) => response.json())
+      .then((summary) => {
+        document.getElementById("old-soft-under10-damping-table").innerHTML = oldSoftWideTable(summary);
+      })
+      .catch((error) => {
+        document.getElementById("old-soft-under10-damping-table").innerHTML = `<tbody><tr><td>Could not load assets/old_soft_under10_damping_recheck.json: ${error}</td></tr></tbody>`;
+      });
+
+    fetch("assets/original_variants_summary.json")
+      .then((response) => response.json())
+      .then((summary) => {
+        document.getElementById("original-fastest-videos").innerHTML = originalFastestVideos
+          .map((item) => makeExtendedCard(item, summary.fastest_stack_params))
+          .join("");
+        document.getElementById("original-full-stack-videos").innerHTML = originalFullStackVideos
+          .map((item) => makeExtendedCard(item, summary.full_stack_params))
+          .join("");
+      })
+      .catch((error) => {
+        document.getElementById("original-fastest-videos").innerHTML = `<p class="note">Could not load assets/original_variants_summary.json: ${error}</p>`;
+      });
+  </script>
+</body>
+</html>
