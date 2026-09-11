@@ -27,11 +27,11 @@ from newton._src.solvers.vbd.particle_vbd_kernels import (
 from newton._src.solvers.vbd.rigid_vbd_kernels import (
     RigidContactHistory,
     _alm_relaxed_ascent,
-    _angular_compliance_from_hessian,
+    _body_compliance_from_hessian,
     _compliant_alm_coefficients,
-    _contact_angular_conditioning_scales,
-    _contact_angular_conditioning_scales_from_mobility,
-    _contact_tangent_conditioning_scale,
+    _contact_angular_mobility,
+    _contact_body_angular_block,
+    _contact_tangent_mobility,
     _eval_body_particle_contact,
     _eval_soft_ef_contact,
     _joint_angular_rho_seed,
@@ -301,6 +301,13 @@ def _eval_joint_angular_rho_seed_kernel(
     rho_out[0] = _joint_angular_rho_seed(0, 1, body_inv_mass, body_inv_inertia, inv_dt_sq)
 
 
+@wp.func
+def _minimum_plane_stiffness(W: wp.mat22):
+    """Inspect the least stiff direction of a plane mobility."""
+    maximum = 0.5 * (W[0, 0] + W[1, 1] + wp.sqrt((W[0, 0] - W[1, 1]) ** 2.0 + 4.0 * W[0, 1] ** 2.0))
+    return 1.0 / maximum
+
+
 @wp.kernel
 def _eval_contact_pair_conditioning_kernel(
     shape_body: wp.array[wp.int32],
@@ -312,30 +319,35 @@ def _eval_contact_pair_conditioning_kernel(
 ):
     normal = wp.vec3(0.0, 0.0, 1.0)
     anchor = wp.vec3(1.0, 0.0, 0.0)
-    tangent_rho = _contact_tangent_conditioning_scale(
+    tangent_mobility = _contact_tangent_mobility(
         0, 1, anchor, anchor, normal, shape_body, body_q, body_com, body_inv_mass, body_inv_inertia, 1.0
     )
-    torsional_rho, rolling_rho = _contact_angular_conditioning_scales(
-        0, 1, normal, body_q, body_inv_mass, body_inv_inertia, 1.0
+    angular_mobility = _contact_body_angular_block(
+        0, body_q, body_inv_mass, body_inv_inertia
+    ) + _contact_body_angular_block(1, body_q, body_inv_mass, body_inv_inertia)
+    torsional_rho, rolling_mobility = _contact_angular_mobility(angular_mobility, normal)
+    rho_out[0] = wp.vec3(
+        _minimum_plane_stiffness(tangent_mobility), torsional_rho, _minimum_plane_stiffness(rolling_mobility)
     )
-    rho_out[0] = wp.vec3(tangent_rho, torsional_rho, rolling_rho)
 
 
 @wp.kernel
-def _eval_local_angular_compliance_kernel(
+def _eval_local_spatial_compliance_kernel(
     h_ll: wp.array[wp.mat33],
     h_aa: wp.array[wp.mat33],
     h_al: wp.array[wp.mat33],
-    compliance: wp.array[wp.mat33],
+    compliance: wp.array[wp.spatial_matrix],
     rho: wp.array[wp.vec2],
 ):
     i = wp.tid()
-    angular_compliance = _angular_compliance_from_hessian(h_ll[i], h_aa[i], h_al[i])
-    torsional_rho, rolling_rho = _contact_angular_conditioning_scales_from_mobility(
-        angular_compliance, wp.vec3(0.0, 0.0, 1.0), 1.0
-    )
-    compliance[i] = angular_compliance
-    rho[i] = wp.vec2(torsional_rho, rolling_rho)
+    spatial = _body_compliance_from_hessian(h_ll[i], h_aa[i], h_al[i])
+    angular = wp.mat33(0.0)
+    for row in range(3):
+        for column in range(3):
+            angular[row, column] = spatial[row + 3, column + 3]
+    torsional_rho, rolling_mobility = _contact_angular_mobility(angular, wp.vec3(0.0, 0.0, 1.0))
+    compliance[i] = spatial
+    rho[i] = wp.vec2(torsional_rho, _minimum_plane_stiffness(rolling_mobility))
 
 
 @wp.kernel
@@ -372,14 +384,14 @@ def _eval_compliant_sliding_contact_metric_kernel(
         0.01,
         100.0,
         1000.0,
-        100.0,
+        wp.mat22(0.01, 0.0, 0.0, 0.01),
         0.0,
         wp.vec3(0.0),
         0.5,
         0.0,
         0.0,
         0.0,
-        0.0,
+        wp.mat22(0.0),
         wp.vec3(0.0),
         0.01,
         0,
@@ -414,7 +426,7 @@ def _eval_angular_contact_friction_kernel(
         mu_torsional[0],
         mu_rolling[0],
         100.0,
-        100.0,
+        wp.mat22(0.01, 0.0, 0.0, 0.01),
         contact_lambda_angular[0],
         use_angular_friction_multiplier,
         1.0e-2,
@@ -952,14 +964,14 @@ def _eval_rigid_contact_rigid_motion_kernel(
         0.06,
         100.0,
         100.0,
-        100.0,
+        wp.mat22(0.01, 0.0, 0.0, 0.01),
         20.0,
         wp.vec3(0.0),
         0.0,
         0.0,
         0.0,
         0.0,
-        0.0,
+        wp.mat22(0.0),
         wp.vec3(0.0),
         0.01,
         0,
@@ -993,14 +1005,14 @@ def _eval_rigid_contact_rigid_motion_kernel(
         0.06,
         100.0,
         100.0,
-        100.0,
+        wp.mat22(0.01, 0.0, 0.0, 0.01),
         0.0,
         wp.vec3(0.0),
         0.0,
         0.0,
         0.0,
         0.0,
-        0.0,
+        wp.mat22(0.0),
         wp.vec3(0.0),
         0.01,
         0,
@@ -1184,8 +1196,8 @@ def _rigid_joint_angular_rho_seed_uses_mean_mobility(test, device):
         np.testing.assert_allclose(rho.numpy(), [12.0], rtol=1.0e-6, atol=1.0e-6)
 
 
-def _angular_compliance_from_hessian_matches_dense_inverse(test, device):
-    """Verify angular compliance matches dense coupled-block inverses."""
+def _spatial_compliance_from_hessian_matches_dense_inverse(test, device):
+    """Verify full spatial compliance matches dense coupled-block inverses."""
     del test
     h_ll = [np.identity(3) * 2.0]
     h_al = [np.diag([0.0, 1.0, 2.0])]
@@ -1202,12 +1214,12 @@ def _angular_compliance_from_hessian_matches_dense_inverse(test, device):
         h_al.append(hessian[3:, :3])
         h_aa.append(hessian[3:, 3:])
 
-    expected = np.array([np.linalg.inv(hessian)[3:, 3:] for hessian in full_hessians])
+    expected = np.array([np.linalg.inv(hessian) for hessian in full_hessians])
     count = len(full_hessians)
-    compliance = wp.empty(count, dtype=wp.mat33, device=device)
+    compliance = wp.empty(count, dtype=wp.spatial_matrix, device=device)
     rho = wp.empty(count, dtype=wp.vec2, device=device)
     wp.launch(
-        _eval_local_angular_compliance_kernel,
+        _eval_local_spatial_compliance_kernel,
         dim=count,
         inputs=[
             wp.array(h_ll, dtype=wp.mat33, device=device),
@@ -1412,14 +1424,14 @@ def _angular_contact_friction_isolates_channels(test, device):
                     np.testing.assert_allclose(hessian_np, expected_stateful_hessian, rtol=1.0e-5, atol=1.0e-5)
 
 
-def _rigid_contact_structural_support_conditions_tangent_rho(test, device):
-    """Verify step setup caps tangent rho with structural support, not D+S."""
+def _rigid_contact_tangent_seed_ignores_structural_summary(test, device):
+    """Seed the full inertial tangent response without direction-blind structural stiffness."""
     with wp.ScopedDevice(device):
         # One dynamic body vs world. At the COM, D = inv_dt^2 / inv_mass = 100.
-        # Normal rho adds structural: rho_n = D+S = 250. Tangent inertial A_t = D
-        # only, so the policy gives rho_t = max(A_t, min(rho_n, S)) = S = 150.
+        # Normal retains D+S = 250. Friction starts with W = I/D; its first
+        # sweep refreshes W from the actual directional body response.
         normal_rho = wp.zeros(1, dtype=float, device=device)
-        tangent_rho = wp.zeros(1, dtype=float, device=device)
+        tangent_mobility = wp.zeros(1, dtype=wp.mat22, device=device)
 
         wp.launch(
             step_body_body_contact_C0_lambda,
@@ -1436,12 +1448,10 @@ def _rigid_contact_structural_support_conditions_tangent_rho(test, device):
                 wp.zeros(1, dtype=float, device=device),
                 wp.zeros(1, dtype=float, device=device),
                 wp.array([-1, 0], dtype=wp.int32, device=device),
-                wp.zeros(1, dtype=wp.int32, device=device),
                 wp.array([1.0], dtype=float, device=device),
                 wp.zeros(1, dtype=wp.mat33, device=device),
                 wp.zeros(1, dtype=wp.vec3, device=device),
                 wp.array([150.0], dtype=float, device=device),
-                int(newton.BodyFlags.PROXY),
                 wp.array([wp.transform_identity()], dtype=wp.transform, device=device),
                 0,
                 1,
@@ -1458,18 +1468,16 @@ def _rigid_contact_structural_support_conditions_tangent_rho(test, device):
                 wp.zeros(1, dtype=float, device=device),
                 wp.zeros(1, dtype=wp.vec3, device=device),
                 wp.zeros(1, dtype=wp.vec3, device=device),
-                tangent_rho,
+                tangent_mobility,
                 wp.zeros(1, dtype=float, device=device),
-                wp.zeros(1, dtype=float, device=device),
+                wp.zeros(1, dtype=wp.mat22, device=device),
                 wp.zeros(1, dtype=wp.vec3, device=device),
             ],
             device=device,
         )
 
-        # A leak of S into the tangent plane metric would lift rho_t to rho_n.
-        test.assertLess(tangent_rho.numpy()[0], normal_rho.numpy()[0])
         np.testing.assert_allclose(normal_rho.numpy(), [250.0], rtol=1.0e-6)
-        np.testing.assert_allclose(tangent_rho.numpy(), [150.0], rtol=1.0e-6)
+        np.testing.assert_allclose(tangent_mobility.numpy()[0], np.eye(2) / 100.0, rtol=1.0e-6)
 
 
 def _rigid_contact_history_restore_from_match_index(test, device):
@@ -1834,7 +1842,8 @@ def _rigid_contact_dual_update_computes_lambda(test, device):
                 shape_body,
                 body_q,
                 body_q_prev,
-                wp.zeros(3, dtype=wp.mat33, device=device),
+                wp.zeros(3, dtype=wp.vec3, device=device),
+                wp.zeros(3, dtype=wp.spatial_matrix, device=device),
                 0,
                 contact_mu,
                 wp.array([0.5, 0.0], dtype=float, device=device),
@@ -1844,10 +1853,10 @@ def _rigid_contact_dual_update_computes_lambda(test, device):
                 0,
                 1,
                 contact_ke,
+                wp.array(np.tile(np.eye(2) / 10.0, (2, 1, 1)), dtype=wp.mat22, device=device),
                 contact_rho,
                 contact_rho,
-                contact_rho,
-                wp.zeros(2, dtype=float, device=device),
+                wp.zeros(2, dtype=wp.mat22, device=device),
                 0.0,
                 penalty_k,
                 contact_lambda,
@@ -2867,7 +2876,7 @@ def _body_body_contact_damping_ignores_penalty_ramp(test, device):
         material_ke = wp.array([100.0] * 4, dtype=float, device=device)
         material_kd = wp.array([20.0, 0.0, 20.0, 0.0], dtype=float, device=device)
         material_mu = wp.zeros(4, dtype=float, device=device)
-        contact_tangent_rho = wp.zeros(4, dtype=float, device=device)
+        contact_tangent_mobility = wp.zeros(4, dtype=wp.mat22, device=device)
         contact_lambda = wp.zeros(4, dtype=wp.vec3, device=device)
         contact_c0 = wp.zeros(4, dtype=wp.vec3, device=device)
 
@@ -2903,9 +2912,9 @@ def _body_body_contact_damping_ignores_penalty_ramp(test, device):
                 material_mu,
                 wp.zeros(4, dtype=float, device=device),
                 wp.zeros(4, dtype=float, device=device),
-                contact_tangent_rho,
+                contact_tangent_mobility,
                 wp.zeros(4, dtype=float, device=device),
-                wp.zeros(4, dtype=float, device=device),
+                wp.zeros(4, dtype=wp.mat22, device=device),
                 contact_lambda,
                 wp.zeros(4, dtype=wp.vec3, device=device),
                 contact_c0,
@@ -5295,8 +5304,8 @@ add_function_test(
 )
 add_function_test(
     TestSolverVBD,
-    "test_angular_compliance_from_hessian_matches_dense_inverse",
-    _angular_compliance_from_hessian_matches_dense_inverse,
+    "test_spatial_compliance_from_hessian_matches_dense_inverse",
+    _spatial_compliance_from_hessian_matches_dense_inverse,
     devices=devices,
 )
 add_function_test(
@@ -5319,8 +5328,8 @@ add_function_test(
 )
 add_function_test(
     TestSolverVBD,
-    "test_rigid_contact_structural_support_conditions_tangent_rho",
-    _rigid_contact_structural_support_conditions_tangent_rho,
+    "test_rigid_contact_tangent_seed_ignores_structural_summary",
+    _rigid_contact_tangent_seed_ignores_structural_summary,
     devices=devices,
 )
 add_function_test(
