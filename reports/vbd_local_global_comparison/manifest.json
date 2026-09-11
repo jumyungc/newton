@@ -1,12 +1,12 @@
 {
   "status": "complete",
-  "generated_at_utc": "2026-09-11T07:12:25.040529+00:00",
+  "generated_at_utc": "2026-09-11T07:45:58.016375+00:00",
   "public_url": "https://jumyungc.github.io/newton/reports/vbd_local_global_comparison/",
   "publication_status": "staged locally; not committed or pushed",
   "local_links_checked": 48,
   "source_sha256": {
     "benchmarks/build_vbd_public_bundle.py": "60b8637697cbbb62818a685aaf1b13b2de5f56d51e891021ea0f2b65d88b5720",
-    "reports/vbd_alm_comparison/targeted_solver_comparison/targeted_solver_comparison_report.html": "61d10a82f89ab63f07b0d0066310fe267edd192a0319f23b99e6897b8fad7449",
+    "reports/vbd_alm_comparison/targeted_solver_comparison/targeted_solver_comparison_report.html": "351d0f432371020e496848cfba51dcd1dcfb51adc4a168cc257506582ab078ef",
     "reports/vbd_alm_comparison/targeted_solver_comparison/targeted_results.json": "ead0832c786b11b55d685990c54f490a772151d4fc42d9f887c7076d1275678e",
     "reports/vbd_alm_comparison/targeted_solver_comparison/timing_recheck.json": "aac0dc0847aa1f73f4efc1e7a44f9ea6912a037071a1d4fd5e4f67d6008ec715",
     "reports/vbd_alm_comparison/targeted_solver_comparison/dr_legs_latest.json": "2a1f0ecb31a1b956dc1954a5eb589a7ddd8435ead3978b539528e529d348d8f2",
@@ -21,7 +21,7 @@
     "droop/SUBSPACE_DROOP_20260910.md": "ff61799014d0a45e5eaccbe662cffa91a60e9fe28b9f4d9d57daebe7ea854144",
     "droop/droop_latest.json": "e8d96ca88031899b92b080387ae8ce766b0f389944aa509f03d64e1059077f90",
     "droop_comparison.csv": "a8bb0e136bba8d5fc69bc9d163a1c45af2d821aa34c247ef36f3c5c9475d7faf",
-    "index.html": "61d10a82f89ab63f07b0d0066310fe267edd192a0319f23b99e6897b8fad7449",
+    "index.html": "351d0f432371020e496848cfba51dcd1dcfb51adc4a168cc257506582ab078ef",
     "report_media/dr_legs__current-g1.jpg": "8d1c9f674fd63e43cbb6b33d9e92dd3f565b97f33c9786bc9aabf8457fc441b7",
     "report_media/dr_legs__current-g1.mp4": "43d9cc64a722adbbf545e412fc4e6568e1f1192a7bea3347fc91a6f770b28f68",
     "report_media/dr_legs__kamino-dvi.jpg": "6c687d93b3eca15641913ce84b298de759ce3cae0153fe8559b5209f5081248c",
