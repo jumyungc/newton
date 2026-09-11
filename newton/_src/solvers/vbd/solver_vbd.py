@@ -156,8 +156,8 @@ class SolverVBD(SolverBase, CouplingInterface):
     For rigid bodies, two paths are supported:
 
     - **Compliant ALM** (``rigid_compliant_alm=True``, recommended): one
-      finite-material formulation for structural joints, drives, limits, and
-      body-body contacts. Authored finite stiffness controls physical compliance,
+      finite-material formulation for structural joints, drives, limits, joint
+      friction, and body-body contacts. Authored finite stiffness controls physical compliance,
       while ``SolverVBD`` selects an internal ALM metric ``rho`` for numerical
       conditioning. For a material row, they combine as
       ``k_eff = k*rho/(k+rho)``, and a multiplier ``lambda`` carries accumulated
@@ -208,8 +208,11 @@ class SolverVBD(SolverBase, CouplingInterface):
           or CUDA graph recapture. Other joint types do not use this property.
         - :attr:`~newton.Model.joint_friction` is supported for REVOLUTE, PRISMATIC, and D6
           joints as a per-DOF Coulomb dry-friction force or torque [N or N·m]. The friction
-          force is ``-joint_friction * tanh(qd / 0.01)`` (velocity in m/s or rad/s).
-          This smooth approximation allows slow creep, not exact static sticking.
+          force uses a bounded projected multiplier under compliant ALM, providing static
+          sticking when the required reaction is within ``joint_friction`` and saturated
+          sliding otherwise. Legacy AVBD retains the smooth approximation
+          ``-joint_friction * tanh(qd / 0.01)`` (velocity in m/s or rad/s), which permits
+          slow near-rest creep.
           Each joint's friction contributes to the coupled motion of a mimic pair;
           it does not change the mimic ratio. Friction values are read live from
           the model, including during CUDA graph replay.
@@ -1145,6 +1148,9 @@ class SolverVBD(SolverBase, CouplingInterface):
             self.joint_C0_ang = wp.zeros(model.joint_count, dtype=wp.vec3, device=self.device)
             # Shared directional support; drive and limit derive separate rho policies.
             self.joint_drive_limit_support = wp.zeros(model.joint_dof_count, dtype=float, device=self.device)
+            # Previous-step coordinates and bounded Coulomb multipliers for compliant ALM.
+            self.joint_q_prev = wp.zeros(model.joint_dof_count, dtype=float, device=self.device)
+            self.joint_friction_lambda = wp.zeros(model.joint_dof_count, dtype=float, device=self.device)
             # Bilateral drive dual, cleared whenever the drive row stops existing.
             self.joint_drive_lambda = wp.zeros(model.joint_dof_count, dtype=float, device=self.device)
             # Unilateral limit dual, held separately from the drive so neither can
@@ -2569,6 +2575,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                 self.joint_lambda_ang,
                 self.joint_drive_lambda,
                 self.joint_limit_lambda,
+                self.joint_friction_lambda,
                 self._rigid_pose_rebaseline_mask,
                 self._contact_history_reset_mask,
                 self._contact_history_reset_pending,
@@ -3161,6 +3168,8 @@ class SolverVBD(SolverBase, CouplingInterface):
                         model.joint_limit_lower,
                         model.joint_limit_upper,
                         model.joint_limit_ke,
+                        model.joint_friction,
+                        model.joint_damping,
                         1.0 / (dt * dt),
                         model.body_com,
                         self.body_inv_mass_effective,
@@ -3176,6 +3185,8 @@ class SolverVBD(SolverBase, CouplingInterface):
                         self.joint_drive_limit_support,
                         self.joint_drive_lambda,
                         self.joint_limit_lambda,
+                        self.joint_q_prev,
+                        self.joint_friction_lambda,
                     ],
                     device=self.device,
                 )
@@ -3618,6 +3629,8 @@ class SolverVBD(SolverBase, CouplingInterface):
                     self.rigid_compliant_alm,
                     model.joint_dof_dim,
                     self.joint_rest_angle,
+                    self.joint_q_prev,
+                    self.joint_friction_lambda,
                     model.joint_friction,
                     model.joint_damping,
                     self.body_forces,
@@ -3718,6 +3731,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                     state_in.body_q,
                     self.body_q_prev,
                     model.body_q,
+                    model.body_com,
                     model.joint_dof_dim,
                     self.joint_C0_lin,
                     self.joint_C0_ang,
@@ -3738,12 +3752,15 @@ class SolverVBD(SolverBase, CouplingInterface):
                     model.joint_limit_kd,
                     self.joint_rest_angle,
                     self.joint_drive_limit_support,
+                    self.joint_q_prev,
+                    model.joint_friction,
                     dt,
                     self.joint_penalty_k,  # input/output
                     self.joint_lambda_lin,  # input/output
                     self.joint_lambda_ang,  # input/output
                     self.joint_drive_lambda,  # input/output
                     self.joint_limit_lambda,  # input/output
+                    self.joint_friction_lambda,  # input/output
                 ],
                 device=self.device,
             )

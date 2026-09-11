@@ -40,7 +40,9 @@ def _build_model(device, joint_type, damping, *, friction=None, serial=False, mi
     return builder.finalize(device=device)
 
 
-def _simulate(model, *, steps=1, force=None, target_velocity=None, iterations=12, dt=_DT, capture=False):
+def _simulate(
+    model, *, steps=1, force=None, target_velocity=None, iterations=12, dt=_DT, capture=False, return_friction=False
+):
     """Advance the model and return reconstructed joint velocities."""
     solver = newton.solvers.SolverVBD(model, iterations=iterations, rigid_compliant_alm=True)
     state_in, state_out = model.state(), model.state()
@@ -67,7 +69,10 @@ def _simulate(model, *, steps=1, force=None, target_velocity=None, iterations=12
     else:
         advance()
     newton.eval_ik(model, state_in, state_in.joint_q, state_in.joint_qd)
-    return state_in.joint_qd.numpy()
+    velocity = state_in.joint_qd.numpy()
+    if return_friction:
+        return velocity, solver.joint_friction_lambda.numpy()
+    return velocity
 
 
 def test_vbd_joint_damping_implicit_decay(test, device):
@@ -129,11 +134,14 @@ def test_vbd_mimic_damping_and_friction(test, device):
         for ratio in (1.0, -1.0, -0.5, 2.0):
             with test.subTest(joint_type=joint_type, ratio=ratio):
                 model = _build_model(device, joint_type, [4.0, 16.0], friction=[0.4, 0.8], mimic_ratio=ratio)
-                velocity = _simulate(model, force=[10.0, 0.0], iterations=24, capture=True)
+                velocity, friction_lambda = _simulate(
+                    model, force=[10.0, 0.0], iterations=24, capture=True, return_friction=True
+                )
                 np.testing.assert_allclose(velocity[1], ratio * velocity[0], atol=1.0e-5)
                 momentum = (1.0 + ratio * ratio) * float(velocity[0]) / _DT
                 net_force = 10.0 - (4.0 + ratio * ratio * 16.0) * float(velocity[0])
-                net_force -= 0.4 * np.tanh(velocity[0] / 0.01) + ratio * 0.8 * np.tanh(velocity[1] / 0.01)
+                net_force -= friction_lambda[0] + ratio * friction_lambda[1]
+                np.testing.assert_array_less(np.abs(friction_lambda), np.array([0.4, 0.8]) + 1.0e-6)
                 test.assertAlmostEqual(momentum, net_force, delta=0.02)
 
 
@@ -142,14 +150,17 @@ def test_vbd_serial_mimic_passive_damping(test, device):
     model = _build_model(
         device, newton.JointType.REVOLUTE, [4.0, 8.0, 16.0], friction=[1.0, 2.0, 3.0], serial=True, mimic_ratio=1.0
     )
-    velocity = _simulate(model, force=[4.0, 0.0, 0.0], iterations=64, capture=True)
+    velocity, friction_lambda = _simulate(
+        model, force=[4.0, 0.0, 0.0], iterations=64, capture=True, return_friction=True
+    )
     np.testing.assert_allclose(velocity[0], velocity[1], atol=1.0e-5)
     # Body speeds are (v, 2v, 2v + w); include the downstream body's inertia.
     momentum = np.array([[9.0, 2.0], [2.0, 1.0]]) @ velocity[[0, 2]] / _DT
     net_force = [
-        4.0 - 12.0 * velocity[0] - 3.0 * np.tanh(velocity[0] / 0.01),
-        -16.0 * velocity[2] - 3.0 * np.tanh(velocity[2] / 0.01),
+        4.0 - 12.0 * velocity[0] - friction_lambda[0] - friction_lambda[1],
+        -16.0 * velocity[2] - friction_lambda[2],
     ]
+    np.testing.assert_array_less(np.abs(friction_lambda), np.array([1.0, 2.0, 3.0]) + 1.0e-6)
     np.testing.assert_allclose(momentum, net_force, atol=0.02)
 
 

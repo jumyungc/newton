@@ -11,10 +11,10 @@ friction = 0 with friction = 0.15 N*m; release the mouse to observe stopping.
 Expand "Example Options" for the right hinge's friction and damping sliders
 and plots. Friction is nearly constant while sliding; viscous damping grows
 with speed. Either resistance slows both fingers through the mimic joint.
-The plots show mirrored angles and speeds. VBD regularizes friction near
-zero speed, so creep is normal.
+The plots show mirrored angles and speeds. Compliant ALM uses a bounded
+friction multiplier, so the gripper can come to a true static rest.
 The fingers are 30 cm long and about 0.8 kg each. The 16 substeps resolve the
-friction smoothing region; much lighter fingers need a smaller step or friction.
+interactive motion; much lighter fingers need a smaller step or friction.
 
 For a reproducible coast-down without picking:
     uv run --extra examples -m newton.examples vbd_mimic_gripper --initial-speed 0.5
@@ -34,7 +34,7 @@ import newton.examples
 
 class Example:
     FPS = 60
-    # Resolve the narrow friction smoothing region for these ~0.8 kg fingers.
+    # Resolve the interactive motion of these ~0.8 kg fingers.
     SUBSTEPS = 16
     HISTORY_SECONDS = 8.0
 
@@ -229,7 +229,7 @@ class Example:
             self.reset()
         ui.text(f"Left speed: {math.degrees(self.qd[0]):+.2f} deg/s")
         ui.text(f"qL + qR: {math.degrees(self.q[0] + self.q[1]):+.4f} deg")
-        ui.text_wrapped("Near-zero friction is smoothed; slow creep is expected.")
+        ui.text_wrapped("Projected friction can hold the gripper at static rest.")
         if len(self.history) < 2:
             return
         if implot.get_current_context() is None:

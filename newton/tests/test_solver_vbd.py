@@ -1697,6 +1697,7 @@ def _joint_angular_dual_projects_free_axis_lambda(test, device):
         joint_constraint_start = wp.array([0], dtype=wp.int32, device=device)
         body_q = wp.array([wp.transform_identity()], dtype=wp.transform, device=device)
         body_q_rest = wp.array([wp.transform_identity()], dtype=wp.transform, device=device)
+        body_com = wp.zeros(1, dtype=wp.vec3, device=device)
         joint_dof_dim = wp.array([[0, 0]], dtype=wp.int32, device=device)
         joint_c0_lin = wp.zeros(1, dtype=wp.vec3, device=device)
         joint_c0_ang = wp.zeros(1, dtype=wp.vec3, device=device)
@@ -1717,6 +1718,7 @@ def _joint_angular_dual_projects_free_axis_lambda(test, device):
         drive_limit_support = wp.zeros(1, dtype=float, device=device)
         drive_limit_lambda = wp.zeros(1, dtype=float, device=device)
         limit_lambda = wp.zeros(1, dtype=float, device=device)
+        friction_lambda = wp.zeros(1, dtype=float, device=device)
 
         wp.launch(
             update_duals_joint,
@@ -1737,6 +1739,7 @@ def _joint_angular_dual_projects_free_axis_lambda(test, device):
                 body_q,
                 body_q,
                 body_q_rest,
+                body_com,
                 joint_dof_dim,
                 joint_c0_lin,
                 joint_c0_ang,
@@ -1757,6 +1760,8 @@ def _joint_angular_dual_projects_free_axis_lambda(test, device):
                 joint_limit_kd,
                 joint_rest_angle,
                 drive_limit_support,
+                wp.zeros(1, dtype=float, device=device),
+                wp.zeros(1, dtype=float, device=device),
                 1.0 / 60.0,
             ],
             outputs=[
@@ -1765,6 +1770,7 @@ def _joint_angular_dual_projects_free_axis_lambda(test, device):
                 lambda_ang,
                 drive_limit_lambda,
                 limit_lambda,
+                friction_lambda,
             ],
             device=device,
         )
@@ -1793,6 +1799,7 @@ def _rod_soft_dual_slots_clear_preserved_lambda(test, device):
             device=device,
         )
         body_q_rest = wp.array([wp.transform_identity()], dtype=wp.transform, device=device)
+        body_com = wp.zeros(1, dtype=wp.vec3, device=device)
         joint_dof_dim = wp.array([[0, 0]], dtype=wp.int32, device=device)
         joint_c0_lin = wp.zeros(1, dtype=wp.vec3, device=device)
         joint_c0_ang = wp.zeros(1, dtype=wp.vec3, device=device)
@@ -1814,6 +1821,7 @@ def _rod_soft_dual_slots_clear_preserved_lambda(test, device):
         lambda_ang = wp.array([[4.0, 5.0, 6.0]], dtype=wp.vec3, device=device)
         drive_limit_lambda = wp.zeros(1, dtype=float, device=device)
         limit_lambda = wp.zeros(1, dtype=float, device=device)
+        friction_lambda = wp.zeros(1, dtype=float, device=device)
 
         wp.launch(
             update_duals_joint,
@@ -1834,6 +1842,7 @@ def _rod_soft_dual_slots_clear_preserved_lambda(test, device):
                 body_q,
                 body_q,
                 body_q_rest,
+                body_com,
                 joint_dof_dim,
                 joint_c0_lin,
                 joint_c0_ang,
@@ -1854,6 +1863,8 @@ def _rod_soft_dual_slots_clear_preserved_lambda(test, device):
                 joint_limit_kd,
                 joint_rest_angle,
                 drive_limit_support,
+                wp.zeros(1, dtype=float, device=device),
+                wp.zeros(1, dtype=float, device=device),
                 1.0 / 60.0,
             ],
             outputs=[
@@ -1862,6 +1873,7 @@ def _rod_soft_dual_slots_clear_preserved_lambda(test, device):
                 lambda_ang,
                 drive_limit_lambda,
                 limit_lambda,
+                friction_lambda,
             ],
             device=device,
         )

@@ -93,7 +93,16 @@ def test_vbd_friction_coordinate_gradients(test, device):
             np.testing.assert_allclose(analytic[:, body, axis], numeric, atol=2.0e-4)
 
 
-def _simulate(model, *, steps=120, joint_force=None, iterations=6, capture=False):
+def _simulate(
+    model,
+    *,
+    steps=120,
+    joint_force=None,
+    iterations=6,
+    capture=False,
+    return_friction=False,
+    solver_kwargs=None,
+):
     """Simulate a VBD model and return its reconstructed joint velocities."""
     state_in = model.state()
     state_out = model.state()
@@ -102,7 +111,9 @@ def _simulate(model, *, steps=120, joint_force=None, iterations=6, capture=False
         control.joint_f.assign(np.asarray(joint_force, dtype=np.float32))
 
     newton.eval_fk(model, model.joint_q, model.joint_qd, state_in)
-    solver = newton.solvers.SolverVBD(model, iterations=iterations, rigid_compliant_alm=True)
+    solver = newton.solvers.SolverVBD(
+        model, iterations=iterations, rigid_compliant_alm=True, **({} if solver_kwargs is None else solver_kwargs)
+    )
     if capture and model.device.is_cuda:
         solver.step(state_in, state_out, control, None, _DT)
         solver.reset(state_in)
@@ -120,7 +131,10 @@ def _simulate(model, *, steps=120, joint_force=None, iterations=6, capture=False
     joint_q = wp.empty_like(model.joint_q)
     joint_qd = wp.empty_like(model.joint_qd)
     newton.eval_ik(model, state_in, joint_q, joint_qd)
-    return joint_qd.numpy()
+    velocity = joint_qd.numpy()
+    if return_friction:
+        return velocity, solver.joint_friction_lambda.numpy()
+    return velocity
 
 
 def _build_single_dof_model(device, joint_type, friction):
@@ -210,6 +224,33 @@ def _build_d6_model(device):
     return builder.finalize(device=device)
 
 
+def _build_pendulum_model(device, *, gravity, friction):
+    """Build a horizontal unit rod hinged about its end."""
+    length = 1.0
+    mass = 1.0
+    inertia_com = mass * length * length / 12.0
+    builder = newton.ModelBuilder(gravity=(0.0, 0.0, gravity))
+    body = builder.add_link(
+        mass=mass,
+        com=wp.vec3(length / 2.0, 0.0, 0.0),
+        inertia=wp.mat33(inertia_com, 0.0, 0.0, 0.0, inertia_com, 0.0, 0.0, 0.0, inertia_com),
+        lock_inertia=True,
+    )
+    joint = builder.add_joint_revolute(
+        -1,
+        body,
+        axis=newton.Axis.Y,
+        target_ke=0.0,
+        target_kd=0.0,
+        limit_ke=0.0,
+        limit_kd=0.0,
+        friction=friction,
+    )
+    builder.add_articulation([joint])
+    builder.color()
+    return builder.finalize(device=device)
+
+
 def test_vbd_joint_friction_coast_down(test, device):
     """Dissipate motion with revolute and prismatic Coulomb friction."""
     for joint_type in (newton.JointType.REVOLUTE, newton.JointType.PRISMATIC):
@@ -250,6 +291,48 @@ def test_vbd_joint_friction_stop(test, device):
                 test.assertLessEqual(velocity, 0.05)
 
 
+def test_vbd_joint_friction_static_threshold(test, device):
+    """Stick below the Coulomb threshold and slide above it in either direction."""
+    friction = 4.0
+    for joint_type in (newton.JointType.REVOLUTE, newton.JointType.PRISMATIC):
+        for force in (-2.0, 2.0, -8.0, 8.0):
+            with test.subTest(joint_type=joint_type, force=force):
+                model = _build_single_dof_model(device, joint_type, friction=friction)
+                model.joint_qd.zero_()
+                velocity = _simulate(model, steps=1, joint_force=[force], iterations=12, capture=True)
+                expected_velocity = np.sign(force) * max(abs(force) - friction, 0.0) * _DT
+                test.assertAlmostEqual(float(velocity[0]), expected_velocity, delta=2.0e-5)
+
+
+def test_vbd_joint_friction_gravity_matches_actuator(test, device):
+    """Treat gravity torque and an equivalent actuator torque consistently."""
+    gravity_torque = 9.81 * 0.5
+    solver_kwargs = {"rigid_joint_linear_ke": 1.0e8, "rigid_joint_angular_ke": 1.0e8}
+    for friction in (3.0, 6.0):
+        with test.subTest(friction=friction):
+            gravity_velocity = _simulate(
+                _build_pendulum_model(device, gravity=-9.81, friction=friction),
+                steps=1,
+                iterations=12,
+                capture=True,
+                solver_kwargs=solver_kwargs,
+            )[0]
+            actuator_velocity = _simulate(
+                _build_pendulum_model(device, gravity=0.0, friction=friction),
+                steps=1,
+                joint_force=[gravity_torque],
+                iterations=12,
+                capture=True,
+                solver_kwargs=solver_kwargs,
+            )[0]
+            test.assertAlmostEqual(float(gravity_velocity), float(actuator_velocity), delta=5.0e-5)
+            if friction < gravity_torque:
+                expected = (gravity_torque - friction) * _DT / (1.0 / 3.0)
+                test.assertAlmostEqual(float(gravity_velocity), expected, delta=5.0e-5)
+            else:
+                test.assertAlmostEqual(float(gravity_velocity), 0.0, delta=2.0e-5)
+
+
 def test_vbd_mimic_friction_force_balance(test, device):
     """Both friction forces must enter the constrained pair's momentum balance."""
     model = _build_actuated_mimic_model(device, follower_friction=16.0)
@@ -259,12 +342,19 @@ def test_vbd_mimic_friction_force_balance(test, device):
         for force in (-10.0, 10.0, 50.0):
             with test.subTest(ratio=ratio, force=force):
                 model.joint_mimic_coeffs.assign([[0.0, 1.0], [0.0, ratio]])
-                velocity = _simulate(model, steps=1, joint_force=[force, 0.0], iterations=24, capture=True)
+                velocity, friction_lambda = _simulate(
+                    model,
+                    steps=1,
+                    joint_force=[force, 0.0],
+                    iterations=24,
+                    capture=True,
+                    return_friction=True,
+                )
                 # Reflect follower inertia and friction into the leader coordinate.
                 momentum_change = (1.0 + ratio * ratio) * float(velocity[0]) / _DT
-                net_force = force - 4.0 * np.tanh(float(velocity[0]) / 0.01)
-                net_force -= ratio * 16.0 * np.tanh(float(velocity[1]) / 0.01)
+                net_force = force - float(friction_lambda[0]) - ratio * float(friction_lambda[1])
                 np.testing.assert_allclose(ratio * velocity[0], velocity[1], atol=1.0e-5)
+                np.testing.assert_array_less(np.abs(friction_lambda), np.array([4.0, 16.0]) + 1.0e-6)
                 test.assertAlmostEqual(momentum_change, net_force, delta=0.05)
 
 
@@ -281,10 +371,13 @@ def test_vbd_multiple_mimic_followers_friction(test, device):
     builder.set_joint_mimic(joints[2], joints[0], (0.0, 2.0))
     builder.color()
     model = builder.finalize(device=device)
-    velocity = _simulate(model, steps=1, iterations=24, joint_force=[4.0, 0.0, 0.0], capture=True)
+    velocity, friction_lambda = _simulate(
+        model, steps=1, iterations=24, joint_force=[4.0, 0.0, 0.0], capture=True, return_friction=True
+    )
     ratios = np.array([1.0, -1.0, 2.0])
     np.testing.assert_allclose(velocity, ratios * velocity[0], atol=1.0e-5)
-    net_force = 4.0 - np.dot(ratios * frictions, np.tanh(velocity / 0.01))
+    net_force = 4.0 - np.dot(ratios, friction_lambda)
+    np.testing.assert_array_less(np.abs(friction_lambda), np.asarray(frictions) + 1.0e-6)
     test.assertAlmostEqual(6.0 * float(velocity[0]) / _DT, net_force, delta=0.02)
 
 
@@ -301,11 +394,14 @@ def test_vbd_serial_mimic_and_passive_friction(test, device):
     builder.set_joint_mimic(joints[1], joints[0])
     builder.color()
     model = builder.finalize(device=device)
-    velocity = _simulate(model, steps=1, iterations=64, joint_force=[4.0, 0.0, 0.0], capture=True)
+    velocity, friction_lambda = _simulate(
+        model, steps=1, iterations=64, joint_force=[4.0, 0.0, 0.0], capture=True, return_friction=True
+    )
     np.testing.assert_allclose(velocity[0], velocity[1], atol=1.0e-5)
     # Body speeds are (v, 2v, 2v + w), so the reduced inertia is [[9,2],[2,1]].
     momentum = np.array([[9.0, 2.0], [2.0, 1.0]]) @ velocity[[0, 2]] / _DT
-    net_force = [4.0 - 3.0 * np.tanh(velocity[0] / 0.01), -3.0 * np.tanh(velocity[2] / 0.01)]
+    net_force = [4.0 - friction_lambda[0] - friction_lambda[1], -friction_lambda[2]]
+    np.testing.assert_array_less(np.abs(friction_lambda), np.array([1.0, 2.0, 3.0]) + 1.0e-6)
     np.testing.assert_allclose(momentum, net_force, atol=0.02)
 
 
@@ -334,6 +430,18 @@ add_function_test(
 )
 add_function_test(
     TestSolverVBDJointFriction, "test_vbd_joint_friction_stop", test_vbd_joint_friction_stop, devices=devices
+)
+add_function_test(
+    TestSolverVBDJointFriction,
+    "test_vbd_joint_friction_static_threshold",
+    test_vbd_joint_friction_static_threshold,
+    devices=devices,
+)
+add_function_test(
+    TestSolverVBDJointFriction,
+    "test_vbd_joint_friction_gravity_matches_actuator",
+    test_vbd_joint_friction_gravity_matches_actuator,
+    devices=devices,
 )
 add_function_test(
     TestSolverVBDJointFriction,
