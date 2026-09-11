@@ -209,8 +209,10 @@ class SolverVBD(SolverBase, CouplingInterface):
         - :attr:`~newton.Model.joint_friction` is supported for REVOLUTE, PRISMATIC, and D6
           joints as a per-DOF Coulomb dry-friction force or torque [N or N·m]. The friction
           force uses a bounded projected multiplier under compliant ALM, providing static
-          sticking when the required reaction is within ``joint_friction`` and saturated
-          sliding otherwise. Legacy AVBD retains the smooth approximation
+          sticking at convergence when the required reaction is within ``joint_friction``
+          and saturated sliding otherwise. Its automatic ALM metric uses the joint's
+          coupled inertial and compliant structural response. Stiff coupled assemblies
+          can converge slowly at a finite body-sweep budget. Legacy AVBD retains the smooth approximation
           ``-joint_friction * tanh(qd / 0.01)`` (velocity in m/s or rad/s), which permits
           slow near-rest creep.
           Each joint's friction contributes to the coupled motion of a mimic pair;
@@ -3164,6 +3166,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                         self.rigid_avbd_gamma,
                         self.joint_penalty_k_min,
                         self.joint_material_k,
+                        self.joint_penalty_kd,
                         model.joint_target_ke,
                         model.joint_target_kd,
                         model.joint_limit_lower,
@@ -3174,7 +3177,6 @@ class SolverVBD(SolverBase, CouplingInterface):
                         1.0 / (dt * dt),
                         model.body_com,
                         self.body_inv_mass_effective,
-                        model.body_inertia,
                         self.body_inv_inertia_effective,
                     ],
                     outputs=[

@@ -395,106 +395,128 @@ def test_vbd_joint_friction_gravity_matches_actuator(test, device):
                 test.assertAlmostEqual(float(gravity_velocity), 0.0, delta=2.0e-5)
 
 
-def test_vbd_joint_friction_uses_constrained_inertia(test, device):
-    """Scale projected friction with the inertia of the actual free joint coordinate."""
-    dt = _DT
+def test_vbd_joint_friction_matches_background_response(test, device):
+    """Match a dense coupled-body response across joint types and compliance."""
+    inertia = np.asarray([[2.0, 0.3, -0.1], [0.3, 3.0, 0.2], [-0.1, 0.2, 4.0]])
+    frame = wp.quat_from_axis_angle(wp.normalize(wp.vec3(1.0, 2.0, -0.5)), 0.8)
+    frame_matrix = np.asarray(wp.quat_to_matrix(frame), dtype=np.float64).reshape(3, 3)
+    for floating in (False, True):
+        for kind in ("revolute", "prismatic", "d6_revolute", "d6"):
+            for stiffness in (0.0, 1.0e4, 1.0e8):
+                with test.subTest(floating=floating, kind=kind, stiffness=stiffness):
+                    builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+                    parent = -1
+                    joints = []
+                    if floating:
+                        parent = builder.add_link(
+                            xform=wp.transform(wp.vec3(0.0), frame),
+                            mass=1.5,
+                            com=wp.vec3(-0.5, 0.2, 0.0),
+                            inertia=wp.mat33(inertia * 0.7),
+                            lock_inertia=True,
+                        )
+                        joints.append(builder.add_joint_free(child=parent))
+                    child = builder.add_link(
+                        xform=wp.transform(wp.vec3(0.0), frame),
+                        mass=2.5,
+                        com=wp.vec3(0.5, -0.1, 0.2),
+                        inertia=wp.mat33(inertia),
+                        lock_inertia=True,
+                    )
+                    axis_config = newton.ModelBuilder.JointDofConfig
+                    kwargs = {"target_ke": 0.0, "target_kd": 0.0, "limit_ke": 0.0, "limit_kd": 0.0, "friction": 4.0}
+                    parent_frame = wp.transform_identity() if floating else wp.transform(wp.vec3(0.0), frame)
+                    if kind == "revolute":
+                        joint = builder.add_joint_revolute(
+                            parent, child, parent_xform=parent_frame, axis=newton.Axis.Z, **kwargs
+                        )
+                    elif kind == "prismatic":
+                        joint = builder.add_joint_prismatic(
+                            parent, child, parent_xform=parent_frame, axis=newton.Axis.Z, **kwargs
+                        )
+                    else:
+                        angular_axes = [axis_config(axis=newton.Axis.Z, **kwargs)]
+                        linear_axes = []
+                        if kind == "d6":
+                            angular_axes = [axis_config(axis=axis, **kwargs) for axis in newton.Axis]
+                            linear_axes = [axis_config(axis=axis, **kwargs) for axis in newton.Axis]
+                        joint = builder.add_joint_d6(
+                            parent, child, parent_xform=parent_frame, linear_axes=linear_axes, angular_axes=angular_axes
+                        )
+                    joints.append(joint)
+                    builder.add_articulation(joints)
+                    builder.color()
+                    if kind == "d6":
+                        builder.joint_q[-6:] = [0.6, 0.4, -0.2, 0.3, 0.5, -0.4]
+                    model = builder.finalize(device=device)
+                    state = model.state()
+                    newton.eval_fk(model, model.joint_q, model.joint_qd, state)
+                    solver = newton.solvers.SolverVBD(
+                        model,
+                        iterations=0,
+                        rigid_compliant_alm=True,
+                        rigid_joint_linear_ke=stiffness,
+                        rigid_joint_angular_ke=stiffness,
+                    )
+                    solver.step(state, model.state(), model.control(), None, _DT)
 
-    # An anisotropic, off-center revolute body exercises both the kinetic-energy
-    # projection a^T I a and the parallel-axis contribution at the locked anchor.
-    axis = np.asarray([1.0, 2.0, -0.5], dtype=np.float64)
-    axis /= np.linalg.norm(axis)
-    com = np.asarray([0.35, -0.2, 0.1], dtype=np.float64)
-    anchor = np.asarray([-0.1, 0.25, 0.3], dtype=np.float64)
-    inertia = np.asarray([[2.0, 0.3, -0.1], [0.3, 3.0, 0.2], [-0.1, 0.2, 4.0]], dtype=np.float64)
-    mass = 2.5
+                    count = 6 if kind == "d6" else 1
+                    coordinates = wp.empty(count, dtype=float, device=device)
+                    gradients = wp.empty((count, 2), dtype=wp.spatial_vector, device=device)
+                    wp.launch(
+                        _sample_coordinates,
+                        dim=count,
+                        inputs=[JointMimicSolver(model).data, joint, state.body_q],
+                        outputs=[coordinates, gradients],
+                        device=device,
+                    )
+                    jacobians = gradients.numpy().astype(np.float64)
+                    poses = state.body_q.numpy()
+                    com = model.body_com.numpy()
+                    mass = model.body_mass.numpy()
+                    inertias = model.body_inertia.numpy()
 
-    builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
-    body = builder.add_link(
-        mass=mass,
-        com=wp.vec3(*com),
-        inertia=wp.mat33(inertia),
-        lock_inertia=True,
-    )
-    joint = builder.add_joint_revolute(
-        -1,
-        body,
-        child_xform=wp.transform(wp.vec3(*anchor), wp.quat_identity()),
-        axis=wp.vec3(*axis),
-        target_ke=0.0,
-        target_kd=0.0,
-        limit_ke=0.0,
-        limit_kd=0.0,
-        friction=1.0,
-    )
-    builder.add_articulation([joint])
-    builder.color()
-    model = builder.finalize(device=device)
-    solver = newton.solvers.SolverVBD(model, iterations=0, rigid_compliant_alm=True)
-    solver.step(model.state(), model.state(), model.control(), None, dt)
-
-    model_inertia = model.body_inertia.numpy()[body].astype(np.float64)
-    model_mass = float(model.body_mass.numpy()[body])
-    lever = anchor - com
-    expected_revolute_rho = (
-        axis @ model_inertia @ axis + model_mass * np.dot(np.cross(lever, axis), np.cross(lever, axis))
-    ) / (dt * dt)
-    test.assertAlmostEqual(float(solver.joint_friction_rho.numpy()[0]), expected_revolute_rho, delta=0.05)
-
-    # A one-angular-axis D6 has the same constrained coordinate as REVOLUTE.
-    builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
-    body = builder.add_link(
-        mass=mass,
-        com=wp.vec3(*com),
-        inertia=wp.mat33(inertia),
-        lock_inertia=True,
-    )
-    angular_axis = newton.ModelBuilder.JointDofConfig(
-        axis=wp.vec3(*axis),
-        target_ke=0.0,
-        target_kd=0.0,
-        limit_ke=0.0,
-        limit_kd=0.0,
-        friction=1.0,
-    )
-    joint = builder.add_joint_d6(
-        -1,
-        body,
-        child_xform=wp.transform(wp.vec3(*anchor), wp.quat_identity()),
-        angular_axes=[angular_axis],
-    )
-    builder.add_articulation([joint])
-    builder.color()
-    model = builder.finalize(device=device)
-    solver = newton.solvers.SolverVBD(model, iterations=0, rigid_compliant_alm=True)
-    solver.step(model.state(), model.state(), model.control(), None, dt)
-    test.assertAlmostEqual(float(solver.joint_friction_rho.numpy()[0]), expected_revolute_rho, delta=0.05)
-
-    # A prismatic joint locks rotation, so its free-coordinate inertia is mass,
-    # independent of the center-of-mass offset.
-    builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
-    body = builder.add_link(
-        mass=mass,
-        com=wp.vec3(*com),
-        inertia=wp.mat33(inertia),
-        lock_inertia=True,
-    )
-    joint = builder.add_joint_prismatic(
-        -1,
-        body,
-        axis=wp.vec3(*axis),
-        target_ke=0.0,
-        target_kd=0.0,
-        limit_ke=0.0,
-        limit_kd=0.0,
-        friction=1.0,
-    )
-    builder.add_articulation([joint])
-    builder.color()
-    model = builder.finalize(device=device)
-    solver = newton.solvers.SolverVBD(model, iterations=0, rigid_compliant_alm=True)
-    solver.step(model.state(), model.state(), model.control(), None, dt)
-    expected_prismatic_rho = float(model.body_mass.numpy()[body]) / (dt * dt)
-    test.assertAlmostEqual(float(solver.joint_friction_rho.numpy()[0]), expected_prismatic_rho, delta=0.05)
+                    # Assemble the full primal matrix directly, independently of
+                    # the kernel's six-row Woodbury factorization.
+                    bodies = [parent, child] if floating else [child]
+                    matrix = np.zeros((6 * len(bodies), 6 * len(bodies)))
+                    constraint = np.zeros((6, 6 * len(bodies)))
+                    linear_projector = np.eye(3)
+                    angular_projector = np.diag([1.0, 1.0, 0.0])
+                    if kind == "prismatic":
+                        linear_projector = np.diag([1.0, 1.0, 0.0])
+                        angular_projector = np.eye(3)
+                    elif kind == "d6":
+                        linear_projector = np.zeros((3, 3))
+                        angular_projector = np.zeros((3, 3))
+                    linear_projector = frame_matrix @ linear_projector @ frame_matrix.T
+                    for index, body in enumerate(bodies):
+                        block = slice(index * 6, index * 6 + 6)
+                        rotation = np.asarray(wp.quat_to_matrix(wp.quat(*poses[body, 3:])), dtype=np.float64).reshape(
+                            3, 3
+                        )
+                        matrix[index * 6 : index * 6 + 3, index * 6 : index * 6 + 3] = mass[body] * np.eye(3)
+                        matrix[index * 6 + 3 : index * 6 + 6, index * 6 + 3 : index * 6 + 6] = (
+                            rotation @ inertias[body] @ rotation.T
+                        )
+                        lever = -rotation @ com[body]
+                        cross = np.asarray(wp.skew(wp.vec3(*lever)), dtype=np.float64).reshape(3, 3)
+                        sign = -1.0 if body == parent else 1.0
+                        constraint[:3, block] = sign * np.hstack((linear_projector, -linear_projector @ cross))
+                        constraint[3:, index * 6 + 3 : index * 6 + 6] = sign * angular_projector @ frame_matrix.T
+                    matrix /= _DT**2
+                    c_start = int(solver.joint_constraint_start.numpy()[joint])
+                    rho = solver.joint_rho.numpy()[c_start : c_start + 2].astype(np.float64)
+                    material = solver.joint_material_k.numpy()[c_start : c_start + 2].astype(np.float64)
+                    effective = np.divide(material * rho, material + rho, out=np.zeros(2), where=material + rho > 0.0)
+                    matrix += constraint.T @ np.diag(np.repeat(effective, 3)) @ constraint
+                    expected = []
+                    for component in range(count):
+                        row = jacobians[component].reshape(-1) if floating else jacobians[component, 1]
+                        expected.append(1.0 / (row @ np.linalg.solve(matrix, row)))
+                    start = int(model.joint_qd_start.numpy()[joint])
+                    actual = solver.joint_friction_rho.numpy()[start : start + count]
+                    np.testing.assert_allclose(actual, expected, rtol=3.0e-4, atol=0.02)
 
 
 def test_vbd_joint_friction_persists_and_rebalances(test, device):
@@ -755,8 +777,8 @@ add_function_test(
 )
 add_function_test(
     TestSolverVBDJointFriction,
-    "test_vbd_joint_friction_uses_constrained_inertia",
-    test_vbd_joint_friction_uses_constrained_inertia,
+    "test_vbd_joint_friction_matches_background_response",
+    test_vbd_joint_friction_matches_background_response,
     devices=devices,
 )
 add_function_test(

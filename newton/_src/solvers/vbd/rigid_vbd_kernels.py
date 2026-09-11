@@ -2545,30 +2545,6 @@ def _drive_limit_needs_support(
     )
 
 
-@wp.func
-def _joint_axis_needs_support(
-    dof: int,
-    joint_target_ke: wp.array[float],
-    joint_target_kd: wp.array[float],
-    joint_limit_lower: wp.array[float],
-    joint_limit_upper: wp.array[float],
-    joint_limit_ke: wp.array[float],
-    joint_friction: wp.array[float],
-):
-    """Whether this DOF needs inverse-Delassus support for any ALM row."""
-    return (
-        _drive_limit_needs_support(
-            dof,
-            joint_target_ke,
-            joint_target_kd,
-            joint_limit_lower,
-            joint_limit_upper,
-            joint_limit_ke,
-        )
-        or joint_friction[dof] > 0.0
-    )
-
-
 @wp.struct
 class JointAxisDriveLimit:
     """Drive and limit data for one joint DOF.
@@ -4401,84 +4377,71 @@ def _joint_axis_angular_support(
 
 
 @wp.func
-def _joint_prismatic_friction_rho(
-    parent: int,
-    child: int,
-    body_inv_mass: wp.array[float],
-    inv_dt_sq: float,
-):
-    """Return inertial support along a prismatic axis with rotations locked."""
-    mobility = float(0.0)
-    if parent >= 0:
-        mobility = mobility + body_inv_mass[parent]
-    if child >= 0:
-        mobility = mobility + body_inv_mass[child]
-    if mobility > 0.0:
-        return inv_dt_sq / mobility
-    return 0.0
-
-
-@wp.func
-def _body_revolute_anchor_mobility(
-    body: int,
-    body_pose: wp.transform,
-    anchor: wp.transform,
-    axis_world: wp.vec3,
-    body_com: wp.array[wp.vec3],
-    body_inv_mass: wp.array[float],
-    body_inertia: wp.array[wp.mat33],
-):
-    """Return angular mobility about a body's revolute anchor.
-
-    The other angular and all linear joint coordinates are locked, so the
-    relevant scalar is the kinetic-energy inertia about the anchor, not the
-    unconstrained inverse-Delassus mobility about the center of mass.
-    """
-    if body < 0 or body_inv_mass[body] <= 0.0:
-        return 0.0
-    axis_local = wp.normalize(wp.quat_rotate_inv(wp.transform_get_rotation(body_pose), axis_world))
-    effective_inertia = wp.dot(axis_local, body_inertia[body] * axis_local)
-    lever_local = wp.transform_get_translation(anchor) - body_com[body]
-    moment_arm = wp.cross(lever_local, axis_local)
-    effective_inertia = effective_inertia + wp.dot(moment_arm, moment_arm) / body_inv_mass[body]
-    if effective_inertia > 0.0:
-        return 1.0 / effective_inertia
-    return 0.0
-
-
-@wp.func
-def _joint_revolute_friction_rho(
+def _joint_coordinate_support(
     parent: int,
     child: int,
     parent_pose: wp.transform,
     child_pose: wp.transform,
+    gradient_parent: wp.spatial_vector,
+    gradient_child: wp.spatial_vector,
     parent_anchor: wp.transform,
     child_anchor: wp.transform,
-    axis_world: wp.vec3,
     body_com: wp.array[wp.vec3],
     body_inv_mass: wp.array[float],
-    body_inertia: wp.array[wp.mat33],
+    body_inv_inertia: wp.array[wp.mat33],
+    linear_metric: wp.mat33,
+    angular_metric: wp.mat33,
     inv_dt_sq: float,
 ):
-    """Return reduced inertial support about locked revolute anchors."""
-    mobility = _body_revolute_anchor_mobility(
-        parent,
-        parent_pose,
-        parent_anchor,
-        axis_world,
-        body_com,
-        body_inv_mass,
-        body_inertia,
-    )
-    mobility = mobility + _body_revolute_anchor_mobility(
-        child,
-        child_pose,
-        child_anchor,
-        axis_world,
-        body_com,
-        body_inv_mass,
-        body_inertia,
-    )
+    """Return inverse row response including this joint's compliant structure.
+
+    With ``L = dt sqrt(K_eff) C``, the background metric is
+    ``A = (M + L^T L)/dt^2``. A six-row Woodbury solve includes the coupling
+    between the two bodies without fixing their shared anchor. The positive
+    sum ``r^T M^-1 r + y^T y`` avoids subtracting nearly equal mobilities.
+    Other joints and contacts are deliberately outside this local metric.
+    """
+    inv_m_p = float(0.0)
+    inv_m_c = float(0.0)
+    inv_I_p = wp.mat33(0.0)
+    inv_I_c = wp.mat33(0.0)
+    B_p = wp.mat33(0.0)
+    B_c = wp.mat33(0.0)
+    L = linear_metric
+    T = angular_metric
+    if parent >= 0 and body_inv_mass[parent] > 0.0:
+        inv_m_p = body_inv_mass[parent]
+        R = wp.quat_to_matrix(wp.transform_get_rotation(parent_pose))
+        inv_I_p = R * body_inv_inertia[parent] * wp.transpose(R)
+        r = wp.transform_vector(parent_pose, wp.transform_get_translation(parent_anchor) - body_com[parent])
+        B_p = -L * wp.skew(r)
+    if child >= 0 and body_inv_mass[child] > 0.0:
+        inv_m_c = body_inv_mass[child]
+        R = wp.quat_to_matrix(wp.transform_get_rotation(child_pose))
+        inv_I_c = R * body_inv_inertia[child] * wp.transpose(R)
+        r = wp.transform_vector(child_pose, wp.transform_get_translation(child_anchor) - body_com[child])
+        B_c = -L * wp.skew(r)
+
+    g_pl, g_pa = wp.spatial_top(gradient_parent), wp.spatial_bottom(gradient_parent)
+    g_cl, g_ca = wp.spatial_top(gradient_child), wp.spatial_bottom(gradient_child)
+    rhs_l = L * (inv_m_c * g_cl - inv_m_p * g_pl) + B_c * (inv_I_c * g_ca) - B_p * (inv_I_p * g_pa)
+    rhs_a = T * (inv_I_c * g_ca - inv_I_p * g_pa)
+    y_l = wp.vec3(0.0)
+    y_a = wp.vec3(0.0)
+    if wp.dot(rhs_l, rhs_l) + wp.dot(rhs_a, rhs_a) > 0.0:
+        D_ll = wp.identity(3, float) + (inv_m_p + inv_m_c) * L * wp.transpose(L)
+        D_ll += B_p * inv_I_p * wp.transpose(B_p) + B_c * inv_I_c * wp.transpose(B_c)
+        D_al = T * (inv_I_p * wp.transpose(B_p) + inv_I_c * wp.transpose(B_c))
+        D_aa = wp.identity(3, float) + T * (inv_I_p + inv_I_c) * wp.transpose(T)
+        y_l, y_a = ldlt6_solve(D_ll, D_aa, D_al, rhs_l, rhs_a)
+
+    r_pl = g_pl + wp.transpose(L) * y_l
+    r_pa = g_pa + wp.transpose(B_p) * y_l + wp.transpose(T) * y_a
+    r_cl = g_cl - wp.transpose(L) * y_l
+    r_ca = g_ca - wp.transpose(B_c) * y_l - wp.transpose(T) * y_a
+    mobility = inv_m_p * wp.dot(r_pl, r_pl) + wp.dot(r_pa, inv_I_p * r_pa)
+    mobility += inv_m_c * wp.dot(r_cl, r_cl) + wp.dot(r_ca, inv_I_c * r_ca)
+    mobility += wp.dot(y_l, y_l) + wp.dot(y_a, y_a)
     if mobility > 0.0:
         return inv_dt_sq / mobility
     return 0.0
@@ -4547,6 +4510,7 @@ def step_joint_C0_lambda_rho(
     penalty_decay: float,
     joint_penalty_k_min: wp.array[float],
     joint_material_k: wp.array[float],
+    joint_penalty_kd: wp.array[float],
     joint_target_ke: wp.array[float],
     joint_target_kd: wp.array[float],
     joint_limit_lower: wp.array[float],
@@ -4557,7 +4521,6 @@ def step_joint_C0_lambda_rho(
     inv_dt_sq: float,
     body_com: wp.array[wp.vec3],
     body_inv_mass: wp.array[float],
-    body_inertia: wp.array[wp.mat33],
     body_inv_inertia: wp.array[wp.mat33],
     joint_penalty_k: wp.array[float],
     joint_C0_lin: wp.array[wp.vec3],
@@ -4634,19 +4597,11 @@ def step_joint_C0_lambda_rho(
         qd_start = joint_qd_start[j]
         has_axis_row = bool(False)
         has_angular_axis_row = bool(False)
+        has_friction_row = bool(False)
         for axis in range(linear_count + angular_count):
             dof = qd_start + axis
             joint_drive_limit_support[dof] = 0.0
             joint_friction_rho[dof] = 0.0
-            needs_support = _joint_axis_needs_support(
-                dof,
-                joint_target_ke,
-                joint_target_kd,
-                joint_limit_lower,
-                joint_limit_upper,
-                joint_limit_ke,
-                joint_friction,
-            )
             has_drive_limit_row = _drive_limit_needs_support(
                 dof,
                 joint_target_ke,
@@ -4656,9 +4611,10 @@ def step_joint_C0_lambda_rho(
                 joint_limit_ke,
             )
             has_passive_row = joint_friction[dof] > 0.0 or joint_damping[dof] > 0.0
-            if needs_support or has_passive_row:
+            has_friction_row = has_friction_row or joint_friction[dof] > 0.0
+            if has_drive_limit_row or has_passive_row:
                 has_axis_row = True
-                if axis >= linear_count:
+                if has_drive_limit_row and axis >= linear_count:
                     has_angular_axis_row = True
             if has_drive_limit_row:
                 if joint_enabled[j] and child >= 0:
@@ -4688,10 +4644,30 @@ def step_joint_C0_lambda_rho(
             X_wc = child_pose * joint_X_c[j]
             q_wp = wp.transform_get_rotation(X_wp)
             q_wc = wp.transform_get_rotation(X_wc)
-            for axis in range(linear_count):
+            angular_jacobian_world = wp.mat33(0.0)
+            if has_friction_row or has_angular_axis_row:
+                q_wp_rest = wp.transform_get_rotation(
+                    (body_q_rest[parent] * joint_X_p[j]) if parent >= 0 else joint_X_p[j]
+                )
+                q_wc_rest = wp.transform_get_rotation(body_q_rest[child] * joint_X_c[j])
+                _kappa, angular_jacobian_world = compute_kappa_and_jacobian(q_wp, q_wc, q_wp_rest, q_wc_rest)
+            linear_metric = wp.mat33(0.0)
+            angular_metric = wp.mat33(0.0)
+            if has_friction_row:
+                P_lin, P_ang = build_joint_projectors(jt, joint_axis, qd_start, linear_count, angular_count, q_wp)
+                _s_l, k_lin, _a_l = _compliant_alm_coefficients(joint_material_k[c_start], joint_rho[c_start])
+                _s_a, k_ang, _a_a = _compliant_alm_coefficients(joint_material_k[c_start + 1], joint_rho[c_start + 1])
+                inv_dt = wp.sqrt(inv_dt_sq)
+                if joint_rho[c_start] > 0.0:
+                    linear_metric = wp.sqrt((k_lin + joint_penalty_kd[c_start] * inv_dt) / inv_dt_sq) * P_lin
+                if joint_rho[c_start + 1] > 0.0:
+                    angular_metric = wp.sqrt((k_ang + joint_penalty_kd[c_start + 1] * inv_dt) / inv_dt_sq) * (
+                        P_ang * wp.transpose(angular_jacobian_world)
+                    )
+            for axis in range(linear_count + angular_count):
                 dof = qd_start + axis
                 if joint_friction[dof] > 0.0 or joint_damping[dof] > 0.0:
-                    coordinate, _gradient_parent, _gradient_child = eval_joint_mimic_coordinate(
+                    coordinate, gradient_parent, gradient_child = eval_joint_mimic_coordinate(
                         j,
                         axis,
                         body_q_prev,
@@ -4706,14 +4682,32 @@ def step_joint_C0_lambda_rho(
                         joint_axis,
                     )
                     joint_q_prev[dof] = coordinate
-                if _joint_axis_needs_support(
+                    if joint_friction[dof] > 0.0:
+                        joint_friction_rho[dof] = _joint_coordinate_support(
+                            parent,
+                            child,
+                            parent_pose,
+                            child_pose,
+                            gradient_parent,
+                            gradient_child,
+                            joint_X_p[j],
+                            joint_X_c[j],
+                            body_com,
+                            body_inv_mass,
+                            body_inv_inertia,
+                            linear_metric,
+                            angular_metric,
+                            inv_dt_sq,
+                        )
+            for axis in range(linear_count):
+                dof = qd_start + axis
+                if _drive_limit_needs_support(
                     dof,
                     joint_target_ke,
                     joint_target_kd,
                     joint_limit_lower,
                     joint_limit_upper,
                     joint_limit_ke,
-                    joint_friction,
                 ):
                     axis_world = wp.normalize(wp.quat_rotate(q_wp, joint_axis[dof]))
                     axis_support = _joint_axis_linear_support(
@@ -4730,50 +4724,17 @@ def step_joint_C0_lambda_rho(
                         inv_dt_sq,
                     )
                     joint_drive_limit_support[dof] = axis_support
-                    if joint_friction[dof] > 0.0:
-                        joint_friction_rho[dof] = axis_support
-                        if jt == JointType.PRISMATIC or (
-                            jt == JointType.D6 and linear_count == 1 and angular_count == 0
-                        ):
-                            joint_friction_rho[dof] = _joint_prismatic_friction_rho(
-                                parent,
-                                child,
-                                body_inv_mass,
-                                inv_dt_sq,
-                            )
 
             if has_angular_axis_row:
-                q_wp_rest = wp.transform_get_rotation(
-                    (body_q_rest[parent] * joint_X_p[j]) if parent >= 0 else joint_X_p[j]
-                )
-                q_wc_rest = wp.transform_get_rotation(body_q_rest[child] * joint_X_c[j])
-                _kappa, angular_jacobian_world = compute_kappa_and_jacobian(q_wp, q_wc, q_wp_rest, q_wc_rest)
                 for axis in range(angular_count):
                     dof = qd_start + linear_count + axis
-                    if joint_friction[dof] > 0.0 or joint_damping[dof] > 0.0:
-                        coordinate, _gradient_parent, _gradient_child = eval_joint_mimic_coordinate(
-                            j,
-                            linear_count + axis,
-                            body_q_prev,
-                            body_com,
-                            joint_type,
-                            joint_parent,
-                            joint_child,
-                            joint_X_p,
-                            joint_X_c,
-                            joint_qd_start,
-                            joint_dof_dim,
-                            joint_axis,
-                        )
-                        joint_q_prev[dof] = coordinate
-                    if _joint_axis_needs_support(
+                    if _drive_limit_needs_support(
                         dof,
                         joint_target_ke,
                         joint_target_kd,
                         joint_limit_lower,
                         joint_limit_upper,
                         joint_limit_ke,
-                        joint_friction,
                     ):
                         gradient_world = angular_jacobian_world * wp.normalize(joint_axis[dof])
                         axis_support = _joint_axis_angular_support(
@@ -4787,24 +4748,6 @@ def step_joint_C0_lambda_rho(
                             inv_dt_sq,
                         )
                         joint_drive_limit_support[dof] = axis_support
-                        if joint_friction[dof] > 0.0:
-                            joint_friction_rho[dof] = axis_support
-                            if jt == JointType.REVOLUTE or (
-                                jt == JointType.D6 and linear_count == 0 and angular_count == 1
-                            ):
-                                joint_friction_rho[dof] = _joint_revolute_friction_rho(
-                                    parent,
-                                    child,
-                                    parent_pose,
-                                    child_pose,
-                                    joint_X_p[j],
-                                    joint_X_c[j],
-                                    gradient_world,
-                                    body_com,
-                                    body_inv_mass,
-                                    body_inertia,
-                                    inv_dt_sq,
-                                )
 
     # 4. C0 snapshot + lambda retention for stabilized structural slots.
     if not joint_enabled[j] or c_dim == 0 or child < 0:
