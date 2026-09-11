@@ -344,7 +344,7 @@ constraints, with opt-in unified compliant ALM and a deprecated legacy AVBD path
      - |no|
 
 | :sup:`2` Not enforced for BALL joints in SemiImplicit.
-| :sup:`8` VBD applies Coulomb friction to each free coordinate of REVOLUTE, PRISMATIC, and D6 joints. With ``rigid_compliant_alm=True``, a bounded projected multiplier provides static sticking up to ``joint_friction`` and saturated sliding beyond it. Legacy AVBD uses ``-joint_friction * tanh(qd / 0.01)``, which allows slow near-rest creep. Friction on either joint in a mimic pair resists the coupled motion.
+| :sup:`8` VBD applies Coulomb friction to each free coordinate of REVOLUTE, PRISMATIC, and D6 joints. ``joint_friction`` is a constant generalized-force bound [N or N·m], like MuJoCo ``frictionloss``; it is not a dimensionless, load-dependent contact-friction coefficient. With ``rigid_compliant_alm=True``, a bounded projected multiplier provides static sticking up to ``joint_friction`` and saturated sliding beyond it. Legacy AVBD uses ``-joint_friction * tanh(qd / 0.01)``, which allows slow near-rest creep. Friction on either joint in a mimic pair resists the coupled motion. Multi-axis D6 bounds apply independently per authored coordinate, forming a coordinate-aligned box rather than an isotropic torque ball.
 
 VBD also supports passive viscous :attr:`~newton.Model.joint_damping` for
 REVOLUTE, PRISMATIC, and D6 joints. Set ``damping`` when adding a joint, or

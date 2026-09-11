@@ -62,9 +62,6 @@ _DAHL_KAPPADOT_DEADBAND = wp.constant(1.0e-6)
 _JOINT_FRICTION_SMOOTHING_VELOCITY = wp.constant(1.0e-2)
 """Velocity scale [m/s or rad/s] for regularized Coulomb joint friction."""
 
-_JOINT_FRICTION_RHO_OVER_INERTIAL_SUPPORT = wp.constant(4.0)
-"""Projected-friction rho relative to the scalar inverse-Delassus support."""
-
 _NUM_CONTACT_THREADS_PER_BODY = wp.constant(4)
 """Threads per body for contact accumulation using strided iteration"""
 
@@ -201,12 +198,6 @@ def _limit_auto_rho(axis_support: float, material_k: float):
     if axis_support <= 0.0 or material_k <= 0.0:
         return 0.0
     return axis_support
-
-
-@wp.func
-def _joint_friction_auto_rho(axis_support: float):
-    """Strengthen inertial support to balance stick and slip convergence."""
-    return _JOINT_FRICTION_RHO_OVER_INERTIAL_SUPPORT * axis_support
 
 
 @wp.func
@@ -2717,8 +2708,11 @@ def _eval_joint_axis_friction(
             force = wp.clamp(trial, -friction, friction)
             if wp.abs(trial) <= friction:
                 hessian = rho
-            elif wp.abs(displacement) > 1.0e-8:
+            elif wp.abs(displacement) > 0.0:
                 hessian = wp.min(rho, friction / wp.abs(displacement))
+            else:
+                # Defensive fallback for roundoff at the projection boundary.
+                hessian = rho
         else:
             inv_eps = 1.0 / _JOINT_FRICTION_SMOOTHING_VELOCITY
             direction = wp.tanh(rate * inv_eps)
@@ -2747,7 +2741,7 @@ def _evaluate_joint_dissipation(
     joint_dof_dim: wp.array2d[int],
     joint_axis: wp.array[wp.vec3],
     joint_q_prev: wp.array[float],
-    joint_axis_support: wp.array[float],
+    joint_friction_rho: wp.array[float],
     joint_friction_lambda: wp.array[float],
     joint_friction: wp.array[float],
     joint_damping: wp.array[float],
@@ -2811,7 +2805,7 @@ def _evaluate_joint_dissipation(
             displacement,
             rate,
             friction,
-            _joint_friction_auto_rho(joint_axis_support[dof]),
+            joint_friction_rho[dof],
             joint_friction_lambda[dof],
             use_compliant_alm,
             1.0 / dt,
@@ -2844,7 +2838,7 @@ def _update_joint_friction_duals(
     joint_dof_dim: wp.array2d[int],
     joint_axis: wp.array[wp.vec3],
     joint_q_prev: wp.array[float],
-    joint_axis_support: wp.array[float],
+    joint_friction_rho: wp.array[float],
     joint_friction: wp.array[float],
     joint_friction_lambda: wp.array[float],
 ):
@@ -2873,7 +2867,7 @@ def _update_joint_friction_duals(
         displacement = q - joint_q_prev[dof]
         if component >= linear_count:
             displacement = wp.atan2(wp.sin(displacement), wp.cos(displacement))
-        trial = joint_friction_lambda[dof] + _joint_friction_auto_rho(joint_axis_support[dof]) * displacement
+        trial = joint_friction_lambda[dof] + joint_friction_rho[dof] * displacement
         joint_friction_lambda[dof] = wp.clamp(trial, -friction, friction)
 
 
@@ -4406,6 +4400,90 @@ def _joint_axis_angular_support(
     return 0.0
 
 
+@wp.func
+def _joint_prismatic_friction_rho(
+    parent: int,
+    child: int,
+    body_inv_mass: wp.array[float],
+    inv_dt_sq: float,
+):
+    """Return inertial support along a prismatic axis with rotations locked."""
+    mobility = float(0.0)
+    if parent >= 0:
+        mobility = mobility + body_inv_mass[parent]
+    if child >= 0:
+        mobility = mobility + body_inv_mass[child]
+    if mobility > 0.0:
+        return inv_dt_sq / mobility
+    return 0.0
+
+
+@wp.func
+def _body_revolute_anchor_mobility(
+    body: int,
+    body_pose: wp.transform,
+    anchor: wp.transform,
+    axis_world: wp.vec3,
+    body_com: wp.array[wp.vec3],
+    body_inv_mass: wp.array[float],
+    body_inertia: wp.array[wp.mat33],
+):
+    """Return angular mobility about a body's revolute anchor.
+
+    The other angular and all linear joint coordinates are locked, so the
+    relevant scalar is the kinetic-energy inertia about the anchor, not the
+    unconstrained inverse-Delassus mobility about the center of mass.
+    """
+    if body < 0 or body_inv_mass[body] <= 0.0:
+        return 0.0
+    axis_local = wp.normalize(wp.quat_rotate_inv(wp.transform_get_rotation(body_pose), axis_world))
+    effective_inertia = wp.dot(axis_local, body_inertia[body] * axis_local)
+    lever_local = wp.transform_get_translation(anchor) - body_com[body]
+    moment_arm = wp.cross(lever_local, axis_local)
+    effective_inertia = effective_inertia + wp.dot(moment_arm, moment_arm) / body_inv_mass[body]
+    if effective_inertia > 0.0:
+        return 1.0 / effective_inertia
+    return 0.0
+
+
+@wp.func
+def _joint_revolute_friction_rho(
+    parent: int,
+    child: int,
+    parent_pose: wp.transform,
+    child_pose: wp.transform,
+    parent_anchor: wp.transform,
+    child_anchor: wp.transform,
+    axis_world: wp.vec3,
+    body_com: wp.array[wp.vec3],
+    body_inv_mass: wp.array[float],
+    body_inertia: wp.array[wp.mat33],
+    inv_dt_sq: float,
+):
+    """Return reduced inertial support about locked revolute anchors."""
+    mobility = _body_revolute_anchor_mobility(
+        parent,
+        parent_pose,
+        parent_anchor,
+        axis_world,
+        body_com,
+        body_inv_mass,
+        body_inertia,
+    )
+    mobility = mobility + _body_revolute_anchor_mobility(
+        child,
+        child_pose,
+        child_anchor,
+        axis_world,
+        body_com,
+        body_inv_mass,
+        body_inertia,
+    )
+    if mobility > 0.0:
+        return inv_dt_sq / mobility
+    return 0.0
+
+
 @wp.kernel
 def init_rod_rest_bend_twist(
     joint_type: wp.array[int],
@@ -4479,6 +4557,7 @@ def step_joint_C0_lambda_rho(
     inv_dt_sq: float,
     body_com: wp.array[wp.vec3],
     body_inv_mass: wp.array[float],
+    body_inertia: wp.array[wp.mat33],
     body_inv_inertia: wp.array[wp.mat33],
     joint_penalty_k: wp.array[float],
     joint_C0_lin: wp.array[wp.vec3],
@@ -4490,6 +4569,7 @@ def step_joint_C0_lambda_rho(
     joint_drive_lambda: wp.array[float],
     joint_limit_lambda: wp.array[float],
     joint_q_prev: wp.array[float],
+    joint_friction_rho: wp.array[float],
     joint_friction_lambda: wp.array[float],
 ):
     """Once-per-step joint setup before the iteration loop (dim = joint_count).
@@ -4557,6 +4637,7 @@ def step_joint_C0_lambda_rho(
         for axis in range(linear_count + angular_count):
             dof = qd_start + axis
             joint_drive_limit_support[dof] = 0.0
+            joint_friction_rho[dof] = 0.0
             needs_support = _joint_axis_needs_support(
                 dof,
                 joint_target_ke,
@@ -4591,9 +4672,10 @@ def step_joint_C0_lambda_rho(
                 joint_limit_lambda[dof] = 0.0
             friction_bound = wp.max(joint_friction[dof], 0.0)
             if joint_compliant_alm == 1 and joint_enabled[j] and child >= 0 and friction_bound > 0.0:
-                joint_friction_lambda[dof] = wp.clamp(
-                    lambda_retention * joint_friction_lambda[dof], -friction_bound, friction_bound
-                )
+                # Static friction is a bounded physical reaction, so preserve it
+                # exactly between steps. Decaying it produces artificial creep;
+                # the projected update removes stale reaction after load changes.
+                joint_friction_lambda[dof] = wp.clamp(joint_friction_lambda[dof], -friction_bound, friction_bound)
             else:
                 joint_friction_lambda[dof] = 0.0
 
@@ -4634,7 +4716,7 @@ def step_joint_C0_lambda_rho(
                     joint_friction,
                 ):
                     axis_world = wp.normalize(wp.quat_rotate(q_wp, joint_axis[dof]))
-                    joint_drive_limit_support[dof] = _joint_axis_linear_support(
+                    axis_support = _joint_axis_linear_support(
                         parent,
                         child,
                         parent_pose,
@@ -4647,6 +4729,18 @@ def step_joint_C0_lambda_rho(
                         body_inv_inertia,
                         inv_dt_sq,
                     )
+                    joint_drive_limit_support[dof] = axis_support
+                    if joint_friction[dof] > 0.0:
+                        joint_friction_rho[dof] = axis_support
+                        if jt == JointType.PRISMATIC or (
+                            jt == JointType.D6 and linear_count == 1 and angular_count == 0
+                        ):
+                            joint_friction_rho[dof] = _joint_prismatic_friction_rho(
+                                parent,
+                                child,
+                                body_inv_mass,
+                                inv_dt_sq,
+                            )
 
             if has_angular_axis_row:
                 q_wp_rest = wp.transform_get_rotation(
@@ -4682,7 +4776,7 @@ def step_joint_C0_lambda_rho(
                         joint_friction,
                     ):
                         gradient_world = angular_jacobian_world * wp.normalize(joint_axis[dof])
-                        joint_drive_limit_support[dof] = _joint_axis_angular_support(
+                        axis_support = _joint_axis_angular_support(
                             parent,
                             child,
                             parent_pose,
@@ -4692,6 +4786,25 @@ def step_joint_C0_lambda_rho(
                             body_inv_inertia,
                             inv_dt_sq,
                         )
+                        joint_drive_limit_support[dof] = axis_support
+                        if joint_friction[dof] > 0.0:
+                            joint_friction_rho[dof] = axis_support
+                            if jt == JointType.REVOLUTE or (
+                                jt == JointType.D6 and linear_count == 0 and angular_count == 1
+                            ):
+                                joint_friction_rho[dof] = _joint_revolute_friction_rho(
+                                    parent,
+                                    child,
+                                    parent_pose,
+                                    child_pose,
+                                    joint_X_p[j],
+                                    joint_X_c[j],
+                                    gradient_world,
+                                    body_com,
+                                    body_inv_mass,
+                                    body_inertia,
+                                    inv_dt_sq,
+                                )
 
     # 4. C0 snapshot + lambda retention for stabilized structural slots.
     if not joint_enabled[j] or c_dim == 0 or child < 0:
@@ -5950,6 +6063,7 @@ def solve_rigid_body(
     joint_dof_dim: wp.array2d[int],
     joint_rest_angle: wp.array[float],
     joint_q_prev: wp.array[float],
+    joint_friction_rho: wp.array[float],
     joint_friction_lambda: wp.array[float],
     joint_friction: wp.array[float],
     joint_damping: wp.array[float],
@@ -6149,7 +6263,7 @@ def solve_rigid_body(
             joint_dof_dim,
             joint_axis,
             joint_q_prev,
-            joint_drive_limit_support,
+            joint_friction_rho,
             joint_friction_lambda,
             joint_friction,
             joint_damping,
@@ -6250,6 +6364,7 @@ def update_duals_joint(
     joint_rest_angle: wp.array[float],
     joint_drive_limit_support: wp.array[float],
     joint_q_prev: wp.array[float],
+    joint_friction_rho: wp.array[float],
     joint_friction: wp.array[float],
     dt: float,
     # Input/output
@@ -6303,7 +6418,7 @@ def update_duals_joint(
             joint_dof_dim,
             joint_axis,
             joint_q_prev,
-            joint_drive_limit_support,
+            joint_friction_rho,
             joint_friction,
             joint_friction_lambda,
         )

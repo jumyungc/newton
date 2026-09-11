@@ -1762,6 +1762,7 @@ def _joint_angular_dual_projects_free_axis_lambda(test, device):
                 drive_limit_support,
                 wp.zeros(1, dtype=float, device=device),
                 wp.zeros(1, dtype=float, device=device),
+                wp.zeros(1, dtype=float, device=device),
                 1.0 / 60.0,
             ],
             outputs=[
@@ -1863,6 +1864,7 @@ def _rod_soft_dual_slots_clear_preserved_lambda(test, device):
                 joint_limit_kd,
                 joint_rest_angle,
                 drive_limit_support,
+                wp.zeros(1, dtype=float, device=device),
                 wp.zeros(1, dtype=float, device=device),
                 wp.zeros(1, dtype=float, device=device),
                 1.0 / 60.0,

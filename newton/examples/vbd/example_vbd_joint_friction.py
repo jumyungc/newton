@@ -93,8 +93,9 @@ class Example:
 
         self.viewer.set_model(self.model)
         self.viewer.set_camera(pos=wp.vec3(0.0, -7.5, 4.0), pitch=-20.0, yaw=90.0)
-        print(f"Applied torques: {self.TORQUES} N*m; dry-friction bound: {self.FRICTION} N*m")
-        print("The inner hinges stick; the outer hinges slide in opposite directions.")
+        if not args.quiet:
+            print(f"Applied torques: {self.TORQUES} N*m; dry-friction bound: {self.FRICTION} N*m")
+            print("The inner hinges stick; the outer hinges slide in opposite directions.")
 
         self.graph = None
         if self.model.device.is_cuda:

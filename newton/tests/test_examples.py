@@ -500,6 +500,20 @@ add_basic_example_test(
     test_options={"num-frames": 50},
 )
 
+add_basic_example_test(
+    name="vbd.example_vbd_joint_friction",
+    devices=test_devices,
+    use_viewer=True,
+    test_options={"num-frames": 20},
+)
+
+add_basic_example_test(
+    name="vbd.example_vbd_mimic_gripper",
+    devices=test_devices,
+    use_viewer=True,
+    test_options={"num-frames": 20, "initial-speed": 0.5},
+)
+
 
 class TestCableExamples(NewtonTestCase):
     pass

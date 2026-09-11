@@ -1150,6 +1150,7 @@ class SolverVBD(SolverBase, CouplingInterface):
             self.joint_drive_limit_support = wp.zeros(model.joint_dof_count, dtype=float, device=self.device)
             # Previous-step coordinates and bounded Coulomb multipliers for compliant ALM.
             self.joint_q_prev = wp.zeros(model.joint_dof_count, dtype=float, device=self.device)
+            self.joint_friction_rho = wp.zeros(model.joint_dof_count, dtype=float, device=self.device)
             self.joint_friction_lambda = wp.zeros(model.joint_dof_count, dtype=float, device=self.device)
             # Bilateral drive dual, cleared whenever the drive row stops existing.
             self.joint_drive_lambda = wp.zeros(model.joint_dof_count, dtype=float, device=self.device)
@@ -3173,6 +3174,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                         1.0 / (dt * dt),
                         model.body_com,
                         self.body_inv_mass_effective,
+                        model.body_inertia,
                         self.body_inv_inertia_effective,
                     ],
                     outputs=[
@@ -3186,6 +3188,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                         self.joint_drive_lambda,
                         self.joint_limit_lambda,
                         self.joint_q_prev,
+                        self.joint_friction_rho,
                         self.joint_friction_lambda,
                     ],
                     device=self.device,
@@ -3630,6 +3633,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                     model.joint_dof_dim,
                     self.joint_rest_angle,
                     self.joint_q_prev,
+                    self.joint_friction_rho,
                     self.joint_friction_lambda,
                     model.joint_friction,
                     model.joint_damping,
@@ -3753,6 +3757,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                     self.joint_rest_angle,
                     self.joint_drive_limit_support,
                     self.joint_q_prev,
+                    self.joint_friction_rho,
                     model.joint_friction,
                     dt,
                     self.joint_penalty_k,  # input/output
