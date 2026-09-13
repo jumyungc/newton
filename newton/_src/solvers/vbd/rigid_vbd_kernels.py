@@ -61,6 +61,37 @@ _DAHL_KAPPADOT_DEADBAND = wp.constant(1.0e-6)
 _NUM_CONTACT_THREADS_PER_BODY = wp.constant(4)
 """Threads per body for contact accumulation using strided iteration"""
 
+
+@wp.func_native(
+    """
+    #if defined(__CUDA_ARCH__)
+    __syncthreads();
+    #endif
+    """
+)
+def _sync_cuda_block(): ...
+
+
+@wp.func
+def _body_id_for_color_slot(
+    slot: int,
+    fallback_ids: wp.array[wp.int32],
+    dynamic_ids: wp.array[wp.int32],
+    color_starts: wp.array[wp.int32],
+    active_color: int,
+) -> int:
+    """Resolve a body from either a model color or a device-built contact color."""
+    if active_color >= 0:
+        start = color_starts[active_color]
+        count = color_starts[active_color + 1] - start
+        if slot >= count:
+            return -1
+        return dynamic_ids[start + slot]
+    if slot >= fallback_ids.shape[0]:
+        return -1
+    return fallback_ids[slot]
+
+
 # DER bend-twist strain measure tolerances (curvature binormal + Bishop transport).
 _ROD_KB_FOLD_EPS = wp.constant(1.0e-12)
 """Degenerate-fold scale and denominator floor for the DER curvature binormal.
@@ -4019,6 +4050,366 @@ def build_body_body_contact_lists(
             wp.atomic_max(body_contact_overflow_max, 0, idx + 1)
 
 
+@wp.func
+def _per_body_contact_neighbor(
+    body: int,
+    contact: int,
+    rigid_contact_shape0: wp.array[int],
+    rigid_contact_shape1: wp.array[int],
+    shape_body: wp.array[wp.int32],
+    body_uses_pair_contacts: wp.array[wp.int32],
+) -> int:
+    """Return the opposite dynamic endpoint when this row belongs to per-body VBD."""
+    shape0 = rigid_contact_shape0[contact]
+    shape1 = rigid_contact_shape1[contact]
+    body0 = shape_body[shape0] if shape0 >= 0 else -1
+    body1 = shape_body[shape1] if shape1 >= 0 else -1
+    if body0 != body and body1 != body:
+        return -1
+
+    pair0 = body0 < 0 or body_uses_pair_contacts[body0] != 0
+    pair1 = body1 < 0 or body_uses_pair_contacts[body1] != 0
+    if pair0 and pair1:
+        return -1
+    return body1 if body0 == body else body0
+
+
+@wp.kernel(enable_backward=False)
+def analyze_rigid_body_contact_refinement(
+    body_contact_buffer_pre_alloc: int,
+    body_contact_counts: wp.array[wp.int32],
+    body_contact_indices: wp.array[wp.int32],
+    rigid_contact_shape0: wp.array[int],
+    rigid_contact_shape1: wp.array[int],
+    shape_body: wp.array[wp.int32],
+    body_inv_mass: wp.array[float],
+    body_uses_pair_contacts: wp.array[wp.int32],
+    body_schedule_active: wp.array[wp.int32],
+    body_joint_colors: wp.array[wp.int32],
+    max_same_color_degree: wp.array[wp.int32],
+    refinement_active: wp.array[wp.int32],
+):
+    """Detect branching that is hidden inside an authored joint color.
+
+    Count distinct neighbors up to three, rather than contact points, so a
+    multi-point manifold remains one edge. The saturated degree is enough for
+    the branching heuristic and avoids a quadratic duplicate scan. This
+    topology-only choice does not certify convergence for arbitrary materials.
+    """
+    body = wp.tid()
+    if body_schedule_active[body] == 0 or body_inv_mass[body] <= 0.0:
+        return
+
+    base_color = body_joint_colors[body]
+    if base_color < 0:
+        return
+
+    degree = wp.int32(0)
+    first_neighbor = wp.int32(-1)
+    second_neighbor = wp.int32(-1)
+    count = wp.min(body_contact_counts[body], body_contact_buffer_pre_alloc)
+    for slot in range(count):
+        contact = body_contact_indices[body * body_contact_buffer_pre_alloc + slot]
+        other = _per_body_contact_neighbor(
+            body,
+            contact,
+            rigid_contact_shape0,
+            rigid_contact_shape1,
+            shape_body,
+            body_uses_pair_contacts,
+        )
+        if (
+            other < 0
+            or body_schedule_active[other] == 0
+            or body_inv_mass[other] <= 0.0
+            or body_joint_colors[other] != base_color
+        ):
+            continue
+
+        if other != first_neighbor and other != second_neighbor:
+            degree += 1
+            if degree == 1:
+                first_neighbor = other
+            elif degree == 2:
+                second_neighbor = other
+            else:
+                break
+
+    wp.atomic_max(max_same_color_degree, 0, degree)
+    if degree > 2:
+        wp.atomic_max(refinement_active, 0, 1)
+
+
+@wp.kernel(enable_backward=False)
+def color_rigid_bodies_from_contacts(
+    body_count: int,
+    color_budget: int,
+    joint_color_count: int,
+    body_inv_mass: wp.array[float],
+    body_uses_pair_contacts: wp.array[wp.int32],
+    body_schedule_active: wp.array[wp.int32],
+    body_contact_buffer_pre_alloc: int,
+    body_contact_counts: wp.array[wp.int32],
+    body_contact_indices: wp.array[wp.int32],
+    rigid_contact_shape0: wp.array[int],
+    rigid_contact_shape1: wp.array[int],
+    shape_body: wp.array[wp.int32],
+    body_joint_colors: wp.array[wp.int32],
+    body_colors: wp.array[wp.int32],
+    body_ids_by_color: wp.array[wp.int32],
+    color_starts: wp.array[wp.int32],
+    num_colors_out: wp.array[wp.int32],
+    overflow_count: wp.array[wp.int32],
+    uses_high_subcolors: wp.array[wp.int32],
+):
+    """Serial deterministic joint-preserving contact coloring (CPU path)."""
+    if wp.tid() != 0:
+        return
+
+    subcolor_count = color_budget // joint_color_count
+    overflow_count[0] = 0
+    uses_high_subcolors[0] = 0
+    for body in range(body_count):
+        body_colors[body] = -1
+
+    num_colors = wp.int32(0)
+    for body in range(body_count):
+        if body_schedule_active[body] == 0 or body_inv_mass[body] <= 0.0:
+            continue
+        base_color = body_joint_colors[body]
+        first_color = base_color * subcolor_count
+        color = first_color
+        found = bool(False)
+        while color < first_color + subcolor_count and not found:
+            conflict = bool(False)
+            count = wp.min(body_contact_counts[body], body_contact_buffer_pre_alloc)
+            for slot in range(count):
+                contact = body_contact_indices[body * body_contact_buffer_pre_alloc + slot]
+                other = _per_body_contact_neighbor(
+                    body,
+                    contact,
+                    rigid_contact_shape0,
+                    rigid_contact_shape1,
+                    shape_body,
+                    body_uses_pair_contacts,
+                )
+                if other >= 0 and body_schedule_active[other] != 0 and body_colors[other] == color:
+                    conflict = True
+            if not conflict:
+                found = True
+            else:
+                color += 1
+        if not found:
+            color = first_color
+            overflow_count[0] += 1
+        body_colors[body] = color
+        if color - first_color >= 4:
+            uses_high_subcolors[0] = 1
+        num_colors = wp.max(num_colors, color + 1)
+
+    for color in range(color_budget + 1):
+        color_starts[color] = 0
+    for body in range(body_count):
+        color = body_colors[body]
+        if color >= 0:
+            color_starts[color + 1] += 1
+    for color in range(num_colors):
+        color_starts[color + 1] += color_starts[color]
+    for body in range(body_count):
+        color = body_colors[body]
+        if color >= 0:
+            slot = color_starts[color]
+            body_ids_by_color[slot] = body
+            color_starts[color] = slot + 1
+
+    previous = wp.int32(0)
+    for color in range(num_colors + 1):
+        cursor = color_starts[color]
+        color_starts[color] = previous
+        previous = cursor
+    for color in range(num_colors + 1, color_budget + 1):
+        color_starts[color] = previous
+    num_colors_out[0] = num_colors
+
+
+@wp.kernel(enable_backward=False)
+def color_rigid_bodies_from_contacts_parallel(
+    body_count: int,
+    color_budget: int,
+    joint_color_count: int,
+    body_inv_mass: wp.array[float],
+    body_uses_pair_contacts: wp.array[wp.int32],
+    body_schedule_active: wp.array[wp.int32],
+    body_contact_buffer_pre_alloc: int,
+    body_contact_counts: wp.array[wp.int32],
+    body_contact_indices: wp.array[wp.int32],
+    rigid_contact_shape0: wp.array[int],
+    rigid_contact_shape1: wp.array[int],
+    shape_body: wp.array[wp.int32],
+    body_joint_colors: wp.array[wp.int32],
+    body_colors: wp.array[wp.int32],
+    body_ids_by_color: wp.array[wp.int32],
+    color_starts: wp.array[wp.int32],
+    num_colors_out: wp.array[wp.int32],
+    overflow_count: wp.array[wp.int32],
+    uses_high_subcolors: wp.array[wp.int32],
+):
+    """Warm-start and deterministically repair contact colors with one CUDA block."""
+    lane = wp.tid()
+    block_size = wp.int32(512)
+    subcolor_count = color_budget // joint_color_count
+
+    if lane == 0:
+        num_colors_out[0] = 0
+        overflow_count[0] = 0
+        uses_high_subcolors[0] = 0
+        color_starts[body_count] = 0
+    _sync_cuda_block()
+
+    # Retain colors that remain valid. Invalidating only the higher-id endpoint
+    # leaves a valid colored subgraph and makes repair deterministic.
+    for body in range(lane, body_count, block_size):
+        retained = wp.int32(-1)
+        base_color = body_joint_colors[body]
+        color = body_colors[body]
+        if (
+            body_schedule_active[body] != 0
+            and body_inv_mass[body] > 0.0
+            and base_color >= 0
+            and color >= 0
+            and color < color_budget
+            and color // subcolor_count == base_color
+        ):
+            retained = color
+            count = wp.min(body_contact_counts[body], body_contact_buffer_pre_alloc)
+            for slot in range(count):
+                contact = body_contact_indices[body * body_contact_buffer_pre_alloc + slot]
+                other = _per_body_contact_neighbor(
+                    body,
+                    contact,
+                    rigid_contact_shape0,
+                    rigid_contact_shape1,
+                    shape_body,
+                    body_uses_pair_contacts,
+                )
+                if (
+                    other >= 0
+                    and other < body
+                    and body_schedule_active[other] != 0
+                    and body_inv_mass[other] > 0.0
+                    and body_colors[other] == color
+                ):
+                    retained = -1
+        body_ids_by_color[body] = retained
+    _sync_cuda_block()
+
+    for body in range(lane, body_count, block_size):
+        body_colors[body] = body_ids_by_color[body]
+        body_ids_by_color[body] = -1
+        if body_schedule_active[body] != 0 and body_inv_mass[body] > 0.0 and body_colors[body] < 0:
+            wp.atomic_add(color_starts, body_count, 1)
+        elif body_colors[body] >= 0:
+            wp.atomic_max(num_colors_out, 0, body_colors[body] + 1)
+            base_color = body_joint_colors[body]
+            if body_colors[body] - base_color * subcolor_count >= 4:
+                wp.atomic_max(uses_high_subcolors, 0, 1)
+    _sync_cuda_block()
+
+    # Direct each edge from the larger body id to the smaller.  Ready bodies
+    # have all lower-id neighbors colored and can commit concurrently while
+    # reproducing ascending greedy decisions.
+    while color_starts[body_count] > 0:
+        for body in range(lane, body_count, block_size):
+            proposed = wp.int32(-1)
+            if body_schedule_active[body] != 0 and body_inv_mass[body] > 0.0 and body_colors[body] < 0:
+                ready = bool(True)
+                base_color = body_joint_colors[body]
+                first_color = base_color * subcolor_count
+                used_mask = wp.int32(0)
+                count = wp.min(body_contact_counts[body], body_contact_buffer_pre_alloc)
+                for slot in range(count):
+                    contact = body_contact_indices[body * body_contact_buffer_pre_alloc + slot]
+                    other = _per_body_contact_neighbor(
+                        body,
+                        contact,
+                        rigid_contact_shape0,
+                        rigid_contact_shape1,
+                        shape_body,
+                        body_uses_pair_contacts,
+                    )
+                    if (
+                        other >= 0
+                        and other < body
+                        and body_schedule_active[other] != 0
+                        and body_inv_mass[other] > 0.0
+                        and body_joint_colors[other] == base_color
+                        and body_colors[other] < 0
+                    ):
+                        ready = False
+
+                    if (
+                        other >= 0
+                        and body_schedule_active[other] != 0
+                        and body_inv_mass[other] > 0.0
+                        and body_colors[other] >= first_color
+                        and body_colors[other] < first_color + subcolor_count
+                    ):
+                        used_mask |= wp.int32(1) << (body_colors[other] - first_color)
+
+                if ready:
+                    color = first_color
+                    found = bool(False)
+                    while color < first_color + subcolor_count and not found:
+                        if (used_mask & (wp.int32(1) << (color - first_color))) == 0:
+                            found = True
+                        else:
+                            color += 1
+                    if found:
+                        proposed = color
+                    else:
+                        proposed = first_color
+                        wp.atomic_add(overflow_count, 0, 1)
+            body_ids_by_color[body] = proposed
+        _sync_cuda_block()
+
+        for body in range(lane, body_count, block_size):
+            color = body_ids_by_color[body]
+            if color >= 0:
+                body_colors[body] = color
+                body_ids_by_color[body] = -1
+                wp.atomic_add(color_starts, body_count, -1)
+                wp.atomic_max(num_colors_out, 0, color + 1)
+                base_color = body_joint_colors[body]
+                if color - base_color * subcolor_count >= 4:
+                    wp.atomic_max(uses_high_subcolors, 0, 1)
+        _sync_cuda_block()
+
+    if lane == 0:
+        num_colors = num_colors_out[0]
+        for color in range(color_budget + 1):
+            color_starts[color] = 0
+        for body in range(body_count):
+            color = body_colors[body]
+            if color >= 0:
+                color_starts[color + 1] += 1
+        for color in range(num_colors):
+            color_starts[color + 1] += color_starts[color]
+        for body in range(body_count):
+            color = body_colors[body]
+            if color >= 0:
+                slot = color_starts[color]
+                body_ids_by_color[slot] = body
+                color_starts[color] = slot + 1
+
+        previous = wp.int32(0)
+        for color in range(num_colors + 1):
+            cursor = color_starts[color]
+            color_starts[color] = previous
+            previous = cursor
+        for color in range(num_colors + 1, color_budget + 1):
+            color_starts[color] = previous
+
+
 @wp.kernel
 def build_body_particle_contact_lists(
     body_particle_contact_count: wp.array[int],
@@ -5097,10 +5488,14 @@ def compute_rod_dahl_parameters(
 def accumulate_body_body_contacts_per_body(
     dt: float,
     color_group: wp.array[wp.int32],
+    dynamic_body_ids: wp.array[wp.int32],
+    dynamic_color_starts: wp.array[wp.int32],
+    active_dynamic_color: int,
     body_q_prev: wp.array[wp.transform],
     body_q: wp.array[wp.transform],
     body_com: wp.array[wp.vec3],
     body_inv_mass: wp.array[float],
+    body_uses_pair_contacts: wp.array[wp.int32],
     friction_epsilon: float,
     contact_penalty_k: wp.array[float],
     contact_normal_rho: wp.array[float],
@@ -5135,22 +5530,24 @@ def accumulate_body_body_contacts_per_body(
 ):
     """
     Per-body contact force/Hessian accumulation (compliant ALM or legacy penalty)
-    with _NUM_CONTACT_THREADS_PER_BODY strided threads.
+    with a block-cooperative tile reduction and one writer per body.
     """
-    tid = wp.tid()
-    body_idx_in_group = tid // _NUM_CONTACT_THREADS_PER_BODY
-    thread_id_within_body = tid % _NUM_CONTACT_THREADS_PER_BODY
+    body_idx_in_group, thread_id_within_body = wp.tid()
+    threads_per_body = wp.block_dim()
 
-    if body_idx_in_group >= color_group.shape[0]:
+    body_id = _body_id_for_color_slot(
+        body_idx_in_group, color_group, dynamic_body_ids, dynamic_color_starts, active_dynamic_color
+    )
+    if body_id < 0:
         return
-
-    body_id = color_group[body_idx_in_group]
     if body_inv_mass[body_id] <= 0.0:
         return
 
     num_contacts = body_contact_counts[body_id]
     if num_contacts > body_contact_buffer_pre_alloc:
         num_contacts = body_contact_buffer_pre_alloc
+    if num_contacts == 0:
+        return
 
     contact_count = rigid_contact_count[0]
 
@@ -5164,7 +5561,7 @@ def accumulate_body_body_contacts_per_body(
     while i < num_contacts:
         contact_idx = body_contact_indices[body_id * body_contact_buffer_pre_alloc + i]
         if contact_idx >= contact_count:
-            i += _NUM_CONTACT_THREADS_PER_BODY
+            i += threads_per_body
             continue
 
         s0 = rigid_contact_shape0[contact_idx]
@@ -5173,7 +5570,13 @@ def accumulate_body_body_contacts_per_body(
         b1 = shape_body[s1] if s1 >= 0 else -1
 
         if b0 != body_id and b1 != body_id:
-            i += _NUM_CONTACT_THREADS_PER_BODY
+            i += threads_per_body
+            continue
+
+        pair0 = b0 < 0 or body_uses_pair_contacts[b0] != 0
+        pair1 = b1 < 0 or body_uses_pair_contacts[b1] != 0
+        if pair0 and pair1:
+            i += threads_per_body
             continue
 
         cp0_local = rigid_contact_point0[contact_idx]
@@ -5209,7 +5612,7 @@ def accumulate_body_body_contacts_per_body(
             friction_c0 = (1.0 - stab_alpha) * (C0_vec - contact_normal * C0_n)
 
         if C_n <= _SMALL_LENGTH_EPS and lam_n <= 0.0:
-            i += _NUM_CONTACT_THREADS_PER_BODY
+            i += threads_per_body
             continue
 
         normal_primal_k, lambda_n_eff = _material_force_terms(
@@ -5217,7 +5620,7 @@ def accumulate_body_body_contacts_per_body(
         )
         f_n_check = normal_primal_k * C_eff + lambda_n_eff
         if f_n_check <= 0.0 and lam_n <= 0.0:
-            i += _NUM_CONTACT_THREADS_PER_BODY
+            i += threads_per_body
             continue
 
         contact_kd = contact_material_kd[contact_idx]
@@ -5272,13 +5675,22 @@ def accumulate_body_body_contacts_per_body(
             h_al_acc += h_al_1
             h_aa_acc += h_aa_1
 
-        i += _NUM_CONTACT_THREADS_PER_BODY
+        i += threads_per_body
 
-    wp.atomic_add(body_forces, body_id, force_acc)
-    wp.atomic_add(body_torques, body_id, torque_acc)
-    wp.atomic_add(body_hessian_ll, body_id, h_ll_acc)
-    wp.atomic_add(body_hessian_al, body_id, h_al_acc)
-    wp.atomic_add(body_hessian_aa, body_id, h_aa_acc)
+    # Each block owns one body; CPU tiles have one lane and sum the serial result.
+    force_acc = wp.tile_sum(wp.tile(force_acc, preserve_type=True))[0]
+    torque_acc = wp.tile_sum(wp.tile(torque_acc, preserve_type=True))[0]
+    h_ll_acc = wp.tile_sum(wp.tile(h_ll_acc, preserve_type=True))[0]
+    h_al_acc = wp.tile_sum(wp.tile(h_al_acc, preserve_type=True))[0]
+    h_aa_acc = wp.tile_sum(wp.tile(h_aa_acc, preserve_type=True))[0]
+
+    if thread_id_within_body == 0:
+        # Explicit assignment avoids Warp translating array += into float atomics.
+        body_forces[body_id] = body_forces[body_id] + force_acc
+        body_torques[body_id] = body_torques[body_id] + torque_acc
+        body_hessian_ll[body_id] = body_hessian_ll[body_id] + h_ll_acc
+        body_hessian_al[body_id] = body_hessian_al[body_id] + h_al_acc
+        body_hessian_aa[body_id] = body_hessian_aa[body_id] + h_aa_acc
 
 
 @wp.kernel
@@ -5438,6 +5850,9 @@ def compute_rigid_contact_forces(
 def accumulate_body_particle_contacts_per_body(
     dt: float,
     color_group: wp.array[wp.int32],
+    dynamic_body_ids: wp.array[wp.int32],
+    dynamic_color_starts: wp.array[wp.int32],
+    active_dynamic_color: int,
     # Particle state
     particle_q: wp.array[wp.vec3],
     particle_q_prev: wp.array[wp.vec3],
@@ -5495,10 +5910,11 @@ def accumulate_body_particle_contacts_per_body(
     body_idx_in_group = tid // _NUM_CONTACT_THREADS_PER_BODY
     thread_id_within_body = tid % _NUM_CONTACT_THREADS_PER_BODY
 
-    if body_idx_in_group >= color_group.shape[0]:
+    body_id = _body_id_for_color_slot(
+        body_idx_in_group, color_group, dynamic_body_ids, dynamic_color_starts, active_dynamic_color
+    )
+    if body_id < 0:
         return
-
-    body_id = color_group[body_idx_in_group]
     if body_inv_mass[body_id] <= 0.0:
         return
 
@@ -5615,6 +6031,9 @@ def accumulate_body_particle_contacts_per_body(
 def solve_rigid_body(
     dt: float,
     body_ids_in_color: wp.array[wp.int32],
+    dynamic_body_ids: wp.array[wp.int32],
+    dynamic_color_starts: wp.array[wp.int32],
+    active_dynamic_color: int,
     body_q: wp.array[wp.transform],
     body_q_prev: wp.array[wp.transform],
     body_q_rest: wp.array[wp.transform],
@@ -5714,7 +6133,11 @@ def solve_rigid_body(
       - All forces, torques, and Hessian blocks are expressed in the world frame.
     """
     tid = wp.tid()
-    body_index = body_ids_in_color[tid]
+    body_index = _body_id_for_color_slot(
+        tid, body_ids_in_color, dynamic_body_ids, dynamic_color_starts, active_dynamic_color
+    )
+    if body_index < 0:
+        return
 
     q_current = body_q[body_index]
 
@@ -6496,6 +6919,7 @@ def update_duals_body_body_contacts(
     rigid_contact_margin0: wp.array[float],
     rigid_contact_margin1: wp.array[float],
     shape_body: wp.array[int],
+    body_uses_pair_contacts: wp.array[wp.int32],
     body_q: wp.array[wp.transform],
     body_q_prev: wp.array[wp.transform],
     contact_material_mu: wp.array[float],
@@ -6524,6 +6948,11 @@ def update_duals_body_body_contacts(
     body_id_1 = shape_body[shape_id_1]
 
     if body_id_0 < 0 and body_id_1 < 0:
+        return
+
+    pair0 = body_id_0 < 0 or body_uses_pair_contacts[body_id_0] != 0
+    pair1 = body_id_1 < 0 or body_uses_pair_contacts[body_id_1] != 0
+    if pair0 and pair1:
         return
 
     cp0_local = rigid_contact_point0[idx]

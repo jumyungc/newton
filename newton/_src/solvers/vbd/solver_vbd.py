@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import warp as wp
@@ -35,7 +35,7 @@ from ..coupled.interface import CouplingInterface
 from ..solver import SolverBase
 from ..xpbd import kernels as xpbd_kernels
 from ..xpbd.kernels import apply_joint_forces, project_joint_mimics
-from . import particle_vbd_kernels, rigid_vbd_kernels, vbd_coupling_kernels
+from . import particle_vbd_kernels, rigid_pair_contact, rigid_vbd_kernels, vbd_coupling_kernels
 from .particle_vbd_kernels import (
     NUM_THREADS_PER_COLLISION_PRIMITIVE,
     TILE_SIZE_TRI_MESH_ELASTICITY_SOLVE,
@@ -54,6 +54,13 @@ from .particle_vbd_kernels import (
     solve_elasticity,
     update_velocity,
 )
+from .rigid_pair_contact import (
+    RigidPairContact,
+    accumulate_constraint_contact_forces_per_body,
+    query_constraint_contact_forces,
+    select_rigid_pair_block_dim,
+    sort_constraint_contact_lists,
+)
 from .rigid_vbd_kernels import (
     _NUM_CONTACT_THREADS_PER_BODY,
     RigidContactHistory,
@@ -62,9 +69,12 @@ from .rigid_vbd_kernels import (
     _fill_adjacent_joints,
     accumulate_body_body_contacts_per_body,
     accumulate_body_particle_contacts_per_body,
+    analyze_rigid_body_contact_refinement,
     build_body_body_contact_lists,
     build_body_particle_contact_lists,
     check_contact_overflow,
+    color_rigid_bodies_from_contacts,
+    color_rigid_bodies_from_contacts_parallel,
     compute_rigid_contact_forces,
     compute_rod_dahl_parameters,
     forward_step_rigid_bodies,
@@ -114,6 +124,10 @@ def _is_tet_only_elasticity_model(model: Model) -> bool:
             return False
 
     return True
+
+
+_RIGID_CONTACT_MAX_SUBCOLORS = 8
+_RIGID_CONTACT_MAX_DYNAMIC_COLORS = 32
 
 
 def _validate_compliant_alm_material_coefficient(
@@ -342,6 +356,7 @@ class SolverVBD(SolverBase, CouplingInterface):
         rigid_contact_k_start: float = 1.0e2,  # Legacy AVBD contact penalty ramp seed
         rigid_body_contact_buffer_size: int = 64,  # Per-body body-body contact list capacity
         rigid_body_particle_contact_buffer_size: int = 256,  # Per-body soft-contact list capacity (particle + edge/face)
+        rigid_contact_coloring: Literal["auto", "model", "refined"] = "auto",
         # Rigid body - joints
         rigid_joint_linear_ke: float = 1.0e5,  # Structural linear joint stiffness
         rigid_joint_angular_ke: float = 1.0e5,  # Structural angular joint stiffness
@@ -516,6 +531,20 @@ class SolverVBD(SolverBase, CouplingInterface):
             rigid_body_contact_buffer_size: Max body-body contacts per rigid body for per-body contact lists.
             rigid_body_particle_contact_buffer_size: Max body-particle soft contacts tracked per rigid
                 body, covering both particle-vs-surface and full-surface edge/face contacts.
+            rigid_contact_coloring: Rigid-contact scheduling policy. ``"auto"`` uses exact
+                pair-manifold coloring for joint-free collision worlds when numeric contact
+                history is enabled; otherwise it uses per-body ALM with the same body-color
+                policy as structural worlds. It refines authored body colors only when the
+                same-color contact graph branches. ``"model"`` always uses authored colors
+                for per-body contact solves; same-color contacts remain Jacobi and may
+                converge poorly in dense contact. ``"refined"`` always
+                applies joint-preserving refinement, bounded to eight subcolors per authored
+                color and 32 total slots (or the authored count if larger). Exhausted subcolors
+                retain joint independence but use Jacobi contact updates. Without CUDA
+                conditional graph support, captured ``"auto"`` uses this fixed refined schedule.
+                The automatic topology threshold is a performance heuristic, not a convergence
+                guarantee. Deterministic contact ordering also requires deterministic collision
+                generation and sufficient per-body contact-list capacity.
             rigid_joint_linear_ke: Material stiffness for non-rod structural linear joint slots [N/m].
             rigid_joint_angular_ke: Material stiffness for non-rod structural angular joint slots [N·m/rad].
             rigid_joint_linear_k_start: Linear penalty seed for legacy AVBD ramping [N/m]. Used when
@@ -763,6 +792,17 @@ class SolverVBD(SolverBase, CouplingInterface):
         options = {"deterministic": effective_deterministic, "deterministic_max_records": 0}
         if integrates_rigid_bodies:
             self._set_module_options(options, module=rigid_vbd_kernels)
+        self._use_rigid_pair_contacts = integrates_rigid_bodies
+        if self._use_rigid_pair_contacts:
+            # Pair counters only permute independent work within a color; serial
+            # overflow and contact reductions use fixed ordering independently.
+            pair_deterministic = effective_deterministic
+            if pair_deterministic == wp.DeterministicMode.RUN_TO_RUN:
+                pair_deterministic = wp.DeterministicMode.NOT_GUARANTEED
+            self._set_module_options(
+                {"deterministic": pair_deterministic, "deterministic_max_records": 0},
+                module=rigid_pair_contact,
+            )
         if model.joint_count > 0:
             self._set_module_options(
                 {"deterministic": effective_deterministic, "deterministic_max_records": 0},
@@ -779,6 +819,7 @@ class SolverVBD(SolverBase, CouplingInterface):
         # participate in particle-rigid interaction on the particle side.
         self.integrate_with_external_rigid_solver = integrate_with_external_rigid_solver
         self._integrates_rigid_bodies = integrates_rigid_bodies
+        self._rigid_pair_contacts = None
 
         # Initialize particle system
         self._init_particle_system(
@@ -813,6 +854,7 @@ class SolverVBD(SolverBase, CouplingInterface):
             rigid_contact_k_start,
             rigid_body_contact_buffer_size,
             rigid_body_particle_contact_buffer_size,
+            rigid_contact_coloring,
             rigid_joint_linear_ke,
             rigid_joint_angular_ke,
             rigid_joint_linear_k_start,
@@ -953,6 +995,7 @@ class SolverVBD(SolverBase, CouplingInterface):
         rigid_contact_k_start: float,
         rigid_body_contact_buffer_size: int,
         rigid_body_particle_contact_buffer_size: int,
+        rigid_contact_coloring: Literal["auto", "model", "refined"],
         rigid_joint_linear_ke: float,
         rigid_joint_angular_ke: float,
         rigid_joint_linear_k_start: float,
@@ -981,6 +1024,11 @@ class SolverVBD(SolverBase, CouplingInterface):
             raise ValueError(f"rigid_avbd_gamma must be in [0, 1], got {rigid_avbd_gamma}")
         if rigid_contact_k_start < 0:
             raise ValueError(f"rigid_contact_k_start must be >= 0, got {rigid_contact_k_start}")
+        if rigid_contact_coloring not in ("auto", "model", "refined"):
+            raise ValueError(
+                f"rigid_contact_coloring must be one of 'auto', 'model', or 'refined', got {rigid_contact_coloring!r}"
+            )
+        self.rigid_contact_coloring = rigid_contact_coloring
         if rigid_joint_linear_k_start < 0:
             raise ValueError(f"rigid_joint_linear_k_start must be >= 0, got {rigid_joint_linear_k_start}")
         if rigid_joint_angular_k_start < 0:
@@ -1095,6 +1143,7 @@ class SolverVBD(SolverBase, CouplingInterface):
 
             # Joint constraint layout, legacy penalty state, and material data.
             self._init_joint_constraint_layout()
+            self._init_rigid_contact_partition()
             (
                 self.joint_penalty_k,
                 self.joint_penalty_k_min,
@@ -1191,6 +1240,22 @@ class SolverVBD(SolverBase, CouplingInterface):
         # Kinematic body support: create effective inv_mass / inv_inertia arrays
         # with kinematic bodies zeroed out.
         self._init_kinematic_state()
+        if self._integrates_rigid_bodies:
+            self._init_rigid_contact_coloring()
+        else:
+            self._rigid_body_refinement_supported = False
+
+        if self._use_rigid_pair_contacts:
+            self._rigid_pair_contacts = RigidPairContact(
+                model,
+                self.body_inv_mass_effective,
+                self.body_inv_inertia_effective,
+                self.body_uses_pair_contacts,
+                self._rigid_pair_body_count,
+            )
+        self._pair_contacts_enabled_this_step = self._rigid_pair_contacts is not None and (
+            not self.rigid_compliant_alm or self.rigid_contact_history
+        )
 
         # Pre-allocate body-body contact buffers when the contact capacity is
         # already known; otherwise lazy allocation handles the first step.
@@ -1544,6 +1609,8 @@ class SolverVBD(SolverBase, CouplingInterface):
         self.body_body_contact_tangent_rho = wp.zeros(rigid_contact_max, dtype=float, device=self.device)
         self.body_body_contact_lambda = wp.zeros(rigid_contact_max, dtype=wp.vec3, device=self.device)
         self.body_body_contact_C0 = wp.zeros(rigid_contact_max, dtype=wp.vec3, device=self.device)
+        if self._rigid_pair_contacts is not None:
+            self._rigid_pair_contacts.resize(rigid_contact_max)
 
     def _validate_compliant_contact_materials(self) -> None:
         """Validate physical contact coefficients consumed by compliant ALM."""
@@ -1631,6 +1698,172 @@ class SolverVBD(SolverBase, CouplingInterface):
         cpu = arr.to("cpu")
         result = cpu.numpy() if hasattr(cpu, "numpy") else np.asarray(cpu)
         return result if dtype is None else result.astype(dtype, copy=False)
+
+    def _init_rigid_contact_partition(self) -> None:
+        """Partition rigid bodies between pair-contact and unified VBD contact solves.
+
+        Collision-isolated worlds containing a potentially active structural
+        joint stay in the unified per-body VBD solve. Bodies in other worlds may
+        use exact pair-colored contacts. Global bodies can collide with every
+        local world, so their presence conservatively keeps all bodies per-body.
+        The topology and formulation/history partition is fixed at construction,
+        so it remains valid if ``joint_enabled`` changes during graph replay.
+        """
+        # Compliant contacts without numeric history use body ALM. Include them
+        # in its schedule so auto/refined coloring also applies to this fallback.
+        pair_supported = not self.rigid_compliant_alm or self.rigid_contact_history
+        uses_pair = np.full(self.model.body_count, int(pair_supported), dtype=np.int32)
+        if self.model.joint_count > 0:
+            joint_type = self._to_numpy(self.model.joint_type, dtype=int)
+            joint_parent = self._to_numpy(self.model.joint_parent, dtype=int)
+            joint_child = self._to_numpy(self.model.joint_child, dtype=int)
+            constrained = joint_type != JointType.FREE
+            endpoints = np.concatenate((joint_parent[constrained], joint_child[constrained]))
+            endpoints = endpoints[(endpoints >= 0) & (endpoints < self.model.body_count)]
+            if endpoints.size > 0:
+                body_world = self._to_numpy(self.model.body_world, dtype=np.int32)
+                structural_worlds = np.unique(body_world[endpoints])
+                if np.any(body_world < 0) or np.any(structural_worlds < 0):
+                    uses_pair.fill(0)
+                else:
+                    uses_pair[np.isin(body_world, structural_worlds)] = 0
+
+        self.body_uses_pair_contacts = wp.array(uses_pair, dtype=wp.int32, device=self.device)
+        self._body_uses_no_pair_contacts = wp.zeros_like(self.body_uses_pair_contacts)
+        self._rigid_pair_body_count = int(np.count_nonzero(uses_pair))
+        self._use_rigid_pair_contacts = bool(np.any(uses_pair))
+        self._has_per_body_rigid_contacts = bool(np.any(uses_pair == 0))
+        self._structural_body_color_groups = []
+        for color_group in self.model.body_color_groups:
+            body_ids = self._to_numpy(color_group, dtype=np.int32)
+            body_ids = body_ids[uses_pair[body_ids] == 0]
+            if body_ids.size > 0:
+                self._structural_body_color_groups.append(wp.array(body_ids, dtype=wp.int32, device=self.device))
+
+    def _init_rigid_contact_coloring(self) -> None:
+        """Allocate the fixed-capacity device schedule for body-contact refinement."""
+        model = self.model
+        joint_color_count = len(model.body_color_groups)
+        self._rigid_body_joint_color_count = joint_color_count
+
+        # Bound graph size and launch count independently of runtime contacts.
+        # Eight subcolors covers the dense contact gates while a total cap keeps
+        # CUDA-graph size controlled for unusually large authored palettes.
+        subcolor_count = min(
+            _RIGID_CONTACT_MAX_SUBCOLORS,
+            max(1, _RIGID_CONTACT_MAX_DYNAMIC_COLORS // max(1, joint_color_count)),
+        )
+        self._rigid_body_contact_subcolor_count = subcolor_count
+        self._rigid_body_color_budget = max(1, joint_color_count * subcolor_count)
+
+        base_colors = np.full(model.body_count, -1, dtype=np.int32)
+        for color, group in enumerate(model.body_color_groups):
+            base_colors[self._to_numpy(group, dtype=np.int32)] = color
+
+        inv_mass = self._to_numpy(self.body_inv_mass_effective, dtype=float)
+        uses_pair = self._to_numpy(self.body_uses_pair_contacts, dtype=np.int32)
+        # Pair-routed bodies need no per-body rigid-contact sweep. They remain in
+        # the schedule only when body-particle coupling still needs their block.
+        schedule_active = (uses_pair == 0) | (model.particle_count > 0)
+        schedule_active &= (inv_mass > 0.0) & (base_colors >= 0)
+        active_int = schedule_active.astype(np.int32)
+
+        colors = np.where(schedule_active, base_colors * subcolor_count, -1).astype(np.int32)
+        ids = np.empty(model.body_count, dtype=np.int32)
+        starts = np.zeros(max(model.body_count + 1, self._rigid_body_color_budget + 1), dtype=np.int32)
+        cursor = 0
+        max_group_size = 1
+        for color in range(self._rigid_body_color_budget):
+            group_ids = np.flatnonzero(colors == color).astype(np.int32)
+            count = int(group_ids.size)
+            if count > 0:
+                ids[cursor : cursor + count] = group_ids
+            cursor += count
+            starts[color + 1] = cursor
+            max_group_size = max(max_group_size, count)
+        starts[self._rigid_body_color_budget + 1 :] = cursor
+
+        self._rigid_body_schedule_active = wp.array(active_int, dtype=wp.int32, device=self.device)
+        self._rigid_body_colors = wp.array(colors, dtype=wp.int32, device=self.device)
+        self._rigid_body_ids_by_color = wp.array(ids, dtype=wp.int32, device=self.device)
+        self._rigid_body_color_starts = wp.array(starts, dtype=wp.int32, device=self.device)
+        initial_num_colors = 0 if cursor == 0 else int(np.max(colors)) + 1
+        self._rigid_body_num_colors = wp.array([initial_num_colors], dtype=wp.int32, device=self.device)
+        self._rigid_body_refinement_overflow = wp.zeros(1, dtype=wp.int32, device=self.device)
+        self._rigid_body_refinement_uses_high_subcolors = wp.zeros(1, dtype=wp.int32, device=self.device)
+        self._rigid_body_max_same_color_degree = wp.zeros(1, dtype=wp.int32, device=self.device)
+        self._rigid_body_refinement_active = wp.zeros(1, dtype=wp.int32, device=self.device)
+        self._rigid_body_dynamic_launch_dim = max_group_size
+        self._rigid_body_refinement_supported = bool(
+            self._has_per_body_rigid_contacts and subcolor_count > 1 and np.any(schedule_active)
+        )
+
+    def _update_rigid_contact_coloring(self, contacts: Contacts) -> None:
+        """Analyze fresh contacts and select the per-body scheduling path."""
+        self._rigid_body_max_same_color_degree.zero_()
+        self._rigid_body_refinement_active.zero_()
+        if not self._rigid_body_refinement_supported or self.rigid_contact_coloring == "model":
+            return
+
+        wp.launch(
+            kernel=analyze_rigid_body_contact_refinement,
+            dim=self.model.body_count,
+            inputs=[
+                self.body_body_contact_buffer_pre_alloc,
+                self.body_body_contact_counts,
+                self.body_body_contact_indices,
+                contacts.rigid_contact_shape0,
+                contacts.rigid_contact_shape1,
+                self.model.shape_body,
+                self.body_inv_mass_effective,
+                self.body_uses_pair_contacts,
+                self._rigid_body_schedule_active,
+                self.model.body_colors,
+            ],
+            outputs=[
+                self._rigid_body_max_same_color_degree,
+                self._rigid_body_refinement_active,
+            ],
+            device=self.device,
+        )
+        if self.rigid_contact_coloring == "refined":
+            self._rigid_body_refinement_active.fill_(1)
+
+    def _rebuild_rigid_contact_coloring(self, contacts: Contacts) -> None:
+        """Build the fixed-capacity joint-preserving schedule on the device."""
+        color_kernel = (
+            color_rigid_bodies_from_contacts_parallel if self.device.is_cuda else color_rigid_bodies_from_contacts
+        )
+        wp.launch(
+            kernel=color_kernel,
+            dim=512 if self.device.is_cuda else 1,
+            inputs=[
+                self.model.body_count,
+                self._rigid_body_color_budget,
+                self._rigid_body_joint_color_count,
+                self.body_inv_mass_effective,
+                self.body_uses_pair_contacts,
+                self._rigid_body_schedule_active,
+                self.body_body_contact_buffer_pre_alloc,
+                self.body_body_contact_counts,
+                self.body_body_contact_indices,
+                contacts.rigid_contact_shape0,
+                contacts.rigid_contact_shape1,
+                self.model.shape_body,
+                self.model.body_colors,
+            ],
+            outputs=[
+                self._rigid_body_colors,
+                self._rigid_body_ids_by_color,
+                self._rigid_body_color_starts,
+                self._rigid_body_num_colors,
+                self._rigid_body_refinement_overflow,
+                self._rigid_body_refinement_uses_high_subcolors,
+            ],
+            device=self.device,
+            block_dim=512 if self.device.is_cuda else 1,
+            max_blocks=1,
+        )
 
     def _init_joint_constraint_layout(self) -> None:
         """Initialize VBD-owned joint constraint indexing.
@@ -2330,10 +2563,24 @@ class SolverVBD(SolverBase, CouplingInterface):
                 self._run_rigid_collision(state_in, dt)
                 update_rigid = True
 
+        pair_contacts_were_enabled = self._pair_contacts_enabled_this_step
+        has_in_iteration_rigid_detection = (
+            self._rigid_mode_this_step == _Frequency.ITERATIONS and self._rigid_freq_this_step <= self.iterations
+        )
+        # The compliant constraint-block solve needs persistent row identity for
+        # a well-resolved Coulomb multiplier across small time steps.  Without
+        # numeric contact history, preserve the established per-body ALM path.
+        pair_contact_state_supported = not self.rigid_compliant_alm or self.rigid_contact_history
+        self._pair_contacts_enabled_this_step = self._rigid_pair_contacts is not None and (
+            pair_contact_state_supported and (self.rigid_compliant_alm or not has_in_iteration_rigid_detection)
+        )
+        if self._pair_contacts_enabled_this_step and not pair_contacts_were_enabled:
+            update_rigid = True
+
         if control is None:
             control = self.model.control(clone_variables=False)
 
-        self._initialize_rigid_bodies(state_in, control, contacts, dt, update_rigid)
+        contacts_refreshed = self._initialize_rigid_bodies(state_in, control, contacts, dt, update_rigid)
         self._initialize_particles(state_in, state_out, dt)
 
         if self._rigid_mode_this_step == _Frequency.PRE_POST_INIT:
@@ -2342,22 +2589,89 @@ class SolverVBD(SolverBase, CouplingInterface):
             self._refresh_rigid_contact_state(contacts, refresh=True)
             self._step_body_body_contact_frame(contacts, iterate.body_q, dt, 1.0, 1.0)
             self._refresh_body_particle_contact_state(contacts, refresh=True)
+            contacts_refreshed = True
 
-        for iter_num in range(self.iterations):
-            if self._rigid_mode_this_step == _Frequency.ITERATIONS and (iter_num + 1) % self._rigid_freq_this_step == 0:
-                # Re-detect all pipeline contacts at the current iterate. This
-                # must also run without internally integrated bodies because
-                # the pipeline owns particle-shape contacts. In-flight rigid
-                # lambdas are snapshotted first so matching can carry them onto
-                # the refreshed contact set.
-                self._snapshot_rigid_contact_history(contacts, force=True)
-                iterate = self._rigid_iterate_view(state_in, state_out)
-                self._run_rigid_collision(iterate, dt)
-                self._refresh_rigid_contact_state(contacts, refresh=True, restore_history=True)
-                self._step_body_body_contact_frame(contacts, iterate.body_q, dt, 1.0, 1.0)
-                self._refresh_body_particle_contact_state(contacts, refresh=True)
-            self._solve_rigid_body_iteration(state_in, state_out, control, contacts, dt)
-            self._solve_particle_iteration(state_in, state_out, contacts, dt, iter_num)
+        pair_primal_seed = self.rigid_contact_history or not update_rigid
+
+        def solve_iterations(
+            use_refined_body_colors: bool,
+            refined_subcolor_count: int = _RIGID_CONTACT_MAX_SUBCOLORS,
+        ) -> None:
+            if use_refined_body_colors and contacts_refreshed:
+                self._rebuild_rigid_contact_coloring(contacts)
+
+            for iter_num in range(self.iterations):
+                if (
+                    self._rigid_mode_this_step == _Frequency.ITERATIONS
+                    and (iter_num + 1) % self._rigid_freq_this_step == 0
+                ):
+                    # Re-detect all pipeline contacts at the current iterate. This
+                    # must also run without internally integrated bodies because
+                    # the pipeline owns particle-shape contacts. In-flight rigid
+                    # lambdas are snapshotted first so matching can carry them onto
+                    # the refreshed contact set.
+                    self._snapshot_rigid_contact_history(contacts, force=True)
+                    iterate = self._rigid_iterate_view(state_in, state_out)
+                    self._run_rigid_collision(iterate, dt)
+                    self._refresh_rigid_contact_state(contacts, refresh=True, restore_history=True)
+                    self._step_body_body_contact_frame(contacts, iterate.body_q, dt, 1.0, 1.0)
+                    self._refresh_body_particle_contact_state(contacts, refresh=True)
+                    if use_refined_body_colors:
+                        self._rebuild_rigid_contact_coloring(contacts)
+
+                self._solve_rigid_body_iteration(
+                    state_in,
+                    state_out,
+                    control,
+                    contacts,
+                    dt,
+                    include_pair_primal=pair_primal_seed and iter_num == 0,
+                    use_refined_body_colors=use_refined_body_colors,
+                    refined_subcolor_count=refined_subcolor_count,
+                )
+                self._solve_particle_iteration(state_in, state_out, contacts, dt, iter_num)
+
+        can_refine_contacts = contacts is not None and self._rigid_body_refinement_supported
+        contacts_change_during_iterations = self._rigid_mode_this_step == _Frequency.ITERATIONS
+        can_branch_in_capture = (
+            not self.device.is_capturing or not self.device.is_cuda or wp.is_conditional_graph_supported()
+        )
+        if (
+            can_refine_contacts
+            and self.rigid_contact_coloring == "auto"
+            and can_branch_in_capture
+            and not contacts_change_during_iterations
+        ):
+            # CUDA 12.4+ records both fixed launch topologies once and selects
+            # the graph body entirely on-device at replay time.
+            wp.capture_if(
+                self._rigid_body_refinement_active,
+                on_true=lambda: wp.capture_if(
+                    self._rigid_body_refinement_uses_high_subcolors,
+                    on_true=lambda: solve_iterations(True, _RIGID_CONTACT_MAX_SUBCOLORS),
+                    on_false=lambda: solve_iterations(True, 4),
+                ),
+                on_false=lambda: solve_iterations(False),
+            )
+        else:
+            # Iteration-frequency collision can change the contact graph between
+            # sweeps. Keep one fixed refined topology in that mode so every
+            # refreshed graph remains valid inside capture.
+            use_refinement = can_refine_contacts and self.rigid_contact_coloring != "model"
+            if (
+                use_refinement
+                and not contacts_change_during_iterations
+                and self.device.is_capturing
+                and self.device.is_cuda
+                and wp.is_conditional_graph_supported()
+            ):
+                wp.capture_if(
+                    self._rigid_body_refinement_uses_high_subcolors,
+                    on_true=lambda: solve_iterations(True, _RIGID_CONTACT_MAX_SUBCOLORS),
+                    on_false=lambda: solve_iterations(True, 4),
+                )
+            else:
+                solve_iterations(use_refinement)
 
         # Snapshot solved rigid contact state for next-frame warm-start.
         self._snapshot_rigid_contact_history(contacts)
@@ -2708,6 +3022,7 @@ class SolverVBD(SolverBase, CouplingInterface):
         if refresh:
             if contacts is None:
                 self.body_body_contact_counts.zero_()
+                self._rigid_body_refinement_active.zero_()
             else:
                 contact_launch_dim = contacts.rigid_contact_max
 
@@ -2746,6 +3061,22 @@ class SolverVBD(SolverBase, CouplingInterface):
                     inputs=[self.body_body_contact_overflow_max, self.body_body_contact_buffer_pre_alloc, 0],
                     device=self.device,
                 )
+
+                if model.body_count > 0:
+                    wp.launch(
+                        kernel=sort_constraint_contact_lists,
+                        dim=model.body_count,
+                        inputs=[
+                            self.body_body_contact_buffer_pre_alloc,
+                            self.body_body_contact_counts,
+                            self.body_body_contact_indices,
+                        ],
+                        device=self.device,
+                    )
+                    self._update_rigid_contact_coloring(contacts)
+
+                if self._pair_contacts_enabled_this_step and model.body_count > 0:
+                    self._rigid_pair_contacts.build(contacts)
 
                 # Restore AVBD body-body contact state from history and pre-compute material properties
                 if (self.rigid_contact_history or restore_history) and contact_launch_dim > 0:
@@ -2988,7 +3319,7 @@ class SolverVBD(SolverBase, CouplingInterface):
         contacts: Contacts | None,
         dt: float,
         refresh: bool,
-    ) -> None:
+    ) -> bool:
         """Initialize rigid body states for AVBD solver (pre-iteration phase).
 
         Performs forward integration and initializes contact-related AVBD state when contacts are provided.
@@ -3003,6 +3334,9 @@ class SolverVBD(SolverBase, CouplingInterface):
         state are rebuilt. It may be promoted locally when contact state needs
         first-time allocation or resizing.
 
+        Returns:
+            Whether rigid contacts were refreshed. The solve uses this to keep
+            the dynamic contact-color schedule synchronized with the lists.
         """
         model = self.model
         rigid_capacity = contacts.rigid_contact_max if contacts is not None else 0
@@ -3195,6 +3529,8 @@ class SolverVBD(SolverBase, CouplingInterface):
             self._rigid_pose_rebaseline_mask.zero_()
 
         self._refresh_body_particle_contact_state(contacts, refresh)
+
+        return refresh
 
     def _solve_particle_iteration(
         self, state_in: State, state_out: State, contacts: Contacts | None, dt: float, iter_num: int
@@ -3394,6 +3730,9 @@ class SolverVBD(SolverBase, CouplingInterface):
         control: Control,
         contacts: Contacts | None,
         dt: float,
+        include_pair_primal: bool = True,
+        use_refined_body_colors: bool = False,
+        refined_subcolor_count: int = _RIGID_CONTACT_MAX_SUBCOLORS,
     ):
         """Solve one rigid-body VBD iteration (per-iteration phase).
 
@@ -3433,6 +3772,11 @@ class SolverVBD(SolverBase, CouplingInterface):
                 )
             return
 
+        use_pair_contacts = self._pair_contacts_enabled_this_step
+        body_uses_pair_contacts = (
+            self.body_uses_pair_contacts if use_pair_contacts else self._body_uses_no_pair_contacts
+        )
+
         # Zero out forces and hessians
         self.body_torques.zero_()
         self.body_forces.zero_()
@@ -3440,20 +3784,49 @@ class SolverVBD(SolverBase, CouplingInterface):
         self.body_hessian_al.zero_()
         self.body_hessian_ll.zero_()
 
-        body_color_groups = model.body_color_groups
+        # A free-body pair solve applies every multiplier increment directly
+        # through the inertial metric. Reassembling the current multipliers in
+        # the general VBD primal before every pair sweep duplicates that
+        # response. Jointed bodies retain full VBD; one seed sweep reapplies
+        # multipliers carried into this step. Rigid-particle coupling still
+        # requires the ordinary per-body assembly.
+        use_dynamic_schedule = use_refined_body_colors and not (
+            use_pair_contacts and model.particle_count == 0 and include_pair_primal
+        )
+        if use_dynamic_schedule:
+            active_subcolor_count = min(refined_subcolor_count, self._rigid_body_contact_subcolor_count)
+            body_color_groups = (
+                base_color * self._rigid_body_contact_subcolor_count + subcolor
+                for base_color in range(self._rigid_body_joint_color_count)
+                for subcolor in range(active_subcolor_count)
+            )
+        elif use_pair_contacts and model.particle_count == 0 and not include_pair_primal:
+            body_color_groups = self._structural_body_color_groups
+        else:
+            body_color_groups = model.body_color_groups
 
         # Gauss-Seidel-style per-color updates
-        for color in range(len(body_color_groups)):
-            color_group = body_color_groups[color]
+        for group in body_color_groups:
+            if use_dynamic_schedule:
+                color_group = self._rigid_body_ids_by_color
+                active_dynamic_color = group
+                color_launch_dim = self._rigid_body_dynamic_launch_dim
+            else:
+                color_group = group
+                active_dynamic_color = -1
+                color_launch_dim = color_group.size
 
             # Accumulate body-particle contact forces/hessians for bodies in this color
             if model.particle_count > 0 and contacts is not None:
                 wp.launch(
                     kernel=accumulate_body_particle_contacts_per_body,
-                    dim=color_group.size * _NUM_CONTACT_THREADS_PER_BODY,
+                    dim=color_launch_dim * _NUM_CONTACT_THREADS_PER_BODY,
                     inputs=[
                         dt,
                         color_group,
+                        self._rigid_body_ids_by_color,
+                        self._rigid_body_color_starts,
+                        active_dynamic_color,
                         state_in.particle_q,
                         self.particle_q_prev,
                         model.particle_radius,
@@ -3491,17 +3864,22 @@ class SolverVBD(SolverBase, CouplingInterface):
                 )
 
             # Accumulate body-body (rigid-rigid) contact forces and Hessians on bodies (per-body, per-color)
-            if contacts is not None:
-                wp.launch(
+            if contacts is not None and (self._has_per_body_rigid_contacts or not use_pair_contacts):
+                wp.launch_tiled(
                     kernel=accumulate_body_body_contacts_per_body,
-                    dim=color_group.size * _NUM_CONTACT_THREADS_PER_BODY,
+                    dim=color_launch_dim,
+                    block_dim=32,
                     inputs=[
                         dt,
                         color_group,
+                        self._rigid_body_ids_by_color,
+                        self._rigid_body_color_starts,
+                        active_dynamic_color,
                         self.body_q_prev,
                         state_in.body_q,
                         model.body_com,
                         self.body_inv_mass_effective,
+                        body_uses_pair_contacts,
                         self.friction_epsilon,
                         self.body_body_contact_penalty_k,
                         self.body_body_contact_normal_rho,
@@ -3539,11 +3917,45 @@ class SolverVBD(SolverBase, CouplingInterface):
                     device=self.device,
                 )
 
+            if contacts is not None and use_pair_contacts:
+                wp.launch(
+                    kernel=accumulate_constraint_contact_forces_per_body,
+                    dim=color_launch_dim,
+                    inputs=[
+                        color_group,
+                        self._rigid_body_ids_by_color,
+                        self._rigid_body_color_starts,
+                        active_dynamic_color,
+                        state_in.body_q,
+                        model.body_com,
+                        self.body_inv_mass_effective,
+                        self.body_uses_pair_contacts,
+                        contacts.rigid_contact_count,
+                        contacts.rigid_contact_shape0,
+                        contacts.rigid_contact_shape1,
+                        contacts.rigid_contact_point0,
+                        contacts.rigid_contact_point1,
+                        contacts.rigid_contact_offset0,
+                        contacts.rigid_contact_offset1,
+                        model.shape_body,
+                        self.body_body_contact_lambda,
+                        self.body_body_contact_buffer_pre_alloc,
+                        self.body_body_contact_counts,
+                        self.body_body_contact_indices,
+                    ],
+                    outputs=[self.body_forces, self.body_torques],
+                    device=self.device,
+                    block_dim=select_rigid_pair_block_dim(color_launch_dim, self.device),
+                )
+
             wp.launch(
                 kernel=solve_rigid_body,
                 inputs=[
                     dt,
                     color_group,
+                    self._rigid_body_ids_by_color,
+                    self._rigid_body_color_starts,
+                    active_dynamic_color,
                     state_in.body_q,
                     self.body_q_prev,
                     model.body_q,
@@ -3600,8 +4012,23 @@ class SolverVBD(SolverBase, CouplingInterface):
                 outputs=[
                     state_in.body_q,
                 ],
-                dim=color_group.size,
+                dim=color_launch_dim,
                 device=self.device,
+            )
+
+        if use_pair_contacts and contacts is not None:
+            self._rigid_pair_contacts.solve(
+                state_in.body_q,
+                self.body_q_prev,
+                contacts,
+                dt,
+                self.body_body_contact_material_ke,
+                self.body_body_contact_material_kd,
+                self.body_body_contact_material_mu,
+                self.body_body_contact_C0,
+                self.body_body_contact_lambda,
+                self.rigid_contact_hard,
+                self.rigid_compliant_alm,
             )
 
         if self._has_joint_mimics:
@@ -3615,7 +4042,11 @@ class SolverVBD(SolverBase, CouplingInterface):
                 dt,
             )
 
-        if contacts is not None and contacts.rigid_contact_max > 0:
+        if (
+            (self._has_per_body_rigid_contacts or not use_pair_contacts)
+            and contacts is not None
+            and contacts.rigid_contact_max > 0
+        ):
             wp.launch(
                 kernel=update_duals_body_body_contacts,
                 dim=contacts.rigid_contact_max,
@@ -3631,6 +4062,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                     contacts.rigid_contact_margin0,
                     contacts.rigid_contact_margin1,
                     model.shape_body,
+                    body_uses_pair_contacts,
                     state_in.body_q,
                     self.body_q_prev,
                     self.body_body_contact_material_mu,
@@ -3818,6 +4250,40 @@ class SolverVBD(SolverBase, CouplingInterface):
             self._rigid_contact_body1 = wp.full(max_contacts, -1, dtype=wp.int32, device=self.device)
             self._rigid_contact_point0_world = wp.zeros(max_contacts, dtype=wp.vec3, device=self.device)
             self._rigid_contact_point1_world = wp.zeros(max_contacts, dtype=wp.vec3, device=self.device)
+
+        if self._pair_contacts_enabled_this_step:
+            wp.launch(
+                kernel=query_constraint_contact_forces,
+                dim=max_contacts,
+                inputs=[
+                    contacts.rigid_contact_count,
+                    contacts.rigid_contact_shape0,
+                    contacts.rigid_contact_shape1,
+                    contacts.rigid_contact_point0,
+                    contacts.rigid_contact_point1,
+                    contacts.rigid_contact_offset0,
+                    contacts.rigid_contact_offset1,
+                    self.model.shape_body,
+                    body_q,
+                    self.body_body_contact_lambda,
+                ],
+                outputs=[
+                    self._rigid_contact_body0,
+                    self._rigid_contact_body1,
+                    self._rigid_contact_point0_world,
+                    self._rigid_contact_point1_world,
+                    contacts.rigid_contact_force,
+                ],
+                device=self.device,
+            )
+            return (
+                self._rigid_contact_body0,
+                self._rigid_contact_body1,
+                self._rigid_contact_point0_world,
+                self._rigid_contact_point1_world,
+                contacts.rigid_contact_force,
+                contacts.rigid_contact_count,
+            )
 
         wp.launch(
             kernel=compute_rigid_contact_forces,

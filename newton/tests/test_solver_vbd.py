@@ -1540,6 +1540,7 @@ def _rigid_contact_dual_update_computes_lambda(test, device):
         normal = wp.array([wp.vec3(0.0, 0.0, 1.0)] * 2, dtype=wp.vec3, device=device)
         margin = wp.array([0.05, 0.05], dtype=float, device=device)
         shape_body = wp.array([0, 1, 2], dtype=int, device=device)
+        body_uses_pair_contacts = wp.zeros(3, dtype=wp.int32, device=device)
 
         q = wp.quat_identity()
         body_q = wp.array(
@@ -1573,6 +1574,7 @@ def _rigid_contact_dual_update_computes_lambda(test, device):
                 margin,
                 margin,
                 shape_body,
+                body_uses_pair_contacts,
                 body_q,
                 body_q_prev,
                 contact_mu,
