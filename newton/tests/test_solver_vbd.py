@@ -2603,6 +2603,7 @@ def _body_body_contact_damping_ignores_penalty_ramp(test, device):
                 body_q,
                 body_q_prev,
                 body_com,
+                wp.zeros(1, dtype=wp.int32, device=device),
                 penalty_k,
                 contact_normal_rho,
                 material_ke,

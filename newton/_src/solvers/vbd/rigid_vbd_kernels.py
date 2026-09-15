@@ -4140,11 +4140,40 @@ def analyze_rigid_body_contact_refinement(
         wp.atomic_max(refinement_active, 0, 1)
 
 
+@wp.func
+def _rigid_color_neighbor(
+    body: int,
+    slot: int,
+    contact_count: int,
+    contact_capacity: int,
+    contact_indices: wp.array[wp.int32],
+    shape0: wp.array[int],
+    shape1: wp.array[int],
+    shape_body: wp.array[wp.int32],
+    uses_pair: wp.array[wp.int32],
+    joint_offsets: wp.array[wp.int32],
+    joint_indices: wp.array[wp.int32],
+    joint_parent: wp.array[int],
+    joint_child: wp.array[int],
+    joint_type: wp.array[int],
+) -> int:
+    """Visit contact and potentially active structural-joint neighbors."""
+    if slot < contact_count:
+        return _per_body_contact_neighbor(
+            body, contact_indices[body * contact_capacity + slot], shape0, shape1, shape_body, uses_pair
+        )
+    joint = joint_indices[joint_offsets[body] + slot - contact_count]
+    if joint_type[joint] == JointType.FREE:
+        return -1
+    parent = joint_parent[joint]
+    return joint_child[joint] if parent == body else parent
+
+
 @wp.kernel(enable_backward=False)
 def color_rigid_bodies_from_contacts(
     body_count: int,
     color_budget: int,
-    joint_color_count: int,
+    block_size: int,
     body_inv_mass: wp.array[float],
     body_uses_pair_contacts: wp.array[wp.int32],
     body_schedule_active: wp.array[wp.int32],
@@ -4155,142 +4184,57 @@ def color_rigid_bodies_from_contacts(
     rigid_contact_shape1: wp.array[int],
     shape_body: wp.array[wp.int32],
     body_joint_colors: wp.array[wp.int32],
+    joint_offsets: wp.array[wp.int32],
+    joint_indices: wp.array[wp.int32],
+    joint_parent: wp.array[int],
+    joint_child: wp.array[int],
+    joint_type: wp.array[int],
     body_colors: wp.array[wp.int32],
     body_ids_by_color: wp.array[wp.int32],
     color_starts: wp.array[wp.int32],
     num_colors_out: wp.array[wp.int32],
     overflow_count: wp.array[wp.int32],
-    uses_high_subcolors: wp.array[wp.int32],
+    joint_overflow: wp.array[wp.int32],
+    flag_gt4: wp.array[wp.int32],
+    flag_gt8: wp.array[wp.int32],
+    flag_gt16: wp.array[wp.int32],
 ):
-    """Serial deterministic joint-preserving contact coloring (CPU path)."""
-    if wp.tid() != 0:
-        return
+    """Repair a joint/contact union coloring, with one block (one lane on CPU).
 
-    subcolor_count = color_budget // joint_color_count
-    overflow_count[0] = 0
-    uses_high_subcolors[0] = 0
-    for body in range(body_count):
-        body_colors[body] = -1
-
-    num_colors = wp.int32(0)
-    for body in range(body_count):
-        if body_schedule_active[body] == 0 or body_inv_mass[body] <= 0.0:
-            continue
-        base_color = body_joint_colors[body]
-        first_color = base_color * subcolor_count
-        color = first_color
-        found = bool(False)
-        while color < first_color + subcolor_count and not found:
-            conflict = bool(False)
-            count = wp.min(body_contact_counts[body], body_contact_buffer_pre_alloc)
-            for slot in range(count):
-                contact = body_contact_indices[body * body_contact_buffer_pre_alloc + slot]
-                other = _per_body_contact_neighbor(
-                    body,
-                    contact,
-                    rigid_contact_shape0,
-                    rigid_contact_shape1,
-                    shape_body,
-                    body_uses_pair_contacts,
-                )
-                if other >= 0 and body_schedule_active[other] != 0 and body_colors[other] == color:
-                    conflict = True
-            if not conflict:
-                found = True
-            else:
-                color += 1
-        if not found:
-            color = first_color
-            overflow_count[0] += 1
-        body_colors[body] = color
-        if color - first_color >= 4:
-            uses_high_subcolors[0] = 1
-        num_colors = wp.max(num_colors, color + 1)
-
-    for color in range(color_budget + 1):
-        color_starts[color] = 0
-    for body in range(body_count):
-        color = body_colors[body]
-        if color >= 0:
-            color_starts[color + 1] += 1
-    for color in range(num_colors):
-        color_starts[color + 1] += color_starts[color]
-    for body in range(body_count):
-        color = body_colors[body]
-        if color >= 0:
-            slot = color_starts[color]
-            body_ids_by_color[slot] = body
-            color_starts[color] = slot + 1
-
-    previous = wp.int32(0)
-    for color in range(num_colors + 1):
-        cursor = color_starts[color]
-        color_starts[color] = previous
-        previous = cursor
-    for color in range(num_colors + 1, color_budget + 1):
-        color_starts[color] = previous
-    num_colors_out[0] = num_colors
-
-
-@wp.kernel(enable_backward=False)
-def color_rigid_bodies_from_contacts_parallel(
-    body_count: int,
-    color_budget: int,
-    joint_color_count: int,
-    body_inv_mass: wp.array[float],
-    body_uses_pair_contacts: wp.array[wp.int32],
-    body_schedule_active: wp.array[wp.int32],
-    body_contact_buffer_pre_alloc: int,
-    body_contact_counts: wp.array[wp.int32],
-    body_contact_indices: wp.array[wp.int32],
-    rigid_contact_shape0: wp.array[int],
-    rigid_contact_shape1: wp.array[int],
-    shape_body: wp.array[wp.int32],
-    body_joint_colors: wp.array[wp.int32],
-    body_colors: wp.array[wp.int32],
-    body_ids_by_color: wp.array[wp.int32],
-    color_starts: wp.array[wp.int32],
-    num_colors_out: wp.array[wp.int32],
-    overflow_count: wp.array[wp.int32],
-    uses_high_subcolors: wp.array[wp.int32],
-):
-    """Warm-start and deterministically repair contact colors with one CUDA block."""
+    Joint conflicts are mandatory. If warm colors exhaust even the joint-only
+    palette, restore the authored coloring for the entire schedule. Never
+    resolve joint overflow by assigning an arbitrary conflicting color.
+    """
     lane = wp.tid()
-    block_size = wp.int32(512)
-    subcolor_count = color_budget // joint_color_count
-
     if lane == 0:
-        num_colors_out[0] = 0
         overflow_count[0] = 0
-        uses_high_subcolors[0] = 0
+        joint_overflow[0] = 0
         color_starts[body_count] = 0
     _sync_cuda_block()
 
-    # Retain colors that remain valid. Invalidating only the higher-id endpoint
-    # leaves a valid colored subgraph and makes repair deterministic.
     for body in range(lane, body_count, block_size):
         retained = wp.int32(-1)
-        base_color = body_joint_colors[body]
         color = body_colors[body]
-        if (
-            body_schedule_active[body] != 0
-            and body_inv_mass[body] > 0.0
-            and base_color >= 0
-            and color >= 0
-            and color < color_budget
-            and color // subcolor_count == base_color
-        ):
+        if body_schedule_active[body] != 0 and body_inv_mass[body] > 0.0 and 0 <= color and color < color_budget:
             retained = color
             count = wp.min(body_contact_counts[body], body_contact_buffer_pre_alloc)
-            for slot in range(count):
-                contact = body_contact_indices[body * body_contact_buffer_pre_alloc + slot]
-                other = _per_body_contact_neighbor(
+            neighbor_count = count + joint_offsets[body + 1] - joint_offsets[body]
+            for slot in range(neighbor_count):
+                other = _rigid_color_neighbor(
                     body,
-                    contact,
+                    slot,
+                    count,
+                    body_contact_buffer_pre_alloc,
+                    body_contact_indices,
                     rigid_contact_shape0,
                     rigid_contact_shape1,
                     shape_body,
                     body_uses_pair_contacts,
+                    joint_offsets,
+                    joint_indices,
+                    joint_parent,
+                    joint_child,
+                    joint_type,
                 )
                 if (
                     other >= 0
@@ -4308,67 +4252,58 @@ def color_rigid_bodies_from_contacts_parallel(
         body_ids_by_color[body] = -1
         if body_schedule_active[body] != 0 and body_inv_mass[body] > 0.0 and body_colors[body] < 0:
             wp.atomic_add(color_starts, body_count, 1)
-        elif body_colors[body] >= 0:
-            wp.atomic_max(num_colors_out, 0, body_colors[body] + 1)
-            base_color = body_joint_colors[body]
-            if body_colors[body] - base_color * subcolor_count >= 4:
-                wp.atomic_max(uses_high_subcolors, 0, 1)
     _sync_cuda_block()
 
-    # Direct each edge from the larger body id to the smaller.  Ready bodies
-    # have all lower-id neighbors colored and can commit concurrently while
-    # reproducing ascending greedy decisions.
     while color_starts[body_count] > 0:
         for body in range(lane, body_count, block_size):
             proposed = wp.int32(-1)
             if body_schedule_active[body] != 0 and body_inv_mass[body] > 0.0 and body_colors[body] < 0:
                 ready = bool(True)
-                base_color = body_joint_colors[body]
-                first_color = base_color * subcolor_count
-                used_mask = wp.int32(0)
+                contact_mask = wp.uint32(0)
+                joint_mask = wp.uint32(0)
                 count = wp.min(body_contact_counts[body], body_contact_buffer_pre_alloc)
-                for slot in range(count):
-                    contact = body_contact_indices[body * body_contact_buffer_pre_alloc + slot]
-                    other = _per_body_contact_neighbor(
+                neighbor_count = count + joint_offsets[body + 1] - joint_offsets[body]
+                for slot in range(neighbor_count):
+                    other = _rigid_color_neighbor(
                         body,
-                        contact,
+                        slot,
+                        count,
+                        body_contact_buffer_pre_alloc,
+                        body_contact_indices,
                         rigid_contact_shape0,
                         rigid_contact_shape1,
                         shape_body,
                         body_uses_pair_contacts,
+                        joint_offsets,
+                        joint_indices,
+                        joint_parent,
+                        joint_child,
+                        joint_type,
                     )
-                    if (
-                        other >= 0
-                        and other < body
-                        and body_schedule_active[other] != 0
-                        and body_inv_mass[other] > 0.0
-                        and body_joint_colors[other] == base_color
-                        and body_colors[other] < 0
-                    ):
-                        ready = False
-
-                    if (
-                        other >= 0
-                        and body_schedule_active[other] != 0
-                        and body_inv_mass[other] > 0.0
-                        and body_colors[other] >= first_color
-                        and body_colors[other] < first_color + subcolor_count
-                    ):
-                        used_mask |= wp.int32(1) << (body_colors[other] - first_color)
-
+                    if other >= 0 and body_schedule_active[other] != 0 and body_inv_mass[other] > 0.0:
+                        other_color = body_colors[other]
+                        if other < body and other_color < 0:
+                            ready = False
+                        if 0 <= other_color and other_color < color_budget:
+                            bit = wp.uint32(1) << wp.uint32(other_color)
+                            if slot < count:
+                                contact_mask |= bit
+                            else:
+                                joint_mask |= bit
                 if ready:
-                    color = first_color
-                    found = bool(False)
-                    while color < first_color + subcolor_count and not found:
-                        if (used_mask & (wp.int32(1) << (color - first_color))) == 0:
-                            found = True
-                        else:
-                            color += 1
-                    if found:
-                        proposed = color
-                    else:
-                        proposed = first_color
+                    color = wp.int32(0)
+                    used = contact_mask | joint_mask
+                    while color < color_budget and (used & (wp.uint32(1) << wp.uint32(color))) != 0:
+                        color += 1
+                    if color == color_budget:
                         wp.atomic_add(overflow_count, 0, 1)
+                        color = wp.int32(0)
+                        while color < color_budget and (joint_mask & (wp.uint32(1) << wp.uint32(color))) != 0:
+                            color += 1
+                        if color == color_budget:
+                            wp.atomic_max(joint_overflow, 0, 1)
+                            color = wp.int32(0)
+                    proposed = color
             body_ids_by_color[body] = proposed
         _sync_cuda_block()
 
@@ -4378,19 +4313,22 @@ def color_rigid_bodies_from_contacts_parallel(
                 body_colors[body] = color
                 body_ids_by_color[body] = -1
                 wp.atomic_add(color_starts, body_count, -1)
-                wp.atomic_max(num_colors_out, 0, color + 1)
-                base_color = body_joint_colors[body]
-                if color - base_color * subcolor_count >= 4:
-                    wp.atomic_max(uses_high_subcolors, 0, 1)
         _sync_cuda_block()
 
     if lane == 0:
-        num_colors = num_colors_out[0]
+        # The fallback applies to all bodies, including those whose retained
+        # colors prevented a joint-safe local choice.
+        if joint_overflow[0] != 0:
+            for body in range(body_count):
+                if body_schedule_active[body] != 0 and body_inv_mass[body] > 0.0:
+                    body_colors[body] = body_joint_colors[body]
+        num_colors = wp.int32(0)
         for color in range(color_budget + 1):
             color_starts[color] = 0
         for body in range(body_count):
             color = body_colors[body]
             if color >= 0:
+                num_colors = wp.max(num_colors, color + 1)
                 color_starts[color + 1] += 1
         for color in range(num_colors):
             color_starts[color + 1] += color_starts[color]
@@ -4408,6 +4346,10 @@ def color_rigid_bodies_from_contacts_parallel(
             previous = cursor
         for color in range(num_colors + 1, color_budget + 1):
             color_starts[color] = previous
+        num_colors_out[0] = num_colors
+        flag_gt4[0] = wp.int32(num_colors > 4)
+        flag_gt8[0] = wp.int32(num_colors > 8)
+        flag_gt16[0] = wp.int32(num_colors > 16)
 
 
 @wp.kernel
@@ -5712,6 +5654,7 @@ def compute_rigid_contact_forces(
     body_q: wp.array[wp.transform],
     body_q_prev: wp.array[wp.transform],
     body_com: wp.array[wp.vec3],
+    body_uses_pair_contacts: wp.array[wp.int32],
     # Contact material properties (per-contact)
     contact_penalty_k: wp.array[float],
     contact_normal_rho: wp.array[float],
@@ -5776,6 +5719,14 @@ def compute_rigid_contact_forces(
     out_point1_world[contact_idx] = (
         wp.transform_point(body_q[b1], cp1_local + cp1_offset_local) if b1 >= 0 else cp1_local + cp1_offset_local
     )
+
+    # Pair multipliers are applied forces. Body ALM instead reports the
+    # material-weighted primal reaction, even in a batch containing pair worlds.
+    pair0 = b0 < 0 or body_uses_pair_contacts[b0] != 0
+    pair1 = b1 < 0 or body_uses_pair_contacts[b1] != 0
+    if pair0 and pair1:
+        out_force_on_body1[contact_idx] = contact_lambda[contact_idx]
+        return
 
     C_n = -contact_surface_separation(
         cp0_world, cp1_world, contact_normal, rigid_contact_margin0[contact_idx], rigid_contact_margin1[contact_idx]

@@ -16,7 +16,7 @@ from newton._src.solvers.vbd import rigid_pair_contact, rigid_vbd_kernels
 from newton._src.solvers.vbd.rigid_pair_contact import RigidPairContact
 from newton._src.solvers.vbd.rigid_vbd_kernels import (
     accumulate_body_body_contacts_per_body,
-    color_rigid_bodies_from_contacts_parallel,
+    color_rigid_bodies_from_contacts,
 )
 from newton._src.solvers.xpbd import kernels as xpbd_kernels
 from newton.tests.unittest_utils import add_function_test, get_selected_cuda_test_devices, get_test_devices
@@ -186,6 +186,57 @@ def test_per_body_contact_lists_are_sorted_without_pair_manager(test, device):
         np.testing.assert_array_equal(active, np.sort(active))
 
 
+def test_pair_warmstart_respects_normal_and_tangent_moment_arms(test, device):
+    """Keep sphere normal warm starts torque-free while preserving friction torque."""
+    builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+    body = builder.add_body(xform=wp.transform(wp.vec3(0.0, 0.0, 0.99), wp.quat_identity()))
+    builder.add_shape_sphere(body, radius=1.0)
+    builder.add_ground_plane()
+    builder.color()
+    model = builder.finalize(device=device)
+    pipeline = _make_pipeline(model, 16)
+    contacts = pipeline.contacts()
+    solver = newton.solvers.SolverVBD(model, iterations=1, rigid_compliant_alm=True, rigid_contact_history=True)
+    state_in, state_out = model.state(), model.state()
+    control = model.control()
+    dt = 1.0 / 120.0
+    pipeline.collide(state_in, contacts)
+    solver.step(state_in, state_out, control, contacts, dt)
+    test.assertEqual(int(contacts.rigid_contact_count.numpy()[0]), 1)
+
+    shape0 = int(contacts.rigid_contact_shape0.numpy()[0])
+    body_is_first = int(model.shape_body.numpy()[shape0]) == body
+    sign = -1.0 if body_is_first else 1.0
+    normal = contacts.rigid_contact_normal.numpy()[0]
+    offsets = contacts.rigid_contact_offset0 if body_is_first else contacts.rigid_contact_offset1
+    rotation = wp.quat_from_axis_angle(wp.vec3(1.0, 0.0, 0.0), math.pi / 4.0)
+    arm = np.asarray(wp.quat_rotate(rotation, wp.vec3(*offsets.numpy()[0])))
+    poses = state_in.body_q.numpy().copy()
+    poses[body, 3:] = np.asarray(rotation)
+    q_seed = wp.array(poses, dtype=wp.transform, device=device)
+
+    for tangent in (np.zeros(3), np.array([3.0, 0.0, 0.0])):
+        force = sign * normal * 10.0 + tangent
+        multipliers = np.zeros((contacts.rigid_contact_max, 3), dtype=np.float32)
+        multipliers[0] = sign * force
+        lambda_seed = wp.array(multipliers, dtype=wp.vec3, device=device)
+
+        def primal(seed=lambda_seed):
+            wp.copy(state_in.body_q, q_seed)
+            wp.copy(solver.body_body_contact_lambda, seed)
+            solver._solve_rigid_body_iteration(state_in, state_out, control, contacts, dt)
+
+        primal()
+        np.testing.assert_allclose(solver.body_forces.numpy()[body], force, rtol=1.0e-6, atol=1.0e-6)
+        np.testing.assert_allclose(solver.body_torques.numpy()[body], np.cross(arm, tangent), atol=1.0e-6)
+        if device.is_cuda:
+            with wp.ScopedCapture(device=device) as capture:
+                primal()
+            for _ in range(3):
+                wp.capture_launch(capture.graph)
+                np.testing.assert_allclose(solver.body_torques.numpy()[body], np.cross(arm, tangent), atol=1.0e-6)
+
+
 def test_pair_primal_is_seeded_only_for_retained_multipliers(test, device):
     """Seed retained multipliers once and rebuild coloring only on refresh."""
 
@@ -208,6 +259,15 @@ def test_pair_primal_is_seeded_only_for_retained_multipliers(test, device):
 
     include_pair_primal = []
     pair_build_count = 0
+    scratch_clear_count = 0
+    clear_scratch = solver.body_forces.zero_
+
+    def record_scratch_clear():
+        nonlocal scratch_clear_count
+        scratch_clear_count += 1
+        return clear_scratch()
+
+    solver.body_forces.zero_ = record_scratch_clear
     solve_iteration = solver._solve_rigid_body_iteration
     pair_build = solver._rigid_pair_contacts.build
 
@@ -223,21 +283,35 @@ def test_pair_primal_is_seeded_only_for_retained_multipliers(test, device):
     solver._solve_rigid_body_iteration = record_iteration
     solver._rigid_pair_contacts.build = record_pair_build
     pipeline.collide(state_in, contacts)
-    solver.step(state_in, state_out, model.control(), contacts, 1.0 / 120.0)
+    with patch.object(wp, "launch", wraps=wp.launch) as launch:
+        solver.step(state_in, state_out, model.control(), contacts, 1.0 / 120.0)
+    test.assertFalse(
+        any(call.kwargs.get("kernel") is rigid_vbd_kernels.update_duals_joint for call in launch.call_args_list)
+    )
+    if device.is_cuda:
+        test.assertFalse(
+            any(
+                call.kwargs.get("kernel") is rigid_pair_contact.solve_constraint_contact_overflow
+                for call in launch.call_args_list
+            )
+        )
     test.assertEqual(include_pair_primal, [False, False, False])
     test.assertEqual(pair_build_count, 1)
+    test.assertEqual(scratch_clear_count, 0)
 
     include_pair_primal.clear()
     solver.set_rigid_history_update(False)
     solver.step(state_out, state_in, model.control(), contacts, 1.0 / 120.0)
     test.assertEqual(include_pair_primal, [True, False, False])
     test.assertEqual(pair_build_count, 1)
+    test.assertEqual(scratch_clear_count, 1)
 
     include_pair_primal.clear()
     pipeline.collide(state_in, contacts)
     solver.step(state_in, state_out, model.control(), contacts, 1.0 / 120.0)
     test.assertEqual(include_pair_primal, [False, False, False])
     test.assertEqual(pair_build_count, 2)
+    test.assertEqual(scratch_clear_count, 1)
 
 
 def _parallel_chain_snapshot(device):
@@ -421,15 +495,15 @@ def test_jointed_contact_refinement_preserves_joint_colors(test, device):
     test.assertEqual(int(solver._rigid_body_refinement_active.numpy()[0]), 1)
     test.assertEqual(int(solver._rigid_body_refinement_overflow.numpy()[0]), 0)
 
-    base_colors = model.body_colors.numpy()
     colors = solver._rigid_body_colors.numpy()
-    subcolors = solver._rigid_body_contact_subcolor_count
     active = solver._rigid_body_schedule_active.numpy().astype(bool)
-    np.testing.assert_array_equal(colors[active] // subcolors, base_colors[active])
+    test.assertTrue(np.all(colors[active] >= 0))
+    for parent, child in zip(model.joint_parent.numpy(), model.joint_child.numpy(), strict=True):
+        if parent >= 0 and child >= 0 and active[parent] and active[child]:
+            test.assertNotEqual(colors[parent], colors[child])
 
     _, pairs = _dynamic_contact_pairs(model, contacts)
-    same_base = base_colors[pairs[:, 0]] == base_colors[pairs[:, 1]]
-    test.assertTrue(np.all(colors[pairs[same_base, 0]] != colors[pairs[same_base, 1]]))
+    test.assertTrue(np.all(colors[pairs[:, 0]] != colors[pairs[:, 1]]))
 
 
 def test_jointed_contact_refinement_is_cuda_graph_repeatable(test, device):
@@ -516,19 +590,19 @@ def test_jointed_contact_graph_changes_during_capture(test, device):
 
 
 def test_jointed_contact_refinement_overflow_is_complete(test, device):
-    """Keep every jointed body and deterministic output when subcolors run out."""
+    """Keep every jointed body and deterministic output when contact colors run out."""
 
     def run():
         builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
         cfg = newton.ModelBuilder.ShapeConfig(density=1000.0, ke=1.0e5, mu=0.0)
-        for i in range(10):
+        for i in range(40):
             position = wp.vec3(0.1 * math.cos(i), 0.1 * math.sin(i), 0.01 * i)
             body = builder.add_link(xform=wp.transform(position, wp.quat_identity()))
             builder.add_shape_sphere(body, radius=0.5, cfg=cfg)
             builder.add_joint_fixed(parent=-1, child=body, parent_xform=wp.transform(position, wp.quat_identity()))
         builder.color()
         model = builder.finalize(device=device)
-        pipeline = _make_pipeline(model, 128)
+        pipeline = _make_pipeline(model, 2048)
         contacts = pipeline.contacts()
         solver = newton.solvers.SolverVBD(
             model,
@@ -541,14 +615,14 @@ def test_jointed_contact_refinement_overflow_is_complete(test, device):
         state_in, state_out = model.state(), model.state()
         pipeline.collide(state_in, contacts)
         solver.step(state_in, state_out, model.control(), contacts, 1.0 / 600.0)
-        test.assertEqual(int(contacts.rigid_contact_count.numpy()[0]), 45)
+        test.assertEqual(int(contacts.rigid_contact_count.numpy()[0]), 780)
         test.assertGreater(int(solver._rigid_body_refinement_overflow.numpy()[0]), 0)
         ids = solver._rigid_body_ids_by_color.numpy()
         ends = solver._rigid_body_color_starts.numpy()
         active_count = int(ends[solver._rigid_body_color_budget])
-        np.testing.assert_array_equal(np.sort(ids[:active_count]), np.arange(10))
+        np.testing.assert_array_equal(np.sort(ids[:active_count]), np.arange(40))
         colors = solver._rigid_body_colors.numpy()
-        np.testing.assert_array_equal(colors // solver._rigid_body_contact_subcolor_count, model.body_colors.numpy())
+        test.assertTrue(np.all((colors >= 0) & (colors < solver._rigid_body_color_budget)))
         test.assertTrue(np.isfinite(state_out.body_q.numpy()).all())
         return state_out.body_q.numpy(), state_out.body_qd.numpy(), colors
 
@@ -611,110 +685,153 @@ def test_body_contact_tile_matches_serial_accumulation(test, device):
 
 
 def test_jointed_color_mask_matches_greedy_reference(test, device):
-    """Match serial greedy decisions for cold, warm, inactive, and overflow graphs."""
+    """Match CPU/CUDA greedy repair, including exhausted mandatory-joint colors."""
+    budget = 32
 
-    def reference(seed, active, authored, neighbors):
-        body_count = len(seed)
-        budget, subcolors = 16, 8
-        retained = np.full(body_count, -1, dtype=np.int32)
-        for body in range(body_count):
-            color = seed[body]
-            if active[body] and 0 <= color < budget and color // subcolors == authored[body]:
-                if not any(other < body and active[other] and seed[other] == color for other in neighbors[body]):
-                    retained[body] = color
-        overflow_count = 0
-        for body in range(body_count):
-            if not active[body] or retained[body] >= 0:
+    def reference(seed, active, authored, contacts, joints):
+        colors = np.full(len(seed), -1, dtype=np.int32)
+        for body, color in enumerate(seed):
+            if active[body] and 0 <= color < budget:
+                if not any(
+                    other < body and active[other] and seed[other] == color for other in contacts[body] | joints[body]
+                ):
+                    colors[body] = color
+        overflow, joint_overflow = 0, 0
+        for body in range(len(seed)):
+            if not active[body] or colors[body] >= 0:
                 continue
-            first = int(authored[body]) * subcolors
-            used = {int(retained[other]) for other in neighbors[body] if active[other]}
-            available = [color for color in range(first, first + subcolors) if color not in used]
-            retained[body] = available[0] if available else first
-            overflow_count += not available
-        return retained, overflow_count
+            mandatory = {int(colors[other]) for other in joints[body] if active[other]}
+            used = mandatory | {int(colors[other]) for other in contacts[body] if active[other]}
+            choices = [color for color in range(budget) if color not in used]
+            if not choices:
+                overflow += 1
+                choices = [color for color in range(budget) if color not in mandatory]
+                if not choices:
+                    joint_overflow = 1
+                    choices = [0]
+            colors[body] = choices[0]
+        if joint_overflow:
+            colors = np.where(active, authored, -1).astype(np.int32)
+        return colors, overflow, joint_overflow
 
-    def run(colors, seed_array, inputs, outputs):
-        wp.copy(colors, seed_array)
-        wp.launch(
-            color_rigid_bodies_from_contacts_parallel,
-            dim=512,
-            block_dim=512,
-            inputs=inputs,
-            outputs=outputs,
-            device=device,
-        )
-
-    for body_count, clique in ((20, True), (64, False)):
-        pairs = [
-            (a, b)
-            for a in range(body_count)
-            for b in range(a + 1, body_count)
-            if clique or (abs(a // 8 - b // 8) <= 1 and abs(a % 8 - b % 8) <= 1)
-        ]
-        pairs.extend((-1, body) for body in range(0, body_count, 5))
-        contacts = np.repeat(np.asarray(sorted(pairs), dtype=np.int32), 3, axis=0)
-        neighbors = [set() for _ in range(body_count)]
-        rows = [[] for _ in range(body_count)]
-        for contact, (a, b) in enumerate(contacts):
-            for body, other in ((a, b), (b, a)):
-                if body >= 0:
-                    rows[body].append(contact)
-                    if other >= 0:
-                        neighbors[body].add(int(other))
-        capacity = max(map(len, rows))
+    for body_count, kind in ((40, "clique"), (64, "grid"), (33, "joint-star"), (1, "empty")):
+        if kind == "clique":
+            edges = [(a, b) for a in range(body_count) for b in range(a + 1, body_count)]
+            joint_edges = []
+        elif kind == "grid":
+            edges = [
+                (a, b)
+                for a in range(body_count)
+                for b in range(a + 1, body_count)
+                if abs(a // 8 - b // 8) <= 1 and abs(a % 8 - b % 8) <= 1
+            ]
+            joint_edges = [(b, b + 1) for b in range(body_count - 1)]
+        elif kind == "joint-star":
+            edges = []
+            joint_edges = [(b, body_count - 1) for b in range(body_count - 1)]
+        else:
+            edges, joint_edges = [], []
+        rows = np.repeat(np.asarray(edges, dtype=np.int32).reshape(-1, 2), 3, axis=0)
+        contacts = [set() for _ in range(body_count)]
+        joints = [set() for _ in range(body_count)]
+        contact_rows = [[] for _ in range(body_count)]
+        joint_rows = [[] for _ in range(body_count)]
+        for index, (a, b) in enumerate(rows):
+            contacts[a].add(int(b))
+            contacts[b].add(int(a))
+            contact_rows[a].append(index)
+            contact_rows[b].append(index)
+        for index, (a, b) in enumerate(joint_edges):
+            joints[a].add(b)
+            joints[b].add(a)
+            joint_rows[a].append(index)
+            joint_rows[b].append(index)
+        capacity = max(1, *map(len, contact_rows))
         indices = np.zeros((body_count, capacity), dtype=np.int32)
-        for body, row in enumerate(rows):
+        for body, row in enumerate(contact_rows):
             indices[body, : len(row)] = row
         inverse_mass = np.ones(body_count, dtype=np.float32)
-        inverse_mass[::7] = 0.0
+        if kind == "grid":
+            inverse_mass[::7] = 0.0
         active = (inverse_mass > 0.0).astype(np.int32)
-        authored = np.arange(body_count, dtype=np.int32) % 2
-        budget, subcolors = 16, 8
-        colors = wp.full(body_count, -1, dtype=wp.int32, device=device)
-        body_ids = wp.full(body_count, -1, dtype=wp.int32, device=device)
-        starts = wp.zeros(body_count + 1, dtype=wp.int32, device=device)
-        count = wp.zeros(1, dtype=wp.int32, device=device)
-        overflow = wp.zeros(1, dtype=wp.int32, device=device)
-        high = wp.zeros(1, dtype=wp.int32, device=device)
+        authored = np.arange(body_count, dtype=np.int32) % 2 if kind == "grid" else np.zeros(body_count, dtype=np.int32)
+        if kind == "joint-star":
+            authored[-1] = 1
+
+        def array(value):
+            return wp.array(np.asarray(value, dtype=np.int32), device=device)
+
+        endpoints = np.asarray(joint_edges, dtype=np.int32).reshape(-1, 2)
         inputs = [
             body_count,
             budget,
-            2,
+            512 if device.is_cuda else 1,
             wp.array(inverse_mass, device=device),
             wp.zeros(body_count, dtype=wp.int32, device=device),
-            wp.array(active, device=device),
+            array(active),
             capacity,
-            wp.array(np.asarray(list(map(len, rows))), dtype=wp.int32, device=device),
-            wp.array(indices.ravel(), device=device),
-            wp.array(contacts[:, 0] + 1, device=device),
-            wp.array(contacts[:, 1] + 1, device=device),
-            wp.array(np.arange(-1, body_count, dtype=np.int32), device=device),
-            wp.array(authored, device=device),
+            array(list(map(len, contact_rows))),
+            array(indices.ravel()),
+            array(rows[:, 0]),
+            array(rows[:, 1]),
+            array(np.arange(body_count)),
+            array(authored),
+            array(np.cumsum([0, *map(len, joint_rows)])),
+            array([joint for row in joint_rows for joint in row]),
+            array(endpoints[:, 0]),
+            array(endpoints[:, 1]),
+            array([int(newton.JointType.FIXED)] * len(joint_edges)),
         ]
+        colors = wp.full(body_count, -1, dtype=wp.int32, device=device)
+        ids = wp.full(body_count, -1, dtype=wp.int32, device=device)
+        starts = wp.zeros(max(body_count, budget) + 1, dtype=wp.int32, device=device)
+        counters = [wp.zeros(1, dtype=wp.int32, device=device) for _ in range(6)]
+        outputs = [colors, ids, starts, *counters]
+        seeds = [np.full(body_count, -1, dtype=np.int32), authored.copy()]
+        if kind == "joint-star":
+            seeds.append(np.append(np.arange(32, dtype=np.int32), -1))
+        for seed in seeds:
+            expected, expected_overflow, expected_joint_overflow = reference(seed, active, authored, contacts, joints)
+            seed_array = array(seed)
 
-        for seed in (
-            np.full(body_count, -1, dtype=np.int32),
-            authored * subcolors,
-            authored * subcolors + np.arange(body_count, dtype=np.int32) % subcolors,
-        ):
-            expected, expected_overflow = reference(seed, active, authored, neighbors)
-            seed_array = wp.array(seed, device=device)
+            def run(colors, seed_array, inputs, outputs):
+                wp.copy(colors, seed_array)
+                wp.launch(
+                    color_rigid_bodies_from_contacts,
+                    dim=512 if device.is_cuda else 1,
+                    block_dim=512 if device.is_cuda else 1,
+                    max_blocks=1,
+                    inputs=inputs,
+                    outputs=outputs,
+                    device=device,
+                )
 
-            run(colors, seed_array, inputs, [colors, body_ids, starts, count, overflow, high])
-            with wp.ScopedCapture(device=device) as capture:
-                run(colors, seed_array, inputs, [colors, body_ids, starts, count, overflow, high])
+            run(colors, seed_array, inputs, outputs)
+            graph = None
+            if device.is_cuda:
+                with wp.ScopedCapture(device=device) as capture:
+                    run(colors, seed_array, inputs, outputs)
+                graph = capture.graph
             for _ in range(3):
-                wp.capture_launch(capture.graph)
+                if graph is None:
+                    run(colors, seed_array, inputs, outputs)
+                else:
+                    wp.capture_launch(graph)
                 np.testing.assert_array_equal(colors.numpy(), expected)
-                test.assertEqual(int(overflow.numpy()[0]), expected_overflow)
-                test.assertEqual(int(count.numpy()[0]), int(expected.max()) + 1)
+                test.assertEqual(int(counters[1].numpy()[0]), expected_overflow)
+                test.assertEqual(int(counters[2].numpy()[0]), expected_joint_overflow)
                 expected_ids = np.asarray(
                     [body for color in range(budget) for body in range(body_count) if expected[body] == color],
                     dtype=np.int32,
                 )
-                np.testing.assert_array_equal(body_ids.numpy()[: len(expected_ids)], expected_ids)
-                expected_starts = np.cumsum([0] + [int(np.count_nonzero(expected == color)) for color in range(budget)])
+                np.testing.assert_array_equal(ids.numpy()[: len(expected_ids)], expected_ids)
+                expected_starts = np.cumsum([0] + [np.count_nonzero(expected == color) for color in range(budget)])
                 np.testing.assert_array_equal(starts.numpy()[: budget + 1], expected_starts)
+                for a, b in joint_edges:
+                    if active[a] and active[b]:
+                        test.assertNotEqual(expected[a], expected[b])
+                if kind == "joint-star" and np.array_equal(seed[:-1], np.arange(32)):
+                    test.assertEqual(expected_joint_overflow, 1)
 
 
 def test_parallel_pair_completion_replays_changed_graphs(test, device):
@@ -776,6 +893,8 @@ def test_parallel_pair_completion_replays_changed_graphs(test, device):
         np.testing.assert_array_equal(endpoints, expected)
         test.assertEqual(int(pair.group_count.numpy()[0]), len(expected))
         test.assertEqual(int(pair.overflow_count.numpy()[0]), int(np.count_nonzero(colors[leaders] < 0)))
+        overflow = np.flatnonzero(colors == -1)
+        np.testing.assert_array_equal(pair.group_list.numpy()[pair.capacity - len(overflow) :], overflow)
         for color in np.unique(colors[colors >= 0]):
             bodies = endpoints[colors[leaders] == color].ravel()
             dynamic = bodies[inverse[bodies] > 0.0]
@@ -946,12 +1065,399 @@ def test_history_disabled_free_contacts_use_body_coloring(test, device):
                 np.testing.assert_array_equal(qd.view(np.uint8), expected_qd.view(np.uint8))
 
 
+def test_contact_color_growth_replays_every_body(test, device):
+    """Solve newly required high colors on the first replay after graph growth."""
+    builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+    cfg = newton.ModelBuilder.ShapeConfig(ke=1.0e5, kd=100.0, mu=0.5)
+    for i in range(6):
+        position = wp.vec3(0.1 * math.cos(i), 0.1 * math.sin(i), 0.01 * i)
+        body = builder.add_link(xform=wp.transform(position, wp.quat_identity()))
+        builder.add_shape_sphere(body, radius=0.5, cfg=cfg)
+        builder.add_joint_fixed(parent=-1, child=body, parent_xform=wp.transform(position, wp.quat_identity()))
+    builder.color()
+    model = builder.finalize(device=device)
+    pipeline = _make_pipeline(model, 128)
+    contacts = pipeline.contacts()
+    solver = newton.solvers.SolverVBD(
+        model,
+        iterations=2,
+        rigid_compliant_alm=True,
+        rigid_contact_history=False,
+        rigid_contact_coloring="refined",
+        deterministic=wp.DeterministicMode.RUN_TO_RUN,
+    )
+    state_in, state_out = model.state(), model.state()
+    control = model.control()
+    pipeline.collide(state_in, contacts)
+    dense_count = int(contacts.rigid_contact_count.numpy()[0])
+    test.assertEqual(dense_count, 15)
+    # Warm allocation with an empty graph, whose valid schedule needs one color.
+    contacts.rigid_contact_count.zero_()
+    solver.step(state_in, state_out, control, contacts, 1.0 / 600.0)
+    test.assertEqual(int(solver._rigid_body_refinement_gt4.numpy()[0]), 0)
+    arrays = []
+    seen = set()
+    for obj in (solver, state_in, state_out):
+        for value in vars(obj).values():
+            if isinstance(value, wp.array) and value.ptr and value.ptr not in seen:
+                seen.add(value.ptr)
+                arrays.append((value, wp.clone(value)))
+
+    def restore():
+        for target, seed in arrays:
+            wp.copy(target, seed)
+
+    for policy in ("auto", "refined"):
+        with test.subTest(policy=policy):
+            solver.rigid_contact_coloring = policy
+            # Compile the populated path, then capture from the previous empty graph.
+            contacts.rigid_contact_count.assign(np.asarray([dense_count], dtype=np.int32))
+            solver.step(state_in, state_out, control, contacts, 1.0 / 600.0)
+            restore()
+            with wp.ScopedCapture(device=device) as capture:
+                restore()
+                solver.step(state_in, state_out, control, contacts, 1.0 / 600.0)
+            for count in (dense_count, 0, dense_count):
+                contacts.rigid_contact_count.assign(np.asarray([count], dtype=np.int32))
+                restore()
+                # Eager forced refinement executes the complete fixed envelope.
+                solver.rigid_contact_coloring = "refined"
+                solver.step(state_in, state_out, control, contacts, 1.0 / 600.0)
+                expected = (state_out.body_q.numpy(), state_out.body_qd.numpy())
+                solver.rigid_contact_coloring = policy
+                for _ in range(3):
+                    wp.capture_launch(capture.graph)
+                    test.assertEqual(int(solver._rigid_body_num_colors.numpy()[0]), 6 if count else 1)
+                    for actual, reference in zip(
+                        (state_out.body_q.numpy(), state_out.body_qd.numpy()), expected, strict=True
+                    ):
+                        np.testing.assert_array_equal(actual.view(np.uint8), reference.view(np.uint8))
+
+
+def test_mixed_world_force_query_keeps_each_contact_law(test, device):
+    """Report body-ALM forces unchanged when an isolated world uses pair contacts."""
+    builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+    cfg = newton.ModelBuilder.ShapeConfig(ke=1.0e5, kd=100.0, mu=0.5)
+    for world in range(2):
+        builder.begin_world()
+        bodies = []
+        for x in (-2.0, 0.0, 0.9) if world == 0 else (0.0, 0.9):
+            body = builder.add_body(xform=wp.transform(wp.vec3(x, 0.0, 0.0), wp.quat_identity()))
+            builder.add_shape_sphere(body, radius=0.5, cfg=cfg)
+            bodies.append(body)
+        if world == 0:
+            builder.add_joint_fixed(
+                parent=bodies[0],
+                child=bodies[1],
+                parent_xform=wp.transform(wp.vec3(2.0, 0.0, 0.0), wp.quat_identity()),
+            )
+        builder.end_world()
+    builder.color()
+    model = builder.finalize(device=device)
+    pipeline = _make_pipeline(model, 32)
+    contacts = pipeline.contacts()
+    solver = newton.solvers.SolverVBD(
+        model,
+        iterations=1,
+        rigid_compliant_alm=True,
+        rigid_contact_history=True,
+        deterministic=wp.DeterministicMode.RUN_TO_RUN,
+    )
+    state_in, state_out = model.state(), model.state()
+    previous = wp.clone(state_in.body_q)
+    pipeline.collide(state_in, contacts)
+    solver.step(state_in, state_out, None, contacts, 1.0 / 600.0)
+    test.assertTrue(solver._pair_contacts_enabled_this_step)
+    count = int(contacts.rigid_contact_count.numpy()[0])
+    shape_body = model.shape_body.numpy()
+    body0 = shape_body[contacts.rigid_contact_shape0.numpy()[:count]]
+    mask = body0 < 3
+    test.assertTrue(mask.any() and (~mask).any())
+    solver._pair_contacts_enabled_this_step = False
+    expected = (
+        solver.collect_rigid_contact_forces(state_out.body_q, previous, contacts, 1.0 / 600.0)[4].numpy()[:count].copy()
+    )
+    solver._pair_contacts_enabled_this_step = True
+
+    def query():
+        return solver.collect_rigid_contact_forces(state_out.body_q, previous, contacts, 1.0 / 600.0)[4]
+
+    actual = query().numpy()[:count]
+    np.testing.assert_array_equal(actual[mask], expected[mask])
+    np.testing.assert_array_equal(actual[~mask], solver.body_body_contact_lambda.numpy()[:count][~mask])
+    if device.is_cuda:
+        with wp.ScopedCapture(device=device) as capture:
+            query()
+        for _ in range(3):
+            wp.capture_launch(capture.graph)
+            np.testing.assert_array_equal(contacts.rigid_contact_force.numpy()[:count], actual)
+
+
+def test_zero_compliant_contact_material_is_not_hard(test, device):
+    """Keep zero stiffness and damping force-free in every matching mode."""
+    builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+    cfg = newton.ModelBuilder.ShapeConfig(ke=0.0, kd=0.0, mu=0.5)
+    for x in (0.0, 0.9):
+        body = builder.add_body(xform=wp.transform(wp.vec3(x, 0.0, 0.0), wp.quat_identity()))
+        builder.add_shape_sphere(body, radius=0.5, cfg=cfg)
+    builder.color()
+    model = builder.finalize(device=device)
+    for matching in ("disabled", "latest", "sticky"):
+        with test.subTest(matching=matching):
+            pipeline = newton.CollisionPipeline(
+                model, contact_matching=matching, deterministic=True, rigid_contact_max=32
+            )
+            contacts = pipeline.contacts()
+            solver = newton.solvers.SolverVBD(
+                model,
+                iterations=2,
+                rigid_compliant_alm=True,
+                rigid_contact_history=matching != "disabled",
+                deterministic=wp.DeterministicMode.RUN_TO_RUN,
+            )
+            state_in, state_out = model.state(), model.state()
+            initial = state_in.body_q.numpy()
+            pipeline.collide(state_in, contacts)
+            test.assertGreater(int(contacts.rigid_contact_count.numpy()[0]), 0)
+            solver.step(state_in, state_out, None, contacts, 1.0 / 600.0)
+            np.testing.assert_allclose(state_out.body_q.numpy(), initial, rtol=0.0, atol=1.0e-7)
+            # Body ALM can retain an auxiliary multiplier whose material-weighted
+            # force is zero. Pair multipliers are the applied force itself.
+            if solver._pair_contacts_enabled_this_step:
+                np.testing.assert_array_equal(solver.body_body_contact_lambda.numpy(), 0.0)
+            np.testing.assert_array_equal(state_out.body_qd.numpy(), 0.0)
+
+
+def test_body_contact_color_budget_is_bounded_and_joint_safe(test, device):
+    """A requested cap bounds body work without overriding mandatory joint colors."""
+    model, pipeline, contacts, _ = _make_jointed_contact_lattice(device, ny=4, nz=2)
+    for invalid in (0, -1, 33, 4.5, True):
+        with test.assertRaisesRegex(ValueError, "rigid_body_contact_color_budget"):
+            newton.solvers.SolverVBD(model, rigid_compliant_alm=True, rigid_body_contact_color_budget=invalid)
+    for budget in (1, 4, 8, 32):
+        with test.subTest(budget=budget):
+            solver = newton.solvers.SolverVBD(
+                model,
+                iterations=2,
+                rigid_compliant_alm=True,
+                rigid_contact_history=True,
+                rigid_contact_coloring="refined",
+                rigid_body_contact_buffer_size=64,
+                rigid_body_contact_color_budget=budget,
+                deterministic=wp.DeterministicMode.RUN_TO_RUN,
+            )
+            state_in, state_out = model.state(), model.state()
+            control = model.control()
+            pipeline.collide(state_in, contacts)
+            solver.step(state_in, state_out, control, contacts, 1.0 / 600.0)
+            effective = max(budget, len(model.body_color_groups))
+            test.assertEqual(solver._rigid_body_color_budget, effective)
+            colors = solver._rigid_body_colors.numpy()
+            active = solver._rigid_body_schedule_active.numpy().astype(bool)
+            test.assertTrue(np.all((colors[active] >= 0) & (colors[active] < effective)))
+            for parent, child in zip(model.joint_parent.numpy(), model.joint_child.numpy(), strict=True):
+                if parent >= 0 and child >= 0 and active[parent] and active[child]:
+                    test.assertNotEqual(colors[parent], colors[child])
+            np.testing.assert_array_equal(
+                np.sort(solver._rigid_body_ids_by_color.numpy()[: np.count_nonzero(active)]),
+                np.flatnonzero(active),
+            )
+
+            copies = [
+                (value, wp.clone(value))
+                for owner in (state_in, state_out, solver, contacts)
+                for value in vars(owner).values()
+                if isinstance(value, wp.array)
+            ]
+
+            def restore(copies=copies):
+                for value, seed in copies:
+                    wp.copy(value, seed)
+
+            restore()
+            solver.step(state_in, state_out, control, contacts, 1.0 / 600.0)
+            expected = (state_out.body_q.numpy().tobytes(), state_out.body_qd.numpy().tobytes())
+            restore()
+            if device.is_cuda:
+                with wp.ScopedCapture(device=device) as capture:
+                    solver.step(state_in, state_out, control, contacts, 1.0 / 600.0)
+            for _ in range(3):
+                restore()
+                if device.is_cuda:
+                    wp.capture_launch(capture.graph)
+                else:
+                    solver.step(state_in, state_out, control, contacts, 1.0 / 600.0)
+                test.assertEqual((state_out.body_q.numpy().tobytes(), state_out.body_qd.numpy().tobytes()), expected)
+
+
+def test_disjoint_joint_force_controls_preserve_wrenches(test, device):
+    """Preserve nonzero controls and mutable enables without cross-body reduction."""
+    for shared in (False, True):
+        builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+        for x in (0.0, 3.0):
+            body = builder.add_body(xform=wp.transform(wp.vec3(x, 0.0, 0.0), wp.quat_identity()))
+            builder.add_shape_sphere(body, radius=0.5)
+        if shared:
+            builder.add_joint_fixed(parent=0, child=1)
+        builder.color()
+        model = builder.finalize(device=device)
+        solver = newton.solvers.SolverVBD(
+            model, iterations=1, rigid_compliant_alm=True, deterministic=wp.DeterministicMode.RUN_TO_RUN
+        )
+        selected = getattr(solver, "_joint_force_kernel", xpbd_kernels.apply_joint_forces)
+        if device.is_cuda and not shared:
+            test.assertIsNot(selected, xpbd_kernels.apply_joint_forces)
+        else:
+            test.assertIs(selected, xpbd_kernels.apply_joint_forces)
+        if shared:
+            continue
+        control = model.control()
+        state = model.state()
+        body_seed = np.asarray([[3, -2, 7, 4, -5, 6], [-1, 2, -3, 4, -5, 6]], dtype=np.float32)
+        expected = wp.array(body_seed, dtype=wp.spatial_vector, device=device)
+        actual = wp.clone(expected)
+        seed = wp.clone(expected)
+        inputs = [
+            state.body_q,
+            model.body_com,
+            model.joint_type,
+            model.joint_enabled,
+            model.joint_parent,
+            model.joint_child,
+            model.joint_X_p,
+            model.joint_X_c,
+            model.joint_qd_start,
+            model.joint_dof_dim,
+            model.joint_axis,
+            control.joint_f,
+            1.0 / 120.0,
+        ]
+
+        def launch(actual=actual, seed=seed, selected=selected, inputs=inputs, count=model.joint_count):
+            wp.copy(actual, seed)
+            wp.launch(selected, dim=count, inputs=inputs, outputs=[actual, None], device=device)
+
+        launch()
+        capture = None
+        if device.is_cuda:
+            with wp.ScopedCapture(device=device) as capture:
+                launch()
+        for enabled in (True, False, True):
+            control.joint_f.assign(np.linspace(-11, 17, model.joint_dof_count, dtype=np.float32))
+            model.joint_enabled.assign(np.full(model.joint_count, enabled, dtype=bool))
+            expected.assign(body_seed)
+            solver._apply_module_options()
+            wp.launch(
+                xpbd_kernels.apply_joint_forces,
+                dim=model.joint_count,
+                inputs=inputs,
+                outputs=[expected, None],
+                device=device,
+            )
+            for _ in range(3):
+                if capture is not None:
+                    wp.capture_launch(capture.graph)
+                else:
+                    launch()
+                np.testing.assert_array_equal(actual.numpy(), expected.numpy())
+            if not enabled:
+                np.testing.assert_array_equal(actual.numpy(), body_seed)
+        test.assertEqual(wp.get_module_options(xpbd_kernels)["deterministic"], wp.DeterministicMode.RUN_TO_RUN)
+        strict = newton.solvers.SolverVBD(
+            model, iterations=1, rigid_compliant_alm=True, deterministic=wp.DeterministicMode.GPU_TO_GPU
+        )
+        test.assertIs(strict._joint_force_kernel, xpbd_kernels.apply_joint_forces)
+
+
+def test_pair_parallel_tail_replays_population_changes(test, device):
+    """Refresh the execution flag when dense late colors appear and disappear."""
+    body_count = 1536
+    model = SimpleNamespace(
+        body_count=body_count, device=device, shape_body=wp.array(np.arange(body_count, dtype=np.int32), device=device)
+    )
+    pair = RigidPairContact(
+        model,
+        wp.ones(body_count, dtype=float, device=device),
+        wp.zeros(body_count, dtype=wp.mat33, device=device),
+        wp.ones(body_count, dtype=wp.int32, device=device),
+        body_count,
+    )
+    edges = np.asarray(
+        [(start + i, start + j) for start in range(0, body_count, 12) for i in range(12) for j in range(i + 1, 12)],
+        dtype=np.int32,
+    )
+    contacts = SimpleNamespace(
+        rigid_contact_max=len(edges),
+        rigid_contact_count=wp.array([len(edges)], dtype=wp.int32, device=device),
+        rigid_contact_shape0=wp.array(edges[:, 0], device=device),
+        rigid_contact_shape1=wp.array(edges[:, 1], device=device),
+    )
+    pair.build(contacts)
+    with wp.ScopedCapture(device=device) as capture:
+        pair.build(contacts)
+    for count in (len(edges), 0, 1, len(edges)):
+        contacts.rigid_contact_count.assign(np.asarray([count], dtype=np.int32))
+        wp.capture_launch(capture.graph)
+        counts = pair.color_counts.numpy()
+        expected = int(np.any(counts[8:16] > rigid_pair_contact._FUSED_THREADS))
+        test.assertEqual(int(pair.parallel_tail.numpy()[0]), expected)
+        test.assertEqual(expected, int(count == len(edges)))
+
+
+def test_pair_tail_dispatch_is_once_per_substep(test, device):
+    """A fixed pair graph must not pay a conditional node for every sweep."""
+    if not wp.is_conditional_graph_supported():
+        test.skipTest("Conditional CUDA graphs unavailable")
+    builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+    for index in range(device.sm_count + 1):
+        body = builder.add_body(xform=wp.transform(wp.vec3(2.0 * index, 0.0, 0.0), wp.quat_identity()))
+        builder.add_shape_sphere(body, radius=0.5)
+    builder.color()
+    model = builder.finalize(device=device)
+    solver = newton.solvers.SolverVBD(
+        model,
+        iterations=3,
+        rigid_compliant_alm=True,
+        rigid_contact_history=True,
+        deterministic=wp.DeterministicMode.RUN_TO_RUN,
+    )
+    pipeline = _make_pipeline(model, 8)
+    contacts = pipeline.contacts()
+    states = [model.state(), model.state()]
+    control = model.control()
+    pipeline.collide(states[0], contacts)
+    solver.step(states[0], states[1], control, contacts, 1.0 / 120.0)
+    expected = states[1].body_q.numpy().copy()
+    original = wp.capture_if
+    calls = []
+
+    def capture_if(condition, *args, **kwargs):
+        if condition is solver._rigid_pair_contacts.parallel_tail:
+            calls.append(condition)
+        return original(condition, *args, **kwargs)
+
+    with patch.object(wp, "capture_if", capture_if):
+        with wp.ScopedCapture(device=device) as capture:
+            solver.step(states[0], states[1], control, contacts, 1.0 / 120.0)
+    test.assertEqual(len(calls), 1)
+    for _ in range(3):
+        wp.capture_launch(capture.graph)
+        np.testing.assert_array_equal(states[1].body_q.numpy(), expected)
+
+
 class TestVBDRigidPairContact(unittest.TestCase):
     pass
 
 
 devices = get_test_devices()
 cuda_devices = get_selected_cuda_test_devices()
+
+add_function_test(
+    TestVBDRigidPairContact,
+    "test_pair_tail_dispatch_is_once_per_substep",
+    test_pair_tail_dispatch_is_once_per_substep,
+    devices=cuda_devices,
+)
 
 add_function_test(
     TestVBDRigidPairContact,
@@ -975,7 +1481,7 @@ add_function_test(
     TestVBDRigidPairContact,
     "test_jointed_color_mask_matches_greedy_reference",
     test_jointed_color_mask_matches_greedy_reference,
-    devices=cuda_devices,
+    devices=devices,
 )
 add_function_test(
     TestVBDRigidPairContact,
@@ -1027,6 +1533,12 @@ add_function_test(
 )
 add_function_test(
     TestVBDRigidPairContact,
+    "test_pair_warmstart_respects_normal_and_tangent_moment_arms",
+    test_pair_warmstart_respects_normal_and_tangent_moment_arms,
+    devices=devices,
+)
+add_function_test(
+    TestVBDRigidPairContact,
     "test_pair_primal_is_seeded_only_for_retained_multipliers",
     test_pair_primal_is_seeded_only_for_retained_multipliers,
     devices=devices,
@@ -1059,6 +1571,50 @@ add_function_test(
     TestVBDRigidPairContact,
     "test_pair_color_overflow_is_complete_and_repeatable",
     test_pair_color_overflow_is_complete_and_repeatable,
+    devices=cuda_devices,
+)
+
+
+add_function_test(
+    TestVBDRigidPairContact,
+    "test_contact_color_growth_replays_every_body",
+    test_contact_color_growth_replays_every_body,
+    devices=cuda_devices,
+)
+
+
+add_function_test(
+    TestVBDRigidPairContact,
+    "test_mixed_world_force_query_keeps_each_contact_law",
+    test_mixed_world_force_query_keeps_each_contact_law,
+    devices=devices,
+)
+add_function_test(
+    TestVBDRigidPairContact,
+    "test_zero_compliant_contact_material_is_not_hard",
+    test_zero_compliant_contact_material_is_not_hard,
+    devices=devices,
+)
+
+
+add_function_test(
+    TestVBDRigidPairContact,
+    "test_body_contact_color_budget_is_bounded_and_joint_safe",
+    test_body_contact_color_budget_is_bounded_and_joint_safe,
+    devices=devices,
+)
+
+
+add_function_test(
+    TestVBDRigidPairContact,
+    "test_disjoint_joint_force_controls_preserve_wrenches",
+    test_disjoint_joint_force_controls_preserve_wrenches,
+    devices=devices,
+)
+add_function_test(
+    TestVBDRigidPairContact,
+    "test_pair_parallel_tail_replays_population_changes",
+    test_pair_parallel_tail_replays_population_changes,
     devices=cuda_devices,
 )
 

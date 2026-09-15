@@ -67,6 +67,7 @@ def build_and_color_pair_groups_serial(
     color_cursors: wp.array[wp.int32],
     group_count_out: wp.array[wp.int32],
     overflow_count_out: wp.array[wp.int32],
+    parallel_tail: wp.array[wp.int32],
 ):
     """Build contiguous body-pair runs and reverse-greedy exact edge colors."""
     if wp.tid() != 0:
@@ -144,6 +145,9 @@ def build_and_color_pair_groups_serial(
                 body_color_mask[body1] |= bit
             color_counts[selected] += 1
         else:
+            # Reverse traversal packs the tail in ascending group order, matching
+            # the serial solve without rescanning unused contact capacity.
+            group_list[group_list.shape[0] - 1 - overflow_count] = group
             overflow_count += 1
         group -= 1
 
@@ -163,6 +167,10 @@ def build_and_color_pair_groups_serial(
 
     group_count_out[0] = group_count
     overflow_count_out[0] = overflow_count
+    parallel_tail[0] = 0
+    for color in range(_DIRECT_COLOR_COUNT, 2 * _DIRECT_COLOR_COUNT):
+        if color_counts[color] > _FUSED_THREADS:
+            parallel_tail[0] = 1
 
 
 @wp.kernel
@@ -331,6 +339,8 @@ def color_pair_tail_serial(
     overflow_count: wp.array[wp.int32],
     color_offsets: wp.array[wp.int32],
     color_cursors: wp.array[wp.int32],
+    group_list: wp.array[wp.int32],
+    parallel_tail: wp.array[wp.int32],
 ):
     """Color the sparse tail deterministically, then build color offsets."""
     if wp.tid() != 0:
@@ -374,6 +384,7 @@ def color_pair_tail_serial(
                         body_color_mask[body1] |= bit
                     color_counts[selected] += 1
                 else:
+                    group_list[group_list.shape[0] - 1 - overflow_count[0]] = group
                     overflow_count[0] += 1
                 remaining -= 1
             group -= 1
@@ -384,6 +395,12 @@ def color_pair_tail_serial(
         color_cursors[color] = offset
         offset += color_counts[color]
     color_offsets[color_count] = offset
+
+    # More than one block of groups in the next batch warrants parallel colors.
+    parallel_tail[0] = 0
+    for color in range(_DIRECT_COLOR_COUNT, 2 * _DIRECT_COLOR_COUNT):
+        if color_counts[color] > _FUSED_THREADS:
+            parallel_tail[0] = 1
 
 
 @wp.kernel
@@ -437,6 +454,7 @@ def accumulate_constraint_contact_forces_per_body(
     contact_point1: wp.array[wp.vec3],
     contact_offset0: wp.array[wp.vec3],
     contact_offset1: wp.array[wp.vec3],
+    contact_normal: wp.array[wp.vec3],
     shape_body: wp.array[wp.int32],
     contact_lambda: wp.array[wp.vec3],
     body_contact_buffer_pre_alloc: int,
@@ -476,67 +494,26 @@ def accumulate_constraint_contact_forces_per_body(
             continue
         reaction = contact_lambda[contact]
         point = wp.vec3(0.0)
+        offset = wp.vec3(0.0)
         force = wp.vec3(0.0)
         if body == body0:
             point = contact_surface_point(body_q[body], contact_point0[contact], contact_offset0[contact])
+            offset = wp.transform_vector(body_q[body], contact_offset0[contact])
             force = -reaction
         elif body == body1:
             point = contact_surface_point(body_q[body], contact_point1[contact], contact_offset1[contact])
+            offset = wp.transform_vector(body_q[body], contact_offset1[contact])
             force = reaction
         else:
             continue
         force_sum += force
-        torque_sum += wp.cross(point - center, force)
+        # Normal rows use skeleton points; only friction uses the surface offset.
+        normal = contact_normal[contact]
+        normal_force = normal * wp.dot(normal, force)
+        torque_sum += wp.cross(point - center, force) - wp.cross(offset, normal_force)
 
     body_forces[body] += force_sum
     body_torques[body] += torque_sum
-
-
-@wp.kernel
-def query_constraint_contact_forces(
-    contact_count: wp.array[wp.int32],
-    contact_shape0: wp.array[wp.int32],
-    contact_shape1: wp.array[wp.int32],
-    contact_point0: wp.array[wp.vec3],
-    contact_point1: wp.array[wp.vec3],
-    contact_offset0: wp.array[wp.vec3],
-    contact_offset1: wp.array[wp.vec3],
-    shape_body: wp.array[wp.int32],
-    body_q: wp.array[wp.transform],
-    contact_lambda: wp.array[wp.vec3],
-    out_body0: wp.array[wp.int32],
-    out_body1: wp.array[wp.int32],
-    out_point0_world: wp.array[wp.vec3],
-    out_point1_world: wp.array[wp.vec3],
-    out_force_on_body1: wp.array[wp.vec3],
-):
-    """Expose the solved force multiplier and current surface points."""
-    contact = wp.tid()
-    if contact >= contact_count[0]:
-        out_body0[contact] = -1
-        out_body1[contact] = -1
-        out_point0_world[contact] = wp.vec3(0.0)
-        out_point1_world[contact] = wp.vec3(0.0)
-        out_force_on_body1[contact] = wp.vec3(0.0)
-        return
-
-    shape0 = contact_shape0[contact]
-    shape1 = contact_shape1[contact]
-    body0 = shape_body[shape0] if shape0 >= 0 else -1
-    body1 = shape_body[shape1] if shape1 >= 0 else -1
-    out_body0[contact] = body0
-    out_body1[contact] = body1
-    out_point0_world[contact] = (
-        contact_surface_point(body_q[body0], contact_point0[contact], contact_offset0[contact])
-        if body0 >= 0
-        else contact_point0[contact] + contact_offset0[contact]
-    )
-    out_point1_world[contact] = (
-        contact_surface_point(body_q[body1], contact_point1[contact], contact_offset1[contact])
-        if body1 >= 0
-        else contact_point1[contact] + contact_offset1[contact]
-    )
-    out_force_on_body1[contact] = contact_lambda[contact]
 
 
 @wp.func
@@ -812,6 +789,7 @@ def _solve_constraint_contact_group(
         compliance = float(0.0)
         damping_fraction = float(0.0)
         use_finite_material = contact_compliant_alm == 1 or legacy_hard_contacts == 0
+        effective_stiffness = float(0.0)
         if use_finite_material:
             stiffness = contact_material_ke[contact]
             damping_rate = contact_material_kd[contact] / dt
@@ -830,7 +808,7 @@ def _solve_constraint_contact_group(
         normal_support = contact_normal_support[contact]
         new_normal = float(0.0)
         denominator = normal_support + compliance
-        if denominator > _EPS:
+        if denominator > _EPS and (not use_finite_material or effective_stiffness > 0.0):
             new_normal = wp.max(old_normal + normal_residual / denominator, 0.0)
         delta_normal = new_normal - old_normal
 
@@ -1045,6 +1023,7 @@ def solve_constraint_contact_colors_fused(
     contact_compliant_alm: int,
     color_counts: wp.array[wp.int32],
     color_offsets: wp.array[wp.int32],
+    overflow_count: wp.array[wp.int32],
     group_list: wp.array[wp.int32],
     group_start: wp.array[wp.int32],
     group_end: wp.array[wp.int32],
@@ -1077,17 +1056,27 @@ def solve_constraint_contact_colors_fused(
     body_q: wp.array[wp.transform],
     contact_lambda: wp.array[wp.vec3],
 ):
-    """Solve all colors in one block, using block barriers as color barriers."""
+    """Solve colors, then packed serial overflow, with block-local barriers."""
     lane = wp.tid()
     color = first_color
-    while color < color_count:
-        count = color_counts[color]
-        # Greedy coloring produces a contiguous palette.  Once a color is
-        # empty, every later color is empty too, so avoid useless barriers.
-        if count == 0:
-            break
+    while color <= color_count:
+        count = int(0)
+        offset = int(0)
         slot = lane
-        offset = color_offsets[color]
+        stride = _FUSED_THREADS
+        if color == color_count:
+            # The last phase preserves the ascending, single-thread overflow order.
+            count = overflow_count[0]
+            offset = group_list.shape[0] - count
+            slot = 0 if lane == 0 else count
+            stride = 1
+        else:
+            count = color_counts[color]
+            # The greedy palette is contiguous; skip empty colors, but not overflow.
+            if count == 0:
+                color = color_count
+                continue
+            offset = color_offsets[color]
         while slot < count:
             group = group_list[offset + slot]
             _solve_constraint_contact_group(
@@ -1126,7 +1115,7 @@ def solve_constraint_contact_colors_fused(
                 body_q,
                 contact_lambda,
             )
-            slot += _FUSED_THREADS
+            slot += stride
         _pair_sync_block()
         color += 1
 
@@ -1140,6 +1129,7 @@ def solve_constraint_contact_overflow(
     contact_compliant_alm: int,
     overflow_count: wp.array[wp.int32],
     group_color: wp.array[wp.int32],
+    group_list: wp.array[wp.int32],
     group_start: wp.array[wp.int32],
     group_end: wp.array[wp.int32],
     group_body0: wp.array[wp.int32],
@@ -1173,7 +1163,11 @@ def solve_constraint_contact_overflow(
 ):
     if wp.tid() != 0 or (solve_all == 0 and overflow_count[0] == 0):
         return
-    for group in range(group_capacity):
+    count = group_capacity if solve_all == 1 else overflow_count[0]
+    for slot in range(count):
+        group = slot
+        if solve_all == 0:
+            group = group_list[group_list.shape[0] - count + slot]
         color = group_color[group]
         if color == -1 or (solve_all == 1 and color >= 0):
             _solve_constraint_contact_group(
@@ -1241,6 +1235,7 @@ class RigidPairContact:
         self.color_cursors = wp.zeros(_COLOR_COUNT, dtype=wp.int32, device=self.device)
         self.group_count = wp.zeros(1, dtype=wp.int32, device=self.device)
         self.overflow_count = wp.zeros(1, dtype=wp.int32, device=self.device)
+        self.parallel_tail = wp.zeros(1, dtype=wp.int32, device=self.device)
         self.resize(0)
 
     def resize(self, capacity: int) -> None:
@@ -1374,6 +1369,8 @@ class RigidPairContact:
                     self.overflow_count,
                     self.color_offsets,
                     self.color_cursors,
+                    self.group_list,
+                    self.parallel_tail,
                 ],
                 device=self.device,
                 block_dim=1,
@@ -1412,6 +1409,7 @@ class RigidPairContact:
                     self.color_cursors,
                     self.group_count,
                     self.overflow_count,
+                    self.parallel_tail,
                 ],
                 device=self.device,
                 block_dim=1,
@@ -1430,8 +1428,9 @@ class RigidPairContact:
         contact_lambda: wp.array,
         legacy_hard_contacts: int,
         contact_compliant_alm: bool,
+        parallel_tail: bool | None = None,
     ) -> None:
-        """Apply one colored pair-manifold block sweep."""
+        """Apply one sweep; an optional enclosing graph branch selects the tail."""
         capacity = contacts.rigid_contact_max
         if capacity <= 0:
             return
@@ -1516,6 +1515,7 @@ class RigidPairContact:
                     int(contact_compliant_alm),
                     self.overflow_count,
                     self.group_color,
+                    self.group_list,
                     *contact_inputs,
                 ],
                 outputs=[body_q, contact_lambda],
@@ -1537,59 +1537,89 @@ class RigidPairContact:
         direct_color_count = (
             0 if self.pair_body_count <= min_bodies_per_sm * self.device.sm_count else _DIRECT_COLOR_COUNT
         )
-        for color in range(direct_color_count):
+
+        def solve_direct(first: int, last: int) -> None:
+            for color in range(first, last):
+                wp.launch(
+                    kernel=solve_constraint_contact_color,
+                    dim=launch_dim,
+                    inputs=[
+                        launch_dim,
+                        color,
+                        dt,
+                        legacy_hard_contacts,
+                        int(contact_compliant_alm),
+                        self.color_counts,
+                        self.color_offsets,
+                        self.group_list,
+                        *contact_inputs,
+                    ],
+                    outputs=[body_q, contact_lambda],
+                    device=self.device,
+                    block_dim=block_dim,
+                )
+
+        def solve_tail(direct_color_count: int) -> None:
+            if direct_color_count < _COLOR_COUNT:
+                wp.launch(
+                    kernel=solve_constraint_contact_colors_fused,
+                    dim=_FUSED_THREADS,
+                    inputs=[
+                        direct_color_count,
+                        _COLOR_COUNT,
+                        dt,
+                        legacy_hard_contacts,
+                        int(contact_compliant_alm),
+                        self.color_counts,
+                        self.color_offsets,
+                        self.overflow_count,
+                        self.group_list,
+                        *contact_inputs,
+                    ],
+                    outputs=[body_q, contact_lambda],
+                    device=self.device,
+                    block_dim=_FUSED_THREADS,
+                    max_blocks=1,
+                )
+                return
             wp.launch(
-                kernel=solve_constraint_contact_color,
-                dim=launch_dim,
+                kernel=solve_constraint_contact_overflow,
+                dim=1,
                 inputs=[
-                    launch_dim,
-                    color,
+                    capacity,
+                    0,
                     dt,
                     legacy_hard_contacts,
                     int(contact_compliant_alm),
-                    self.color_counts,
-                    self.color_offsets,
+                    self.overflow_count,
+                    self.group_color,
                     self.group_list,
                     *contact_inputs,
                 ],
                 outputs=[body_q, contact_lambda],
                 device=self.device,
-                block_dim=block_dim,
+                block_dim=1,
             )
-        if direct_color_count < _COLOR_COUNT:
-            wp.launch(
-                kernel=solve_constraint_contact_colors_fused,
-                dim=_FUSED_THREADS,
-                inputs=[
-                    direct_color_count,
-                    _COLOR_COUNT,
-                    dt,
-                    legacy_hard_contacts,
-                    int(contact_compliant_alm),
-                    self.color_counts,
-                    self.color_offsets,
-                    self.group_list,
-                    *contact_inputs,
-                ],
-                outputs=[body_q, contact_lambda],
-                device=self.device,
-                block_dim=_FUSED_THREADS,
-                max_blocks=1,
+
+        if direct_color_count and parallel_tail is not None:
+            direct_color_count *= 2 if parallel_tail else 1
+        solve_direct(0, direct_color_count)
+        if (
+            parallel_tail is None
+            and direct_color_count
+            and self.device.is_capturing
+            and wp.is_conditional_graph_supported()
+        ):
+
+            def solve_parallel_tail() -> None:
+                expanded_count = 2 * _DIRECT_COLOR_COUNT
+                solve_direct(direct_color_count, expanded_count)
+                solve_tail(expanded_count)
+
+            wp.capture_if(
+                self.parallel_tail,
+                on_true=solve_parallel_tail,
+                on_false=lambda: solve_tail(direct_color_count),
             )
-        wp.launch(
-            kernel=solve_constraint_contact_overflow,
-            dim=1,
-            inputs=[
-                capacity,
-                0,
-                dt,
-                legacy_hard_contacts,
-                int(contact_compliant_alm),
-                self.overflow_count,
-                self.group_color,
-                *contact_inputs,
-            ],
-            outputs=[body_q, contact_lambda],
-            device=self.device,
-            block_dim=1,
-        )
+        else:
+            solve_tail(direct_color_count)
