@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Newton Rigid VBD Validation Reports</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17202a;
+      --muted: #5f6f82;
+      --line: #d9e0e8;
+      --panel: #f7f9fb;
+      --accent: #1f6f8b;
+      --accent-soft: #e7f2f7;
+      --max: 1120px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: #ffffff;
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+    }
+
+    header {
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfd;
+    }
+
+    main,
+    .header-inner,
+    footer {
+      width: min(var(--max), calc(100vw - 32px));
+      margin: 0 auto;
+    }
+
+    .header-inner {
+      padding: 38px 0 30px;
+    }
+
+    h1 {
+      margin: 0 0 10px;
+      font-size: clamp(2rem, 4vw, 3.35rem);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 0 0 12px;
+      font-size: 1.45rem;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 1.12rem;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 12px;
+    }
+
+    a {
+      color: var(--accent);
+    }
+
+    .subtitle {
+      max-width: 880px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 1.05rem;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 22px;
+    }
+
+    .summary-card,
+    .report-card,
+    .note {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .summary-card {
+      padding: 14px 16px;
+    }
+
+    .summary-card .label {
+      color: var(--muted);
+      font-size: 0.82rem;
+      font-weight: 650;
+      text-transform: uppercase;
+    }
+
+    .summary-card .value {
+      display: block;
+      margin-top: 4px;
+      font-size: 1.2rem;
+      font-weight: 760;
+    }
+
+    main {
+      padding: 30px 0 50px;
+    }
+
+    section {
+      margin: 0 0 36px;
+    }
+
+    .note {
+      padding: 16px 18px;
+      background: var(--panel);
+      color: var(--muted);
+      max-width: 930px;
+    }
+
+    .report-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+      margin-top: 16px;
+    }
+
+    .report-card {
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .media {
+      background: #111827;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .media img,
+    .media video {
+      display: block;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      object-fit: contain;
+      background: #111827;
+    }
+
+    .body {
+      padding: 16px 18px 18px;
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .body p {
+      color: var(--muted);
+    }
+
+    .result {
+      margin: 0;
+      color: var(--ink);
+      font-weight: 650;
+    }
+
+    .links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: auto;
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      min-height: 34px;
+      padding: 7px 11px;
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-weight: 650;
+      text-decoration: none;
+    }
+
+    .subtle {
+      border-color: var(--line);
+      background: #ffffff;
+      color: var(--muted);
+    }
+
+    .matrix {
+      width: 100%;
+      margin-top: 16px;
+      border-collapse: collapse;
+      border: 1px solid var(--line);
+      background: #ffffff;
+    }
+
+    .matrix th,
+    .matrix td {
+      padding: 10px 12px;
+      border-top: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .matrix th {
+      color: var(--muted);
+      font-size: 0.86rem;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    footer {
+      padding: 0 0 42px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    @media (max-width: 860px) {
+      .summary,
+      .report-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <h1>Newton Rigid VBD Validation Reports</h1>
+      <p class="subtitle">
+        A grouped entry point for the rigid VBD validation pages. Each subreport keeps its own detailed plots,
+        coefficients, and reproduced scene, while this page gives the shortest path to the main evidence.
+      </p>
+      <div class="summary">
+        <div class="summary-card">
+          <span class="label">Coverage</span>
+          <span class="value">7 validation reports</span>
+        </div>
+        <div class="summary-card">
+          <span class="label">Media</span>
+          <span class="value">Newton-rendered videos</span>
+        </div>
+        <div class="summary-card">
+          <span class="label">Focus</span>
+          <span class="value">contact compliance, friction, joints</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>How To Read This Set</h2>
+      <p class="note">
+        The reports are grouped by what they validate. The capstan case checks a known friction relation,
+        contact cases isolate normal compliance, sliding, and stacking behavior, and jointed-body cases
+        stress coupled joint and contact constraints.
+      </p>
+    </section>
+
+    <section>
+      <h2>Analytic Friction Check</h2>
+      <div class="report-grid">
+        <article class="report-card">
+          <div class="media">
+            <video controls muted loop playsinline preload="metadata">
+              <source src="../capstan_analytic_zero_bend/assets/capstan_example_soft_hard.mp4" type="video/mp4">
+            </video>
+          </div>
+          <div class="body">
+            <h3>Analytic Capstan</h3>
+            <p>Zero-bend capstan validation against the ideal tension ratio for a known wrap angle.</p>
+            <p class="result">Checks whether soft and hard VBD contact reproduce the expected capstan force plateau.</p>
+            <div class="links">
+              <a class="button" href="../capstan_analytic_zero_bend/">Open full report</a>
+              <a class="button subtle" href="../capstan_analytic_zero_bend/assets/capstan_analytic_zero_bend_mu_combined.png">Key plot</a>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>Normal Contact And Friction</h2>
+      <div class="report-grid">
+        <article class="report-card">
+          <div class="media">
+            <video controls muted loop playsinline preload="metadata">
+              <source src="../vbd_contact_soft_compliance/assets/soft_contact_compliance.mp4" type="video/mp4">
+            </video>
+          </div>
+          <div class="body">
+            <h3>Normal Contact Compliance</h3>
+            <p>Single-body normal-contact setup that isolates the soft-contact equilibrium response.</p>
+            <p class="result">Validates that compression follows the expected mass-versus-stiffness scaling before adding friction or stacking.</p>
+            <div class="links">
+              <a class="button" href="../vbd_contact_soft_compliance/">Open full report</a>
+              <a class="button subtle" href="../vbd_contact_soft_compliance/assets/soft_contact_compliance_scaling.png">Key plot</a>
+            </div>
+          </div>
+        </article>
+
+        <article class="report-card">
+          <div class="media">
+            <video controls muted loop playsinline preload="metadata">
+              <source src="../vbd_contact_friction_ramp/assets/friction_ramp_static_soft_hard.mp4" type="video/mp4">
+            </video>
+          </div>
+          <div class="body">
+            <h3>Friction Ramp</h3>
+            <p>Static ramp, dynamic ramp, and flat sliding cases for controlled Coulomb friction checks.</p>
+            <p class="result">Separates static holding from dynamic stop-distance behavior under the same reported friction settings.</p>
+            <div class="links">
+              <a class="button" href="../vbd_contact_friction_ramp/">Open full report</a>
+              <a class="button subtle" href="../vbd_contact_friction_ramp/assets/dynamic_box_mode_comparison_iter_08.png">Key plot</a>
+            </div>
+          </div>
+        </article>
+
+        <article class="report-card">
+          <div class="media">
+            <video controls muted loop playsinline preload="metadata">
+              <source src="../vbd_box_stack_contact_stability/assets/box_stack_solver_schedule.mp4" type="video/mp4">
+            </video>
+          </div>
+          <div class="body">
+            <h3>Box-Stack Contact Stability</h3>
+            <p>Stacked rigid boxes under different contact schedules: full Jacobi, relaxed Jacobi, and full Gauss-Seidel.</p>
+            <p class="result">Shows how contact history and solver scheduling affect height loss and convergence.</p>
+            <div class="links">
+              <a class="button" href="../vbd_box_stack_contact_stability/">Open full report</a>
+              <a class="button subtle" href="../vbd_box_stack_contact_stability/assets/box_stack_full_gs_iteration_sensitivity.png">Key plot</a>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>Jointed Rigid-Body Scenarios</h2>
+      <div class="report-grid">
+        <article class="report-card">
+          <div class="media">
+            <video controls muted loop playsinline preload="metadata">
+              <source src="../vbd_pendulum_chain_joint_stability/assets/pendulum_chain_soft_hard.mp4" type="video/mp4">
+            </video>
+          </div>
+          <div class="body">
+            <h3>Pendulum-Chain Joint Stability</h3>
+            <p>Rigid capsule chain with ball joints, tuned around the low-iteration joint-stability regime.</p>
+            <p class="result">Compares joint-gap reduction across soft and hard joint modes without relying on energy diagnostics.</p>
+            <div class="links">
+              <a class="button" href="../vbd_pendulum_chain_joint_stability/">Open full report</a>
+              <a class="button subtle" href="../vbd_pendulum_chain_joint_stability/assets/pendulum_chain_iteration_sensitivity.png">Key plot</a>
+            </div>
+          </div>
+        </article>
+
+        <article class="report-card">
+          <div class="media">
+            <video controls muted loop playsinline preload="metadata">
+              <source src="../vbd_peaucellier_lipkin_linkages/assets/lipkin_linkages_teaser.mp4" type="video/mp4">
+            </video>
+          </div>
+          <div class="body">
+            <h3>Peaucellier-Lipkin Linkages</h3>
+            <p>Planar straight-line mechanisms with direct and slider-driven Peaucellier-Lipkin variants.</p>
+            <p class="result">Checks tracer straight-line error and revolute joint-anchor closure under VBD.</p>
+            <div class="links">
+              <a class="button" href="../vbd_peaucellier_lipkin_linkages/">Open full report</a>
+              <a class="button subtle" href="../vbd_peaucellier_lipkin_linkages/assets/lipkin_slider_iteration_sweep.png">Key plot</a>
+            </div>
+          </div>
+        </article>
+
+        <article class="report-card">
+          <div class="media">
+            <video controls muted loop playsinline preload="metadata">
+              <source src="../vbd_two_heavy_balls_cable_wrap/assets/two_heavy_balls_modes_long.mp4" type="video/mp4">
+            </video>
+          </div>
+          <div class="body">
+            <h3>Two-Heavy-Body Chain</h3>
+            <p>Two heavy loads attached to a jointed chain that wraps around a fixed capsule, stressing joints and contact together.</p>
+            <p class="result">Tracks joint gap and contact residual for soft-soft, hard-hard, and hard-hard-history modes.</p>
+            <div class="links">
+              <a class="button" href="../vbd_two_heavy_balls_cable_wrap/">Open full report</a>
+              <a class="button subtle" href="../vbd_two_heavy_balls_cable_wrap/assets/two_heavy_balls_iteration_sensitivity.png">Key plot</a>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>Subreport Index</h2>
+      <table class="matrix">
+        <tr>
+          <th>Report</th>
+          <th>Primary Question</th>
+          <th>Detailed Page</th>
+        </tr>
+        <tr>
+          <td>Analytic Capstan</td>
+          <td>Does the zero-bend capstan scene match the analytic tension ratio?</td>
+          <td><a href="../capstan_analytic_zero_bend/">capstan_analytic_zero_bend</a></td>
+        </tr>
+        <tr>
+          <td>Normal Contact Compliance</td>
+          <td>Does soft contact compression scale with mass and contact stiffness?</td>
+          <td><a href="../vbd_contact_soft_compliance/">vbd_contact_soft_compliance</a></td>
+        </tr>
+        <tr>
+          <td>Friction Ramp</td>
+          <td>Do static holding, ramp sliding, and flat sliding behave consistently?</td>
+          <td><a href="../vbd_contact_friction_ramp/">vbd_contact_friction_ramp</a></td>
+        </tr>
+        <tr>
+          <td>Box-Stack Contact Stability</td>
+          <td>How do full Jacobi, relaxed Jacobi, and full Gauss-Seidel schedules compare?</td>
+          <td><a href="../vbd_box_stack_contact_stability/">vbd_box_stack_contact_stability</a></td>
+        </tr>
+        <tr>
+          <td>Pendulum-Chain Joint Stability</td>
+          <td>How well do low-iteration joint solves control ball-joint gaps?</td>
+          <td><a href="../vbd_pendulum_chain_joint_stability/">vbd_pendulum_chain_joint_stability</a></td>
+        </tr>
+        <tr>
+          <td>Peaucellier-Lipkin Linkages</td>
+          <td>Do planar loop-closure mechanisms preserve a known straight-line tracer path?</td>
+          <td><a href="../vbd_peaucellier_lipkin_linkages/">vbd_peaucellier_lipkin_linkages</a></td>
+        </tr>
+        <tr>
+          <td>Two-Heavy-Body Chain</td>
+          <td>What happens when jointed-chain constraints and capsule contact are both active?</td>
+          <td><a href="../vbd_two_heavy_balls_cable_wrap/">vbd_two_heavy_balls_cable_wrap</a></td>
+        </tr>
+      </table>
+    </section>
+  </main>
+
+  <footer>
+    This page is a report index. The detailed subreports remain the source of record for coefficients, plots, and reproduced examples.
+  </footer>
+</body>
+</html>

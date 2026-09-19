@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>See-saw &amp; Scale: Granular vs Monolithic Loads (XPBD / Soft VBD / Hard VBD)</title>
+  <style>
+:root {
+  color-scheme: light;
+  --ink: #17202a;
+  --muted: #5f6f82;
+  --line: #d9e0e8;
+  --panel: #f7f9fb;
+  --accent: #1f6f8b;
+  --good: #146c43;
+  --warn: #9a5b00;
+  --bad: #b3261e;
+  --max: 1280px;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: #ffffff; color: var(--ink);
+       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+       line-height: 1.5; }
+header { border-bottom: 1px solid var(--line); background: #fbfcfd; }
+main, .header-inner, footer { width: min(var(--max), calc(100vw - 32px)); margin: 0 auto; }
+.header-inner { padding: 36px 0 28px; }
+h1 { margin: 0 0 10px; font-size: clamp(2rem, 4vw, 3.35rem); line-height: 1.05; letter-spacing: 0; }
+.subtitle { max-width: 850px; margin: 0; color: var(--muted); font-size: 1.05rem; }
+.metric-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
+.metric { border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 14px 16px; }
+.metric .label { color: var(--muted); font-size: 0.82rem; font-weight: 650; text-transform: uppercase; }
+.metric .value { display: block; margin-top: 4px; font-size: 1.25rem; font-weight: 760; }
+.metric .value.good { color: var(--good); }
+.metric .value.warn { color: var(--warn); }
+.metric .value.bad { color: var(--bad); }
+main { padding: 28px 0 48px; }
+section { margin: 0 0 34px; }
+h2 { margin: 0 0 10px; font-size: 1.45rem; line-height: 1.2; letter-spacing: 0; }
+h3 { margin: 18px 0 10px; font-size: 1.1rem; line-height: 1.25; }
+p { margin: 0 0 12px; }
+a { color: var(--accent); }
+code { padding: 0.08em 0.25em; border-radius: 4px; background: #edf2f7;
+       font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; font-size: 0.92em; }
+pre { margin: 12px 0 0; padding: 14px 16px; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+pre code { padding: 0; background: transparent; }
+.breadcrumb { margin: 0 0 14px; font-size: 0.92rem; font-weight: 650; }
+.breadcrumb a { color: var(--accent); text-decoration: none; }
+.video-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 18px 0; }
+figure { margin: 0; border: 1px solid var(--line); border-radius: 8px; background: #fff; overflow: hidden; }
+figure img, video { display: block; width: 100%; height: auto; }
+video { background: #111827; }
+figcaption { padding: 12px 14px; border-top: 1px solid var(--line); color: var(--ink);
+             font-size: 0.92rem; background: var(--panel); }
+figcaption strong { display: block; margin-bottom: 4px; font-size: 1rem; }
+table { width: 100%; border-collapse: collapse; border: 1px solid var(--line); background: white; }
+th, td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+th { background: var(--panel); color: var(--muted); font-size: 0.86rem; text-transform: uppercase; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.win { background: #e8f5ee; color: var(--good); font-weight: 650; }
+td.lose { background: #fdecea; color: var(--bad); font-weight: 650; }
+td.warn { background: #fff3d6; color: var(--warn); }
+ul.compact { margin: 0; padding-left: 1.15rem; }
+ul.compact li { margin: 0.3rem 0; }
+footer { padding: 0 0 42px; color: var(--muted); font-size: 0.9rem; }
+@media (max-width: 820px) {
+  .metric-row { grid-template-columns: 1fr; }
+  .video-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <p class="breadcrumb"><a href="../">← Reports index</a></p>
+      <h1>See-saw &amp; Scale: Granular vs Monolithic Loads</h1>
+      <p class="subtitle">
+        Two pedagogical experiments to test whether <strong>1 big cube</strong> and
+        <strong>64 small cubes packed into the same shape with the same total mass</strong>
+        behave the same way under gravity. Goal: probe momentum / mass conservation across
+        discretization for XPBD, Soft VBD, and Hard VBD.
+      </p>
+      <div class="metric-row">
+        <div class="metric"><span class="label">Loads compared</span><span class="value">1 big · 64 small</span></div>
+        <div class="metric"><span class="label">Total mass each side</span><span class="value">1000 kg</span></div>
+        <div class="metric"><span class="label">External shape</span><span class="value">1 m cube</span></div>
+        <div class="metric"><span class="label">Solvers</span><span class="value">XPBD · Soft / Hard VBD</span></div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+
+    <section>
+      <h2>What this report is</h2>
+      <p>
+        Newton's pyramid stress test compares solvers on a single discretization (cubes of fixed
+        size). This report asks the complementary question: <strong>given two loads with the
+        same total mass and the same external shape but different cube-count discretization,
+        does each solver treat them as gravitationally equivalent?</strong>
+      </p>
+      <p>
+        Two experiments answer that:
+      </p>
+      <ul class="compact">
+        <li><strong>See-saw</strong> — a balance beam (light rigid body on a revolute joint).
+          Place one load on each side. If the gravitational torques cancel, the beam stays horizontal.
+          If a solver biases one side, the beam tips. This is also a sensitive symmetry test:
+          mirror-image loads should produce mirror-image responses.</li>
+        <li><strong>Static scale</strong> — both loads sitting side by side on the same ground
+          plane. Each load's center-of-mass height after settling reveals whether the solver
+          maintains the expected 0.5 m equilibrium (= half-extent of the bounding cube).</li>
+      </ul>
+      <p>
+        Mass / shape recipe (matched exactly):
+      </p>
+      <ul class="compact">
+        <li><strong>Big cube</strong>: half-extent 0.5 m → side 1 m → volume 1 m³ → density 1000 kg/m³ → <strong>1000 kg</strong>.</li>
+        <li><strong>64 small cubes (4×4×4)</strong>: half-extent 0.125 m → side 0.25 m → 64 × 0.015625 m³ × 1000 kg/m³ = <strong>1000 kg total</strong>, packed tight (centers 0.2502 m apart) into a 1 m cube footprint.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Precondition — which solvers can hold an NxNxN stack on a plane?</h2>
+      <p>
+        Before any see-saw or scale test, the granular load must be self-supporting under gravity.
+        Tight-packed cubic grids are surprisingly hard: contacts are simultaneous, in tight clusters,
+        and small numerical errors compound across layers. Sweep over N at <code>ss=10, mu=0.6,
+        density=1000</code>, with each solver's recommended Track-B configuration:
+      </p>
+      <table>
+        <tr><th>N (cube count)</th><th>XPBD ss=10, iter=2 (defaults)</th><th>Soft VBD ss=10, iter=4, ke=5e5</th><th>Hard VBD ss=10, iter=4, ke=5e5</th></tr>
+        <tr><td><strong>2 (8)</strong></td><td class="win">OK · 0.0% CoM drop</td><td class="win">OK · 0.3%</td><td class="win">OK · 0.4%</td></tr>
+        <tr><td><strong>3 (27)</strong></td><td class="warn">partial · 12.5% drop</td><td class="win">OK · 0.2%</td><td class="win">OK · 0.0%</td></tr>
+        <tr><td><strong>4 (64)</strong></td><td class="warn">partial · 15.9% drop</td><td class="win">OK · 2.1%</td><td class="win">OK · 0.0%</td></tr>
+        <tr><td><strong>5 (125)</strong></td><td class="warn">partial · 8.5% drop</td><td class="lose">COLLAPSE · 61.7%</td><td class="win">OK · 0.0%</td></tr>
+      </table>
+      <p>
+        Two surprises in the precondition test:
+      </p>
+      <ul class="compact">
+        <li><strong>XPBD with newton defaults under-resolves tight cube grids</strong> at any N ≥ 3,
+          dropping 8–16% of stack CoM as cubes shift sideways. Fixable by raising iter from 2 to 8
+          (then CoM drop falls to ~1%), at 4× the solver cost.</li>
+        <li><strong>Soft VBD cannot hold a 5×5×5 stack</strong> — penalty-only contact resolution
+          can't propagate constraints transitively through a 5-deep grid. Even at <code>ss=30,
+          iter=4, ke=1e6</code> (120 inner iterations per frame), the stack still drops 40% of CoM.
+          The fix is to use <strong>Hard VBD</strong> (AVBD Lagrangian propagates constraints
+          across layers) or step down to <strong>N=4 (64 cubes)</strong> which all three solvers handle.</li>
+      </ul>
+      <p>
+        <strong>Decision:</strong> the see-saw and scale experiments below all use <strong>N=4
+        (64 cubes)</strong> and per-solver tuned configs (XPBD: iter=8; Soft &amp; Hard VBD: iter=4,
+        ke=5e5) so all three solvers participate cleanly in the comparison.
+      </p>
+    </section>
+
+    <section>
+      <h2>Experiment 1 — See-saw</h2>
+      <p>
+        A 6 m × 1.5 m × 0.2 m beam (180 kg) is mounted on a revolute joint about its Y-axis at the
+        scene origin. Two loads are placed symmetrically on top at x = ±2 m. The see-saw is an
+        <em>unstable equilibrium</em>: any imbalance grows because the off-pivot load shifts further
+        out as the beam tips. So the test is sensitive to small per-step asymmetries.
+      </p>
+
+      <h3>1A — Control test: mirror loads on both sides (must stay balanced)</h3>
+      <p>
+        Same load on each side. By symmetry, the beam should not tip — every gravitational torque
+        on the left has a mirror on the right. Any tipping indicates the solver isn't preserving
+        the mirror symmetry of the inputs.
+      </p>
+      <table>
+        <tr><th>Solver</th><th>big-big (1 big cube each side)</th><th>small-small (64-cube stack each side)</th></tr>
+        <tr><td>XPBD ss=10, iter=8</td><td class="win">0.000° peak (perfect)</td><td class="win">0.078° peak (essentially perfect)</td></tr>
+        <tr><td>Soft VBD ss=10, iter=4, ke=5e5</td><td class="win">0.002° peak (perfect)</td><td class="lose">35.4° peak (tips violently)</td></tr>
+        <tr><td>Hard VBD ss=10, iter=4, ke=5e5</td><td class="win">0.000° peak (perfect)</td><td class="lose">33.6° peak (tips violently)</td></tr>
+      </table>
+      <p>
+        <strong>VBD breaks mirror symmetry under granular loads.</strong> Two identical 64-cube
+        stacks on opposite sides of the pivot should produce identical responses. They don't, in
+        either VBD mode. The cause is in the solver, not the scene: parallel Gauss-Seidel iterates
+        bodies in color-group order, and the assigned colors of the +x stack differ from the −x
+        stack's. Each stack therefore settles to a slightly different micro-equilibrium, and that
+        tiny asymmetry triggers the unstable see-saw to tip. With 1 big cube on each side
+        (no internal contacts), VBD handles it perfectly — confirming the issue is intra-stack
+        coloring asymmetry, not joint dynamics.
+      </p>
+
+      <h3>1B — Main test: 1 big cube vs 64 small cubes (same mass, same shape)</h3>
+      <p>
+        If mass is correctly conserved across discretization, the gravitational torque from 64
+        small cubes (1000 kg total, CoM at x=+2 m) equals the torque from 1 big cube (1000 kg, CoM
+        at x=-2 m). The see-saw should remain balanced.
+      </p>
+      <div class="video-grid">
+        <figure>
+          <video src="assets/seesaw_small-big_xpbd.mp4" autoplay loop muted playsinline controls></video>
+          <figcaption>
+            <strong>XPBD</strong> · ss=10, iter=8 — beam tilt steady at <strong>0.024°</strong>.
+            Both loads stay at ±2 m throughout. <em>Mass conservation: passes.</em>
+          </figcaption>
+        </figure>
+        <figure>
+          <video src="assets/seesaw_small-big_vbd_soft.mp4" autoplay loop muted playsinline controls></video>
+          <figcaption>
+            <strong>Soft VBD</strong> · ss=10, iter=4, ke=5e5 — beam tips to <strong>peak 22.9°</strong>.
+            Loads slide off the pivot side. <em>Symmetry test fails (not a mass-conservation result —
+            it tips in the symmetric control too).</em>
+          </figcaption>
+        </figure>
+        <figure>
+          <video src="assets/seesaw_small-big_vbd_hard.mp4" autoplay loop muted playsinline controls></video>
+          <figcaption>
+            <strong>Hard VBD</strong> · ss=10, iter=4, ke=5e5 — beam reaches <strong>peak 20.1°</strong>.
+            Loads slide; same root cause as Soft VBD.
+          </figcaption>
+        </figure>
+      </div>
+
+      <h3>1C — Where does the asymmetry come from?  (small-small control videos)</h3>
+      <p>
+        The granular-stack tipping is not specific to the 1-cube vs 64-cube comparison. The same
+        tipping happens when both sides carry identical 64-cube stacks. That's the
+        symmetry-breakdown evidence: VBD's parallel Gauss-Seidel coloring assigns colors based on
+        body indices, and the +x and −x stacks get non-mirror-symmetric color orderings. Each stack
+        finds a slightly different micro-equilibrium; the unstable see-saw amplifies the difference.
+      </p>
+      <div class="video-grid">
+        <figure>
+          <video src="assets/seesaw_small-small_xpbd.mp4" autoplay loop muted playsinline controls></video>
+          <figcaption>
+            <strong>XPBD</strong> small-small control — <strong>0.078° peak</strong>. Beam holds steady.
+            Position-based projection is order-independent: mirror inputs produce mirror outputs.
+          </figcaption>
+        </figure>
+        <figure>
+          <video src="assets/seesaw_small-small_vbd_soft.mp4" autoplay loop muted playsinline controls></video>
+          <figcaption>
+            <strong>Soft VBD</strong> small-small control — <strong>35.4° peak</strong>. Beam tips
+            despite mirror-image loads. Both stacks settle to slightly different micro-equilibria
+            and the see-saw amplifies the difference.
+          </figcaption>
+        </figure>
+        <figure>
+          <video src="assets/seesaw_small-small_vbd_hard.mp4" autoplay loop muted playsinline controls></video>
+          <figcaption>
+            <strong>Hard VBD</strong> small-small control — <strong>33.6° peak</strong>. Same
+            symmetry-breaking, same root cause. AVBD Lagrangian doesn't fix it; the bias is in the
+            Gauss-Seidel update order.
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section>
+      <h2>Experiment 2 — Static scale (two loads side-by-side)</h2>
+      <p>
+        Both loads sit on the same flat ground plane, 5 m apart. After settling, each load's
+        center-of-mass height should be at z = 0.5 m (the half-extent of the bounding 1 m cube).
+        A solver that loses mass — or compresses the granular stack — will show a lower CoM for
+        the small-cube load than for the big cube.
+      </p>
+      <div class="video-grid">
+        <figure>
+          <video src="assets/scale_xpbd.mp4" autoplay loop muted playsinline controls></video>
+          <figcaption>
+            <strong>XPBD</strong> ss=10, iter=6.
+            Big cube CoM = 0.500 m (0% error). 64-cube CoM = 0.467 m (−6.7%): the small-cube grid
+            shifts sideways slightly as it settles.
+          </figcaption>
+        </figure>
+        <figure>
+          <video src="assets/scale_vbd_soft.mp4" autoplay loop muted playsinline controls></video>
+          <figcaption>
+            <strong>Soft VBD</strong> ss=10, iter=4, ke=5e5.
+            Big cube CoM = 0.498 m (−0.5%). 64-cube CoM = 0.494 m (−1.2%). Δ = 7 mm.
+            <em>Mass correctly conserved across discretization.</em>
+          </figcaption>
+        </figure>
+        <figure>
+          <video src="assets/scale_vbd_hard.mp4" autoplay loop muted playsinline controls></video>
+          <figcaption>
+            <strong>Hard VBD</strong> ss=10, iter=4, ke=5e5.
+            Big cube CoM = 0.500 m (−0.1%). 64-cube CoM = 0.500 m (0.0%). Δ = 1.3 mm.
+            <em>Tightest mass conservation of all three solvers.</em>
+          </figcaption>
+        </figure>
+      </div>
+      <h3>Static-scale summary</h3>
+      <table>
+        <tr>
+          <th>Solver</th>
+          <th class="num">Big-cube CoM_z</th>
+          <th class="num">64-cube CoM_z</th>
+          <th class="num">Δ (small − big)</th>
+          <th>Mass conserved?</th>
+        </tr>
+        <tr><td>XPBD ss=10, iter=6</td><td class="num">0.500 m (0%)</td><td class="num warn">0.467 m (−6.7%)</td><td class="num warn">−33 mm</td><td>Yes (loss is lateral spread, not vertical sink)</td></tr>
+        <tr><td>Soft VBD ss=10, iter=4, ke=5e5</td><td class="num">0.498 m (−0.5%)</td><td class="num">0.494 m (−1.2%)</td><td class="num win">−7 mm</td><td class="win">Yes</td></tr>
+        <tr><td>Hard VBD ss=10, iter=4, ke=5e5</td><td class="num win">0.500 m (−0.1%)</td><td class="num win">0.500 m (0.0%)</td><td class="num win">+1.3 mm</td><td class="win">Yes (tightest)</td></tr>
+      </table>
+      <p>
+        All three solvers correctly preserve total mass under gravity. Hard VBD is the tightest at
+        1.3 mm difference; Soft VBD is 7 mm; XPBD's small-cube load drops 33 mm because the grid
+        cubes spread laterally (not because mass is lost — the CoM is still mostly at the right
+        height; the drop is from the corner cubes sliding outward).
+      </p>
+    </section>
+
+    <section>
+      <h2>What the two experiments together say</h2>
+      <ul class="compact">
+        <li><strong>Mass / gravity IS correctly preserved across discretization</strong> for all
+          three solvers. The static-scale comparison shows that 1000 kg as 1 big cube and 1000 kg
+          as 64 small cubes both settle to within a few mm of the same CoM height.</li>
+        <li><strong>XPBD additionally preserves mirror symmetry of momenta</strong>. The see-saw
+          stays balanced (≤ 0.08° tilt) whether the loads are mirror-image granular stacks or
+          one-big-vs-many-small. This is the property the see-saw was meant to probe; XPBD passes
+          cleanly.</li>
+        <li><strong>VBD breaks mirror symmetry under granular loads</strong>. Two identical 64-cube
+          stacks on opposite sides of a see-saw don't behave identically — the beam tips by
+          33–35° in both Soft and Hard VBD modes. The root cause is in the solver: parallel
+          Gauss-Seidel iterates bodies in color-group order, and color-group assignment isn't
+          mirror-symmetric across the scene's reflection plane. Each stack reaches a slightly
+          different micro-equilibrium; the unstable see-saw amplifies the difference into a
+          tipping cascade.</li>
+        <li><strong>The 1-vs-64 tipping in VBD is therefore not a mass-conservation failure</strong>
+          — it's the same Gauss-Seidel asymmetry, made worse by the granular side's internal
+          contact compliance.</li>
+        <li><strong>For practical use:</strong> Hard VBD on a stable platform (or a one-sided
+          static scene) gives the tightest mass behavior of the three solvers. But for any test
+          that depends on mirror-symmetric behavior under granular loads (closely-matched
+          stacks, perfectly-aligned pile collapse, balance-scale apps), XPBD is the correct
+          choice; VBD's coloring isn't symmetric enough.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Reproduction</h2>
+      <p>
+        Newton commit: <code>cdadc8a1</code> (tip of <code>vbd-cable-twist-bend-split</code>). GPU:
+        NVIDIA L40. CUDA 12.9, Warp 1.14.0. Render: ViewerGL headless under xvfb at 1280×720, frames
+        captured via <code>viewer.get_frame()</code> PBO/CUDA path, encoded with ffmpeg + libx264 at
+        60 fps. Scene constants: see <code>seesaw_scene.py</code>, <code>seesaw_control.py</code>,
+        <code>scale_static.py</code> in the working tree.
+      </p>
+      <p>
+        Diagnostic scripts and example code live in the working tree on branch <code>vbd-perf</code>
+        (uncommitted; this report site is the only published artifact). Solver code is unmodified
+        from <code>cdadc8a1</code>.
+      </p>
+    </section>
+
+  </main>
+
+  <footer>
+    <p>
+      Companion to <a href="../vbd_pyramid_comparison/">Pyramid Stress Test: XPBD vs Hard VBD vs Soft VBD</a>
+      and <a href="../vbd_perf_robustness/">VBD Rigid + Cable: Perf &amp; Robustness</a>.
+      All reports published from branch <code>gh-pages</code> at <code>reports/</code>.
+    </p>
+  </footer>
+
+</body>
+</html>

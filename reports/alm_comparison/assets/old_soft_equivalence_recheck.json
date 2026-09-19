@@ -1,0 +1,102 @@
+{
+  "legacy_8x1_scale01_1200": {
+    "suite": "contacts_stack",
+    "mode": "old_soft",
+    "title": "Old VBD soft penalty",
+    "config": {
+      "substeps": 8,
+      "iterations": 1,
+      "alpha": 0.95,
+      "legacy_scale": 0.1
+    },
+    "frames": 1200,
+    "stable": false,
+    "error": null,
+    "finite": true,
+    "top_xy_drift": 5.5195631980896,
+    "top_z": 14.472209930419922,
+    "max_box_xy_drift": 12.069019317626953,
+    "min_z": 0.3999568521976471,
+    "max_abs_pos": 27.032106399536133,
+    "runtime_s": 7.133849784964696
+  },
+  "legacy_8x1_scale01_2400": {
+    "suite": "contacts_stack_settlement",
+    "mode": "old_soft",
+    "title": "Old VBD soft penalty",
+    "config": {
+      "substeps": 8,
+      "iterations": 1,
+      "alpha": 0.95,
+      "legacy_scale": 0.1
+    },
+    "frames": 2400,
+    "sample_stride": 60,
+    "settlement_window": 600,
+    "stable": true,
+    "settled": true,
+    "error": null,
+    "finite": true,
+    "top_xy_drift": 0.06263034045696259,
+    "top_z": 15.590754508972168,
+    "max_box_xy_drift": 0.06263034045696259,
+    "min_z": 0.39825746417045593,
+    "max_abs_pos": 15.590754508972168,
+    "last_window_max_sample_displacement": 0.0018638503970578313,
+    "last_window_mean_sample_displacement": 0.000323304848279804,
+    "last_window_max_z_range": 7.724761962890625e-05,
+    "last_window_top_z_range": 7.534027099609375e-05,
+    "runtime_s": 13.778046638995875,
+    "budget_cost": 8
+  },
+  "direct_8x1_ke32768e6_1200": {
+    "suite": "contacts_stack",
+    "mode": "old_soft",
+    "title": "Old VBD soft penalty",
+    "config": {
+      "substeps": 8,
+      "iterations": 1,
+      "alpha": 0.95,
+      "ke": 32768000.0
+    },
+    "frames": 1200,
+    "stable": true,
+    "error": null,
+    "finite": true,
+    "top_xy_drift": 0.3971431255340576,
+    "top_z": 15.595269203186035,
+    "max_box_xy_drift": 0.3971431255340576,
+    "min_z": 0.39994293451309204,
+    "max_abs_pos": 15.595269203186035,
+    "runtime_s": 6.962874321034178
+  },
+  "direct_8x1_ke32768e6_2400": {
+    "suite": "contacts_stack_settlement",
+    "mode": "old_soft",
+    "title": "Old VBD soft penalty",
+    "config": {
+      "substeps": 8,
+      "iterations": 1,
+      "alpha": 0.95,
+      "ke": 32768000.0
+    },
+    "frames": 2400,
+    "sample_stride": 60,
+    "settlement_window": 600,
+    "stable": false,
+    "settled": false,
+    "error": null,
+    "finite": true,
+    "top_xy_drift": 30.858238220214844,
+    "top_z": 0.5966137051582336,
+    "max_box_xy_drift": 176.08782958984375,
+    "min_z": 0.39989256858825684,
+    "max_abs_pos": 165.58758544921875,
+    "last_window_max_sample_displacement": 12.952929496765137,
+    "last_window_mean_sample_displacement": 0.2806459367275238,
+    "last_window_max_z_range": 26.66854476928711,
+    "last_window_top_z_range": 7.7752275466918945,
+    "runtime_s": 13.861195621022489,
+    "budget_cost": 8
+  }
+}
