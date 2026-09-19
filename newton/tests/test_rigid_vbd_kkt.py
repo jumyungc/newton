@@ -2250,6 +2250,16 @@ def _structural_kkt_estimates_allocation_payloads_exactly(test, device):
                 closure_count=3,
             ),
         ),
+        (
+            "closed_tree_lane_backsub",
+            lambda: _build_replicated_fixed_topology(
+                device,
+                closed=True,
+                worlds=2,
+                link_count=19,
+                closure_count=17,
+            ),
+        ),
     )
     for kind, build_model in cases:
         with test.subTest(kind=kind):
@@ -2261,25 +2271,31 @@ def _structural_kkt_estimates_allocation_payloads_exactly(test, device):
             )
             diagnostics = backend._bucket_diagnostics
             test.assertEqual(len(diagnostics), 1)
-            test.assertEqual(diagnostics[0].kind, kind)
+            expected_kind = "closed_tree" if kind.startswith("closed_tree") else kind
+            test.assertEqual(diagnostics[0].kind, expected_kind)
             test.assertIsNone(diagnostics[0].fallback_reason)
-            if kind == "closed_tree":
+            if kind.startswith("closed_tree"):
                 bucket = backend.closed_tree_buckets[0]
                 matrix_bytes = wp.types.type_size_in_bytes(wp.spatial_matrix)
+                expected_response_bytes = bucket.response_rhs.capacity
+                if bucket.paired_response is not None:
+                    expected_response_bytes += (
+                        bucket.paired_response.capacity + bucket.paired_correction_response.capacity
+                    )
                 test.assertEqual(
                     diagnostics[0].closure_response_bytes,
-                    bucket.response_rhs.capacity
-                    + bucket.paired_response.capacity
-                    + bucket.paired_correction_response.capacity,
+                    expected_response_bytes,
                 )
                 test.assertEqual(
                     diagnostics[0].closure_schur_bytes,
                     bucket.batch_count * bucket.closure_count * bucket.closure_count * matrix_bytes,
                 )
-                test.assertEqual(diagnostics[0].batch_count, 3)
-                test.assertEqual(diagnostics[0].cycle_rank_per_island, 3)
-                test.assertEqual(diagnostics[0].closure_count_per_island, 3)
-                test.assertEqual(diagnostics[0].closure_count_total, 9)
+                expected_worlds = 2 if kind == "closed_tree_lane_backsub" else 3
+                expected_closures = 17 if kind == "closed_tree_lane_backsub" else 3
+                test.assertEqual(diagnostics[0].batch_count, expected_worlds)
+                test.assertEqual(diagnostics[0].cycle_rank_per_island, expected_closures)
+                test.assertEqual(diagnostics[0].closure_count_per_island, expected_closures)
+                test.assertEqual(diagnostics[0].closure_count_total, expected_worlds * expected_closures)
 
 
 def _structural_kkt_oversized_closure_falls_back_before_allocation(test, device):
@@ -2395,6 +2411,74 @@ def _structural_kkt_closed_preflight_skips_unused_contraction(test, device):
     test.assertTrue(backend.active)
     test.assertEqual(len(backend.closed_tree_buckets), 1)
     test.assertFalse(backend.closed_tree_buckets[0].tree.use_tree_contraction)
+
+
+def _structural_kkt_mixed_rod_tree_uses_stable_leaf_route(test, device):
+    """Keep heterogeneous cable/mechanism trees on the stable rooted pivot order."""
+    builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+    slider = builder.add_link(
+        xform=wp.transform(wp.vec3(-0.18, 0.0, 1.0), wp.quat_identity()),
+        mass=0.1,
+        inertia=wp.mat33(1.0e-3, 0.0, 0.0, 0.0, 1.0e-3, 0.0, 0.0, 0.0, 1.0e-3),
+    )
+    slider_joint = builder.add_joint_prismatic(parent=-1, child=slider, axis=newton.Axis.X)
+    builder.add_articulation([slider_joint])
+    positions = [wp.vec3(0.0, 0.0, 1.0)]
+    edges = []
+    for direction in (
+        wp.vec3(1.0, 0.0, 0.0),
+        wp.vec3(-0.5, 0.8660254, 0.0),
+        wp.vec3(-0.5, -0.8660254, 0.0),
+    ):
+        previous = 0
+        for segment in range(1, 9):
+            positions.append(positions[0] + direction * (0.03 * segment))
+            current = len(positions) - 1
+            edges.append((previous, current))
+            previous = current
+    bodies, _ = builder.add_rod_graph(
+        node_positions=positions,
+        edges=edges,
+        radius=0.01,
+        cfg=builder.default_shape_cfg.copy(),
+        stretch_stiffness=1.0e9,
+        bend_stiffness=1.0e4,
+        wrap_in_articulation=True,
+        body_frame_origin="com",
+    )
+    builder.add_joint_ball(
+        parent=slider,
+        child=int(bodies[0]),
+        child_xform=wp.transform(wp.vec3(0.0, 0.0, -0.015), wp.quat_identity()),
+    )
+    builder.color(balance_colors=False)
+    model = builder.finalize(device=device)
+    solver = newton.solvers.SolverVBD(
+        model,
+        iterations=2,
+        rigid_compliant_alm=True,
+        rigid_joint_global_iterations=1,
+        deterministic=wp.DeterministicMode.RUN_TO_RUN,
+    )
+    backend = solver._structural_graph_kkt
+    test.assertIsNotNone(backend)
+    test.assertEqual(len(backend.tree_buckets), 1)
+    bucket = backend.tree_buckets[0]
+    test.assertFalse(bucket.use_tree_contraction)
+    test.assertEqual(bucket._diagnostics.selected_route, "tree_leaf_rake")
+    test.assertEqual(bucket._diagnostics.fill_edge_count_total, 0)
+    test.assertEqual(bucket._diagnostics.estimated_bytes, bucket._estimated_bytes)
+    test.assertEqual(bucket.use_fused_tree_levels, device.is_cuda)
+
+    # Preserve the fast route inside its existing homogeneous-ROD coverage.
+    homogeneous_model, _, _ = _build_y_tree(device, segments_per_branch=4)
+    homogeneous_solver = newton.solvers.SolverVBD(
+        homogeneous_model,
+        iterations=2,
+        rigid_compliant_alm=True,
+        rigid_joint_global_iterations=1,
+    )
+    test.assertTrue(homogeneous_solver._structural_graph_kkt.tree_buckets[0].use_tree_contraction)
 
 
 def _structural_kkt_partial_fallback_preserves_healthy_island(test, device):
@@ -2945,16 +3029,18 @@ def _structural_kkt_fused_closure_matches_level_schedule(test, device):
 
 
 def _structural_kkt_fused_closure_matches_dense_oracle(test, device):
-    """Match the former arithmetic and a well-conditioned float64 SPD oracle."""
+    """Match optimized closure solves to their serial path and an FP64 oracle."""
     rng = np.random.default_rng(20260912)
-    for closures, batches in ((5, 1), (6, 4), (16, 2)):
+    for closures, batches in ((5, 1), (6, 4), (16, 2), (17, 2), (31, 1)):
         n = 6 * closures
         dense = rng.standard_normal((batches, n, n))
         dense = (dense @ dense.transpose(0, 2, 1) + n * np.eye(n)).astype(np.float32)
         rhs = rng.standard_normal((batches, n)).astype(np.float32)
         blocks = dense.reshape(batches, closures, 6, closures, 6).transpose(0, 1, 3, 2, 4).reshape(-1, 6, 6)
         solutions, factors = [], []
-        for fused in (False, True):
+        candidate_fused = closures <= rigid_vbd_kkt._FUSED_CLOSURE_MAX_BLOCKS
+        candidate_lanes = rigid_vbd_kkt._closure_back_substitute_lanes(closures, device)
+        for fused, lanes in ((False, False), (candidate_fused, candidate_lanes)):
             bucket = SimpleNamespace(
                 closure_count=closures,
                 batch_count=batches,
@@ -2962,6 +3048,10 @@ def _structural_kkt_fused_closure_matches_dense_oracle(test, device):
                 use_fused_closure=fused,
                 device=device,
                 spatial_block_dim=32,
+                use_lane_back_substitute=lanes,
+                closure_back_partial=(
+                    wp.zeros(batches * closures, dtype=wp.spatial_vector, device=device) if lanes else None
+                ),
                 closure_schur=wp.array(blocks, dtype=wp.spatial_matrix, device=device),
                 closure_multiplier=wp.array(rhs.reshape(-1, 6), dtype=wp.spatial_vector, device=device),
             )
@@ -3034,6 +3124,75 @@ def _structural_kkt_paired_coarse_lanes_match_serial_schedule(test, device):
         rigid_joint_global_iterations=1,
     )
     test.assertFalse(cpu_solver._structural_graph_kkt.closed_tree_buckets[0].use_lane_split_coarse)
+
+
+def _structural_kkt_paired_refinement_lanes_match_serial_schedule(test, device):
+    """Preserve paired defects and scatters while distributing response columns."""
+
+    def simulate(model, use_lanes):
+        solver = newton.solvers.SolverVBD(
+            model,
+            iterations=2,
+            rigid_compliant_alm=True,
+            rigid_joint_global_iterations=1,
+            deterministic=wp.DeterministicMode.RUN_TO_RUN,
+        )
+        bucket = solver._structural_graph_kkt.closed_tree_buckets[0]
+        test.assertTrue(bucket.use_paired_backbone)
+        test.assertTrue(bucket.use_lane_split_refinement)
+        bucket.use_lane_split_refinement = use_lanes
+        state_in = model.state()
+        state_out = model.state()
+        control = model.control()
+        dt = 1.0 / 600.0
+        solver.step(state_in, state_out, control, None, dt)
+        state_in, state_out = state_out, state_in
+        with wp.ScopedCapture(device) as capture:
+            solver.step(state_in, state_out, control, None, dt)
+            solver.step(state_out, state_in, control, None, dt)
+        for _ in range(3):
+            wp.capture_launch(capture.graph)
+        wp.synchronize_device(device)
+        return state_in.body_q.numpy(), state_in.body_qd.numpy()
+
+    # Cover the gate, batching, and closure-column striding beyond one warp.
+    for closures, worlds in ((6, 1), (6, 4), (34, 1)):
+        model = _build_replicated_fixed_topology(
+            device,
+            closed=True,
+            worlds=worlds,
+            link_count=max(10, closures + 2),
+            closure_count=closures,
+        )
+        serial_q, serial_qd = simulate(model, False)
+        lane_q, lane_qd = simulate(model, True)
+        np.testing.assert_array_equal(lane_q, serial_q)
+        np.testing.assert_array_equal(lane_qd, serial_qd)
+
+    narrow = _build_replicated_fixed_topology(device, closed=True, worlds=1, link_count=10, closure_count=3)
+    narrow_solver = newton.solvers.SolverVBD(
+        narrow,
+        iterations=1,
+        rigid_compliant_alm=True,
+        rigid_joint_global_iterations=1,
+    )
+    test.assertFalse(narrow_solver._structural_graph_kkt.closed_tree_buckets[0].use_lane_split_refinement)
+
+    cpu = wp.get_device("cpu")
+    cpu_model = _build_replicated_fixed_topology(
+        cpu,
+        closed=True,
+        worlds=1,
+        link_count=10,
+        closure_count=6,
+    )
+    cpu_solver = newton.solvers.SolverVBD(
+        cpu_model,
+        iterations=1,
+        rigid_compliant_alm=True,
+        rigid_joint_global_iterations=1,
+    )
+    test.assertFalse(cpu_solver._structural_graph_kkt.closed_tree_buckets[0].use_lane_split_refinement)
 
 
 def _structural_kkt_suppresses_nonfinite_correction(test, device):
@@ -4073,6 +4232,12 @@ add_function_test(
 )
 add_function_test(
     TestVBDRigidKKT,
+    "test_structural_kkt_paired_refinement_lanes_match_serial_schedule",
+    _structural_kkt_paired_refinement_lanes_match_serial_schedule,
+    devices=get_cuda_test_devices(),
+)
+add_function_test(
+    TestVBDRigidKKT,
     "test_structural_kkt_suppresses_nonfinite_correction",
     _structural_kkt_suppresses_nonfinite_correction,
     devices=get_test_devices(),
@@ -4178,6 +4343,12 @@ add_function_test(
     TestVBDRigidKKT,
     "test_structural_kkt_closed_preflight_skips_unused_contraction",
     _structural_kkt_closed_preflight_skips_unused_contraction,
+    devices=get_test_devices(),
+)
+add_function_test(
+    TestVBDRigidKKT,
+    "test_structural_kkt_mixed_rod_tree_uses_stable_leaf_route",
+    _structural_kkt_mixed_rod_tree_uses_stable_leaf_route,
     devices=get_test_devices(),
 )
 add_function_test(

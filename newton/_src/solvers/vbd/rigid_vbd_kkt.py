@@ -156,6 +156,20 @@ _SPATIAL_GPU_BLOCK_DIM = 32
 _FUSED_CLOSURE_MAX_BLOCKS = 16
 """Largest measured dense closure solve owned by one synchronized CUDA block."""
 
+_CLOSURE_BACK_SUBSTITUTE_MIN_BLOCKS = _FUSED_CLOSURE_MAX_BLOCKS + 1
+"""Smallest dense closure system whose back-substitution earns a lane split.
+
+Smaller CUDA systems are already solved by the fused persistent kernel, so
+allocating a second path's scratch for them would be dead weight. CPU systems
+retain their serial solve.
+"""
+
+
+def _closure_back_substitute_lanes(closure_count: int, device) -> bool:
+    """Return whether the dense back-substitution should be lane-parallel."""
+    return bool(device.is_cuda) and closure_count >= _CLOSURE_BACK_SUBSTITUTE_MIN_BLOCKS
+
+
 _PAIRED_COARSE_MIN_CLOSURES = 5
 """Smallest closure count whose coarse solve repays a lane-split block.
 
@@ -163,6 +177,9 @@ The closure columns are the only parallel dimension in the paired coarse
 block-Thomas tail. Below this the split adds barriers without recovering
 enough width, and a single-closure loop measurably regresses.
 """
+
+_PAIRED_REFINEMENT_LANE_MIN_CLOSURES = 5
+"""Smallest response panel considered for lane-parallel refinement work."""
 
 _FUSED_TREE_MIN_LEVELS = 4
 """Smallest leaf-rake schedule worth collapsing into one synchronized block.
@@ -2768,6 +2785,83 @@ def compute_paired_tree_backbone_residual(
 
 
 @wp.kernel
+def compute_paired_tree_backbone_residual_lanes(
+    pair_count: int,
+    backbone_node_count: int,
+    closure_count: int,
+    backbone_nodes: wp.array[wp.int32],
+    backbone_lower: wp.array[wp.spatial_matrix],
+    backbone_upper: wp.array[wp.spatial_matrix],
+    diagonal: wp.array[wp.spatial_matrix],
+    original_rhs: wp.array[wp.spatial_vector],
+    original_response: wp.array[wp.spatial_matrix],
+    pair_solution: wp.array[_SpatialPairVector],
+    pair_response_solution: wp.array[_SpatialPairResponse],
+    residual: wp.array[_SpatialPairVector],
+    response_residual: wp.array[_SpatialPairResponse],
+):
+    """Evaluate a pair defect while distributing response columns over lanes."""
+    thread = wp.tid()
+    width = wp.block_dim()
+    lane = thread % width
+    index = thread // width
+    batch = index // pair_count
+    local_pair = index - batch * pair_count
+    backbone_base = batch * backbone_node_count
+    first_row = 2 * local_pair
+    first_index = backbone_base + first_row
+    first_node = backbone_nodes[first_index]
+    has_second = first_row + 1 < backbone_node_count
+
+    if lane == 0:
+        pair_value = pair_solution[index]
+        first_solution = pair_value.v0
+        value = _SpatialPairVector()
+        value.v0 = original_rhs[first_node] - diagonal[first_node] * first_solution
+        value.v1 = wp.spatial_vector()
+        if first_row > 0:
+            value.v0 = value.v0 - backbone_lower[first_index] * pair_solution[index - 1].v1
+        if has_second:
+            second_index = first_index + 1
+            second_node = backbone_nodes[second_index]
+            second_solution = pair_value.v1
+            value.v0 = value.v0 - backbone_upper[first_index] * second_solution
+            value.v1 = original_rhs[second_node] - diagonal[second_node] * second_solution
+            value.v1 = value.v1 - backbone_lower[second_index] * first_solution
+            if first_row + 2 < backbone_node_count:
+                value.v1 = value.v1 - backbone_upper[second_index] * pair_solution[index + 1].v0
+        residual[index] = value
+
+    closure = lane
+    while closure < closure_count:
+        response_index = index * closure_count + closure
+        pair_response = pair_response_solution[response_index]
+        first_response = pair_response.v0
+        response_value = _SpatialPairResponse()
+        response_value.v0 = (
+            original_response[first_node * closure_count + closure] - diagonal[first_node] * first_response
+        )
+        response_value.v1 = wp.spatial_matrix(0.0)
+        if first_row > 0:
+            previous_response = pair_response_solution[(index - 1) * closure_count + closure].v1
+            response_value.v0 = response_value.v0 - backbone_lower[first_index] * previous_response
+        if has_second:
+            second_index = first_index + 1
+            second_node = backbone_nodes[second_index]
+            second_response = pair_response.v1
+            response_value.v0 = response_value.v0 - backbone_upper[first_index] * second_response
+            response_value.v1 = (
+                original_response[second_node * closure_count + closure] - diagonal[second_node] * second_response
+            )
+            response_value.v1 = response_value.v1 - backbone_lower[second_index] * first_response
+            if first_row + 2 < backbone_node_count:
+                following_response = pair_response_solution[(index + 1) * closure_count + closure].v0
+                response_value.v1 = response_value.v1 - backbone_upper[second_index] * following_response
+        response_residual[response_index] = response_value
+        closure += width
+
+
+@wp.kernel
 def scatter_refined_paired_tree_backbone_solution(
     pair_count: int,
     backbone_node_count: int,
@@ -2804,6 +2898,52 @@ def scatter_refined_paired_tree_backbone_solution(
             second_node = backbone_nodes[backbone_base + first_row + 1]
             second_response_index = second_node * closure_count + closure
             response_solution[second_response_index] = response.v1 + response_correction.v1
+
+
+@wp.kernel
+def scatter_refined_paired_tree_backbone_solution_lanes(
+    pair_count: int,
+    backbone_node_count: int,
+    closure_count: int,
+    backbone_nodes: wp.array[wp.int32],
+    pair_solution: wp.array[_SpatialPairVector],
+    pair_response_solution: wp.array[_SpatialPairResponse],
+    pair_correction: wp.array[_SpatialPairVector],
+    pair_response_correction: wp.array[_SpatialPairResponse],
+    solution: wp.array[wp.spatial_vector],
+    response_solution: wp.array[wp.spatial_matrix],
+):
+    """Scatter one refined pair while distributing response columns over lanes."""
+    thread = wp.tid()
+    width = wp.block_dim()
+    lane = thread % width
+    index = thread // width
+    batch = index // pair_count
+    local_pair = index - batch * pair_count
+    backbone_base = batch * backbone_node_count
+    first_row = 2 * local_pair
+    first_node = backbone_nodes[backbone_base + first_row]
+
+    if lane == 0:
+        value = pair_solution[index]
+        correction = pair_correction[index]
+        solution[first_node] = value.v0 + correction.v0
+        if first_row + 1 < backbone_node_count:
+            second_node = backbone_nodes[backbone_base + first_row + 1]
+            solution[second_node] = value.v1 + correction.v1
+
+    closure = lane
+    while closure < closure_count:
+        response_index = index * closure_count + closure
+        response = pair_response_solution[response_index]
+        response_correction = pair_response_correction[response_index]
+        first_response_index = first_node * closure_count + closure
+        response_solution[first_response_index] = response.v0 + response_correction.v0
+        if first_row + 1 < backbone_node_count:
+            second_node = backbone_nodes[backbone_base + first_row + 1]
+            second_response_index = second_node * closure_count + closure
+            response_solution[second_response_index] = response.v1 + response_correction.v1
+        closure += width
 
 
 @wp.kernel
@@ -4194,6 +4334,8 @@ def _closed_tree_bucket_diagnostics(
     )
     estimated_bytes += closure_response_bytes
     estimated_bytes += closure_schur_bytes
+    if _closure_back_substitute_lanes(closure_count, device):
+        estimated_bytes += _array_payload_bytes(closure_size, wp.spatial_vector)
     estimated_bytes += _array_payload_bytes(closure_size, wp.spatial_vector)
 
     local_backbone = tree_symbolics.backbone
@@ -5409,6 +5551,53 @@ def back_substitute_block_ldlt_serial(
 
 
 @wp.kernel
+def back_substitute_block_ldlt_lanes(
+    block_count: int,
+    matrix: wp.array[wp.spatial_matrix],
+    partial: wp.array[wp.spatial_vector],
+    rhs_solution: wp.array[wp.spatial_vector],
+):
+    """Back-substitute one dense block-LDLT system with lane-parallel products.
+
+    The row loop is irreducibly sequential, but within a row the products over
+    higher columns are independent. Measured on a 127-block closure system, the
+    serial form spends about 360 ns per block operation -- roughly 870 cycles --
+    because one thread waits on its own dependent 144-byte matrix load with
+    nothing else in flight. Simply unrolling that loop is counterproductive:
+    holding several 6x6 temporaries at once exceeds the register budget and
+    spills, measured 33% *slower*.
+
+    So the products are spread across lanes, one block per system, and written
+    to a scratch column. Lane zero then subtracts them in **ascending column
+    order**, exactly as the serial loop did. Bit-identity depends on that: the
+    partial products are unchanged values and their accumulation order is
+    unchanged, so every intermediate rounding matches. A cross-lane tree
+    reduction would be faster still and is deliberately not used, because
+    regrouping a floating-point sum would change the result.
+    """
+    thread = wp.tid()
+    width = wp.block_dim()
+    lane = thread % width
+    batch = thread // width
+    matrix_base = batch * block_count * block_count
+    rhs_base = batch * block_count
+    for reverse_index in range(block_count):
+        row = block_count - 1 - reverse_index
+        row_base = matrix_base + row * block_count
+        column = row + 1 + int(lane)
+        while column < block_count:
+            partial[rhs_base + column] = wp.transpose(matrix[row_base + column]) * rhs_solution[rhs_base + column]
+            column += width
+        _synchronize_cr_block()
+        if lane == 0:
+            value = rhs_solution[rhs_base + row]
+            for ordered in range(row + 1, block_count):
+                value = value - partial[rhs_base + ordered]
+            rhs_solution[rhs_base + row] = value
+        _synchronize_cr_block()
+
+
+@wp.kernel
 def solve_block_ldlt_persistent(
     block_count: int,
     matrix: wp.array[wp.spatial_matrix],
@@ -6387,6 +6576,12 @@ class _ClosedTreeBucket:
         )
         self.closure_rhs = wp.zeros(self.closure_size, dtype=wp.spatial_vector, device=device)
         self.closure_multiplier = self.closure_rhs
+        self.use_lane_back_substitute = _closure_back_substitute_lanes(self.closure_count, device)
+        self.closure_back_partial = (
+            wp.zeros(self.closure_size, dtype=wp.spatial_vector, device=device)
+            if self.use_lane_back_substitute
+            else None
+        )
 
         # Closed-tree backbones alternate body and row nodes. Group each body
         # with its following row so near-hard compliance is never selected as
@@ -6403,6 +6598,9 @@ class _ClosedTreeBucket:
         # are independent. Give the block that width only when there are enough
         # columns to repay the barriers; one column measurably regresses.
         self.use_lane_split_coarse = self.device.is_cuda and self.closure_count >= _PAIRED_COARSE_MIN_CLOSURES
+        self.use_lane_split_refinement = (
+            self.device.is_cuda and self.closure_count >= _PAIRED_REFINEMENT_LANE_MIN_CLOSURES
+        )
         if self.use_paired_backbone:
             self.paired_lower = wp.zeros(self.paired_backbone_size, dtype=_SpatialPairMatrix, device=self.device)
             self.paired_diagonal = wp.zeros_like(self.paired_lower)
@@ -6582,44 +6780,85 @@ class _ClosedTreeBucket:
         self._solve_paired_backbone_system(True, self.paired_rhs, self.paired_response)
         # Form the defect before scattering, while the tree buffers still hold
         # the unmodified branch-reduced right-hand sides. This avoids copies.
-        wp.launch(
-            compute_paired_tree_backbone_residual,
-            self.paired_backbone_size,
-            inputs=[
-                self.paired_backbone_count,
-                self.backbone_node_count,
-                self.closure_count,
-                self.backbone_nodes,
-                self.backbone_lower,
-                self.backbone_upper,
-                self.tree.diagonal,
-                self.tree.rhs,
-                self.response_rhs,
-                self.paired_rhs,
-                self.paired_response,
-            ],
-            outputs=[self.paired_correction_rhs, self.paired_correction_response],
-            device=self.device,
-            block_dim=self.spatial_block_dim,
-        )
+        if self.use_lane_split_refinement:
+            wp.launch(
+                compute_paired_tree_backbone_residual_lanes,
+                self.paired_backbone_size * self.spatial_block_dim,
+                inputs=[
+                    self.paired_backbone_count,
+                    self.backbone_node_count,
+                    self.closure_count,
+                    self.backbone_nodes,
+                    self.backbone_lower,
+                    self.backbone_upper,
+                    self.tree.diagonal,
+                    self.tree.rhs,
+                    self.response_rhs,
+                    self.paired_rhs,
+                    self.paired_response,
+                ],
+                outputs=[self.paired_correction_rhs, self.paired_correction_response],
+                device=self.device,
+                block_dim=self.spatial_block_dim,
+            )
+        else:
+            wp.launch(
+                compute_paired_tree_backbone_residual,
+                self.paired_backbone_size,
+                inputs=[
+                    self.paired_backbone_count,
+                    self.backbone_node_count,
+                    self.closure_count,
+                    self.backbone_nodes,
+                    self.backbone_lower,
+                    self.backbone_upper,
+                    self.tree.diagonal,
+                    self.tree.rhs,
+                    self.response_rhs,
+                    self.paired_rhs,
+                    self.paired_response,
+                ],
+                outputs=[self.paired_correction_rhs, self.paired_correction_response],
+                device=self.device,
+                block_dim=self.spatial_block_dim,
+            )
         self._solve_paired_backbone_repeated()
-        wp.launch(
-            scatter_refined_paired_tree_backbone_solution,
-            self.paired_backbone_size,
-            inputs=[
-                self.paired_backbone_count,
-                self.backbone_node_count,
-                self.closure_count,
-                self.backbone_nodes,
-                self.paired_rhs,
-                self.paired_response,
-                self.paired_correction_rhs,
-                self.paired_correction_response,
-            ],
-            outputs=[self.tree.rhs, self.response_rhs],
-            device=self.device,
-            block_dim=self.spatial_block_dim,
-        )
+        if self.use_lane_split_refinement:
+            wp.launch(
+                scatter_refined_paired_tree_backbone_solution_lanes,
+                self.paired_backbone_size * self.spatial_block_dim,
+                inputs=[
+                    self.paired_backbone_count,
+                    self.backbone_node_count,
+                    self.closure_count,
+                    self.backbone_nodes,
+                    self.paired_rhs,
+                    self.paired_response,
+                    self.paired_correction_rhs,
+                    self.paired_correction_response,
+                ],
+                outputs=[self.tree.rhs, self.response_rhs],
+                device=self.device,
+                block_dim=self.spatial_block_dim,
+            )
+        else:
+            wp.launch(
+                scatter_refined_paired_tree_backbone_solution,
+                self.paired_backbone_size,
+                inputs=[
+                    self.paired_backbone_count,
+                    self.backbone_node_count,
+                    self.closure_count,
+                    self.backbone_nodes,
+                    self.paired_rhs,
+                    self.paired_response,
+                    self.paired_correction_rhs,
+                    self.paired_correction_response,
+                ],
+                outputs=[self.tree.rhs, self.response_rhs],
+                device=self.device,
+                block_dim=self.spatial_block_dim,
+            )
 
     def _solve_paired_backbone_repeated(self):
         """Apply retained factors to the paired defect right-hand sides."""
@@ -6718,13 +6957,23 @@ class _ClosedTreeBucket:
             device=self.device,
             block_dim=self.spatial_block_dim,
         )
-        wp.launch(
-            back_substitute_block_ldlt_serial,
-            self.batch_count,
-            inputs=[self.closure_count, self.closure_schur],
-            outputs=[self.closure_multiplier],
-            device=self.device,
-        )
+        if self.use_lane_back_substitute:
+            wp.launch(
+                back_substitute_block_ldlt_lanes,
+                self.batch_count * self.spatial_block_dim,
+                inputs=[self.closure_count, self.closure_schur, self.closure_back_partial],
+                outputs=[self.closure_multiplier],
+                device=self.device,
+                block_dim=self.spatial_block_dim,
+            )
+        else:
+            wp.launch(
+                back_substitute_block_ldlt_serial,
+                self.batch_count,
+                inputs=[self.closure_count, self.closure_schur],
+                outputs=[self.closure_multiplier],
+                device=self.device,
+            )
 
     def solve_tree(self, body_matrix, body_rhs, body_scale, body_correction):
         self.tree.initialize_system(body_matrix, body_rhs, body_scale)
@@ -7055,6 +7304,7 @@ class StructuralGraphKKT:
             ignore_free_completion_joints=ignore_free_completion_joints,
         )
         all_components = [*paths, *trees, *closed_trees]
+        joint_type = np.asarray(model.joint_type.numpy(), dtype=np.int64)
         parent = np.asarray(model.joint_parent.numpy(), dtype=np.int32)
         child = np.asarray(model.joint_child.numpy(), dtype=np.int32)
 
@@ -7083,6 +7333,27 @@ class StructuralGraphKKT:
                 ordered[0],
                 enable_paired_open_chain=bool(enable_paired_open_chains and self.device.is_cuda),
             )
+            # Generic rake/compress changes the pivot order of an indefinite
+            # compliance KKT system.  Its homogeneous routes have independent
+            # numerical coverage, but a mixed rod/rigid
+            # tree can combine section-scale cable rows with attachment and
+            # mechanism rows spanning many orders of magnitude.  Preserve the
+            # rooted leaf order for that unsupported numerical envelope.  On
+            # CUDA, eligible schedules still collapse to the bit-identical
+            # fused leaf kernel, so this is a stability boundary rather than a
+            # return to O(depth) launch count.
+            mixed_rod_tree = any(
+                any(joint_type[joint] == int(JointType.ROD) for joint in candidate.joints)
+                and any(joint_type[joint] != int(JointType.ROD) for joint in candidate.joints)
+                for candidate in ordered
+            )
+            if mixed_rod_tree and symbolics.use_tree_contraction:
+                symbolics = replace(
+                    symbolics,
+                    contraction=None,
+                    use_tree_contraction=False,
+                    selected_route="tree_leaf_rake",
+                )
             plans.append(
                 _BucketPlan(
                     "tree",
