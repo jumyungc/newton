@@ -5703,8 +5703,221 @@ def test_full_surface_rejected_for_vbd_proxy_particles(test, device):
         )
 
 
+def _run_rigid_step_with_trace(model, solver, contacts):
+    state_in = model.state()
+    state_out = model.state()
+    control = model.control()
+    with wp.ScopedTimer("rigid-step", print=False, synchronize=True, cuda_filter=wp.TIMING_KERNEL) as timer:
+        state_in.clear_forces()
+        solver.step(state_in, state_out, control, contacts, 1.0 / 240.0)
+    wp.synchronize_device(model.device)
+    return {
+        "q": state_out.body_q.numpy(),
+        "qd": state_out.body_qd.numpy(),
+        "objectives": [
+            solver.body_forces.numpy(),
+            solver.body_torques.numpy(),
+            solver.body_hessian_ll.numpy(),
+            solver.body_hessian_al.numpy(),
+            solver.body_hessian_aa.numpy(),
+        ],
+        "duals": [
+            solver.joint_penalty_k.numpy(),
+            solver.joint_lambda_lin.numpy(),
+            solver.joint_lambda_ang.numpy(),
+        ],
+        "kernels": [item.name for item in timer.timing_results if item.device == model.device],
+    }
+
+
+def _build_paired_open_chain_model(device, body_count, chain_count=1):
+    builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+    half = 0.04
+    moment = ((2.0 * half) ** 2 + (2.0 * half) ** 2) / 12.0
+    inertia = wp.mat33(moment, 0.0, 0.0, 0.0, moment, 0.0, 0.0, 0.0, moment)
+    for chain in range(chain_count):
+        y = 0.2 * chain
+        bodies = [
+            builder.add_link(
+                xform=wp.transform(wp.vec3(0.1 * index, y, 1.0), wp.quat_identity()),
+                mass=1.0,
+                inertia=inertia,
+                label=f"paired_open_chain_{chain}_body_{index}",
+            )
+            for index in range(body_count)
+        ]
+        joints = [
+            builder.add_joint_revolute(
+                parent=-1,
+                child=bodies[0],
+                parent_xform=wp.transform(wp.vec3(0.0, y, 1.0), wp.quat_identity()),
+                child_xform=wp.transform_identity(),
+                axis=wp.vec3(0.0, 0.0, 1.0),
+                damping=0.02,
+            )
+        ]
+        for index in range(1, body_count):
+            joints.append(
+                builder.add_joint_revolute(
+                    parent=bodies[index - 1],
+                    child=bodies[index],
+                    parent_xform=wp.transform(wp.vec3(0.1, 0.0, 0.0), wp.quat_identity()),
+                    child_xform=wp.transform_identity(),
+                    axis=wp.vec3(0.0, 0.0, 1.0),
+                    damping=0.02,
+                )
+            )
+        builder.add_articulation(joints, label=f"paired_open_chain_{chain}")
+    builder.color(balance_colors=False)
+    return builder.finalize(device=device)
+
+
+def test_paired_open_chain_global_solve(test, device):
+    """The bounded paired route preserves the stock KKT solve and capture path."""
+    model = _build_paired_open_chain_model(device, 64)
+    kwargs = {
+        "iterations": 4,
+        "rigid_joint_global_iterations": 1,
+        "rigid_compliant_alm": True,
+        "deterministic": wp.DeterministicMode.NOT_GUARANTEED,
+    }
+    baseline = newton.solvers.SolverVBD(model, **kwargs)
+    candidate = newton.solvers.SolverVBD(model, **kwargs)
+    baseline_bucket = baseline._structural_graph_kkt.tree_buckets[0]
+    candidate_bucket = candidate._structural_graph_kkt.tree_buckets[0]
+    test.assertEqual(candidate_bucket.use_paired_open_backbone, device.is_cuda)
+    baseline_bucket.use_paired_open_backbone = False
+
+    baseline_result = _run_rigid_step_with_trace(model, baseline, None)
+    candidate_result = _run_rigid_step_with_trace(model, candidate, None)
+    paired_kernel = "initialize_paired_tree_backbone"
+    test.assertFalse(any(paired_kernel in name for name in baseline_result["kernels"]))
+    test.assertEqual(sum(paired_kernel in name for name in candidate_result["kernels"]), int(device.is_cuda))
+    for name in ("q", "qd"):
+        np.testing.assert_allclose(candidate_result[name], baseline_result[name], rtol=1.0e-6, atol=1.0e-6)
+    for candidate_array, baseline_array in zip(
+        candidate_result["objectives"] + candidate_result["duals"],
+        baseline_result["objectives"] + baseline_result["duals"],
+        strict=True,
+    ):
+        np.testing.assert_allclose(candidate_array, baseline_array, rtol=1.0e-6, atol=1.0e-6)
+
+    # Identical open chains share one topology bucket. The paired kernels are
+    # batch-indexed, so widening from one island must preserve every chain.
+    batched_model = _build_paired_open_chain_model(device, 64, chain_count=4)
+    batched_baseline = newton.solvers.SolverVBD(batched_model, **kwargs)
+    batched_candidate = newton.solvers.SolverVBD(batched_model, **kwargs)
+    batched_baseline_bucket = batched_baseline._structural_graph_kkt.tree_buckets[0]
+    batched_candidate_bucket = batched_candidate._structural_graph_kkt.tree_buckets[0]
+    test.assertEqual(batched_candidate_bucket.batch_count, 4)
+    test.assertEqual(batched_candidate_bucket.use_paired_open_backbone, device.is_cuda)
+    batched_baseline_bucket.use_paired_open_backbone = False
+    batched_baseline_result = _run_rigid_step_with_trace(batched_model, batched_baseline, None)
+    batched_candidate_result = _run_rigid_step_with_trace(batched_model, batched_candidate, None)
+    test.assertEqual(sum(paired_kernel in name for name in batched_candidate_result["kernels"]), int(device.is_cuda))
+    for name in ("q", "qd"):
+        np.testing.assert_allclose(
+            batched_candidate_result[name], batched_baseline_result[name], rtol=1.0e-6, atol=1.0e-6
+        )
+    for candidate_array, baseline_array in zip(
+        batched_candidate_result["objectives"] + batched_candidate_result["duals"],
+        batched_baseline_result["objectives"] + batched_baseline_result["duals"],
+        strict=True,
+    ):
+        np.testing.assert_allclose(candidate_array, baseline_array, rtol=1.0e-6, atol=1.0e-6)
+
+    # A Contacts object uses the stock tree solve even when the topology has
+    # preplanned paired storage.
+    contact_baseline = newton.solvers.SolverVBD(model, **kwargs)
+    contact_candidate = newton.solvers.SolverVBD(model, **kwargs)
+    contact_baseline._structural_graph_kkt.tree_buckets[0].use_paired_open_backbone = False
+    contacts = newton.Contacts(0, 0, device=device)
+    contact_baseline_result = _run_rigid_step_with_trace(model, contact_baseline, contacts)
+    contact_candidate_result = _run_rigid_step_with_trace(model, contact_candidate, contacts)
+    test.assertFalse(any(paired_kernel in name for name in contact_candidate_result["kernels"]))
+    for name in ("q", "qd"):
+        np.testing.assert_array_equal(contact_candidate_result[name], contact_baseline_result[name])
+    for candidate_array, baseline_array in zip(
+        contact_candidate_result["objectives"] + contact_candidate_result["duals"],
+        contact_baseline_result["objectives"] + contact_baseline_result["duals"],
+        strict=True,
+    ):
+        np.testing.assert_array_equal(candidate_array, baseline_array)
+
+    if not device.is_cuda:
+        return
+
+    short_model = _build_paired_open_chain_model(device, 63)
+    short_solver = newton.solvers.SolverVBD(short_model, **kwargs)
+    test.assertFalse(short_solver._structural_graph_kkt.tree_buckets[0].use_paired_open_backbone)
+    refined_model = _build_paired_open_chain_model(device, 256)
+    refined_baseline = newton.solvers.SolverVBD(refined_model, **kwargs)
+    refined_candidate = newton.solvers.SolverVBD(refined_model, **kwargs)
+    refined_baseline._structural_graph_kkt.tree_buckets[0].use_paired_open_backbone = False
+    refined_bucket = refined_candidate._structural_graph_kkt.tree_buckets[0]
+    test.assertIsNotNone(refined_bucket.paired_correction_rhs)
+    refined_baseline_result = _run_rigid_step_with_trace(refined_model, refined_baseline, None)
+    refined_candidate_result = _run_rigid_step_with_trace(refined_model, refined_candidate, None)
+    test.assertEqual(
+        sum("compute_paired_tree_backbone_residual" in name for name in refined_candidate_result["kernels"]),
+        1,
+    )
+    test.assertEqual(
+        sum("scatter_refined_paired_tree_backbone_solution" in name for name in refined_candidate_result["kernels"]),
+        1,
+    )
+    test.assertFalse(any("add_paired_tree_backbone_correction" in name for name in refined_candidate_result["kernels"]))
+    for name in ("q", "qd"):
+        np.testing.assert_allclose(
+            refined_candidate_result[name], refined_baseline_result[name], rtol=1.0e-6, atol=1.0e-6
+        )
+    for candidate_array, baseline_array in zip(
+        refined_candidate_result["objectives"] + refined_candidate_result["duals"],
+        refined_baseline_result["objectives"] + refined_baseline_result["duals"],
+        strict=True,
+    ):
+        np.testing.assert_allclose(candidate_array, baseline_array, rtol=1.0e-6, atol=1.0e-5)
+
+    long_model = _build_paired_open_chain_model(device, 257)
+    long_solver = newton.solvers.SolverVBD(long_model, **kwargs)
+    test.assertFalse(long_solver._structural_graph_kkt.tree_buckets[0].use_paired_open_backbone)
+    deterministic_solver = newton.solvers.SolverVBD(
+        model,
+        **{**kwargs, "deterministic": wp.DeterministicMode.RUN_TO_RUN},
+    )
+    test.assertFalse(deterministic_solver._structural_graph_kkt.tree_buckets[0].use_paired_open_backbone)
+
+    # Compile once before capture, then ensure the natural route records and
+    # replays without allocation or host work.
+    capture_solver = newton.solvers.SolverVBD(model, **kwargs)
+    state_in = model.state()
+    state_out = model.state()
+    control = model.control()
+    state_in.clear_forces()
+    capture_solver.step(state_in, state_out, control, None, 1.0 / 240.0)
+    wp.synchronize_device(device)
+    with wp.ScopedCapture(device) as capture:
+        state_in.clear_forces()
+        capture_solver.step(state_in, state_out, control, None, 1.0 / 240.0)
+    wp.capture_launch(capture.graph)
+    wp.synchronize_device(device)
+    test.assertTrue(np.isfinite(state_out.body_q.numpy()).all())
+
+
 class TestVBDFullSurfaceContact(unittest.TestCase):
     pass
+
+
+class TestVBDPairedOpenChain(unittest.TestCase):
+    pass
+
+
+add_function_test(
+    TestVBDPairedOpenChain,
+    "test_paired_open_chain_global_solve",
+    test_paired_open_chain_global_solve,
+    devices=devices,
+)
 
 
 add_function_test(

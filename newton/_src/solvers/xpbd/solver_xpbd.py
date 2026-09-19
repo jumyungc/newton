@@ -1,8 +1,10 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 The Newton Developers
 # SPDX-License-Identifier: Apache-2.0
 
+import importlib
 import warnings
 
+import numpy as np
 import warp as wp
 
 from ...core.types import override
@@ -46,6 +48,13 @@ _COMPUTE_BODY_VELOCITY_DEPRECATION_MSG = (
     "or later. Leave it at False because XPBD now updates rigid-body velocities incrementally after every position "
     "correction."
 )
+
+
+def _load_rigid_joint_global_modules():
+    """Load the optional global backend without affecting the G=0 import path."""
+    rigid_vbd_kkt = importlib.import_module("..vbd.rigid_vbd_kkt", __package__)
+    rigid_xpbd_kkt = importlib.import_module(".rigid_xpbd_kkt", __package__)
+    return rigid_vbd_kkt, rigid_xpbd_kkt
 
 
 class SolverXPBD(SolverBase, CouplingInterface):
@@ -134,6 +143,7 @@ class SolverXPBD(SolverBase, CouplingInterface):
         angular_damping: float = 0.0,
         enable_restitution: bool = False,
         deterministic: wp.DeterministicMode | None = None,
+        rigid_joint_global_iterations: int = 0,
     ):
         """Initialize the XPBD solver.
 
@@ -167,6 +177,14 @@ class SolverXPBD(SolverBase, CouplingInterface):
                 kernel module. Pass a :class:`warp.DeterministicMode`, or
                 ``None`` (default) to inherit the current
                 ``wp.config.deterministic`` mode.
+            rigid_joint_global_iterations: Experimental number of globally coupled rigid-joint corrections per
+                step. A correction is scheduled after a local joint iteration and before another local iteration
+                can reconcile contacts. Supported complete islands containing BALL, FIXED, REVOLUTE, PRISMATIC,
+                DISTANCE, and D6 joints use the global path; unsupported or mixed islands remain local.
+                Active static-contact normals are condensed into the global body metric with numerical
+                hard-row compliance; friction and dynamic-dynamic contacts remain local. Regularized tree
+                directions are safeguarded by minimizing their original quadratic model along the step.
+                These safeguards do not guarantee nonlinear contact feasibility. Defaults to 0.
         """
         super().__init__(model=model)
         effective_deterministic = deterministic if deterministic is not None else wp.config.deterministic
@@ -176,8 +194,28 @@ class SolverXPBD(SolverBase, CouplingInterface):
         }
         self._set_module_options(module_options, module=kernels)
         self._restitution_module_options = module_options
+        self._rigid_joint_global_module_options = module_options
+
+        if not isinstance(rigid_joint_global_iterations, int) or isinstance(rigid_joint_global_iterations, bool):
+            raise TypeError("rigid_joint_global_iterations must be an integer")
+        if rigid_joint_global_iterations < 0:
+            raise ValueError("rigid_joint_global_iterations must be non-negative")
+        if rigid_joint_global_iterations > 0 and not rigid_joint_global_iterations < iterations:
+            raise ValueError(
+                "rigid_joint_global_iterations must be less than iterations when enabled, "
+                f"got {rigid_joint_global_iterations} for iterations={iterations}"
+            )
 
         self.iterations = iterations
+        self.rigid_joint_global_iterations = rigid_joint_global_iterations
+        self._rigid_joint_global_iteration_indices = (
+            frozenset(
+                global_pass * iterations // rigid_joint_global_iterations
+                for global_pass in range(rigid_joint_global_iterations)
+            )
+            if rigid_joint_global_iterations > 0
+            else frozenset()
+        )
 
         self.soft_body_relaxation = soft_body_relaxation
         self.soft_contact_relaxation = soft_contact_relaxation
@@ -186,6 +224,9 @@ class SolverXPBD(SolverBase, CouplingInterface):
         self.joint_angular_relaxation = joint_angular_relaxation
         self.joint_linear_compliance = joint_linear_compliance
         self.joint_angular_compliance = joint_angular_compliance
+        # The global KKT system already contains the complete coupled metric;
+        # unlike the additive local pass, it does not need per-body averaging.
+        self._rigid_joint_global_relaxation = 1.0
 
         self.rigid_contact_relaxation = rigid_contact_relaxation
         if rigid_contact_restitution_iterations < 1:
@@ -205,6 +246,9 @@ class SolverXPBD(SolverBase, CouplingInterface):
         self._has_joint_mimics = has_supported_joint_mimics(model, "SolverXPBD")
 
         self._init_kinematic_state()
+        self._rigid_joint_global_solver = None
+        if self.rigid_joint_global_iterations > 0:
+            self._rebuild_rigid_joint_global_solver()
 
         # helper variables to track constraint resolution vars
         self._particle_delta_counter = 0
@@ -236,8 +280,9 @@ class SolverXPBD(SolverBase, CouplingInterface):
     def notify_model_changed(self, flags: ModelFlags | int) -> None:
         """Refresh cached body data after model properties change.
 
-        Effective inverse masses and inertia tensors are refreshed for body-property changes. The cached restitution
-        state is refreshed for shape-property changes. Other flags are ignored.
+        Effective inverse masses and inertia tensors are refreshed for body-property changes. The optional global
+        rigid-joint topology is rebuilt for joint- or body-property changes, and cached restitution state is refreshed
+        for shape-property changes. Other flags are ignored.
 
         Args:
             flags: Bitmask of :class:`~newton.ModelFlags` or custom ``int`` bits indicating which model properties
@@ -245,10 +290,63 @@ class SolverXPBD(SolverBase, CouplingInterface):
         """
         self._ensure_restitution_module_options()
         self._apply_module_options()
+        global_topology_active = self.rigid_joint_global_iterations > 0
+        global_topology_flags = ModelFlags.JOINT_PROPERTIES | ModelFlags.BODY_PROPERTIES
+        if (
+            global_topology_active
+            and self.device.is_capturing
+            and flags & (global_topology_flags | ModelFlags.BODY_INERTIAL_PROPERTIES)
+        ):
+            raise RuntimeError("XPBD rigid-joint topology cannot be rebuilt during CUDA graph capture")
         if flags & (ModelFlags.BODY_PROPERTIES | ModelFlags.BODY_INERTIAL_PROPERTIES):
             self._refresh_kinematic_state()
+        if global_topology_active and flags & global_topology_flags:
+            self._rebuild_rigid_joint_global_solver()
+        elif global_topology_active and flags & ModelFlags.BODY_INERTIAL_PROPERTIES:
+            backend = self._rigid_joint_global_solver.backend
+            dynamic_mask = np.asarray(self.body_inv_mass_effective.numpy()) > 0.0
+            if not np.array_equal(dynamic_mask, backend.dynamic_body_mask_host):
+                self._rebuild_rigid_joint_global_solver()
         if self.enable_restitution and flags & ModelFlags.SHAPE_PROPERTIES:
             self._refresh_rigid_restitution_enabled()
+
+    def _rebuild_rigid_joint_global_solver(self) -> None:
+        """Rebuild the optional global rigid-joint topology and workspaces."""
+        rigid_vbd_kkt, rigid_xpbd_kkt = _load_rigid_joint_global_modules()
+
+        self._set_module_options(self._rigid_joint_global_module_options, module=rigid_vbd_kkt)
+        self._set_module_options(self._rigid_joint_global_module_options, module=rigid_xpbd_kkt)
+        self._rigid_joint_global_solver = rigid_xpbd_kkt.RigidJointGlobalXPBD(self.model, self.body_inv_mass_effective)
+
+    def _solve_rigid_joint_global(
+        self,
+        body_q: wp.array[wp.transform],
+        body_qd: wp.array[wp.spatial_vector],
+        control: Control,
+        joint_impulse: wp.array[wp.spatial_vector] | None,
+        dt: float,
+        contacts: Contacts | None = None,
+        contact_impulse: wp.array[wp.spatial_vector] | None = None,
+    ) -> None:
+        """Apply one globally coupled XPBD joint correction."""
+        backend = self._rigid_joint_global_solver
+        if backend is None or not backend.active:
+            return
+        backend.solve(
+            model=self.model,
+            body_q=body_q,
+            body_qd=body_qd,
+            body_inv_mass=self.body_inv_mass_effective,
+            body_inv_inertia=self.body_inv_inertia_effective,
+            control=control,
+            joint_linear_compliance=self.joint_linear_compliance,
+            joint_angular_compliance=self.joint_angular_compliance,
+            relaxation=self._rigid_joint_global_relaxation,
+            joint_impulse=joint_impulse,
+            dt=dt,
+            contacts=contacts,
+            contact_impulse=contact_impulse,
+        )
 
     def _refresh_rigid_restitution_enabled(self) -> None:
         restitution = self.model.shape_material_restitution
@@ -266,9 +364,10 @@ class SolverXPBD(SolverBase, CouplingInterface):
         """Return whether inertial properties can be refreshed during graph capture.
 
         Returns:
-            ``True`` because :meth:`notify_model_changed` refreshes the derived inertial buffers with device work.
+            ``True`` when the optional global rigid-joint topology is disabled. A global topology may need rebuilding
+            when a body crosses the dynamic/static boundary, which cannot be determined during graph capture.
         """
-        return True
+        return self.rigid_joint_global_iterations == 0
 
     def copy_kinematic_body_state(self, model: Model, state_in: State, state_out: State):
         """Copy kinematic body poses and velocities from an input state to an output state.
@@ -413,6 +512,8 @@ class SolverXPBD(SolverBase, CouplingInterface):
         self._ensure_restitution_module_options()
         self._apply_module_options()
         requires_grad = state_in.requires_grad
+        if requires_grad and self.rigid_joint_global_iterations > 0:
+            raise NotImplementedError("XPBD rigid_joint_global_iterations does not support differentiable simulation")
         self._particle_delta_counter = 0
         self._body_delta_counter = 0
 
@@ -875,6 +976,10 @@ class SolverXPBD(SolverBase, CouplingInterface):
                             )
 
                         body_q, body_qd = self._apply_body_deltas(model, state_in, state_out, body_deltas, dt)
+                        if i in self._rigid_joint_global_iteration_indices:
+                            self._solve_rigid_joint_global(
+                                body_q, body_qd, control, joint_impulse, dt, contacts, contact_impulse
+                            )
 
             self._contact_impulse = contact_impulse
             self._contact_impulse_capacity = contacts.rigid_contact_max if contacts is not None else 0

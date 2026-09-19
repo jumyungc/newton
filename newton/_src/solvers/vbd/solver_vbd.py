@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import importlib
 import warnings
 from collections.abc import Mapping
 from typing import Any
@@ -116,6 +117,11 @@ def _is_tet_only_elasticity_model(model: Model) -> bool:
             return False
 
     return True
+
+
+def _load_rigid_vbd_kkt():
+    """Load the optional global backend without affecting the G=0 import path."""
+    return importlib.import_module(".rigid_vbd_kkt", __package__)
 
 
 def _validate_compliant_alm_material_coefficient(
@@ -329,6 +335,7 @@ class SolverVBD(SolverBase, CouplingInterface):
         particle_external_edge_contact_filtering_map: dict | None = None,
         # Rigid body - constraint formulation and stabilization
         rigid_compliant_alm: bool | None = None,  # None retains legacy and emits the scoped migration warning
+        rigid_joint_global_iterations: int = 0,  # Optional global structural corrections per step
         rigid_avbd_alpha: float | None = None,  # Shared alpha override; None uses mode defaults
         rigid_avbd_joint_alpha: float | None = None,  # Joint alpha override
         rigid_avbd_contact_alpha: float | None = None,  # Body-body contact alpha override
@@ -443,6 +450,13 @@ class SolverVBD(SolverBase, CouplingInterface):
                 ``rho`` internally for numerical conditioning. Values used with legacy
                 hard constraints may require retuning for the desired deformation.
                 Values must be finite and representable in float32; infinity is unsupported.
+            rigid_joint_global_iterations: Number of compliant-ALM local iterations that
+                receive an additional global structural correction. ``0`` (default)
+                preserves the baseline local solver exactly. Positive values require
+                ``rigid_compliant_alm=True``, may not exceed ``iterations``, and currently
+                support only rigid-only models integrated directly by ``SolverVBD``. When
+                equal to ``iterations``, one additional local rigid/contact/dual sweep is
+                appended so the timestep ends with locally reconciled nonlinear state.
             rigid_avbd_alpha: C0 stabilization strength (``C_stab = C - alpha * C0``). Range: [0, 1].
                 Controls both joints and body-body contacts when neither class-specific
                 override (``rigid_avbd_joint_alpha`` / ``rigid_avbd_contact_alpha``) is set.
@@ -655,6 +669,21 @@ class SolverVBD(SolverBase, CouplingInterface):
             raise ValueError(f"rigid_avbd_beta must be >= 0, got {rigid_avbd_beta}")
         rigid_avbd_linear_beta = rigid_avbd_linear_beta if rigid_avbd_linear_beta is not None else rigid_avbd_beta
         rigid_avbd_angular_beta = rigid_avbd_angular_beta if rigid_avbd_angular_beta is not None else rigid_avbd_beta
+        if not isinstance(rigid_joint_global_iterations, int) or isinstance(rigid_joint_global_iterations, bool):
+            raise TypeError("rigid_joint_global_iterations must be an integer")
+        if not 0 <= rigid_joint_global_iterations <= iterations:
+            raise ValueError(
+                "rigid_joint_global_iterations must be in [0, iterations], "
+                f"got {rigid_joint_global_iterations} for iterations={iterations}"
+            )
+        if rigid_joint_global_iterations > 0 and not rigid_compliant_alm:
+            raise ValueError("rigid_joint_global_iterations requires rigid_compliant_alm=True")
+        if rigid_joint_global_iterations > 0 and integrate_with_external_rigid_solver:
+            raise ValueError("rigid_joint_global_iterations does not support externally integrated rigid bodies")
+        if rigid_joint_global_iterations > 0 and model.particle_count > 0:
+            raise ValueError("rigid_joint_global_iterations does not support models containing particles")
+        if rigid_joint_global_iterations > 0 and model.device.is_capturing:
+            raise RuntimeError("The global VBD joint topology must be constructed before CUDA graph capture.")
         if (
             rigid_contact_stick_motion_eps is not None
             or rigid_contact_stick_freeze_translation_eps is not None
@@ -840,6 +869,7 @@ class SolverVBD(SolverBase, CouplingInterface):
         )
 
         options = {"deterministic": effective_deterministic, "deterministic_max_records": 0}
+        self._rigid_module_options = options
         if integrates_rigid_bodies:
             self._set_module_options(options, module=rigid_vbd_kernels)
         if model.joint_count > 0:
@@ -853,6 +883,11 @@ class SolverVBD(SolverBase, CouplingInterface):
         self.friction_epsilon = friction_epsilon
         self.rigid_soft_contact_use_log_barrier = bool(rigid_soft_contact_use_log_barrier)
         self._joint_mode_deprecation_warned = False
+        self.rigid_joint_global_iterations = rigid_joint_global_iterations
+        self._rigid_joint_global_iteration_indices = frozenset(
+            global_pass * iterations // rigid_joint_global_iterations
+            for global_pass in range(rigid_joint_global_iterations)
+        )
 
         # Rigid integration mode: when True, rigid bodies are integrated by an external
         # solver (one-way coupling). SolverVBD will not move rigid bodies, but can still
@@ -899,6 +934,13 @@ class SolverVBD(SolverBase, CouplingInterface):
             rigid_joint_linear_kd,
             rigid_joint_angular_kd,
         )
+        self.body_dynamic_contact_hessian = None
+        self._rigid_vbd_kkt = None
+        self._structural_graph_kkt = None
+        self._structural_graph_kkt_bucket_diagnostics = ()
+        self._structural_graph_kkt_payload_budget_bytes = 0
+        self._structural_graph_kkt_estimated_bytes = 0
+        self._rebuild_structural_graph_kkt()
 
         self._has_joint_mimics = self._integrates_rigid_bodies and has_supported_joint_mimics(model, "SolverVBD")
         self._mimic_body_deltas = None
@@ -1322,6 +1364,69 @@ class SolverVBD(SolverBase, CouplingInterface):
             self._refresh_structural_k()
         if flags & (ModelFlags.JOINT_PROPERTIES | ModelFlags.BODY_PROPERTIES):
             self._refresh_rod_rest_bend_twist_cache()
+
+        global_topology_active = (
+            self.rigid_compliant_alm
+            and self.rigid_joint_global_iterations > 0
+            and not self.integrate_with_external_rigid_solver
+            and self.model.body_count > 0
+            and self.model.particle_count == 0
+            and self.model.joint_count > 0
+        )
+        topology_changed = global_topology_active and (refresh_structural_k or bool(flags & ModelFlags.BODY_PROPERTIES))
+        if topology_changed:
+            if self.device.is_capturing:
+                raise RuntimeError("Structural joint or body topology cannot be rebuilt during CUDA graph capture")
+            self._rebuild_structural_graph_kkt()
+        elif flags & ModelFlags.BODY_INERTIAL_PROPERTIES and global_topology_active and not self.device.is_capturing:
+            # Numeric effective inertia is read from live device arrays. Rebuild
+            # only if an endpoint crosses the dynamic/static boundary.
+            backend = self._structural_graph_kkt
+            dynamic_mask = np.asarray(self.body_inv_mass_effective.numpy()) > 0.0
+            if backend is None or not np.array_equal(dynamic_mask, backend.dynamic_body_mask_host):
+                self._rebuild_structural_graph_kkt()
+
+    def _rebuild_structural_graph_kkt(self) -> None:
+        """Build compact graph-capturable topology for the optional global correction."""
+        self._rigid_vbd_kkt = None
+        self._structural_graph_kkt = None
+        self._structural_graph_kkt_bucket_diagnostics = ()
+        self._structural_graph_kkt_payload_budget_bytes = 0
+        self._structural_graph_kkt_estimated_bytes = 0
+        self.body_dynamic_contact_hessian = None
+        if not (
+            self.rigid_compliant_alm
+            and self.rigid_joint_global_iterations > 0
+            and not self.integrate_with_external_rigid_solver
+            and self.model.body_count > 0
+            and self.model.particle_count == 0
+            and self.model.joint_count > 0
+        ):
+            return
+
+        rigid_vbd_kkt = _load_rigid_vbd_kkt()
+        self._set_module_options(self._rigid_module_options, module=rigid_vbd_kkt)
+        backend = rigid_vbd_kkt.StructuralGraphKKT(
+            self.model,
+            self.body_inv_mass_effective,
+            # FREE has no energy rows and must not invalidate an otherwise
+            # complete constrained island (for example an articulated free root).
+            ignore_free_completion_joints=True,
+            enable_paired_open_chains=(
+                self._rigid_module_options["deterministic"] == wp.DeterministicMode.NOT_GUARANTEED
+            ),
+        )
+        self._structural_graph_kkt_bucket_diagnostics = backend._bucket_diagnostics
+        self._structural_graph_kkt_payload_budget_bytes = backend._payload_budget_bytes
+        self._structural_graph_kkt_estimated_bytes = backend._estimated_bytes
+        if not backend.active:
+            return
+
+        self._rigid_vbd_kkt = rigid_vbd_kkt
+        self._structural_graph_kkt = backend
+        # Dynamic contact curvature is consumed before the backend overwrites
+        # its compact body-matrix workspace.
+        self.body_dynamic_contact_hessian = backend.body_matrix
 
     @override
     def coupling_supports_inertial_property_refresh(self) -> bool:
@@ -2422,14 +2527,41 @@ class SolverVBD(SolverBase, CouplingInterface):
             state_in, state_out, contacts, dt, rigid_due=rigid_due, soft_due=soft_due, preserve_history=False
         )
 
-        for iter_num in range(self.iterations):
-            rigid_due = self.collision_pipeline is not None and self._rigid_collision_is_due(iter_num)
-            soft_due = self.particle_enable_self_contact and self._self_contact_is_due(iter_num)
-            self._mid_step_detection(
-                state_in, state_out, contacts, dt, rigid_due=rigid_due, soft_due=soft_due, preserve_history=True
-            )
-            self._solve_rigid_body_iteration(state_in, state_out, control, contacts, dt)
-            self._solve_particle_iteration(state_in, state_out, contacts, dt)
+        if not self._rigid_joint_global_iteration_indices or self._structural_graph_kkt is None:
+            # Keep the main G=0 hot path unchanged.
+            for iter_num in range(self.iterations):
+                rigid_due = self.collision_pipeline is not None and self._rigid_collision_is_due(iter_num)
+                soft_due = self.particle_enable_self_contact and self._self_contact_is_due(iter_num)
+                self._mid_step_detection(
+                    state_in, state_out, contacts, dt, rigid_due=rigid_due, soft_due=soft_due, preserve_history=True
+                )
+                self._solve_rigid_body_iteration(state_in, state_out, control, contacts, dt)
+                self._solve_particle_iteration(state_in, state_out, contacts, dt)
+        else:
+            for iter_num in range(self.iterations):
+                rigid_due = self.collision_pipeline is not None and self._rigid_collision_is_due(iter_num)
+                soft_due = self.particle_enable_self_contact and self._self_contact_is_due(iter_num)
+                self._mid_step_detection(
+                    state_in, state_out, contacts, dt, rigid_due=rigid_due, soft_due=soft_due, preserve_history=True
+                )
+                global_iteration = iter_num in self._rigid_joint_global_iteration_indices
+                self._solve_rigid_body_iteration(
+                    state_in,
+                    state_out,
+                    control,
+                    contacts,
+                    dt,
+                    defer_joint_dual=global_iteration,
+                )
+                if global_iteration:
+                    self._solve_structural_graph_kkt(state_in, control, contacts, dt)
+                    self._update_rigid_joint_duals(state_in, control, dt)
+                self._solve_particle_iteration(state_in, state_out, contacts, dt)
+            if self.rigid_joint_global_iterations == self.iterations:
+                # Every configured iteration ended with a linearized global
+                # correction. Append one ordinary local sweep so nonlinear
+                # contact/friction and their dual state own the accepted pose.
+                self._solve_rigid_body_iteration(state_in, state_out, control, contacts, dt)
 
         # Snapshot solved rigid contact state for next-frame warm-start.
         self._snapshot_rigid_contact_history(contacts)
@@ -3743,6 +3875,209 @@ class SolverVBD(SolverBase, CouplingInterface):
 
         wp.copy(state_out.particle_q, state_in.particle_q)
 
+    def _refresh_structural_contact_objective(
+        self,
+        state_in: State,
+        contacts: Contacts | None,
+        dt: float,
+    ) -> None:
+        """Relinearize contact at the pose consumed by the global correction."""
+        backend = self._structural_graph_kkt
+        rigid_vbd_kkt = self._rigid_vbd_kkt
+        if backend is None or rigid_vbd_kkt is None:
+            return
+
+        if contacts is None or contacts.rigid_contact_max == 0:
+            return
+
+        wp.launch(
+            kernel=rigid_vbd_kkt.accumulate_structural_body_body_contacts,
+            dim=backend.graph_body_count * _NUM_CONTACT_THREADS_PER_BODY,
+            inputs=[
+                dt,
+                backend.graph_body_ids,
+                self.body_q_prev,
+                state_in.body_q,
+                self.model.body_com,
+                self.body_inv_mass_effective,
+                self.friction_epsilon,
+                self.body_body_contact_penalty_k,
+                self.body_body_contact_normal_rho,
+                self.body_body_contact_material_ke,
+                self.body_body_contact_material_kd,
+                self.body_body_contact_material_mu,
+                self.body_body_contact_tangent_rho,
+                self.body_body_contact_lambda,
+                self.body_body_contact_C0,
+                self.rigid_contact_alpha,
+                self.rigid_contact_hard,
+                self.rigid_compliant_alm,
+                contacts.rigid_contact_count,
+                contacts.rigid_contact_shape0,
+                contacts.rigid_contact_shape1,
+                contacts.rigid_contact_point0,
+                contacts.rigid_contact_point1,
+                contacts.rigid_contact_offset0,
+                contacts.rigid_contact_offset1,
+                contacts.rigid_contact_normal,
+                contacts.rigid_contact_margin0,
+                contacts.rigid_contact_margin1,
+                self.model.shape_body,
+                backend.body_slot_by_id,
+                backend.graph_body_island,
+                int(backend.use_fused_contact_classification),
+                self.body_body_contact_buffer_pre_alloc,
+                self.body_body_contact_counts,
+                self.body_body_contact_indices,
+            ],
+            outputs=[
+                self.body_forces,
+                self.body_torques,
+                self.body_hessian_ll,
+                self.body_hessian_al,
+                self.body_hessian_aa,
+                self.body_dynamic_contact_hessian,
+                backend.island_contact_state,
+            ],
+            device=self.device,
+        )
+
+    def _reset_structural_solve_state(self) -> None:
+        """Reset scratch consumed by one global structural correction."""
+        backend = self._structural_graph_kkt
+        rigid_vbd_kkt = self._rigid_vbd_kkt
+        if backend is None or rigid_vbd_kkt is None:
+            return
+        if backend.use_fused_solve_reset:
+            wp.launch(
+                rigid_vbd_kkt.reset_structural_solve_state,
+                backend.graph_body_count,
+                inputs=[backend.island_count, backend.graph_body_ids],
+                outputs=[
+                    self.body_forces,
+                    self.body_torques,
+                    self.body_hessian_ll,
+                    self.body_hessian_al,
+                    self.body_hessian_aa,
+                    self.body_dynamic_contact_hessian,
+                    backend.body_correction,
+                    backend.island_contact_state,
+                    backend.island_step_scale,
+                ],
+                device=self.device,
+            )
+        else:
+            backend.island_contact_state.fill_(1)
+            wp.launch(
+                rigid_vbd_kkt.clear_structural_contact_objective,
+                backend.graph_body_count,
+                inputs=[backend.graph_body_ids],
+                outputs=[
+                    self.body_forces,
+                    self.body_torques,
+                    self.body_hessian_ll,
+                    self.body_hessian_al,
+                    self.body_hessian_aa,
+                    self.body_dynamic_contact_hessian,
+                ],
+                device=self.device,
+            )
+
+    def _solve_structural_graph_kkt(
+        self,
+        state_in: State,
+        control: Control,
+        contacts: Contacts | None,
+        dt: float,
+    ) -> None:
+        """Apply one contact-proximal global structural correction."""
+        backend = self._structural_graph_kkt
+        rigid_vbd_kkt = self._rigid_vbd_kkt
+        if backend is None or rigid_vbd_kkt is None:
+            return
+        model = self.model
+
+        self._reset_structural_solve_state()
+        if contacts is not None and contacts.rigid_contact_max > 0 and not backend.use_fused_contact_classification:
+            wp.launch(
+                kernel=rigid_vbd_kkt.classify_global_contact_islands,
+                dim=contacts.rigid_contact_max,
+                inputs=[
+                    contacts.rigid_contact_count,
+                    contacts.rigid_contact_shape0,
+                    contacts.rigid_contact_shape1,
+                    contacts.rigid_contact_point0,
+                    contacts.rigid_contact_point1,
+                    contacts.rigid_contact_normal,
+                    contacts.rigid_contact_margin0,
+                    contacts.rigid_contact_margin1,
+                    model.shape_body,
+                    state_in.body_q,
+                    self.body_inv_mass_effective,
+                    self.body_body_contact_lambda,
+                    backend.body_slot_by_id,
+                    backend.graph_body_island,
+                    self.body_body_contact_buffer_pre_alloc,
+                    self.body_body_contact_counts,
+                ],
+                outputs=[backend.island_contact_state],
+                device=self.device,
+            )
+        self._refresh_structural_contact_objective(state_in, contacts, dt)
+        backend.solve(
+            dt=dt,
+            contacts=contacts,
+            body_q=state_in.body_q,
+            body_inertia_q=self.body_inertia_q,
+            body_q_prev=self.body_q_prev,
+            body_q_rest=model.body_q,
+            body_mass=model.body_mass,
+            body_inv_mass=self.body_inv_mass_effective,
+            body_inertia=model.body_inertia,
+            body_com=model.body_com,
+            contact_hessian_ll=self.body_hessian_ll,
+            contact_hessian_al=self.body_hessian_al,
+            contact_hessian_aa=self.body_hessian_aa,
+            contact_forces=self.body_forces,
+            contact_torques=self.body_torques,
+            dynamic_contact_hessian=self.body_dynamic_contact_hessian,
+            joint_type=model.joint_type,
+            joint_enabled=model.joint_enabled,
+            joint_parent=model.joint_parent,
+            joint_child=model.joint_child,
+            joint_X_p=model.joint_X_p,
+            joint_X_c=model.joint_X_c,
+            joint_axis=model.joint_axis,
+            joint_rod_rest_kb_local=self.joint_rod_rest_kb_local,
+            joint_rod_rest_twist=self.joint_rod_rest_twist,
+            joint_qd_start=model.joint_qd_start,
+            joint_target_q_start=model.joint_target_q_start,
+            joint_dof_dim=model.joint_dof_dim,
+            joint_constraint_start=self.joint_constraint_start,
+            joint_material_k=self.joint_material_k,
+            joint_rho=self.joint_rho,
+            joint_penalty_kd=self.joint_penalty_kd,
+            joint_target_ke=model.joint_target_ke,
+            joint_target_kd=model.joint_target_kd,
+            joint_target_q=control.joint_target_q,
+            joint_target_qd=control.joint_target_qd,
+            joint_limit_lower=model.joint_limit_lower,
+            joint_limit_upper=model.joint_limit_upper,
+            joint_limit_ke=model.joint_limit_ke,
+            joint_limit_kd=model.joint_limit_kd,
+            joint_drive_limit_support=self.joint_drive_limit_support,
+            joint_drive_lambda=self.joint_drive_lambda,
+            joint_limit_lambda=self.joint_limit_lambda,
+            joint_lambda_lin=self.joint_lambda_lin,
+            joint_lambda_ang=self.joint_lambda_ang,
+            joint_C0_lin=self.joint_C0_lin,
+            joint_C0_ang=self.joint_C0_ang,
+            joint_rest_angle=self.joint_rest_angle,
+            joint_sigma_start=self.joint_sigma_start,
+            joint_C_fric=self.joint_C_fric,
+            stab_alpha=self.rigid_joint_alpha,
+        )
+
     def _solve_rigid_body_iteration(
         self,
         state_in: State,
@@ -3750,6 +4085,8 @@ class SolverVBD(SolverBase, CouplingInterface):
         control: Control,
         contacts: Contacts | None,
         dt: float,
+        *,
+        defer_joint_dual: bool = False,
     ):
         """Solve one rigid-body VBD iteration (per-iteration phase).
 
@@ -4030,55 +4367,62 @@ class SolverVBD(SolverBase, CouplingInterface):
                 device=self.device,
             )
 
-        if model.joint_count > 0:
-            wp.launch(
-                kernel=update_duals_joint,
-                dim=model.joint_count,
-                inputs=[
-                    model.joint_type,
-                    model.joint_enabled,
-                    model.joint_parent,
-                    model.joint_child,
-                    model.joint_X_p,
-                    model.joint_X_c,
-                    model.joint_axis,
-                    self.joint_rod_rest_kb_local,
-                    self.joint_rod_rest_twist,
-                    model.joint_qd_start,
-                    model.joint_target_q_start,
-                    self.joint_constraint_start,
-                    state_in.body_q,
-                    self.body_q_prev,
-                    model.body_q,
-                    model.joint_dof_dim,
-                    self.joint_C0_lin,
-                    self.joint_C0_ang,
-                    self.joint_is_hard,
-                    self.rigid_joint_alpha,
-                    self.joint_material_k,
-                    self.joint_rho,
-                    self.rigid_compliant_alm,
-                    self.rigid_linear_beta,
-                    self.rigid_angular_beta,
-                    model.joint_target_ke,
-                    model.joint_target_kd,
-                    control.joint_target_q,
-                    control.joint_target_qd,
-                    model.joint_limit_lower,
-                    model.joint_limit_upper,
-                    model.joint_limit_ke,
-                    model.joint_limit_kd,
-                    self.joint_rest_angle,
-                    self.joint_drive_limit_support,
-                    dt,
-                    self.joint_penalty_k,  # input/output
-                    self.joint_lambda_lin,  # input/output
-                    self.joint_lambda_ang,  # input/output
-                    self.joint_drive_lambda,  # input/output
-                    self.joint_limit_lambda,  # input/output
-                ],
-                device=self.device,
-            )
+        if not defer_joint_dual:
+            self._update_rigid_joint_duals(state_in, control, dt)
+
+    def _update_rigid_joint_duals(self, state_in: State, control: Control, dt: float) -> None:
+        """Update structural, drive, and limit multipliers at the current pose."""
+        model = self.model
+        if model.joint_count == 0:
+            return
+        wp.launch(
+            kernel=update_duals_joint,
+            dim=model.joint_count,
+            inputs=[
+                model.joint_type,
+                model.joint_enabled,
+                model.joint_parent,
+                model.joint_child,
+                model.joint_X_p,
+                model.joint_X_c,
+                model.joint_axis,
+                self.joint_rod_rest_kb_local,
+                self.joint_rod_rest_twist,
+                model.joint_qd_start,
+                model.joint_target_q_start,
+                self.joint_constraint_start,
+                state_in.body_q,
+                self.body_q_prev,
+                model.body_q,
+                model.joint_dof_dim,
+                self.joint_C0_lin,
+                self.joint_C0_ang,
+                self.joint_is_hard,
+                self.rigid_joint_alpha,
+                self.joint_material_k,
+                self.joint_rho,
+                self.rigid_compliant_alm,
+                self.rigid_linear_beta,
+                self.rigid_angular_beta,
+                model.joint_target_ke,
+                model.joint_target_kd,
+                control.joint_target_q,
+                control.joint_target_qd,
+                model.joint_limit_lower,
+                model.joint_limit_upper,
+                model.joint_limit_ke,
+                model.joint_limit_kd,
+                self.joint_rest_angle,
+                self.joint_drive_limit_support,
+                dt,
+                self.joint_penalty_k,  # input/output
+                self.joint_lambda_lin,  # input/output
+                self.joint_lambda_ang,  # input/output
+                self.joint_drive_lambda,  # input/output
+                self.joint_limit_lambda,  # input/output
+            ],
+            device=self.device,
+        )
 
     def collect_rigid_contact_forces(
         self,
