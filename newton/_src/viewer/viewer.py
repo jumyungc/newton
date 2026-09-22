@@ -834,13 +834,13 @@ class ViewerBase(ABC):
             raise ValueError("camera_speed must be finite and nonnegative")
         self._camera_speed = value
 
-    def set_camera(self, pos: wp.vec3, pitch: float, yaw: float):
+    def set_camera(self, pos: wp.vec3, pitch: float | None = None, yaw: float | None = None):
         """Set the camera position and orientation.
 
         Args:
-            pos: The position of the camera.
-            pitch: The pitch of the camera.
-            yaw: The yaw of the camera.
+            pos: The position of the camera [m].
+            pitch: The pitch of the camera [deg]. If None, the current pitch is kept.
+            yaw: The yaw of the camera [deg]. If None, the current yaw is kept.
         """
         return
 
@@ -2259,7 +2259,8 @@ class ViewerBase(ABC):
     def _hash_geometry(
         self, geo_type: int, geo_scale, thickness: float, is_solid: bool, geo_src=None, mirror: bool = False
     ) -> int:
-        geometry_hash = hash((int(geo_type), geo_src, *geo_scale, float(thickness), bool(is_solid), bool(mirror)))
+        source_hash = geo_src._get_render_hash() if isinstance(geo_src, newton.Mesh) else geo_src
+        geometry_hash = hash((int(geo_type), source_hash, *geo_scale, float(thickness), bool(is_solid), bool(mirror)))
         if isinstance(geo_src, newton.Mesh) and geo_src.texture is not None:
             geometry_hash = hash((geometry_hash, geo_src.texture_transform))
         return geometry_hash
