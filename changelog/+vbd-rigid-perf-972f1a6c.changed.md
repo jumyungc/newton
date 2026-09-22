@@ -1,0 +1,1 @@
+Reduce rigid VBD launch and contact accumulation cost using adaptive CUDA blocks, fixed-order lane-owned scratch, and omission of no-op joint dual updates, without changing solver parameters or equations.

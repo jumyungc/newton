@@ -100,6 +100,26 @@ __all__ = ["SolverVBD"]
 _PARTICLE_CONTACT_GATHER_BLOCK_DIM = 128
 
 
+def _select_rigid_block_dim(launch_dim: int, device: wp.Device) -> int:
+    """Expose more blocks on small rigid launches, allowing sub-warp blocks.
+
+    Target half as many blocks as SMs, with a four-thread minimum and a
+    256-thread maximum. This empirical tradeoff does not guarantee occupancy.
+    """
+    if not device.is_cuda:
+        return 256
+
+    # Empirical latency/throughput tradeoff, not an occupancy target.
+    target_blocks = max(1, (device.sm_count + 1) // 2)
+    block_dim = 4
+    while block_dim < 256:
+        candidate = 2 * block_dim
+        if (launch_dim + candidate - 1) // candidate < target_blocks:
+            break
+        block_dim = candidate
+    return block_dim
+
+
 def _is_tet_only_elasticity_model(model: Model) -> bool:
     """Return whether the model's active element materials are tetrahedral only."""
     if model.tet_count == 0:
@@ -1120,6 +1140,17 @@ class SolverVBD(SolverBase, CouplingInterface):
         # Rigid-only solver state (used when SolverVBD integrates bodies)
         # -------------------------------------------------------------
         if self._integrates_rigid_bodies:
+            # Skip the dual launch when every joint type takes the kernel's early return.
+            dual_joint_types = (
+                JointType.ROD,
+                JointType.BALL,
+                JointType.FIXED,
+                JointType.REVOLUTE,
+                JointType.PRISMATIC,
+                JointType.D6,
+            )
+            joint_types = model.joint_type.numpy()
+            self._has_rigid_joint_duals = bool(np.isin(joint_types, dual_joint_types).any())
             # The first step's State establishes pose history; reset marks selected
             # worlds for a new baseline. Final slot: entities without a world.
             history_mask_size = model.world_count + 1
@@ -1141,17 +1172,19 @@ class SolverVBD(SolverBase, CouplingInterface):
             # Adjacency and dimensions
             self.rigid_adjacency = self._compute_rigid_force_element_adjacency(model).to(self.device)
 
-            # Force accumulation arrays
-            self.body_torques = wp.zeros(model.body_count, dtype=wp.vec3, device=self.device)
-            self.body_forces = wp.zeros(model.body_count, dtype=wp.vec3, device=self.device)
+            # One clear resets disjoint (body, lane) views: two vec3 fields and
+            # three mat33 fields, packed as 1 + 1 + 3 + 3 + 3 vec3-sized regions.
+            body_count = model.body_count
+            lanes = _NUM_CONTACT_THREADS_PER_BODY
+            self._body_contact_scratch = wp.zeros((11, body_count, lanes, 3), dtype=float, device=self.device)
+            self.body_forces = self._body_contact_scratch[0].view(wp.vec3)
+            self.body_torques = self._body_contact_scratch[1].view(wp.vec3)
+            self.body_hessian_ll = self._body_contact_scratch[2:5].reshape((body_count, lanes, 3, 3)).view(wp.mat33)
+            self.body_hessian_al = self._body_contact_scratch[5:8].reshape((body_count, lanes, 3, 3)).view(wp.mat33)
+            self.body_hessian_aa = self._body_contact_scratch[8:11].reshape((body_count, lanes, 3, 3)).view(wp.mat33)
 
             # Persistent scratch for joint_f accumulation
             self._body_f_for_integration = wp.zeros(model.body_count, dtype=wp.spatial_vector, device=self.device)
-
-            # Hessian blocks (6x6 block structure: angular-angular, angular-linear, linear-linear)
-            self.body_hessian_aa = wp.zeros(model.body_count, dtype=wp.mat33, device=self.device)
-            self.body_hessian_al = wp.zeros(model.body_count, dtype=wp.mat33, device=self.device)
-            self.body_hessian_ll = wp.zeros(model.body_count, dtype=wp.mat33, device=self.device)
 
             # Per-body contact lists (CSR-like: per-body counts + flat index array).
             # Tight: pre_alloc = 0 when the contact source is absent (no shapes / no particles).
@@ -3459,6 +3492,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                     self.body_inertia_q,
                 ],
                 dim=model.body_count,
+                block_dim=_select_rigid_block_dim(model.body_count, self.device),
                 device=self.device,
             )
 
@@ -3518,6 +3552,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                         self.joint_drive_lambda,
                         self.joint_limit_lambda,
                     ],
+                    block_dim=_select_rigid_block_dim(model.joint_count, self.device),
                     device=self.device,
                 )
 
@@ -3553,6 +3588,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                         self.joint_C_fric,
                     ],
                     dim=model.joint_count,
+                    block_dim=_select_rigid_block_dim(model.joint_count, self.device),
                     device=self.device,
                 )
 
@@ -3790,11 +3826,7 @@ class SolverVBD(SolverBase, CouplingInterface):
             return
 
         # Zero out forces and hessians
-        self.body_torques.zero_()
-        self.body_forces.zero_()
-        self.body_hessian_aa.zero_()
-        self.body_hessian_al.zero_()
-        self.body_hessian_ll.zero_()
+        self._body_contact_scratch.zero_()
 
         body_color_groups = model.body_color_groups
 
@@ -3844,6 +3876,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                         self.body_hessian_al,
                         self.body_hessian_aa,
                     ],
+                    block_dim=_select_rigid_block_dim(color_group.size * _NUM_CONTACT_THREADS_PER_BODY, self.device),
                     device=self.device,
                 )
 
@@ -3893,6 +3926,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                         self.body_hessian_al,
                         self.body_hessian_aa,
                     ],
+                    block_dim=_select_rigid_block_dim(color_group.size * _NUM_CONTACT_THREADS_PER_BODY, self.device),
                     device=self.device,
                 )
 
@@ -3958,6 +3992,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                     state_in.body_q,
                 ],
                 dim=color_group.size,
+                block_dim=_select_rigid_block_dim(color_group.size, self.device),
                 device=self.device,
             )
             # Truncate this color's pose updates before the next color accumulates
@@ -4030,7 +4065,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                 device=self.device,
             )
 
-        if model.joint_count > 0:
+        if self._has_rigid_joint_duals:
             wp.launch(
                 kernel=update_duals_joint,
                 dim=model.joint_count,
@@ -4077,6 +4112,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                     self.joint_drive_lambda,  # input/output
                     self.joint_limit_lambda,  # input/output
                 ],
+                block_dim=_select_rigid_block_dim(model.joint_count, self.device),
                 device=self.device,
             )
 
@@ -4264,6 +4300,7 @@ class SolverVBD(SolverBase, CouplingInterface):
             ],
             outputs=[self.body_q_prev, state_out.body_qd, state_in.body_qd, state_out.body_q],
             dim=model.body_count,
+            block_dim=_select_rigid_block_dim(model.body_count, self.device),
             device=self.device,
         )
 
@@ -4292,6 +4329,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                     self.joint_dkappa_prev,
                 ],
                 dim=model.joint_count,
+                block_dim=_select_rigid_block_dim(model.joint_count, self.device),
                 device=self.device,
             )
 

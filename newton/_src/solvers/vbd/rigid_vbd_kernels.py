@@ -5178,11 +5178,11 @@ def accumulate_body_body_contacts_per_body(
     body_contact_buffer_pre_alloc: int,
     body_contact_counts: wp.array[wp.int32],
     body_contact_indices: wp.array[wp.int32],
-    body_forces: wp.array[wp.vec3],
-    body_torques: wp.array[wp.vec3],
-    body_hessian_ll: wp.array[wp.mat33],
-    body_hessian_al: wp.array[wp.mat33],
-    body_hessian_aa: wp.array[wp.mat33],
+    body_forces: wp.array2d[wp.vec3],
+    body_torques: wp.array2d[wp.vec3],
+    body_hessian_ll: wp.array2d[wp.mat33],
+    body_hessian_al: wp.array2d[wp.mat33],
+    body_hessian_aa: wp.array2d[wp.mat33],
 ):
     """
     Per-body contact force/Hessian accumulation (compliant ALM or legacy penalty)
@@ -5202,6 +5202,9 @@ def accumulate_body_body_contacts_per_body(
     num_contacts = body_contact_counts[body_id]
     if num_contacts > body_contact_buffer_pre_alloc:
         num_contacts = body_contact_buffer_pre_alloc
+    if thread_id_within_body >= num_contacts:
+        # Preserve any contribution from the other contact family.
+        return
 
     contact_count = rigid_contact_count[0]
 
@@ -5325,11 +5328,14 @@ def accumulate_body_body_contacts_per_body(
 
         i += _NUM_CONTACT_THREADS_PER_BODY
 
-    wp.atomic_add(body_forces, body_id, force_acc)
-    wp.atomic_add(body_torques, body_id, torque_acc)
-    wp.atomic_add(body_hessian_ll, body_id, h_ll_acc)
-    wp.atomic_add(body_hessian_al, body_id, h_al_acc)
-    wp.atomic_add(body_hessian_aa, body_id, h_aa_acc)
+    # Each (body, lane) slot has one writer per launch. Preserve contributions
+    # from the other family; array += would generate an atomic in Warp.
+    lane = thread_id_within_body
+    body_forces[body_id, lane] = body_forces[body_id, lane] + force_acc
+    body_torques[body_id, lane] = body_torques[body_id, lane] + torque_acc
+    body_hessian_ll[body_id, lane] = body_hessian_ll[body_id, lane] + h_ll_acc
+    body_hessian_al[body_id, lane] = body_hessian_al[body_id, lane] + h_al_acc
+    body_hessian_aa[body_id, lane] = body_hessian_aa[body_id, lane] + h_aa_acc
 
 
 @wp.kernel
@@ -5522,11 +5528,11 @@ def accumulate_body_particle_contacts_per_body(
     body_particle_contact_counts: wp.array[wp.int32],
     body_particle_contact_indices: wp.array[wp.int32],
     # Outputs
-    body_forces: wp.array[wp.vec3],
-    body_torques: wp.array[wp.vec3],
-    body_hessian_ll: wp.array[wp.mat33],
-    body_hessian_al: wp.array[wp.mat33],
-    body_hessian_aa: wp.array[wp.mat33],
+    body_forces: wp.array2d[wp.vec3],
+    body_torques: wp.array2d[wp.vec3],
+    body_hessian_ll: wp.array2d[wp.mat33],
+    body_hessian_al: wp.array2d[wp.mat33],
+    body_hessian_aa: wp.array2d[wp.mat33],
 ):
     """
     Per-body accumulation of body-particle soft contact forces and Hessians on rigid bodies.
@@ -5557,6 +5563,9 @@ def accumulate_body_particle_contacts_per_body(
     num_contacts = body_particle_contact_counts[body_id]
     if num_contacts > body_particle_contact_buffer_pre_alloc:
         num_contacts = body_particle_contact_buffer_pre_alloc
+    if thread_id_within_body >= num_contacts:
+        # Preserve any contribution from the other contact family.
+        return
 
     max_contacts = body_particle_contact_count[0]  # single total soft-contact count
 
@@ -5661,11 +5670,14 @@ def accumulate_body_particle_contacts_per_body(
         h_al_acc += -r_skew_T_K
         h_aa_acc += r_skew_T_K * r_skew
 
-    wp.atomic_add(body_forces, body_id, force_acc)
-    wp.atomic_add(body_torques, body_id, torque_acc)
-    wp.atomic_add(body_hessian_ll, body_id, h_ll_acc)
-    wp.atomic_add(body_hessian_al, body_id, h_al_acc)
-    wp.atomic_add(body_hessian_aa, body_id, h_aa_acc)
+    # Each (body, lane) slot has one writer per launch. Preserve contributions
+    # from the other family; array += would generate an atomic in Warp.
+    lane = thread_id_within_body
+    body_forces[body_id, lane] = body_forces[body_id, lane] + force_acc
+    body_torques[body_id, lane] = body_torques[body_id, lane] + torque_acc
+    body_hessian_ll[body_id, lane] = body_hessian_ll[body_id, lane] + h_ll_acc
+    body_hessian_al[body_id, lane] = body_hessian_al[body_id, lane] + h_al_acc
+    body_hessian_aa[body_id, lane] = body_hessian_aa[body_id, lane] + h_aa_acc
 
 
 @wp.kernel
@@ -5724,12 +5736,12 @@ def solve_rigid_body(
     joint_compliant_alm: int,
     joint_dof_dim: wp.array2d[int],
     joint_rest_angle: wp.array[float],
-    external_forces: wp.array[wp.vec3],
-    external_torques: wp.array[wp.vec3],
+    external_forces: wp.array2d[wp.vec3],
+    external_torques: wp.array2d[wp.vec3],
     # Preaccumulated rigid-contact Hessian contributions
-    external_hessian_ll: wp.array[wp.mat33],
-    external_hessian_al: wp.array[wp.mat33],
-    external_hessian_aa: wp.array[wp.mat33],
+    external_hessian_ll: wp.array2d[wp.mat33],
+    external_hessian_al: wp.array2d[wp.mat33],
+    external_hessian_aa: wp.array2d[wp.mat33],
     # Output
     body_q_new: wp.array[wp.transform],
 ):
@@ -5824,13 +5836,18 @@ def solve_rigid_body(
     I_world = R_cur * I_body * wp.transpose(R_cur)
     angular_hessian = dt_sqr_reciprocal * I_world
 
-    # Accumulate external forces (rigid contacts)
-    # Read external contributions
-    ext_torque = external_torques[body_index]
-    ext_force = external_forces[body_index]
-    ext_h_aa = external_hessian_aa[body_index]
-    ext_h_al = external_hessian_al[body_index]
-    ext_h_ll = external_hessian_ll[body_index]
+    # Combine the per-lane contact contributions in a fixed lane order.
+    ext_torque = external_torques[body_index, 0]
+    ext_force = external_forces[body_index, 0]
+    ext_h_aa = external_hessian_aa[body_index, 0]
+    ext_h_al = external_hessian_al[body_index, 0]
+    ext_h_ll = external_hessian_ll[body_index, 0]
+    for lane in range(1, _NUM_CONTACT_THREADS_PER_BODY):
+        ext_torque += external_torques[body_index, lane]
+        ext_force += external_forces[body_index, lane]
+        ext_h_aa += external_hessian_aa[body_index, lane]
+        ext_h_al += external_hessian_al[body_index, lane]
+        ext_h_ll += external_hessian_ll[body_index, lane]
 
     f_torque = tau_world + ext_torque
     f_force = f_lin + ext_force
