@@ -41,6 +41,7 @@ from newton._src.solvers.vbd.rigid_vbd_kernels import (
     _joint_angular_rho_seed,
     build_body_body_contact_lists,
     build_body_particle_contact_lists,
+    clear_rigid_body_contact_scratch,
     compute_rigid_contact_forces,
     evaluate_angular_constraint_force_hessian,
     evaluate_body_particle_contact,
@@ -54,6 +55,7 @@ from newton._src.solvers.vbd.rigid_vbd_kernels import (
     rigid_trajectory_truncation_t,
     snapshot_body_body_contact_history,
     step_body_body_contact_C0_lambda,
+    update_body_velocity,
     update_duals_body_body_contacts,
     update_duals_body_particle_contacts,
     update_duals_joint,
@@ -4355,11 +4357,15 @@ def _yawed_cable_does_not_inject_energy(test, device, hard_contact=True, rigid_c
         body_idx = [int(b) for b in bodies]
 
         def kinetic_energy() -> float:
+            q = state_0.body_q.numpy()
             qd = state_0.body_qd.numpy()
             ke = 0.0
             for b in body_idx:
                 vel = qd[b, 0:3]
-                omega = qd[b, 3:6]
+                # Angular velocity is world-space; body_inertia is body-space.
+                rotation_inv = q[b, 3:7].copy()
+                rotation_inv[:3] *= -1.0
+                omega = _quat_rotate_np(rotation_inv, qd[b, 3:6])
                 ke += 0.5 * float(masses[b]) * float(vel @ vel)
                 ke += 0.5 * float(omega @ (inertias[b] @ omega))
             return ke
@@ -7071,6 +7077,161 @@ add_function_test(
     "test_rigid_dat_graph_capture_replays_match_eager",
     test_rigid_dat_graph_capture_replays_match_eager,
     devices=cuda_devices,
+)
+
+
+def test_rigid_free_flight_preserves_velocity_state(test, device):
+    """Retain sub-ULP inertial velocities with every rigid contact-history mode."""
+    dt = 1.0 / 4000.0
+    steps = 100
+    for matching in ("disabled", "latest", "sticky"):
+        with test.subTest(matching=matching):
+            builder = newton.ModelBuilder(gravity=(0.0, 0.0, -9.81))
+            for altitude in (0.0, 45.0):
+                body = builder.add_body(xform=wp.transform(wp.vec3(0.0, 0.0, altitude), wp.quat_identity()))
+                builder.add_shape_sphere(body, radius=0.1)
+            builder.color()
+            model = builder.finalize(device=device)
+            pipeline = newton.CollisionPipeline(model, contact_matching=matching, deterministic=True)
+            contacts = pipeline.contacts()
+            solver = newton.solvers.SolverVBD(
+                model,
+                iterations=2,
+                rigid_compliant_alm=True,
+                rigid_contact_history=matching != "disabled",
+                deterministic=wp.DeterministicMode.RUN_TO_RUN,
+            )
+            states = [model.state(), model.state()]
+            control = model.control()
+
+            def step(pipeline=pipeline, states=states, contacts=contacts, solver=solver, control=control):
+                pipeline.collide(states[0], contacts)
+                solver.step(states[0], states[1], control, contacts, dt)
+                states.reverse()
+
+            step()
+            step()
+            if device.is_cuda:
+                with wp.ScopedCapture(device=device) as capture:
+                    for _ in range(steps - 2):
+                        step()
+                wp.capture_launch(capture.graph)
+            else:
+                for _ in range(steps - 2):
+                    step()
+            expected_velocity = np.zeros((2, 6), dtype=np.float32)
+            expected_velocity[:, 2] = -9.81 * dt * steps
+            np.testing.assert_allclose(states[0].body_qd.numpy(), expected_velocity, atol=1.0e-5, rtol=0.0)
+            expected_z = np.array([0.0, 45.0]) - 9.81 * dt * dt * steps * (steps + 1) / 2
+            np.testing.assert_allclose(states[0].body_q.numpy()[:, 2], expected_z, atol=2.0e-5, rtol=0.0)
+            np.testing.assert_array_equal(states[0].body_qd.numpy(), states[1].body_qd.numpy())
+
+
+add_function_test(
+    TestSolverVBD,
+    "test_rigid_free_flight_preserves_velocity_state",
+    test_rigid_free_flight_preserves_velocity_state,
+    devices=devices,
+)
+
+
+def test_rigid_velocity_correction_preserves_com_and_kinematics(test, device):
+    """Apply solved COM corrections while retaining pose-derived kinematic motion."""
+    dt = 1.0 / 32.0
+    com = wp.vec3(0.25, -0.125, 0.5)
+    previous = wp.transform(wp.vec3(45.0, 1.0, 2.0), wp.quat_identity())
+    predicted = wp.transform(wp.vec3(45.01, 1.02, 2.03), wp.quat_from_axis_angle(wp.vec3(0.0, 0.0, 1.0), 0.2))
+    solved = wp.transform(wp.vec3(45.02, 1.01, 2.04), wp.quat_from_axis_angle(wp.vec3(0.0, 0.0, 1.0), 0.21))
+    predicted_velocity = wp.spatial_vector(1.0, 2.0, 3.0, 0.0, 0.0, 0.0)
+    poses = wp.array([solved, solved], dtype=wp.transform, device=device)
+    targets = wp.array([predicted, predicted], dtype=wp.transform, device=device)
+    predicted_v = wp.array([wp.vec3(1.0, 2.0, 3.0)] * 2, dtype=wp.vec3, device=device)
+    centers = wp.array([com, com], dtype=wp.vec3, device=device)
+    inverse_mass = wp.array([1.0, 0.0], dtype=float, device=device)
+    seed_prev = wp.array([previous, previous], dtype=wp.transform, device=device)
+    seed_velocity = wp.array([predicted_velocity, predicted_velocity], dtype=wp.spatial_vector, device=device)
+    prev = wp.clone(seed_prev)
+    # Mimic projection can modify state velocity; the inertial predictor must not change.
+    seed_velocity.fill_(wp.spatial_vector(9.0, 8.0, 7.0, 0.0, 0.0, 0.0))
+    mirror = wp.clone(seed_velocity)
+    output = wp.zeros(2, dtype=wp.spatial_vector, device=device)
+    pose_output = wp.zeros(2, dtype=wp.transform, device=device)
+
+    def run():
+        wp.copy(prev, seed_prev)
+        wp.copy(mirror, seed_velocity)
+        wp.launch(
+            update_body_velocity,
+            dim=2,
+            inputs=[dt, poses, centers, targets, predicted_v, inverse_mass],
+            outputs=[prev, output, mirror, pose_output],
+            device=device,
+        )
+
+    run()
+    actual = output.numpy()
+    delta = np.asarray(wp.transform_get_translation(solved), dtype=np.float64) - np.asarray(
+        wp.transform_get_translation(predicted), dtype=np.float64
+    )
+    delta += np.asarray(wp.quat_rotate(wp.transform_get_rotation(solved), com), dtype=np.float64) - np.asarray(
+        wp.quat_rotate(wp.transform_get_rotation(predicted), com), dtype=np.float64
+    )
+    np.testing.assert_allclose(actual[0, :3], np.array([1.0, 2.0, 3.0]) + delta / dt, atol=2.0e-5, rtol=0.0)
+    expected_kinematic = (
+        np.asarray(wp.transform_point(solved, com)) - np.asarray(wp.transform_point(previous, com))
+    ) / dt
+    np.testing.assert_allclose(actual[1, :3], expected_kinematic, atol=1.0e-5, rtol=0.0)
+    np.testing.assert_allclose(actual[:, 3:], [[0.0, 0.0, 0.21 / dt]] * 2, atol=1.0e-5, rtol=0.0)
+    if device.is_cuda:
+        with wp.ScopedCapture(device=device) as capture:
+            run()
+        for _ in range(3):
+            wp.capture_launch(capture.graph)
+            np.testing.assert_array_equal(output.numpy(), actual)
+    np.testing.assert_array_equal(output.numpy(), mirror.numpy())
+    np.testing.assert_array_equal(pose_output.numpy(), poses.numpy())
+    np.testing.assert_array_equal(prev.numpy(), poses.numpy())
+
+
+add_function_test(
+    TestSolverVBD,
+    "test_rigid_velocity_correction_preserves_com_and_kinematics",
+    test_rigid_velocity_correction_preserves_com_and_kinematics,
+    devices=devices,
+)
+
+
+def test_rigid_contact_scratch_clear(test, device):
+    """Clear every accumulator exactly, including after captured graph replay."""
+    with wp.ScopedDevice(device):
+        for count in (1, 7, 257):
+            with test.subTest(count=count):
+                scratch = [wp.empty(count, dtype=dtype) for dtype in (wp.vec3, wp.vec3, wp.mat33, wp.mat33, wp.mat33)]
+
+                def clear(count, scratch):
+                    wp.launch(clear_rigid_body_contact_scratch, dim=count, outputs=scratch)
+
+                clear(count, scratch)
+                if device.is_cuda:
+                    with wp.ScopedCapture() as capture:
+                        clear(count, scratch)
+                for seed in (float("nan"), -3.0):
+                    for array in scratch:
+                        array.assign(np.full_like(array.numpy(), seed))
+                    if device.is_cuda:
+                        wp.capture_launch(capture.graph)
+                    else:
+                        clear(count, scratch)
+                    for array in scratch:
+                        actual = array.numpy()
+                        test.assertEqual(actual.tobytes(), np.zeros_like(actual).tobytes())
+
+
+add_function_test(
+    TestSolverVBD,
+    "test_rigid_contact_scratch_clear",
+    test_rigid_contact_scratch_clear,
+    devices=devices,
 )
 
 

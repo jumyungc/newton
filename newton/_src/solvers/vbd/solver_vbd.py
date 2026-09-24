@@ -57,8 +57,6 @@ from .particle_vbd_kernels import (
 from .rigid_pair_contact import (
     RigidPairContact,
     accumulate_constraint_contact_forces_per_body,
-    select_rigid_pair_block_dim,
-    sort_constraint_contact_lists,
 )
 from .rigid_vbd_kernels import (
     _NUM_CONTACT_THREADS_PER_BODY,
@@ -74,6 +72,7 @@ from .rigid_vbd_kernels import (
     build_body_body_contact_lists,
     build_body_particle_contact_lists,
     check_contact_overflow,
+    clear_rigid_body_contact_scratch,
     color_rigid_bodies_from_contacts,
     compute_rigid_contact_forces,
     compute_rod_dahl_parameters,
@@ -85,8 +84,10 @@ from .rigid_vbd_kernels import (
     refresh_body_structural_k,
     refresh_joint_material_params,
     reset_rigid_state,
+    select_rigid_block_dim,
     snapshot_body_body_contact_history,
     solve_rigid_body,
+    sort_body_body_contact_lists,
     step_body_body_contact_C0_lambda,
     step_joint_C0_lambda_rho,
     update_body_velocity,
@@ -106,6 +107,7 @@ from .vbd_coupling_kernels import (
 __all__ = ["SolverVBD"]
 
 _PARTICLE_CONTACT_GATHER_BLOCK_DIM = 128
+_RIGID_CONTACT_MAX_DYNAMIC_COLORS = 32
 
 # Reuse the shared equations without scatter reduction only for disjoint writers.
 # A unique module leaves XPBD and other VBD instances' requested options untouched.
@@ -132,9 +134,6 @@ def _is_tet_only_elasticity_model(model: Model) -> bool:
             return False
 
     return True
-
-
-_RIGID_CONTACT_MAX_DYNAMIC_COLORS = 32
 
 
 def _validate_compliant_alm_material_coefficient(
@@ -554,11 +553,14 @@ class SolverVBD(SolverBase, CouplingInterface):
             rigid_body_contact_buffer_size: Max body-body contacts per rigid body for per-body contact lists.
             rigid_body_particle_contact_buffer_size: Max body-particle soft contacts tracked per rigid
                 body, covering both particle-vs-surface and full-surface edge/face contacts.
-            rigid_contact_coloring: Rigid-contact scheduling policy. ``"auto"`` uses exact
-                pair-manifold coloring for joint-free collision worlds when numeric contact
-                history is enabled; otherwise it uses per-body ALM with the same body-color
-                policy as structural worlds. It recolors the joint/contact graph only when
-                contacts branch inside an authored body color. ``"model"`` always uses authored colors
+            rigid_contact_coloring: Per-body contact scheduling policy; it does not select
+                the contact formulation. With compliant ALM, collision-isolated joint-free
+                worlds with numeric contact history use exact pair-manifold coloring under
+                all three policies. A world containing a potentially active structural joint
+                stays on the per-body path, including its unjointed bodies. Compliant ALM
+                without numeric contact history also uses the per-body path.
+                ``"auto"`` recolors the joint/contact graph when contacts branch inside an
+                authored body color. ``"model"`` always uses authored colors
                 for per-body contact solves; same-color contacts remain Jacobi and may
                 converge poorly in dense contact. ``"refined"`` always
                 colors the joint/contact union graph within the body color budget. Contact overflow
@@ -571,7 +573,8 @@ class SolverVBD(SolverBase, CouplingInterface):
                 generation and sufficient per-body contact-list capacity.
             rigid_body_contact_color_budget: Requested color capacity for per-body contact refinement,
                 in [1, 32]. Defaults to 32. The effective capacity is never below the authored
-                joint-color count. Smaller budgets reduce color passes but may leave contact
+                joint-color count; the capacity is not the number of color passes always executed.
+                Smaller budgets reduce color passes but may leave contact
                 conflicts using Jacobi updates; joint independence is preserved. Applies to
                 both structural worlds and the history-disabled free-world body path.
                 Does not limit pair-manifold colors and has no effect with "model" coloring.
@@ -890,15 +893,10 @@ class SolverVBD(SolverBase, CouplingInterface):
         options = {"deterministic": effective_deterministic, "deterministic_max_records": 0}
         if integrates_rigid_bodies:
             self._set_module_options(options, module=rigid_vbd_kernels)
-        self._use_rigid_pair_contacts = integrates_rigid_bodies
-        if self._use_rigid_pair_contacts:
-            # Pair counters only permute independent work within a color; serial
-            # overflow and contact reductions use fixed ordering independently.
-            pair_deterministic = effective_deterministic
-            if pair_deterministic == wp.DeterministicMode.RUN_TO_RUN:
-                pair_deterministic = wp.DeterministicMode.NOT_GUARANTEED
+            # Pair counters only permute independent work within a color; all
+            # numerical reductions and serial overflow retain fixed ordering.
             self._set_module_options(
-                {"deterministic": pair_deterministic, "deterministic_max_records": 0},
+                {"deterministic": effective_deterministic, "deterministic_max_records": 0},
                 module=rigid_pair_contact,
             )
         if model.joint_count > 0:
@@ -1177,6 +1175,11 @@ class SolverVBD(SolverBase, CouplingInterface):
         self.rigid_angular_beta = rigid_avbd_angular_beta
         self.rigid_contact_hard = int(rigid_contact_hard)
         self.rigid_contact_history = rigid_contact_history
+        # Pair contact needs either the legacy hard multiplier or compliant-ALM
+        # row history. Legacy penalty-only contact remains on the body path.
+        self._rigid_pair_contact_state_supported = (self.rigid_compliant_alm and self.rigid_contact_history) or (
+            not self.rigid_compliant_alm and self.rigid_contact_hard == 1
+        )
         # Contact alpha precedence: contact override > shared override > mode default.
         # Under compliant ALM it controls only residual stabilization.
         if rigid_avbd_contact_alpha is not None:
@@ -1213,6 +1216,7 @@ class SolverVBD(SolverBase, CouplingInterface):
             self.body_q_prev = wp.clone(model.body_q, device=self.device)
             self._coupling_body_q_prev_snapshot = wp.clone(model.body_q, device=self.device)
             self.body_inertia_q = wp.zeros_like(model.body_q, device=self.device)  # inertial target poses
+            self.body_inertia_v = wp.zeros(model.body_count, dtype=wp.vec3, device=self.device)
 
             # Adjacency and dimensions
             rigid_adjacency = self._compute_rigid_force_element_adjacency(model)
@@ -1359,7 +1363,7 @@ class SolverVBD(SolverBase, CouplingInterface):
         else:
             self._rigid_body_refinement_supported = False
 
-        if self._use_rigid_pair_contacts:
+        if self._integrates_rigid_bodies and self._rigid_pair_body_count > 0:
             self._rigid_pair_contacts = RigidPairContact(
                 model,
                 self.body_inv_mass_effective,
@@ -1367,8 +1371,8 @@ class SolverVBD(SolverBase, CouplingInterface):
                 self.body_uses_pair_contacts,
                 self._rigid_pair_body_count,
             )
-        self._pair_contacts_enabled_this_step = self._rigid_pair_contacts is not None and (
-            not self.rigid_compliant_alm or self.rigid_contact_history
+        self._pair_contacts_enabled_this_step = (
+            self._rigid_pair_contacts is not None and self._rigid_pair_contact_state_supported
         )
 
         # Pre-allocate body-body contact buffers when the contact capacity is
@@ -1827,7 +1831,7 @@ class SolverVBD(SolverBase, CouplingInterface):
         """
         # Compliant contacts without numeric history use body ALM. Include them
         # in its schedule so auto/refined coloring also applies to this fallback.
-        pair_supported = not self.rigid_compliant_alm or self.rigid_contact_history
+        pair_supported = self._rigid_pair_contact_state_supported
         uses_pair = np.full(self.model.body_count, int(pair_supported), dtype=np.int32)
         if self.model.joint_count > 0:
             joint_type = self._to_numpy(self.model.joint_type, dtype=int)
@@ -1847,7 +1851,6 @@ class SolverVBD(SolverBase, CouplingInterface):
         self.body_uses_pair_contacts = wp.array(uses_pair, dtype=wp.int32, device=self.device)
         self._body_uses_no_pair_contacts = wp.zeros_like(self.body_uses_pair_contacts)
         self._rigid_pair_body_count = int(np.count_nonzero(uses_pair))
-        self._use_rigid_pair_contacts = bool(np.any(uses_pair))
         self._has_per_body_rigid_contacts = bool(np.any(uses_pair == 0))
         self._structural_body_color_groups = []
         for color_group in self.model.body_color_groups:
@@ -1965,6 +1968,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                 self.model.joint_parent,
                 self.model.joint_child,
                 self.model.joint_type,
+                True,  # The existing schedule remains consistent with its body colors.
             ],
             outputs=[
                 self._rigid_body_colors,
@@ -2686,9 +2690,9 @@ class SolverVBD(SolverBase, CouplingInterface):
         # The compliant constraint-block solve needs persistent row identity for
         # a well-resolved Coulomb multiplier across small time steps.  Without
         # numeric contact history, preserve the established per-body ALM path.
-        pair_contact_state_supported = not self.rigid_compliant_alm or self.rigid_contact_history
         self._pair_contacts_enabled_this_step = self._rigid_pair_contacts is not None and (
-            pair_contact_state_supported and (self.rigid_compliant_alm or not has_in_iteration_rigid_detection)
+            self._rigid_pair_contact_state_supported
+            and (self.rigid_compliant_alm or not has_in_iteration_rigid_detection)
         )
         if self._pair_contacts_enabled_this_step and not pair_contacts_were_enabled:
             update_rigid = True
@@ -3482,7 +3486,7 @@ class SolverVBD(SolverBase, CouplingInterface):
 
                 if model.body_count > 0:
                     wp.launch(
-                        kernel=sort_constraint_contact_lists,
+                        kernel=sort_body_body_contact_lists,
                         dim=model.body_count,
                         inputs=[
                             self.body_body_contact_buffer_pre_alloc,
@@ -3848,6 +3852,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                 outputs=[
                     self.body_q_prev,  # rebaselined for flagged worlds (first step / reset)
                     self.body_inertia_q,
+                    self.body_inertia_v,
                 ],
                 dim=model.body_count,
                 device=self.device,
@@ -4197,8 +4202,14 @@ class SolverVBD(SolverBase, CouplingInterface):
         # response. Jointed bodies retain full VBD; one seed sweep reapplies
         # multipliers carried into this step. Rigid-particle coupling still
         # requires the ordinary per-body assembly.
-        use_dynamic_schedule = use_refined_body_colors and not (
-            use_pair_contacts and model.particle_count == 0 and include_pair_primal
+        # If a legacy in-iteration collision schedule temporarily disables the
+        # pair lane, its bodies are absent from the refined schedule. Fall back
+        # to the complete model schedule so every body still receives contact.
+        pair_partition_available = use_pair_contacts or self._rigid_pair_body_count == 0
+        use_dynamic_schedule = (
+            use_refined_body_colors
+            and pair_partition_available
+            and not (use_pair_contacts and model.particle_count == 0 and include_pair_primal)
         )
         if use_dynamic_schedule:
             body_color_groups = range(min(refined_color_count, self._rigid_body_color_budget))
@@ -4209,11 +4220,18 @@ class SolverVBD(SolverBase, CouplingInterface):
 
         # Pair-only sweeps do not consume the per-body primal scratch.
         if body_color_groups:
-            self.body_torques.zero_()
-            self.body_forces.zero_()
-            self.body_hessian_aa.zero_()
-            self.body_hessian_al.zero_()
-            self.body_hessian_ll.zero_()
+            wp.launch(
+                kernel=clear_rigid_body_contact_scratch,
+                dim=model.body_count,
+                outputs=[
+                    self.body_forces,
+                    self.body_torques,
+                    self.body_hessian_ll,
+                    self.body_hessian_al,
+                    self.body_hessian_aa,
+                ],
+                device=self.device,
+            )
 
         # Gauss-Seidel-style per-color updates
         for group in body_color_groups:
@@ -4357,7 +4375,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                     ],
                     outputs=[self.body_forces, self.body_torques],
                     device=self.device,
-                    block_dim=select_rigid_pair_block_dim(color_launch_dim, self.device),
+                    block_dim=select_rigid_block_dim(color_launch_dim, self.device),
                 )
 
             wp.launch(
@@ -4426,6 +4444,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                 ],
                 dim=color_launch_dim,
                 device=self.device,
+                block_dim=select_rigid_block_dim(color_launch_dim, self.device),
             )
             # Truncate this color's pose updates before the next color accumulates
             # forces against them; the last color also feeds the dual updates.
@@ -4753,6 +4772,9 @@ class SolverVBD(SolverBase, CouplingInterface):
                 dt,
                 state_in.body_q,
                 model.body_com,
+                self.body_inertia_q,
+                self.body_inertia_v,
+                self.body_inv_mass_effective,
             ],
             outputs=[self.body_q_prev, state_out.body_qd, state_in.body_qd, state_out.body_q],
             dim=model.body_count,

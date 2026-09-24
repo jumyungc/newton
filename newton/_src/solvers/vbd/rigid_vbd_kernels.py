@@ -67,36 +67,6 @@ _NUM_CONTACT_THREADS_PER_BODY = wp.constant(4)
 """Threads per body for contact accumulation using strided iteration"""
 
 
-@wp.func_native(
-    """
-    #if defined(__CUDA_ARCH__)
-    __syncthreads();
-    #endif
-    """
-)
-def _sync_cuda_block(): ...
-
-
-@wp.func
-def _body_id_for_color_slot(
-    slot: int,
-    fallback_ids: wp.array[wp.int32],
-    dynamic_ids: wp.array[wp.int32],
-    color_starts: wp.array[wp.int32],
-    active_color: int,
-) -> int:
-    """Resolve a body from either a model color or a device-built contact color."""
-    if active_color >= 0:
-        start = color_starts[active_color]
-        count = color_starts[active_color + 1] - start
-        if slot >= count:
-            return -1
-        return dynamic_ids[start + slot]
-    if slot >= fallback_ids.shape[0]:
-        return -1
-    return fallback_ids[slot]
-
-
 # DER bend-twist strain measure tolerances (curvature binormal + Bishop transport).
 _ROD_KB_FOLD_EPS = wp.constant(1.0e-12)
 """Degenerate-fold scale and denominator floor for the DER curvature binormal.
@@ -256,6 +226,50 @@ def _contact_auto_tangent_rho(
 # ---------------------------------
 # Helper classes and device functions
 # ---------------------------------
+
+
+def select_rigid_block_dim(launch_dim: int, device) -> int:
+    """Choose a power-of-two CUDA block width for ordinary rigid kernels."""
+    if not device.is_cuda:
+        return 256
+    target_blocks = max(1, (device.sm_count + 1) // 2)
+    block_dim = 4
+    while block_dim < 256:
+        candidate = 2 * block_dim
+        if (launch_dim + candidate - 1) // candidate < target_blocks:
+            break
+        block_dim = candidate
+    return block_dim
+
+
+@wp.func_native(
+    """
+    #if defined(__CUDA_ARCH__)
+    __syncthreads();
+    #endif
+    """
+)
+def _sync_cuda_block(): ...
+
+
+@wp.func
+def _body_id_for_color_slot(
+    slot: int,
+    fallback_ids: wp.array[wp.int32],
+    dynamic_ids: wp.array[wp.int32],
+    color_starts: wp.array[wp.int32],
+    active_color: int,
+) -> int:
+    """Resolve a body from either a model color or a device-built contact color."""
+    if active_color >= 0:
+        start = color_starts[active_color]
+        count = color_starts[active_color + 1] - start
+        if slot >= count:
+            return -1
+        return dynamic_ids[start + slot]
+    if slot >= fallback_ids.shape[0]:
+        return -1
+    return fallback_ids[slot]
 
 
 @wp.struct
@@ -3995,6 +4009,7 @@ def forward_step_rigid_bodies(
     body_qd: wp.array[wp.spatial_vector],
     body_q_prev: wp.array[wp.transform],
     body_inertia_q: wp.array[wp.transform],
+    body_inertia_v: wp.array[wp.vec3],
 ):
     """
     Forward integration step for rigid bodies in SolverVBD.
@@ -4015,6 +4030,7 @@ def forward_step_rigid_bodies(
             pre-step pose for worlds selected by ``pose_rebaseline_mask`` (first step
             after construction or reset); left unchanged otherwise.
         body_inertia_q: Inertial target body transforms for the AVBD solve (output).
+        body_inertia_v: Linear velocity baselines, including non-reset authored motion (output).
     """
     tid = wp.tid()
 
@@ -4056,6 +4072,14 @@ def forward_step_rigid_bodies(
     body_q[tid] = q_new
     body_qd[tid] = qd_new
     body_inertia_q[tid] = q_new
+    # A non-reset authored pose change still contributes to finite-difference velocity.
+    # Keep that contribution immutable too: mimic projection modifies body_qd later.
+    q_previous = body_q_prev[tid]
+    delta_com = (wp.transform_get_translation(q_current) - wp.transform_get_translation(q_previous)) + (
+        wp.quat_rotate(wp.transform_get_rotation(q_current), com_local)
+        - wp.quat_rotate(wp.transform_get_rotation(q_previous), com_local)
+    )
+    body_inertia_v[tid] = wp.spatial_top(qd_new) + delta_com / dt
 
 
 @wp.kernel
@@ -4099,6 +4123,26 @@ def build_body_body_contact_lists(
             body_contact_indices[b1 * body_contact_buffer_pre_alloc + idx] = t_id
         else:
             wp.atomic_max(body_contact_overflow_max, 0, idx + 1)
+
+
+@wp.kernel
+def sort_body_body_contact_lists(
+    body_contact_buffer_size: int,
+    body_contact_counts: wp.array[wp.int32],
+    body_contact_indices: wp.array[wp.int32],
+):
+    """Sort each bounded per-body list so multiplier sums are reproducible."""
+    body = wp.tid()
+    count = wp.min(body_contact_counts[body], body_contact_buffer_size)
+    for i in range(1, count):
+        value = body_contact_indices[body * body_contact_buffer_size + i]
+        j = i - 1
+        while j >= 0 and body_contact_indices[body * body_contact_buffer_size + j] > value:
+            body_contact_indices[body * body_contact_buffer_size + j + 1] = body_contact_indices[
+                body * body_contact_buffer_size + j
+            ]
+            j -= 1
+        body_contact_indices[body * body_contact_buffer_size + j + 1] = value
 
 
 @wp.func
@@ -4240,6 +4284,7 @@ def color_rigid_bodies_from_contacts(
     joint_parent: wp.array[int],
     joint_child: wp.array[int],
     joint_type: wp.array[int],
+    reuse_packed_schedule: bool,
     body_colors: wp.array[wp.int32],
     body_ids_by_color: wp.array[wp.int32],
     color_starts: wp.array[wp.int32],
@@ -4255,8 +4300,73 @@ def color_rigid_bodies_from_contacts(
     Joint conflicts are mandatory. If warm colors exhaust even the joint-only
     palette, restore the authored coloring for the entire schedule. Never
     resolve joint overflow by assigning an arbitrary conflicting color.
+
+    Reuse requires packed IDs, offsets and counts consistent with the input
+    body colors. Fresh contacts and active bodies are still validated.
     """
     lane = wp.tid()
+    # The caller supplies a schedule consistent with body_colors. Fresh
+    # graph validation still runs; only unchanged repair/packing is skipped.
+    can_reuse = reuse_packed_schedule and block_size > 1 and overflow_count[0] == 0 and joint_overflow[0] == 0
+    # Read the previous result before any lane reuses its counters.
+    _sync_cuda_block()
+    if can_reuse:
+        if lane == 0:
+            joint_overflow[0] = 0
+        _sync_cuda_block()
+        needs_rebuild = bool(False)
+        for body in range(lane, body_count, block_size):
+            retained = wp.int32(-1)
+            color = body_colors[body]
+            if body_schedule_active[body] != 0 and body_inv_mass[body] > 0.0 and 0 <= color and color < color_budget:
+                retained = color
+                count = wp.min(body_contact_counts[body], body_contact_buffer_pre_alloc)
+                neighbor_count = count + joint_offsets[body + 1] - joint_offsets[body]
+                for slot in range(neighbor_count):
+                    other = _rigid_color_neighbor(
+                        body,
+                        slot,
+                        count,
+                        body_contact_buffer_pre_alloc,
+                        body_contact_indices,
+                        rigid_contact_shape0,
+                        rigid_contact_shape1,
+                        shape_body,
+                        body_uses_pair_contacts,
+                        joint_offsets,
+                        joint_indices,
+                        joint_parent,
+                        joint_child,
+                        joint_type,
+                    )
+                    if (
+                        other >= 0
+                        and other < body
+                        and body_schedule_active[other] != 0
+                        and body_inv_mass[other] > 0.0
+                        and body_colors[other] == color
+                    ):
+                        retained = -1
+            if retained != color or (body_schedule_active[body] != 0 and body_inv_mass[body] > 0.0 and retained < 0):
+                needs_rebuild = True
+        if needs_rebuild:
+            wp.atomic_max(joint_overflow, 0, 1)
+        _sync_cuda_block()
+        unchanged = joint_overflow[0] == 0
+        _sync_cuda_block()
+        if unchanged:
+            for slot in range(color_starts[color_budget] + lane, body_count, block_size):
+                body_ids_by_color[slot] = -1
+            if lane == 0:
+                overflow_count[0] = 0
+                if body_count > color_budget:
+                    color_starts[body_count] = 0
+                count = num_colors_out[0]
+                flag_gt4[0] = wp.int32(count > 4)
+                flag_gt8[0] = wp.int32(count > 8)
+                flag_gt16[0] = wp.int32(count > 16)
+            return
+
     if lane == 0:
         overflow_count[0] = 0
         joint_overflow[0] = 0
@@ -4366,38 +4476,65 @@ def color_rigid_bodies_from_contacts(
                 wp.atomic_add(color_starts, body_count, -1)
         _sync_cuda_block()
 
-    if lane == 0:
-        # The fallback applies to all bodies, including those whose retained
-        # colors prevented a joint-safe local choice.
-        if joint_overflow[0] != 0:
-            for body in range(body_count):
-                if body_schedule_active[body] != 0 and body_inv_mass[body] > 0.0:
-                    body_colors[body] = body_joint_colors[body]
-        num_colors = wp.int32(0)
-        for color in range(color_budget + 1):
-            color_starts[color] = 0
+    # Restore mandatory joint separation before packing the schedule.
+    if joint_overflow[0] != 0:
+        for body in range(lane, body_count, block_size):
+            if body_schedule_active[body] != 0 and body_inv_mass[body] > 0.0:
+                body_colors[body] = body_joint_colors[body]
+    for color in range(lane, color_budget + 1, block_size):
+        color_starts[color] = 0
+    _sync_cuda_block()
+
+    if block_size == 1:
+        # The CPU keeps its linear-time body-major histogram and packing.
         for body in range(body_count):
             color = body_colors[body]
             if color >= 0:
-                num_colors = wp.max(num_colors, color + 1)
                 color_starts[color + 1] += 1
-        for color in range(num_colors):
+    else:
+        # One CUDA lane owns each color. Local counters avoid serial global
+        # read/modify/write dependencies while retaining ascending body order.
+        for color in range(lane, color_budget, block_size):
+            count = wp.int32(0)
+            for body in range(body_count):
+                if body_colors[body] == color:
+                    count += 1
+            color_starts[color + 1] = count
+    _sync_cuda_block()
+
+    if lane == 0:
+        num_colors = wp.int32(0)
+        for color in range(color_budget):
+            if color_starts[color + 1] > 0:
+                num_colors = color + 1
             color_starts[color + 1] += color_starts[color]
+        num_colors_out[0] = num_colors
+    _sync_cuda_block()
+
+    if block_size == 1:
         for body in range(body_count):
             color = body_colors[body]
             if color >= 0:
                 slot = color_starts[color]
                 body_ids_by_color[slot] = body
                 color_starts[color] = slot + 1
-
         previous = wp.int32(0)
-        for color in range(num_colors + 1):
+        for color in range(num_colors_out[0] + 1):
             cursor = color_starts[color]
             color_starts[color] = previous
             previous = cursor
-        for color in range(num_colors + 1, color_budget + 1):
+        for color in range(num_colors_out[0] + 1, color_budget + 1):
             color_starts[color] = previous
-        num_colors_out[0] = num_colors
+    else:
+        for color in range(lane, color_budget, block_size):
+            slot = color_starts[color]
+            for body in range(body_count):
+                if body_colors[body] == color:
+                    body_ids_by_color[slot] = body
+                    slot += 1
+
+    if lane == 0:
+        num_colors = num_colors_out[0]
         flag_gt4[0] = wp.int32(num_colors > 4)
         flag_gt8[0] = wp.int32(num_colors > 8)
         flag_gt16[0] = wp.int32(num_colors > 16)
@@ -6036,6 +6173,23 @@ def accumulate_body_particle_contacts_per_body(
 
 
 @wp.kernel
+def clear_rigid_body_contact_scratch(
+    body_forces: wp.array[wp.vec3],
+    body_torques: wp.array[wp.vec3],
+    body_hessian_ll: wp.array[wp.mat33],
+    body_hessian_al: wp.array[wp.mat33],
+    body_hessian_aa: wp.array[wp.mat33],
+):
+    """Clear the per-body contact accumulators together before a primal sweep."""
+    body = wp.tid()
+    body_forces[body] = wp.vec3(0.0)
+    body_torques[body] = wp.vec3(0.0)
+    body_hessian_ll[body] = wp.mat33(0.0)
+    body_hessian_al[body] = wp.mat33(0.0)
+    body_hessian_aa[body] = wp.mat33(0.0)
+
+
+@wp.kernel
 def solve_rigid_body(
     dt: float,
     body_ids_in_color: wp.array[wp.int32],
@@ -7113,6 +7267,9 @@ def update_body_velocity(
     dt: float,
     body_q: wp.array[wp.transform],
     body_com: wp.array[wp.vec3],
+    body_inertia_q: wp.array[wp.transform],
+    body_inertia_v: wp.array[wp.vec3],
+    body_inv_mass: wp.array[float],
     body_q_prev: wp.array[wp.transform],
     body_qd: wp.array[wp.spatial_vector],
     body_qd_mirror: wp.array[wp.spatial_vector],
@@ -7121,17 +7278,21 @@ def update_body_velocity(
     """
     Update body velocities from position changes (world frame).
 
-    Computes linear and angular velocities using finite differences.
+    Preserve predicted linear velocity and add the solved COM correction.
+    Kinematic and angular velocities use pose finite differences.
     Also transfers the final body poses to body_q_out (fused copy from
     the in-place Gauss-Seidel iteration buffer to state_out).
 
-    Linear: v = (com_current - com_prev) / dt
+    Dynamic linear: v = v_predicted + (com_current - com_predicted) / dt
     Angular: omega from quaternion difference dq = q * q_prev^-1
 
     Args:
         dt: Time step.
         body_q: Current body transforms (world), from state_in (in-place iteration buffer).
         body_com: Center of mass offsets (local frame).
+        body_inertia_q: Forward-integrated target transforms.
+        body_inertia_v: Immutable predicted velocities plus non-reset authored motion [m/s].
+        body_inv_mass: Effective inverse masses; zero for kinematic bodies.
         body_q_prev: Previous body transforms (input/output), advanced to the
             current pose for the next step. ``SolverVBD.reset()`` is the supported
             way to establish a new baseline after a discontinuous pose change.
@@ -7157,8 +7318,15 @@ def update_body_velocity(
     x_com = x + wp.quat_rotate(q, com_local)
     x_com_prev = x_prev + wp.quat_rotate(q_prev, com_local)
 
-    # Linear velocity
+    # Small inertial displacements can round away in world-space float32 poses.
+    # Keep the integrated velocity instead of reconstructing it from those poses.
     v = (x_com - x_com_prev) / dt
+    if body_inv_mass[tid] > 0.0:
+        predicted = body_inertia_q[tid]
+        x_predicted = wp.transform_get_translation(predicted)
+        q_predicted = wp.transform_get_rotation(predicted)
+        delta_com = (x - x_predicted) + (wp.quat_rotate(q, com_local) - wp.quat_rotate(q_predicted, com_local))
+        v = body_inertia_v[tid] + delta_com / dt
 
     # Angular velocity
     omega = quat_velocity(q, q_prev, dt)

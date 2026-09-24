@@ -5,8 +5,13 @@
 
 import warp as wp
 
+from newton._src.math import orthonormal_basis
 from newton._src.sim.contacts import contact_surface_point, contact_surface_separation
-from newton._src.solvers.vbd.rigid_vbd_kernels import orthonormal_basis
+from newton._src.solvers.vbd.rigid_vbd_kernels import (
+    _body_id_for_color_slot,
+    _sync_cuda_block,
+    select_rigid_block_dim,
+)
 
 wp.set_module_options({"enable_backward": False})
 
@@ -20,29 +25,14 @@ _EPS = wp.constant(1.0e-12)
 _TANGENT_EPS = wp.constant(1.0e-6)
 
 
-def select_rigid_pair_block_dim(launch_dim: int, device, target_blocks: int | None = None) -> int:
-    """Choose a power-of-two CUDA block width for pair-contact kernels."""
-    if not device.is_cuda:
-        return 256
-    if target_blocks is None:
-        target_blocks = max(1, (device.sm_count + 1) // 2)
-    block_dim = 4
-    while block_dim < 256:
-        candidate = 2 * block_dim
-        if (launch_dim + candidate - 1) // candidate < target_blocks:
-            break
-        block_dim = candidate
-    return block_dim
+@wp.struct
+class ContactConstants:
+    """Sweep-invariant terms prepared alongside each contact's inertial response."""
 
-
-@wp.func_native(
-    """
-    #if defined(__CUDA_ARCH__)
-    __syncthreads();
-    #endif
-    """
-)
-def _pair_sync_block(): ...
+    anchor0_prev: wp.vec3
+    anchor1_prev: wp.vec3
+    compliance: float
+    damping_fraction: float
 
 
 @wp.kernel
@@ -73,7 +63,8 @@ def build_and_color_pair_groups_serial(
     if wp.tid() != 0:
         return
 
-    for group in range(group_color.shape[0]):
+    # Serial builds pack groups densely; unused capacity already holds -2.
+    for group in range(group_count_out[0]):
         group_color[group] = -2
     for body in range(body_count):
         body_color_mask[body] = 0
@@ -83,7 +74,7 @@ def build_and_color_pair_groups_serial(
         color_cursors[color] = 0
     color_offsets[color_count] = 0
 
-    active_contacts = contact_count[0]
+    active_contacts = wp.min(contact_count[0], contact_shape0.shape[0])
     group_count = wp.int32(0)
     contact = wp.int32(0)
     while contact < active_contacts:
@@ -191,7 +182,8 @@ def mark_pair_groups_parallel(
     """Mark contiguous body-pair leaders independently on large worlds."""
     contact = wp.tid()
     group_color[contact] = -2
-    if contact >= contact_count[0]:
+    active_contacts = wp.min(contact_count[0], contact_shape0.shape[0])
+    if contact >= active_contacts:
         return
 
     shape0 = contact_shape0[contact]
@@ -214,7 +206,7 @@ def mark_pair_groups_parallel(
         return
 
     end = contact + 1
-    while end < contact_count[0]:
+    while end < active_contacts:
         next_shape0 = contact_shape0[end]
         next_shape1 = contact_shape1[end]
         next_body0 = shape_body[next_shape0] if next_shape0 >= 0 else -1
@@ -352,7 +344,7 @@ def color_pair_tail_serial(
         colored_count += color_counts[color]
     if colored_count < group_count[0]:
         remaining = group_count[0] - colored_count
-        group = contact_count[0] - 1
+        group = wp.min(contact_count[0], group_color.shape[0]) - 1
         while group >= 0 and remaining > 0:
             if group_color[group] == -1:
                 body0 = group_body0[group]
@@ -418,26 +410,6 @@ def scatter_pair_groups_by_color(
 
 
 @wp.kernel
-def sort_constraint_contact_lists(
-    body_contact_buffer_size: int,
-    body_contact_counts: wp.array[wp.int32],
-    body_contact_indices: wp.array[wp.int32],
-):
-    """Sort each bounded per-body list so multiplier sums are reproducible."""
-    body = wp.tid()
-    count = wp.min(body_contact_counts[body], body_contact_buffer_size)
-    for i in range(1, count):
-        value = body_contact_indices[body * body_contact_buffer_size + i]
-        j = i - 1
-        while j >= 0 and body_contact_indices[body * body_contact_buffer_size + j] > value:
-            body_contact_indices[body * body_contact_buffer_size + j + 1] = body_contact_indices[
-                body * body_contact_buffer_size + j
-            ]
-            j -= 1
-        body_contact_indices[body * body_contact_buffer_size + j + 1] = value
-
-
-@wp.kernel
 def accumulate_constraint_contact_forces_per_body(
     color_group: wp.array[wp.int32],
     dynamic_body_ids: wp.array[wp.int32],
@@ -465,14 +437,7 @@ def accumulate_constraint_contact_forces_per_body(
 ):
     """Accumulate the current contact reaction in each VBD primal block."""
     slot = wp.tid()
-    body = wp.int32(-1)
-    if active_dynamic_color >= 0:
-        start = dynamic_color_starts[active_dynamic_color]
-        count_in_color = dynamic_color_starts[active_dynamic_color + 1] - start
-        if slot < count_in_color:
-            body = dynamic_body_ids[start + slot]
-    elif slot < color_group.shape[0]:
-        body = color_group[slot]
+    body = _body_id_for_color_slot(slot, color_group, dynamic_body_ids, dynamic_color_starts, active_dynamic_color)
     if body < 0 or body_inv_mass[body] <= 0.0:
         return
 
@@ -512,8 +477,10 @@ def accumulate_constraint_contact_forces_per_body(
         normal_force = normal * wp.dot(normal, force)
         torque_sum += wp.cross(point - center, force) - wp.cross(offset, normal_force)
 
-    body_forces[body] += force_sum
-    body_torques[body] += torque_sum
+    # One thread owns each body. Use explicit assignment so Warp does not
+    # lower the ordered writes to unnecessary floating-point atomics.
+    body_forces[body] = body_forces[body] + force_sum
+    body_torques[body] = body_torques[body] + torque_sum
 
 
 @wp.func
@@ -618,6 +585,11 @@ def _constraint_direction_response(
 @wp.kernel
 def prepare_constraint_contact_blocks(
     dt: float,
+    legacy_hard_contacts: int,
+    contact_compliant_alm: int,
+    body_q_prev: wp.array[wp.transform],
+    contact_material_ke: wp.array[float],
+    contact_material_kd: wp.array[float],
     contact_count: wp.array[wp.int32],
     contact_shape0: wp.array[wp.int32],
     contact_shape1: wp.array[wp.int32],
@@ -641,6 +613,7 @@ def prepare_constraint_contact_blocks(
     response1_tangent1: wp.array[wp.spatial_vector],
     normal_support: wp.array[float],
     tangent_support: wp.array[wp.mat22],
+    contact_constants: wp.array[ContactConstants],
 ):
     """Prepare a fixed inertial Delassus linearization for each contact."""
     contact = wp.tid()
@@ -718,14 +691,44 @@ def prepare_constraint_contact_blocks(
     response1_tangent1[contact] = wp.spatial_vector(x1_t1, w1_t1)
     normal_support[contact] = wp.dot(n, relative_n)
     tangent_support[contact] = wp.mat22(W00, W01, W01, W11)
+    # Keep the two previous anchors separate to preserve the slip subtraction order.
+    constants = ContactConstants()
+    anchor0_local = contact_point0[contact] + contact_offset0[contact]
+    anchor1_local = contact_point1[contact] + contact_offset1[contact]
+    prev_pose0 = body_q_prev[body0] if body0 >= 0 else wp.transform_identity()
+    prev_pose1 = body_q_prev[body1] if body1 >= 0 else wp.transform_identity()
+    anchor0_prev = (
+        contact_surface_point(prev_pose0, contact_point0[contact], contact_offset0[contact])
+        if body0 >= 0
+        else anchor0_local
+    )
+    anchor1_prev = (
+        contact_surface_point(prev_pose1, contact_point1[contact], contact_offset1[contact])
+        if body1 >= 0
+        else anchor1_local
+    )
+    compliance = float(0.0)
+    damping_fraction = float(0.0)
+    use_finite_material = contact_compliant_alm == 1 or legacy_hard_contacts == 0
+    effective_stiffness = float(0.0)
+    if use_finite_material:
+        stiffness = contact_material_ke[contact]
+        damping_rate = contact_material_kd[contact] / dt
+        effective_stiffness = stiffness + damping_rate
+        if effective_stiffness > 0.0:
+            compliance = 1.0 / effective_stiffness
+            damping_fraction = damping_rate / effective_stiffness
+
+    constants.anchor0_prev = anchor0_prev
+    constants.anchor1_prev = anchor1_prev
+    constants.compliance = compliance if not use_finite_material or effective_stiffness > 0.0 else -1.0
+    constants.damping_fraction = damping_fraction
+    contact_constants[contact] = constants
 
 
 @wp.func
 def _solve_constraint_contact_group(
     group: int,
-    dt: float,
-    legacy_hard_contacts: int,
-    contact_compliant_alm: int,
     group_start: wp.array[wp.int32],
     group_end: wp.array[wp.int32],
     group_body0: wp.array[wp.int32],
@@ -737,8 +740,6 @@ def _solve_constraint_contact_group(
     contact_normal: wp.array[wp.vec3],
     contact_margin0: wp.array[float],
     contact_margin1: wp.array[float],
-    contact_material_ke: wp.array[float],
-    contact_material_kd: wp.array[float],
     contact_material_mu: wp.array[float],
     contact_C0: wp.array[wp.vec3],
     contact_tangent0: wp.array[wp.vec3],
@@ -751,7 +752,7 @@ def _solve_constraint_contact_group(
     response1_tangent1: wp.array[wp.spatial_vector],
     contact_normal_support: wp.array[float],
     contact_tangent_support: wp.array[wp.mat22],
-    body_q_prev: wp.array[wp.transform],
+    contact_constants: wp.array[ContactConstants],
     body_com: wp.array[wp.vec3],
     body_inv_mass: wp.array[float],
     body_q: wp.array[wp.transform],
@@ -786,17 +787,9 @@ def _solve_constraint_contact_group(
         C0 = contact_C0[contact]
         C0_n = wp.dot(C0, n)
 
-        compliance = float(0.0)
-        damping_fraction = float(0.0)
-        use_finite_material = contact_compliant_alm == 1 or legacy_hard_contacts == 0
-        effective_stiffness = float(0.0)
-        if use_finite_material:
-            stiffness = contact_material_ke[contact]
-            damping_rate = contact_material_kd[contact] / dt
-            effective_stiffness = stiffness + damping_rate
-            if effective_stiffness > 0.0:
-                compliance = 1.0 / effective_stiffness
-                damping_fraction = damping_rate / effective_stiffness
+        constants = contact_constants[contact]
+        compliance = constants.compliance
+        damping_fraction = constants.damping_fraction
 
         normal_residual = penetration - damping_fraction * C0_n - compliance * old_normal
         response0_n = response0_normal[contact]
@@ -808,7 +801,7 @@ def _solve_constraint_contact_group(
         normal_support = contact_normal_support[contact]
         new_normal = float(0.0)
         denominator = normal_support + compliance
-        if denominator > _EPS and (not use_finite_material or effective_stiffness > 0.0):
+        if denominator > _EPS and compliance >= 0.0:
             new_normal = wp.max(old_normal + normal_residual / denominator, 0.0)
         delta_normal = new_normal - old_normal
 
@@ -826,18 +819,8 @@ def _solve_constraint_contact_group(
             if body1 >= 0
             else anchor1_local
         )
-        prev_pose0 = body_q_prev[body0] if body0 >= 0 else wp.transform_identity()
-        prev_pose1 = body_q_prev[body1] if body1 >= 0 else wp.transform_identity()
-        anchor0_prev = (
-            contact_surface_point(prev_pose0, contact_point0[contact], contact_offset0[contact])
-            if body0 >= 0
-            else anchor0_local
-        )
-        anchor1_prev = (
-            contact_surface_point(prev_pose1, contact_point1[contact], contact_offset1[contact])
-            if body1 >= 0
-            else anchor1_local
-        )
+        anchor0_prev = constants.anchor0_prev
+        anchor1_prev = constants.anchor1_prev
         relative_motion = (anchor1 - anchor1_prev) - (anchor0 - anchor0_prev)
 
         slip = relative_motion - n * wp.dot(n, relative_motion)
@@ -933,9 +916,6 @@ def _solve_constraint_contact_group(
 def solve_constraint_contact_color(
     launch_dim: int,
     active_color: int,
-    dt: float,
-    legacy_hard_contacts: int,
-    contact_compliant_alm: int,
     color_counts: wp.array[wp.int32],
     color_offsets: wp.array[wp.int32],
     group_list: wp.array[wp.int32],
@@ -950,8 +930,6 @@ def solve_constraint_contact_color(
     contact_normal: wp.array[wp.vec3],
     contact_margin0: wp.array[float],
     contact_margin1: wp.array[float],
-    contact_material_ke: wp.array[float],
-    contact_material_kd: wp.array[float],
     contact_material_mu: wp.array[float],
     contact_C0: wp.array[wp.vec3],
     contact_tangent0: wp.array[wp.vec3],
@@ -964,7 +942,7 @@ def solve_constraint_contact_color(
     response1_tangent1: wp.array[wp.spatial_vector],
     contact_normal_support: wp.array[float],
     contact_tangent_support: wp.array[wp.mat22],
-    body_q_prev: wp.array[wp.transform],
+    contact_constants: wp.array[ContactConstants],
     body_com: wp.array[wp.vec3],
     body_inv_mass: wp.array[float],
     body_q: wp.array[wp.transform],
@@ -977,9 +955,6 @@ def solve_constraint_contact_color(
         group = group_list[offset + slot]
         _solve_constraint_contact_group(
             group,
-            dt,
-            legacy_hard_contacts,
-            contact_compliant_alm,
             group_start,
             group_end,
             group_body0,
@@ -991,8 +966,6 @@ def solve_constraint_contact_color(
             contact_normal,
             contact_margin0,
             contact_margin1,
-            contact_material_ke,
-            contact_material_kd,
             contact_material_mu,
             contact_C0,
             contact_tangent0,
@@ -1005,7 +978,7 @@ def solve_constraint_contact_color(
             response1_tangent1,
             contact_normal_support,
             contact_tangent_support,
-            body_q_prev,
+            contact_constants,
             body_com,
             body_inv_mass,
             body_q,
@@ -1018,9 +991,6 @@ def solve_constraint_contact_color(
 def solve_constraint_contact_colors_fused(
     first_color: int,
     color_count: int,
-    dt: float,
-    legacy_hard_contacts: int,
-    contact_compliant_alm: int,
     color_counts: wp.array[wp.int32],
     color_offsets: wp.array[wp.int32],
     overflow_count: wp.array[wp.int32],
@@ -1036,8 +1006,6 @@ def solve_constraint_contact_colors_fused(
     contact_normal: wp.array[wp.vec3],
     contact_margin0: wp.array[float],
     contact_margin1: wp.array[float],
-    contact_material_ke: wp.array[float],
-    contact_material_kd: wp.array[float],
     contact_material_mu: wp.array[float],
     contact_C0: wp.array[wp.vec3],
     contact_tangent0: wp.array[wp.vec3],
@@ -1050,7 +1018,7 @@ def solve_constraint_contact_colors_fused(
     response1_tangent1: wp.array[wp.spatial_vector],
     contact_normal_support: wp.array[float],
     contact_tangent_support: wp.array[wp.mat22],
-    body_q_prev: wp.array[wp.transform],
+    contact_constants: wp.array[ContactConstants],
     body_com: wp.array[wp.vec3],
     body_inv_mass: wp.array[float],
     body_q: wp.array[wp.transform],
@@ -1081,9 +1049,6 @@ def solve_constraint_contact_colors_fused(
             group = group_list[offset + slot]
             _solve_constraint_contact_group(
                 group,
-                dt,
-                legacy_hard_contacts,
-                contact_compliant_alm,
                 group_start,
                 group_end,
                 group_body0,
@@ -1095,8 +1060,6 @@ def solve_constraint_contact_colors_fused(
                 contact_normal,
                 contact_margin0,
                 contact_margin1,
-                contact_material_ke,
-                contact_material_kd,
                 contact_material_mu,
                 contact_C0,
                 contact_tangent0,
@@ -1109,27 +1072,21 @@ def solve_constraint_contact_colors_fused(
                 response1_tangent1,
                 contact_normal_support,
                 contact_tangent_support,
-                body_q_prev,
+                contact_constants,
                 body_com,
                 body_inv_mass,
                 body_q,
                 contact_lambda,
             )
             slot += stride
-        _pair_sync_block()
+        _sync_cuda_block()
         color += 1
 
 
 @wp.kernel
-def solve_constraint_contact_overflow(
+def solve_constraint_contacts_serial(
     group_capacity: int,
-    solve_all: int,
-    dt: float,
-    legacy_hard_contacts: int,
-    contact_compliant_alm: int,
-    overflow_count: wp.array[wp.int32],
     group_color: wp.array[wp.int32],
-    group_list: wp.array[wp.int32],
     group_start: wp.array[wp.int32],
     group_end: wp.array[wp.int32],
     group_body0: wp.array[wp.int32],
@@ -1141,8 +1098,6 @@ def solve_constraint_contact_overflow(
     contact_normal: wp.array[wp.vec3],
     contact_margin0: wp.array[float],
     contact_margin1: wp.array[float],
-    contact_material_ke: wp.array[float],
-    contact_material_kd: wp.array[float],
     contact_material_mu: wp.array[float],
     contact_C0: wp.array[wp.vec3],
     contact_tangent0: wp.array[wp.vec3],
@@ -1155,26 +1110,19 @@ def solve_constraint_contact_overflow(
     response1_tangent1: wp.array[wp.spatial_vector],
     contact_normal_support: wp.array[float],
     contact_tangent_support: wp.array[wp.mat22],
-    body_q_prev: wp.array[wp.transform],
+    contact_constants: wp.array[ContactConstants],
     body_com: wp.array[wp.vec3],
     body_inv_mass: wp.array[float],
     body_q: wp.array[wp.transform],
     contact_lambda: wp.array[wp.vec3],
 ):
-    if wp.tid() != 0 or (solve_all == 0 and overflow_count[0] == 0):
+    """Solve all active groups in contact order on the CPU."""
+    if wp.tid() != 0:
         return
-    count = group_capacity if solve_all == 1 else overflow_count[0]
-    for slot in range(count):
-        group = slot
-        if solve_all == 0:
-            group = group_list[group_list.shape[0] - count + slot]
-        color = group_color[group]
-        if color == -1 or (solve_all == 1 and color >= 0):
+    for group in range(group_capacity):
+        if group_color[group] >= -1:
             _solve_constraint_contact_group(
                 group,
-                dt,
-                legacy_hard_contacts,
-                contact_compliant_alm,
                 group_start,
                 group_end,
                 group_body0,
@@ -1186,8 +1134,6 @@ def solve_constraint_contact_overflow(
                 contact_normal,
                 contact_margin0,
                 contact_margin1,
-                contact_material_ke,
-                contact_material_kd,
                 contact_material_mu,
                 contact_C0,
                 contact_tangent0,
@@ -1200,7 +1146,7 @@ def solve_constraint_contact_overflow(
                 response1_tangent1,
                 contact_normal_support,
                 contact_tangent_support,
-                body_q_prev,
+                contact_constants,
                 body_com,
                 body_inv_mass,
                 body_q,
@@ -1236,7 +1182,6 @@ class RigidPairContact:
         self.group_count = wp.zeros(1, dtype=wp.int32, device=self.device)
         self.overflow_count = wp.zeros(1, dtype=wp.int32, device=self.device)
         self.parallel_tail = wp.zeros(1, dtype=wp.int32, device=self.device)
-        self.resize(0)
 
     def resize(self, capacity: int) -> None:
         if capacity <= self.capacity:
@@ -1259,6 +1204,7 @@ class RigidPairContact:
         self.response1_tangent1 = wp.zeros(capacity, dtype=wp.spatial_vector, device=self.device)
         self.normal_support = wp.zeros(capacity, dtype=float, device=self.device)
         self.tangent_support = wp.zeros(capacity, dtype=wp.mat22, device=self.device)
+        self.constants = wp.zeros(capacity, dtype=ContactConstants, device=self.device)
 
     def build(self, contacts) -> None:
         """Build body-pair manifolds and a deterministic conflict-free schedule."""
@@ -1440,6 +1386,11 @@ class RigidPairContact:
             dim=capacity,
             inputs=[
                 dt,
+                legacy_hard_contacts,
+                int(contact_compliant_alm),
+                body_q_prev,
+                contact_material_ke,
+                contact_material_kd,
                 contacts.rigid_contact_count,
                 contacts.rigid_contact_shape0,
                 contacts.rigid_contact_shape1,
@@ -1465,9 +1416,10 @@ class RigidPairContact:
                 self.response1_tangent1,
                 self.normal_support,
                 self.tangent_support,
+                self.constants,
             ],
             device=self.device,
-            block_dim=select_rigid_pair_block_dim(capacity, self.device),
+            block_dim=select_rigid_block_dim(capacity, self.device),
         )
 
         contact_inputs = [
@@ -1482,8 +1434,6 @@ class RigidPairContact:
             contacts.rigid_contact_normal,
             contacts.rigid_contact_margin0,
             contacts.rigid_contact_margin1,
-            contact_material_ke,
-            contact_material_kd,
             contact_material_mu,
             contact_C0,
             self.tangent0,
@@ -1496,28 +1446,18 @@ class RigidPairContact:
             self.response1_tangent1,
             self.normal_support,
             self.tangent_support,
-            body_q_prev,
+            self.constants,
             model.body_com,
             self.body_inv_mass,
         ]
         # One exact color contains at most one group per pair-routed body.
         launch_dim = max(1, min(capacity, max(self.pair_body_count, 128)))
-        block_dim = select_rigid_pair_block_dim(launch_dim, self.device)
+        block_dim = select_rigid_block_dim(launch_dim, self.device)
         if not self.device.is_cuda:
             wp.launch(
-                kernel=solve_constraint_contact_overflow,
+                kernel=solve_constraint_contacts_serial,
                 dim=1,
-                inputs=[
-                    capacity,
-                    1,
-                    dt,
-                    legacy_hard_contacts,
-                    int(contact_compliant_alm),
-                    self.overflow_count,
-                    self.group_color,
-                    self.group_list,
-                    *contact_inputs,
-                ],
+                inputs=[capacity, self.group_color, *contact_inputs],
                 outputs=[body_q, contact_lambda],
                 device=self.device,
                 block_dim=1,
@@ -1546,9 +1486,6 @@ class RigidPairContact:
                     inputs=[
                         launch_dim,
                         color,
-                        dt,
-                        legacy_hard_contacts,
-                        int(contact_compliant_alm),
                         self.color_counts,
                         self.color_offsets,
                         self.group_list,
@@ -1559,46 +1496,25 @@ class RigidPairContact:
                     block_dim=block_dim,
                 )
 
-        def solve_tail(direct_color_count: int) -> None:
-            if direct_color_count < _COLOR_COUNT:
-                wp.launch(
-                    kernel=solve_constraint_contact_colors_fused,
-                    dim=_FUSED_THREADS,
-                    inputs=[
-                        direct_color_count,
-                        _COLOR_COUNT,
-                        dt,
-                        legacy_hard_contacts,
-                        int(contact_compliant_alm),
-                        self.color_counts,
-                        self.color_offsets,
-                        self.overflow_count,
-                        self.group_list,
-                        *contact_inputs,
-                    ],
-                    outputs=[body_q, contact_lambda],
-                    device=self.device,
-                    block_dim=_FUSED_THREADS,
-                    max_blocks=1,
-                )
-                return
+        def solve_tail(first_color: int) -> None:
+            # Direct passes cover at most 16 of 30 colors. The fused kernel
+            # always handles the remaining colors and the serial overflow.
             wp.launch(
-                kernel=solve_constraint_contact_overflow,
-                dim=1,
+                kernel=solve_constraint_contact_colors_fused,
+                dim=_FUSED_THREADS,
                 inputs=[
-                    capacity,
-                    0,
-                    dt,
-                    legacy_hard_contacts,
-                    int(contact_compliant_alm),
+                    first_color,
+                    _COLOR_COUNT,
+                    self.color_counts,
+                    self.color_offsets,
                     self.overflow_count,
-                    self.group_color,
                     self.group_list,
                     *contact_inputs,
                 ],
                 outputs=[body_q, contact_lambda],
                 device=self.device,
-                block_dim=1,
+                block_dim=_FUSED_THREADS,
+                max_blocks=1,
             )
 
         if direct_color_count and parallel_tail is not None:
