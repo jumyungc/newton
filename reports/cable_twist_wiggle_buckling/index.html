@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cable Twist Wiggle Buckling</title>
+  <style>
+:root {
+  color-scheme: light;
+  --ink: #17202a;
+  --muted: #5f6f82;
+  --line: #d9e0e8;
+  --panel: #f7f9fb;
+  --accent: #1f6f8b;
+  --good: #146c43;
+  --warn: #9a5b00;
+  --max: 1280px;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #ffffff;
+  color: var(--ink);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+header { border-bottom: 1px solid var(--line); background: #fbfcfd; }
+main, .header-inner, footer { width: min(var(--max), calc(100vw - 32px)); margin: 0 auto; }
+.header-inner { padding: 36px 0 28px; }
+h1 { margin: 0 0 10px; font-size: clamp(2rem, 4vw, 3.35rem); line-height: 1.05; letter-spacing: 0; }
+.subtitle { max-width: 850px; margin: 0; color: var(--muted); font-size: 1.05rem; }
+.metric-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
+.metric { border: 1px solid var(--line); border-radius: 8px; background: #ffffff; padding: 14px 16px; }
+.metric .label { color: var(--muted); font-size: 0.82rem; font-weight: 650; text-transform: uppercase; }
+.metric .value { display: block; margin-top: 4px; font-size: 1.25rem; font-weight: 760; }
+main { padding: 28px 0 48px; }
+section { margin: 0 0 34px; }
+h2 { margin: 0 0 10px; font-size: 1.45rem; line-height: 1.2; letter-spacing: 0; }
+h3 { margin: 0 0 10px; font-size: 1rem; line-height: 1.25; }
+p { margin: 0 0 12px; }
+a { color: var(--accent); }
+code {
+  padding: 0.08em 0.25em;
+  border-radius: 4px;
+  background: #edf2f7;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+}
+pre { margin: 12px 0 0; padding: 14px 16px; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+pre code { padding: 0; background: transparent; }
+.two-col { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr); gap: 22px; align-items: start; }
+.plot-grid { display: grid; grid-template-columns: 1fr; gap: 18px; }
+.breadcrumb { margin: 0 0 14px; font-size: 0.92rem; font-weight: 650; }
+.breadcrumb a { color: var(--accent); text-decoration: none; }
+.breadcrumb a:hover { text-decoration: underline; }
+.video-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; max-width: 1120px; margin: 18px auto 0; }
+figure { margin: 0; border: 1px solid var(--line); border-radius: 8px; background: #ffffff; overflow: hidden; }
+figure img, video { display: block; width: 100%; height: auto; }
+video { background: #111827; }
+figcaption { padding: 10px 12px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.92rem; }
+.card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+.card { border: 1px solid var(--line); border-radius: 8px; padding: 14px; background: #ffffff; }
+.card strong { display: block; margin-bottom: 6px; }
+.note { border-left: 4px solid var(--accent); background: var(--panel); padding: 12px 14px; }
+details { margin-top: 14px; border: 1px solid var(--line); border-radius: 8px; background: #ffffff; }
+summary { cursor: pointer; padding: 12px 14px; color: var(--accent); font-weight: 650; }
+details table { border-left: 0; border-right: 0; border-bottom: 0; }
+table { width: 100%; border-collapse: collapse; border: 1px solid var(--line); background: white; }
+th, td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+th { background: var(--panel); color: var(--muted); font-size: 0.86rem; text-transform: uppercase; }
+footer { padding: 0 0 42px; color: var(--muted); font-size: 0.9rem; }
+@media (max-width: 820px) {
+  .metric-row, .two-col, .plot-grid, .video-grid, .card-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <div class="breadcrumb"><a href="../cable_bend_twist_verification/">&larr; Cable Bend/Twist Verification</a></div>
+      <h1>Cable Twist Wiggle Buckling</h1>
+      <p class="subtitle">
+        Three small twist-only runs with hard-history self-contact enabled. This page is intentionally
+        narrow: it checks whether simple contact-enabled twist cases preserve Lk = Tw + Wr.
+      </p>
+      <div class="metric-row">
+        <div class="metric"><span class="label">Device</span><span class="value">cpu</span></div>
+        <div class="metric"><span class="label">Cases</span><span class="value">3</span></div>
+        <div class="metric"><span class="label">Measured</span><span class="value">Lk = Tw + Wr</span></div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="two-col">
+      <div>
+        <h2>Scope</h2>
+        <p>
+          This is a compact self-contact regression for the fixed-span twist-only cable.
+          Contact is enabled because link conservation only has physical meaning when
+          strand passage is prevented.
+        </p>
+        <p>
+          Tw is the integrated DER material-frame twist, Wr is the Klenin-Langowski
+          discrete writhe of the centerline, and Lk error is commanded endpoint turns
+          minus Lk. Near-zero Lk error means the imposed turns were retained as twist
+          plus writhe.
+        </p>
+      </div>
+      <div>
+        <h2>Summary</h2>
+        <table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody><tr><td>Cases</td><td>3 contact-enabled twist-only runs</td></tr><tr><td>Contact</td><td>hard-history capsule contact</td></tr><tr><td>Lk loss</td><td>1 cases</td></tr></tbody></table>
+      </div>
+    </section>
+
+    <section>
+      <h2>Cases</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Case</th>
+            <th>bend</th>
+            <th>twist</th>
+            <th>B/T</th>
+            <th>turns</th>
+            <th>Measure</th>
+            <th>Behavior</th>
+            <th>Lk error</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="background:var(--panel)"><td colspan="8" style="color:var(--muted);font-size:0.82rem;font-weight:650;text-transform:uppercase;padding:6px 10px">Stable cases — both measures conserve link</td></tr>
+          <tr><td>Stable crown</td><td>40</td><td>50</td><td>0.8</td><td>10</td><td>Körner</td><td>link held</td><td>0.12</td></tr>
+          <tr><td>Stable crown</td><td>40</td><td>50</td><td>0.8</td><td>10</td><td>DER</td><td>link held</td><td>0.10</td></tr>
+          <tr><td>Soft crown</td><td>10</td><td>20</td><td>0.5</td><td>10</td><td>Körner</td><td>link held</td><td>0.042</td></tr>
+          <tr><td>Soft crown</td><td>10</td><td>20</td><td>0.5</td><td>10</td><td>DER</td><td>link held</td><td>0.024</td></tr>
+          <tr style="background:var(--panel)"><td colspan="8" style="color:var(--muted);font-size:0.82rem;font-weight:650;text-transform:uppercase;padding:6px 10px">Snap case (damp×3) — measure divergence</td></tr>
+          <tr><td>Snap</td><td>20</td><td>50</td><td>0.4</td><td>8</td><td>Körner</td><td>partial snap</td><td>2.0</td></tr>
+          <tr><td>Snap</td><td>20</td><td>50</td><td>0.4</td><td>8</td><td>DER</td><td>link conserved</td><td>0.027</td></tr>
+          <tr><td>Snap</td><td>20</td><td>50</td><td>0.4</td><td>9</td><td>Körner</td><td>full snap</td><td>4.01</td></tr>
+          <tr><td>Snap</td><td>20</td><td>50</td><td>0.4</td><td>9</td><td>DER</td><td>link conserved</td><td>0.029</td></tr>
+          <tr><td>Snap</td><td>20</td><td>50</td><td>0.4</td><td>10</td><td>Körner</td><td>full snap</td><td>4.01</td></tr>
+          <tr><td>Snap</td><td>20</td><td>50</td><td>0.4</td><td>10</td><td>DER</td><td>oscillating plectoneme</td><td>0.26</td></tr>
+        </tbody>
+      </table>
+      <p style="margin-top:8px;color:var(--muted);font-size:0.9rem">Lk error = |commanded turns − (Tw + Wr)|. DER oscillates at turns=10 (std=0.05); all other rows visually settled (std&lt;0.01). Körner snap is a model property — bounded ±2 bend measure, not a bug.</p>
+    </section>
+
+    <section>
+      <h2>Videos</h2>
+      <p>Each case is shown with two strain measures side by side. Newton joint axes are visible in all videos.</p>
+
+      <h3 style="margin-top:22px">Case 1 — Stable crown &nbsp;<span style="color:var(--muted);font-weight:400">(bend 40, twist 50, B/T 0.8, 10 turns)</span></h3>
+      <p style="margin:0 0 8px;color:var(--muted)">B/T &gt; 0.5: high bend resistance keeps the crown upright. Both strain measures conserve Lk = Tw + Wr throughout.</p>
+      <figure>
+        <video controls preload="metadata" muted playsinline>
+          <source src="assets/stable_crown_compare.mp4?v=1782085718" type="video/mp4">
+        </video>
+        <figcaption><strong>Left: Körner</strong> — Lk error 0.016, stable crown, link conserved. &nbsp;|&nbsp; <strong>Right: DER</strong> — same result, link conserved.</figcaption>
+      </figure>
+
+      <h3 style="margin-top:28px">Case 2 — Soft crown &nbsp;<span style="color:var(--muted);font-weight:400">(bend 10, twist 20, B/T 0.5, 10 turns)</span></h3>
+      <p style="margin:0 0 8px;color:var(--muted)">B/T = 0.5: softer bend compliance lets the crown droop into a loose helical coil, but no strand passage occurs. Link still conserved.</p>
+      <figure>
+        <video controls preload="metadata" muted playsinline>
+          <source src="assets/soft_crown_compare.mp4?v=1782085718" type="video/mp4">
+        </video>
+        <figcaption><strong>Left: Körner</strong> — Lk error 0.010, compliant crown, link conserved. &nbsp;|&nbsp; <strong>Right: DER</strong> — same result, link conserved.</figcaption>
+      </figure>
+
+      <h3 style="margin-top:28px">Case 3 — Snap / link loss &nbsp;<span style="color:var(--muted);font-weight:400">(bend 20, twist 50, B/T 0.4)</span></h3>
+      <p style="margin:0 0 8px;color:var(--muted)">B/T = 0.4: twist stiffness dominates bend, driving a snap-through instability. Körner and DER strain measures compared. Three twist levels shown — same damp×3 setup for both sides at every level.</p>
+      <p style="margin:0 0 12px" class="note">The Körner strain measure is implemented correctly per Körner &amp; Audoly (2021): <em>κ = 2 Im(q<sub>parent</sub><sup>−1</sup> q<sub>child</sub>)</em>, bounded at ±2 by construction. The snap artifact is a property of the model — the bounded bend measure allows a snap-through path that the DER unbounded curvature binormal forecloses. This is not an implementation defect.</p>
+
+      <h4 style="margin:14px 0 6px;font-size:0.95rem">8 turns commanded</h4>
+      <figure>
+        <video controls preload="metadata" muted playsinline>
+          <source src="assets/snap_t8_compare.mp4?v=1782095173" type="video/mp4">
+        </video>
+        <figcaption><strong>Left: Körner</strong> — Lk error 2.0, partial snap, curvature saturation limits writhe. &nbsp;|&nbsp; <strong>Right: DER</strong> — Lk error 0.03, unbounded curvature binormal blocks the snap path.</figcaption>
+      </figure>
+
+      <h4 style="margin:18px 0 6px;font-size:0.95rem">9 turns commanded</h4>
+      <figure>
+        <video controls preload="metadata" muted playsinline>
+          <source src="assets/snap_t9_compare.mp4?v=1782095173" type="video/mp4">
+        </video>
+        <figcaption><strong>Left: Körner</strong> — snap intensifies as twist load increases. &nbsp;|&nbsp; <strong>Right: DER</strong> — writhing geometry maintained, curvature binormal energy cost blocks over-bending.</figcaption>
+      </figure>
+
+      <h4 style="margin:18px 0 6px;font-size:0.95rem">10 turns commanded</h4>
+      <figure>
+        <video controls preload="metadata" muted playsinline>
+          <source src="assets/snap_t10_compare.mp4?v=1782095173" type="video/mp4">
+        </video>
+        <figcaption><strong>Left: Körner</strong> — Lk error 4.0, full snap to crown, writhe fails to form. &nbsp;|&nbsp; <strong>Right: DER</strong> — link mostly conserved, plectoneme dynamics sustained.</figcaption>
+      </figure>
+    </section>
+
+    <section>
+      <h2>Reproduce</h2>
+      <pre><code>uv run --extra examples python scripts/generate_cable_twist_wiggle_buckling_report.py --device cpu --videos --overwrite-videos</code></pre>
+    </section>
+  </main>
+
+  <footer>
+    Report URL: <code>https://jumyungc.github.io/newton/reports/cable_twist_wiggle_buckling/</code>.
+  </footer>
+</body>
+</html>

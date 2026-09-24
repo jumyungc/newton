@@ -1,0 +1,125 @@
+{
+  "claim": "qualitative Track-B trajectory comparisons; frozen routing objective overlays (not canonical R); descriptive timings only; Provisional",
+  "coverage_manifest_sha256": "557339dd10bbd26b30ac9e3276e2c7400b5eed61f4697119326fd52f1a18a535",
+  "generated_utc": "20260705T085138Z",
+  "owner_line_start": "OWNER: Team Fable (claimed 2026-07-05T05:49:11Z \u2014 round 4: benchmark coverage campaign \u2014 comparison videos + tables for every supported registry scene, BGN-or-rescue global engine, honest N/A matrix)",
+  "scenes": {
+    "horiz_cantilever_stretch": {
+      "duration_s": 5.01,
+      "frames_decoded": 301,
+      "poster": "horiz_cantilever_stretch_poster.png",
+      "poster_sha256": "c2e9abfcfad453f174cb484e5e86097cfd6996cb4e490bd64aedaa639fb54a2a",
+      "video": "horiz_cantilever_stretch_2x2.mp4",
+      "video_sha256": "5935e5278406b2cebd2797e2ee3d77a9f5ec93197204497b123322e4f328052c"
+    },
+    "horiz_cantilever_stretch_bend": {
+      "duration_s": 5.01,
+      "frames_decoded": 301,
+      "poster": "horiz_cantilever_stretch_bend_poster.png",
+      "poster_sha256": "d6919637020a6b1e28d50dca8877c5523b9c0583f100b5342b5b6bc1ce41f90f",
+      "video": "horiz_cantilever_stretch_bend_2x2.mp4",
+      "video_sha256": "4ce55edaf329315a2b01973661450b0bb72d04f818d4af1e8e8567a747ab66f3"
+    },
+    "horiz_pinned_both": {
+      "duration_s": 5.01,
+      "frames_decoded": 301,
+      "poster": "horiz_pinned_both_poster.png",
+      "poster_sha256": "d6e46628c13d3dcbe29d30cb66ba3a8b9357c14a61066a6cfdbdc315f9ff5a85",
+      "video": "horiz_pinned_both_2x2.mp4",
+      "video_sha256": "7c2eb657937af3098c554df9415c33f9bb5e0ecb8cac841d7dafa9a1489a1f46"
+    },
+    "long_cantilever_1024_superbend500": {
+      "duration_s": 5.01,
+      "frames_decoded": 301,
+      "poster": "long_cantilever_1024_superbend500_poster.png",
+      "poster_sha256": "a3083806c431441b68991212dd2c70bbfa5fb6c047be2d153c78ea1379afc873",
+      "video": "long_cantilever_1024_superbend500_2x2.mp4",
+      "video_sha256": "bb185e90a5779b72c4846d636d53e8d1788b0b50ee79635b746f701fdc55f885"
+    },
+    "long_cantilever_2048_superbend500": {
+      "duration_s": 5.01,
+      "frames_decoded": 301,
+      "poster": "long_cantilever_2048_superbend500_poster.png",
+      "poster_sha256": "1ed98b36012d10f4fcad74a77c84f2e745ad7a8f6072c5fa16074c9d1ff19e72",
+      "video": "long_cantilever_2048_superbend500_2x2.mp4",
+      "video_sha256": "a328de628dc9549b5bd5e5dbdcd99d6931ad5caf5238a9a5c46cfe02d930cd28"
+    },
+    "long_cantilever_4096_superbend500": {
+      "duration_s": 5.01,
+      "frames_decoded": 301,
+      "poster": "long_cantilever_4096_superbend500_poster.png",
+      "poster_sha256": "96a6747f4411077b6b349f93b5e5eaa45e6f797aed4ac5a64564b4f19d1063d0",
+      "video": "long_cantilever_4096_superbend500_2x2.mp4",
+      "video_sha256": "6ec88d674895ca2870d9447fb7c1121e2dc642ef3094f338f896580e881cd3da"
+    },
+    "long_cantilever_512_bend": {
+      "duration_s": 5.01,
+      "frames_decoded": 301,
+      "poster": "long_cantilever_512_bend_poster.png",
+      "poster_sha256": "6649d2d55a1249c0e3d63b0a2d398377121bd62c0b34637a34a3b248f13c3e9a",
+      "video": "long_cantilever_512_bend_2x2.mp4",
+      "video_sha256": "9ecb3e637d55b5d98c7afb56bdeef7a66b179353171889e338ad93e7be29d055"
+    },
+    "long_vertical_1024_stiffbend": {
+      "duration_s": 5.01,
+      "frames_decoded": 301,
+      "poster": "long_vertical_1024_stiffbend_poster.png",
+      "poster_sha256": "65bf3fdb087d270489ba9ab7342c4135460a673efd1c1ca6fef7a3eec35be970",
+      "video": "long_vertical_1024_stiffbend_2x2.mp4",
+      "video_sha256": "0c20b04c2100cde21bd1ee2674ed20332070e30c54f1d4367782228107507c3a"
+    },
+    "offcenter_anchor": {
+      "duration_s": 5.01,
+      "frames_decoded": 301,
+      "poster": "offcenter_anchor_poster.png",
+      "poster_sha256": "276e90e0b1d3a07926edf12c465fb456555daac287311e65b2ef93e79febfba5",
+      "video": "offcenter_anchor_2x2.mp4",
+      "video_sha256": "e2626d4459ae43062baa2060a03d5b13d9d177fae3f1d9d30d6fb09273390415"
+    },
+    "ring_chord": {
+      "duration_s": 5.01,
+      "frames_decoded": 301,
+      "poster": "ring_chord_poster.png",
+      "poster_sha256": "bbbf1087315194a85956c2dba71af4bf19f18c4b3864c96d3594755382167c82",
+      "video": "ring_chord_2x2.mp4",
+      "video_sha256": "7e530894d9d0fa244950bf38fe1500a27a9a60c670c4405be32cd4660ff58819"
+    },
+    "vertical_hanging": {
+      "duration_s": 5.01,
+      "frames_decoded": 301,
+      "poster": "vertical_hanging_poster.png",
+      "poster_sha256": "8b96ad09408163421ae38f5fefb650f038fd9d46362da71a5459b20f59bf222e",
+      "video": "vertical_hanging_2x2.mp4",
+      "video_sha256": "fbc80a22c8e0f09fc3e2d6a3e0576dfc5ce72d1af2baa9788f5429a328e7ce7e"
+    },
+    "y127_default": {
+      "duration_s": 5.01,
+      "frames_decoded": 301,
+      "poster": "y127_default_poster.png",
+      "poster_sha256": "689840dc2d4f09d48bfbe24847d02b749df87885172f5c10021829eb9c66eafc",
+      "video": "y127_default_2x2.mp4",
+      "video_sha256": "4c02c0a4a9860730e161a350d0e2267f5334c5545bb17187999c5876bc717750"
+    },
+    "y_junction": {
+      "duration_s": 5.01,
+      "frames_decoded": 301,
+      "poster": "y_junction_poster.png",
+      "poster_sha256": "4bbbf15773cfebdf5187f0ae9e6658006313f83a29ab3cc5215e93a2dcc9d894",
+      "video": "y_junction_2x2.mp4",
+      "video_sha256": "1fd4dac00664ad1e51ec1d954dbb1cae8f891b0541337bd075c82421b6ab4c4a"
+    },
+    "y_junction_stiff": {
+      "duration_s": 5.01,
+      "frames_decoded": 301,
+      "poster": "y_junction_stiff_poster.png",
+      "poster_sha256": "3262f7ba27e703c8f6c210252f48b48140acb1c907c3e37641ea48a5d452c9f0",
+      "video": "y_junction_stiff_2x2.mp4",
+      "video_sha256": "492546d15608b6ec36a83564f0fbf0e9085691fef42e9ab58bad16cc633c4f19"
+    }
+  },
+  "schema": "fable-coverage-render/v1",
+  "sources": {
+    "fable_cov_render.py": "934329707a7fd7915829519265ee0ed00f605786a47323b68e6165f7c1581151"
+  },
+  "stretch_colormap_max_mm": 3.0
+}

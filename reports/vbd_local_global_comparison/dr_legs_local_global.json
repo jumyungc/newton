@@ -1,0 +1,4485 @@
+{
+  "comparison_protocols": {
+    "fixed_vbd": {
+      "configs": {
+        "current-g1": {
+          "alpha": 0.0,
+          "contact_scale": 4.0,
+          "iterations": 8,
+          "relaxation": 0.65
+        },
+        "upstream-main": {
+          "alpha": 0.0,
+          "contact_scale": 4.0,
+          "iterations": 8,
+          "relaxation": 0.65
+        }
+      },
+      "description": "Controlled VBD ablation with I8, joint K=2e5, contact K x4, and alpha=0."
+    },
+    "tuned": {
+      "configs": {
+        "current-g1": {
+          "alpha": 0.0,
+          "contact_scale": 4.0,
+          "iterations": 1,
+          "relaxation": 0.65
+        },
+        "upstream-main": {
+          "alpha": 0.0,
+          "contact_scale": 8.0,
+          "iterations": 16,
+          "relaxation": 0.65
+        }
+      },
+      "description": "Bounded, method-specific posture-valid selections; settings are explicit per row."
+    }
+  },
+  "fixed_vbd_routes": {
+    "current-g1": {
+      "runs": [
+        {
+          "articulation_count": 1,
+          "bilateral_solver": null,
+          "body_count": 31,
+          "closure_joint_count": 6,
+          "closure_joint_labels": [
+            "/DR_Legs/Joints/j6_l_o",
+            "/DR_Legs/Joints/j6_r_o",
+            "/DR_Legs/Joints/j9_l_i",
+            "/DR_Legs/Joints/j9_l_o",
+            "/DR_Legs/Joints/j9_r_i",
+            "/DR_Legs/Joints/j9_r_o"
+          ],
+          "completed_substeps": 360,
+          "constraints_alpha": null,
+          "constraints_gamma": null,
+          "contact_normal_damping_scale": 1.0,
+          "contact_normal_stiffness_scale": 4.0,
+          "contact_pipeline": "Newton",
+          "device": "cuda:0",
+          "diagonal_regularization": 0.0,
+          "disabled_drive_suffixes": [
+            "j6_l_i",
+            "j6_r_i"
+          ],
+          "display_color_rgb": [
+            0.7200000286102295,
+            0.75,
+            0.800000011920929
+          ],
+          "drive_kd": 2.0,
+          "drive_kp": 10.0,
+          "dt": 0.01,
+          "failure_substep": null,
+          "final_all": {
+            "angular_max_rad": 1.9532905323772744e-06,
+            "angular_norm_rad": 5.440126138893965e-06,
+            "linear_max_m": 0.00016358304925352042,
+            "linear_norm_m": 0.0005418828225287525,
+            "per_joint": {
+              "/DR_Legs/Joints/j1_l_i": {
+                "angular_rad": 8.050048026796988e-07,
+                "linear_m": 7.774394974643069e-05
+              },
+              "/DR_Legs/Joints/j1_l_o": {
+                "angular_rad": 7.912594339497164e-07,
+                "linear_m": 7.010197041601481e-05
+              },
+              "/DR_Legs/Joints/j1_r_i": {
+                "angular_rad": 1.0174257000045046e-06,
+                "linear_m": 7.757302348883881e-05
+              },
+              "/DR_Legs/Joints/j1_r_o": {
+                "angular_rad": 9.102728819744137e-07,
+                "linear_m": 6.987889352148134e-05
+              },
+              "/DR_Legs/Joints/j2_l_i": {
+                "angular_rad": 1.887601704165354e-06,
+                "linear_m": 0.0001633832296185632
+              },
+              "/DR_Legs/Joints/j2_l_o": {
+                "angular_rad": 1.2065485447495637e-06,
+                "linear_m": 0.00010810781148093174
+              },
+              "/DR_Legs/Joints/j2_r_i": {
+                "angular_rad": 1.7179810141301725e-06,
+                "linear_m": 0.00016309800002591187
+              },
+              "/DR_Legs/Joints/j2_r_o": {
+                "angular_rad": 1.026542752408586e-06,
+                "linear_m": 0.00010786161128754051
+              },
+              "/DR_Legs/Joints/j3_l_i": {
+                "angular_rad": 9.822970857119596e-07,
+                "linear_m": 0.00016358304925352042
+              },
+              "/DR_Legs/Joints/j3_l_o": {
+                "angular_rad": 7.211652101627373e-07,
+                "linear_m": 0.00010793616614572186
+              },
+              "/DR_Legs/Joints/j3_r_i": {
+                "angular_rad": 1.1205151029704711e-06,
+                "linear_m": 0.0001632952410093933
+              },
+              "/DR_Legs/Joints/j3_r_o": {
+                "angular_rad": 7.131102034933421e-07,
+                "linear_m": 0.00010770215114354411
+              },
+              "/DR_Legs/Joints/j4_l_i": {
+                "angular_rad": 1.1245997919504626e-06,
+                "linear_m": 7.553435227496035e-05
+              },
+              "/DR_Legs/Joints/j4_l_o": {
+                "angular_rad": 2.3535141588380635e-07,
+                "linear_m": 7.205008763594008e-05
+              },
+              "/DR_Legs/Joints/j4_r_i": {
+                "angular_rad": 1.031978521263145e-06,
+                "linear_m": 7.532558613342741e-05
+              },
+              "/DR_Legs/Joints/j4_r_o": {
+                "angular_rad": 2.492883844611257e-07,
+                "linear_m": 7.182471081447626e-05
+              },
+              "/DR_Legs/Joints/j5_l_i": {
+                "angular_rad": 3.0801616062918176e-07,
+                "linear_m": 7.565199714874653e-05
+              },
+              "/DR_Legs/Joints/j5_l_o": {
+                "angular_rad": 2.1199525020476253e-07,
+                "linear_m": 7.283334864113717e-05
+              },
+              "/DR_Legs/Joints/j5_r_i": {
+                "angular_rad": 2.469298318718933e-07,
+                "linear_m": 7.544814187455168e-05
+              },
+              "/DR_Legs/Joints/j5_r_o": {
+                "angular_rad": 2.601471219905752e-07,
+                "linear_m": 7.168820255534795e-05
+              },
+              "/DR_Legs/Joints/j6_l_i": {
+                "angular_rad": 1.9532905323772744e-06,
+                "linear_m": 7.377920859455629e-05
+              },
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 1.538366172735606e-07,
+                "linear_m": 7.279098808632232e-05
+              },
+              "/DR_Legs/Joints/j6_r_i": {
+                "angular_rad": 1.7945612376641291e-06,
+                "linear_m": 7.356106247037823e-05
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 1.8476614360581244e-06,
+                "linear_m": 7.356509612512791e-05
+              },
+              "/DR_Legs/Joints/j7_l_i": {
+                "angular_rad": 9.107536633981207e-08,
+                "linear_m": 8.607863545378844e-05
+              },
+              "/DR_Legs/Joints/j7_l_o": {
+                "angular_rad": 9.264492711614964e-08,
+                "linear_m": 3.8151680750641406e-05
+              },
+              "/DR_Legs/Joints/j7_r_i": {
+                "angular_rad": 1.488692162005959e-07,
+                "linear_m": 8.600519690854531e-05
+              },
+              "/DR_Legs/Joints/j7_r_o": {
+                "angular_rad": 9.333399578229953e-08,
+                "linear_m": 3.8152407535521656e-05
+              },
+              "/DR_Legs/Joints/j8_l_i": {
+                "angular_rad": 4.561875765510997e-07,
+                "linear_m": 8.65711575802379e-05
+              },
+              "/DR_Legs/Joints/j8_l_o": {
+                "angular_rad": 1.9500883528253306e-07,
+                "linear_m": 3.767500723839372e-05
+              },
+              "/DR_Legs/Joints/j8_r_i": {
+                "angular_rad": 2.5865549277021555e-07,
+                "linear_m": 8.649293550735547e-05
+              },
+              "/DR_Legs/Joints/j8_r_o": {
+                "angular_rad": 2.349463041416406e-07,
+                "linear_m": 3.767576141631901e-05
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 3.7847334583777814e-07,
+                "linear_m": 8.656421347908172e-05
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 3.6255751872224073e-07,
+                "linear_m": 3.7625468459142896e-05
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 4.08727326166749e-07,
+                "linear_m": 8.64655938182954e-05
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 3.7043926808891783e-07,
+                "linear_m": 3.7623202866687406e-05
+              }
+            }
+          },
+          "final_closure": {
+            "angular_max_rad": 1.8476614360581244e-06,
+            "angular_norm_rad": 2.004118707437233e-06,
+            "linear_max_m": 8.656421347908172e-05,
+            "linear_norm_m": 0.00016885258231606284,
+            "per_joint": {
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 1.538366172735606e-07,
+                "linear_m": 7.279098808632232e-05
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 1.8476614360581244e-06,
+                "linear_m": 7.356509612512791e-05
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 3.7847334583777814e-07,
+                "linear_m": 8.656421347908172e-05
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 3.6255751872224073e-07,
+                "linear_m": 3.7625468459142896e-05
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 4.08727326166749e-07,
+                "linear_m": 8.64655938182954e-05
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 3.7043926808891783e-07,
+                "linear_m": 3.7623202866687406e-05
+              }
+            }
+          },
+          "final_pelvis_height_m": 0.042470674961805344,
+          "fixture_asset_root": "/home/jumyungc/.cache/newton/newton-assets_disneyresearch_56289e70_261cd1f4/disneyresearch",
+          "fixture_model_signature": "25cf7e41422a7a99a6548bd91df3634b75b8bf9bea21bf68659e2fb4135ca1ab",
+          "fps": 50,
+          "frames": 180,
+          "global_active": true,
+          "global_island_count": 1,
+          "global_joint_count": 36,
+          "initial_closure": {
+            "angular_max_rad": 0.0,
+            "angular_norm_rad": 0.0,
+            "linear_max_m": 2.6787732192018794e-08,
+            "linear_norm_m": 3.216183543802025e-08,
+            "per_joint": {
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 0.0,
+                "linear_m": 4.255322758112241e-09
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 0.0,
+                "linear_m": 4.93245932210616e-09
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 0.0,
+                "linear_m": 1.1415826782706438e-08
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 0.0,
+                "linear_m": 9.12821587646239e-09
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 0.0,
+                "linear_m": 7.792221107680227e-09
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 0.0,
+                "linear_m": 2.6787732192018794e-08
+              }
+            }
+          },
+          "iterations": 8,
+          "joint_count": 36,
+          "joint_dof_count": 36,
+          "joint_kd": 0.0,
+          "joint_ke": 200000.0,
+          "max_body_speed_mps": 2.2785720825195312,
+          "max_closure_um": 265.8122554718825,
+          "max_contacts": 12,
+          "max_pelvis_tilt_deg": 90.14155668911094,
+          "mean_collision_us": null,
+          "mean_contacts": 10.86111111111111,
+          "mean_graph_step_us": 1203.063373823705,
+          "mean_solver_us": null,
+          "min_pelvis_height_m": 0.04217185452580452,
+          "mode": "Local-Global VBD, G=1",
+          "newton_path": "/home/jumyungc/JC/git/newton_g1_latest_integration/newton/__init__.py",
+          "p50_collision_us": null,
+          "p50_graph_step_us": 1147.6054787635803,
+          "p50_solver_us": null,
+          "p90_collision_us": null,
+          "p90_graph_step_us": 1219.9147371575236,
+          "p90_solver_us": null,
+          "relaxation": 0.65,
+          "returncode": 0,
+          "rms_all_linear_um": 595.0442967599968,
+          "rms_closure_per_joint_um": 74.30960458629565,
+          "rms_closure_um": 182.02061422440497,
+          "route": "current-g1",
+          "schedule": "8 local sweeps; G1 after sweep 1",
+          "selection_config": {
+            "alpha": 0.0,
+            "contact_scale": 4.0,
+            "iterations": 8,
+            "relaxation": 0.65
+          },
+          "shape_count": 35,
+          "solver": "vbd",
+          "status": "ok",
+          "stderr_tail": "",
+          "substeps_per_frame": 2,
+          "tangential_stiffness_scale": 1.0,
+          "timing_method": "cuda_graph_end_to_end",
+          "vbd_alpha": 0.0,
+          "vbd_solve": "local"
+        },
+        {
+          "articulation_count": 1,
+          "bilateral_solver": null,
+          "body_count": 31,
+          "closure_joint_count": 6,
+          "closure_joint_labels": [
+            "/DR_Legs/Joints/j6_l_o",
+            "/DR_Legs/Joints/j6_r_o",
+            "/DR_Legs/Joints/j9_l_i",
+            "/DR_Legs/Joints/j9_l_o",
+            "/DR_Legs/Joints/j9_r_i",
+            "/DR_Legs/Joints/j9_r_o"
+          ],
+          "completed_substeps": 360,
+          "constraints_alpha": null,
+          "constraints_gamma": null,
+          "contact_normal_damping_scale": 1.0,
+          "contact_normal_stiffness_scale": 4.0,
+          "contact_pipeline": "Newton",
+          "device": "cuda:0",
+          "diagonal_regularization": 0.0,
+          "disabled_drive_suffixes": [
+            "j6_l_i",
+            "j6_r_i"
+          ],
+          "display_color_rgb": [
+            0.7200000286102295,
+            0.75,
+            0.800000011920929
+          ],
+          "drive_kd": 2.0,
+          "drive_kp": 10.0,
+          "dt": 0.01,
+          "failure_substep": null,
+          "final_all": {
+            "angular_max_rad": 1.9532905323772744e-06,
+            "angular_norm_rad": 5.440126138893965e-06,
+            "linear_max_m": 0.00016358304925352042,
+            "linear_norm_m": 0.0005418828225287525,
+            "per_joint": {
+              "/DR_Legs/Joints/j1_l_i": {
+                "angular_rad": 8.050048026796988e-07,
+                "linear_m": 7.774394974643069e-05
+              },
+              "/DR_Legs/Joints/j1_l_o": {
+                "angular_rad": 7.912594339497164e-07,
+                "linear_m": 7.010197041601481e-05
+              },
+              "/DR_Legs/Joints/j1_r_i": {
+                "angular_rad": 1.0174257000045046e-06,
+                "linear_m": 7.757302348883881e-05
+              },
+              "/DR_Legs/Joints/j1_r_o": {
+                "angular_rad": 9.102728819744137e-07,
+                "linear_m": 6.987889352148134e-05
+              },
+              "/DR_Legs/Joints/j2_l_i": {
+                "angular_rad": 1.887601704165354e-06,
+                "linear_m": 0.0001633832296185632
+              },
+              "/DR_Legs/Joints/j2_l_o": {
+                "angular_rad": 1.2065485447495637e-06,
+                "linear_m": 0.00010810781148093174
+              },
+              "/DR_Legs/Joints/j2_r_i": {
+                "angular_rad": 1.7179810141301725e-06,
+                "linear_m": 0.00016309800002591187
+              },
+              "/DR_Legs/Joints/j2_r_o": {
+                "angular_rad": 1.026542752408586e-06,
+                "linear_m": 0.00010786161128754051
+              },
+              "/DR_Legs/Joints/j3_l_i": {
+                "angular_rad": 9.822970857119596e-07,
+                "linear_m": 0.00016358304925352042
+              },
+              "/DR_Legs/Joints/j3_l_o": {
+                "angular_rad": 7.211652101627373e-07,
+                "linear_m": 0.00010793616614572186
+              },
+              "/DR_Legs/Joints/j3_r_i": {
+                "angular_rad": 1.1205151029704711e-06,
+                "linear_m": 0.0001632952410093933
+              },
+              "/DR_Legs/Joints/j3_r_o": {
+                "angular_rad": 7.131102034933421e-07,
+                "linear_m": 0.00010770215114354411
+              },
+              "/DR_Legs/Joints/j4_l_i": {
+                "angular_rad": 1.1245997919504626e-06,
+                "linear_m": 7.553435227496035e-05
+              },
+              "/DR_Legs/Joints/j4_l_o": {
+                "angular_rad": 2.3535141588380635e-07,
+                "linear_m": 7.205008763594008e-05
+              },
+              "/DR_Legs/Joints/j4_r_i": {
+                "angular_rad": 1.031978521263145e-06,
+                "linear_m": 7.532558613342741e-05
+              },
+              "/DR_Legs/Joints/j4_r_o": {
+                "angular_rad": 2.492883844611257e-07,
+                "linear_m": 7.182471081447626e-05
+              },
+              "/DR_Legs/Joints/j5_l_i": {
+                "angular_rad": 3.0801616062918176e-07,
+                "linear_m": 7.565199714874653e-05
+              },
+              "/DR_Legs/Joints/j5_l_o": {
+                "angular_rad": 2.1199525020476253e-07,
+                "linear_m": 7.283334864113717e-05
+              },
+              "/DR_Legs/Joints/j5_r_i": {
+                "angular_rad": 2.469298318718933e-07,
+                "linear_m": 7.544814187455168e-05
+              },
+              "/DR_Legs/Joints/j5_r_o": {
+                "angular_rad": 2.601471219905752e-07,
+                "linear_m": 7.168820255534795e-05
+              },
+              "/DR_Legs/Joints/j6_l_i": {
+                "angular_rad": 1.9532905323772744e-06,
+                "linear_m": 7.377920859455629e-05
+              },
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 1.538366172735606e-07,
+                "linear_m": 7.279098808632232e-05
+              },
+              "/DR_Legs/Joints/j6_r_i": {
+                "angular_rad": 1.7945612376641291e-06,
+                "linear_m": 7.356106247037823e-05
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 1.8476614360581244e-06,
+                "linear_m": 7.356509612512791e-05
+              },
+              "/DR_Legs/Joints/j7_l_i": {
+                "angular_rad": 9.107536633981207e-08,
+                "linear_m": 8.607863545378844e-05
+              },
+              "/DR_Legs/Joints/j7_l_o": {
+                "angular_rad": 9.264492711614964e-08,
+                "linear_m": 3.8151680750641406e-05
+              },
+              "/DR_Legs/Joints/j7_r_i": {
+                "angular_rad": 1.488692162005959e-07,
+                "linear_m": 8.600519690854531e-05
+              },
+              "/DR_Legs/Joints/j7_r_o": {
+                "angular_rad": 9.333399578229953e-08,
+                "linear_m": 3.8152407535521656e-05
+              },
+              "/DR_Legs/Joints/j8_l_i": {
+                "angular_rad": 4.561875765510997e-07,
+                "linear_m": 8.65711575802379e-05
+              },
+              "/DR_Legs/Joints/j8_l_o": {
+                "angular_rad": 1.9500883528253306e-07,
+                "linear_m": 3.767500723839372e-05
+              },
+              "/DR_Legs/Joints/j8_r_i": {
+                "angular_rad": 2.5865549277021555e-07,
+                "linear_m": 8.649293550735547e-05
+              },
+              "/DR_Legs/Joints/j8_r_o": {
+                "angular_rad": 2.349463041416406e-07,
+                "linear_m": 3.767576141631901e-05
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 3.7847334583777814e-07,
+                "linear_m": 8.656421347908172e-05
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 3.6255751872224073e-07,
+                "linear_m": 3.7625468459142896e-05
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 4.08727326166749e-07,
+                "linear_m": 8.64655938182954e-05
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 3.7043926808891783e-07,
+                "linear_m": 3.7623202866687406e-05
+              }
+            }
+          },
+          "final_closure": {
+            "angular_max_rad": 1.8476614360581244e-06,
+            "angular_norm_rad": 2.004118707437233e-06,
+            "linear_max_m": 8.656421347908172e-05,
+            "linear_norm_m": 0.00016885258231606284,
+            "per_joint": {
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 1.538366172735606e-07,
+                "linear_m": 7.279098808632232e-05
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 1.8476614360581244e-06,
+                "linear_m": 7.356509612512791e-05
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 3.7847334583777814e-07,
+                "linear_m": 8.656421347908172e-05
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 3.6255751872224073e-07,
+                "linear_m": 3.7625468459142896e-05
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 4.08727326166749e-07,
+                "linear_m": 8.64655938182954e-05
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 3.7043926808891783e-07,
+                "linear_m": 3.7623202866687406e-05
+              }
+            }
+          },
+          "final_pelvis_height_m": 0.042470674961805344,
+          "fixture_asset_root": "/home/jumyungc/.cache/newton/newton-assets_disneyresearch_56289e70_261cd1f4/disneyresearch",
+          "fixture_model_signature": "25cf7e41422a7a99a6548bd91df3634b75b8bf9bea21bf68659e2fb4135ca1ab",
+          "fps": 50,
+          "frames": 180,
+          "global_active": true,
+          "global_island_count": 1,
+          "global_joint_count": 36,
+          "initial_closure": {
+            "angular_max_rad": 0.0,
+            "angular_norm_rad": 0.0,
+            "linear_max_m": 2.6787732192018794e-08,
+            "linear_norm_m": 3.216183543802025e-08,
+            "per_joint": {
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 0.0,
+                "linear_m": 4.255322758112241e-09
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 0.0,
+                "linear_m": 4.93245932210616e-09
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 0.0,
+                "linear_m": 1.1415826782706438e-08
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 0.0,
+                "linear_m": 9.12821587646239e-09
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 0.0,
+                "linear_m": 7.792221107680227e-09
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 0.0,
+                "linear_m": 2.6787732192018794e-08
+              }
+            }
+          },
+          "iterations": 8,
+          "joint_count": 36,
+          "joint_dof_count": 36,
+          "joint_kd": 0.0,
+          "joint_ke": 200000.0,
+          "max_body_speed_mps": 2.2785720825195312,
+          "max_closure_um": 265.8122554718825,
+          "max_contacts": 12,
+          "max_pelvis_tilt_deg": 90.14155668911094,
+          "mean_collision_us": null,
+          "mean_contacts": 10.86111111111111,
+          "mean_graph_step_us": 1207.2917341035518,
+          "mean_solver_us": null,
+          "min_pelvis_height_m": 0.04217185452580452,
+          "mode": "Local-Global VBD, G=1",
+          "newton_path": "/home/jumyungc/JC/git/newton_g1_latest_integration/newton/__init__.py",
+          "p50_collision_us": null,
+          "p50_graph_step_us": 1145.3339830040932,
+          "p50_solver_us": null,
+          "p90_collision_us": null,
+          "p90_graph_step_us": 1209.4535864889622,
+          "p90_solver_us": null,
+          "relaxation": 0.65,
+          "returncode": 0,
+          "rms_all_linear_um": 595.0442967599968,
+          "rms_closure_per_joint_um": 74.30960458629565,
+          "rms_closure_um": 182.02061422440497,
+          "route": "current-g1",
+          "schedule": "8 local sweeps; G1 after sweep 1",
+          "selection_config": {
+            "alpha": 0.0,
+            "contact_scale": 4.0,
+            "iterations": 8,
+            "relaxation": 0.65
+          },
+          "shape_count": 35,
+          "solver": "vbd",
+          "status": "ok",
+          "stderr_tail": "",
+          "substeps_per_frame": 2,
+          "tangential_stiffness_scale": 1.0,
+          "timing_method": "cuda_graph_end_to_end",
+          "vbd_alpha": 0.0,
+          "vbd_solve": "local"
+        },
+        {
+          "articulation_count": 1,
+          "bilateral_solver": null,
+          "body_count": 31,
+          "closure_joint_count": 6,
+          "closure_joint_labels": [
+            "/DR_Legs/Joints/j6_l_o",
+            "/DR_Legs/Joints/j6_r_o",
+            "/DR_Legs/Joints/j9_l_i",
+            "/DR_Legs/Joints/j9_l_o",
+            "/DR_Legs/Joints/j9_r_i",
+            "/DR_Legs/Joints/j9_r_o"
+          ],
+          "completed_substeps": 360,
+          "constraints_alpha": null,
+          "constraints_gamma": null,
+          "contact_normal_damping_scale": 1.0,
+          "contact_normal_stiffness_scale": 4.0,
+          "contact_pipeline": "Newton",
+          "device": "cuda:0",
+          "diagonal_regularization": 0.0,
+          "disabled_drive_suffixes": [
+            "j6_l_i",
+            "j6_r_i"
+          ],
+          "display_color_rgb": [
+            0.7200000286102295,
+            0.75,
+            0.800000011920929
+          ],
+          "drive_kd": 2.0,
+          "drive_kp": 10.0,
+          "dt": 0.01,
+          "failure_substep": null,
+          "final_all": {
+            "angular_max_rad": 1.9532905323772744e-06,
+            "angular_norm_rad": 5.440126138893965e-06,
+            "linear_max_m": 0.00016358304925352042,
+            "linear_norm_m": 0.0005418828225287525,
+            "per_joint": {
+              "/DR_Legs/Joints/j1_l_i": {
+                "angular_rad": 8.050048026796988e-07,
+                "linear_m": 7.774394974643069e-05
+              },
+              "/DR_Legs/Joints/j1_l_o": {
+                "angular_rad": 7.912594339497164e-07,
+                "linear_m": 7.010197041601481e-05
+              },
+              "/DR_Legs/Joints/j1_r_i": {
+                "angular_rad": 1.0174257000045046e-06,
+                "linear_m": 7.757302348883881e-05
+              },
+              "/DR_Legs/Joints/j1_r_o": {
+                "angular_rad": 9.102728819744137e-07,
+                "linear_m": 6.987889352148134e-05
+              },
+              "/DR_Legs/Joints/j2_l_i": {
+                "angular_rad": 1.887601704165354e-06,
+                "linear_m": 0.0001633832296185632
+              },
+              "/DR_Legs/Joints/j2_l_o": {
+                "angular_rad": 1.2065485447495637e-06,
+                "linear_m": 0.00010810781148093174
+              },
+              "/DR_Legs/Joints/j2_r_i": {
+                "angular_rad": 1.7179810141301725e-06,
+                "linear_m": 0.00016309800002591187
+              },
+              "/DR_Legs/Joints/j2_r_o": {
+                "angular_rad": 1.026542752408586e-06,
+                "linear_m": 0.00010786161128754051
+              },
+              "/DR_Legs/Joints/j3_l_i": {
+                "angular_rad": 9.822970857119596e-07,
+                "linear_m": 0.00016358304925352042
+              },
+              "/DR_Legs/Joints/j3_l_o": {
+                "angular_rad": 7.211652101627373e-07,
+                "linear_m": 0.00010793616614572186
+              },
+              "/DR_Legs/Joints/j3_r_i": {
+                "angular_rad": 1.1205151029704711e-06,
+                "linear_m": 0.0001632952410093933
+              },
+              "/DR_Legs/Joints/j3_r_o": {
+                "angular_rad": 7.131102034933421e-07,
+                "linear_m": 0.00010770215114354411
+              },
+              "/DR_Legs/Joints/j4_l_i": {
+                "angular_rad": 1.1245997919504626e-06,
+                "linear_m": 7.553435227496035e-05
+              },
+              "/DR_Legs/Joints/j4_l_o": {
+                "angular_rad": 2.3535141588380635e-07,
+                "linear_m": 7.205008763594008e-05
+              },
+              "/DR_Legs/Joints/j4_r_i": {
+                "angular_rad": 1.031978521263145e-06,
+                "linear_m": 7.532558613342741e-05
+              },
+              "/DR_Legs/Joints/j4_r_o": {
+                "angular_rad": 2.492883844611257e-07,
+                "linear_m": 7.182471081447626e-05
+              },
+              "/DR_Legs/Joints/j5_l_i": {
+                "angular_rad": 3.0801616062918176e-07,
+                "linear_m": 7.565199714874653e-05
+              },
+              "/DR_Legs/Joints/j5_l_o": {
+                "angular_rad": 2.1199525020476253e-07,
+                "linear_m": 7.283334864113717e-05
+              },
+              "/DR_Legs/Joints/j5_r_i": {
+                "angular_rad": 2.469298318718933e-07,
+                "linear_m": 7.544814187455168e-05
+              },
+              "/DR_Legs/Joints/j5_r_o": {
+                "angular_rad": 2.601471219905752e-07,
+                "linear_m": 7.168820255534795e-05
+              },
+              "/DR_Legs/Joints/j6_l_i": {
+                "angular_rad": 1.9532905323772744e-06,
+                "linear_m": 7.377920859455629e-05
+              },
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 1.538366172735606e-07,
+                "linear_m": 7.279098808632232e-05
+              },
+              "/DR_Legs/Joints/j6_r_i": {
+                "angular_rad": 1.7945612376641291e-06,
+                "linear_m": 7.356106247037823e-05
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 1.8476614360581244e-06,
+                "linear_m": 7.356509612512791e-05
+              },
+              "/DR_Legs/Joints/j7_l_i": {
+                "angular_rad": 9.107536633981207e-08,
+                "linear_m": 8.607863545378844e-05
+              },
+              "/DR_Legs/Joints/j7_l_o": {
+                "angular_rad": 9.264492711614964e-08,
+                "linear_m": 3.8151680750641406e-05
+              },
+              "/DR_Legs/Joints/j7_r_i": {
+                "angular_rad": 1.488692162005959e-07,
+                "linear_m": 8.600519690854531e-05
+              },
+              "/DR_Legs/Joints/j7_r_o": {
+                "angular_rad": 9.333399578229953e-08,
+                "linear_m": 3.8152407535521656e-05
+              },
+              "/DR_Legs/Joints/j8_l_i": {
+                "angular_rad": 4.561875765510997e-07,
+                "linear_m": 8.65711575802379e-05
+              },
+              "/DR_Legs/Joints/j8_l_o": {
+                "angular_rad": 1.9500883528253306e-07,
+                "linear_m": 3.767500723839372e-05
+              },
+              "/DR_Legs/Joints/j8_r_i": {
+                "angular_rad": 2.5865549277021555e-07,
+                "linear_m": 8.649293550735547e-05
+              },
+              "/DR_Legs/Joints/j8_r_o": {
+                "angular_rad": 2.349463041416406e-07,
+                "linear_m": 3.767576141631901e-05
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 3.7847334583777814e-07,
+                "linear_m": 8.656421347908172e-05
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 3.6255751872224073e-07,
+                "linear_m": 3.7625468459142896e-05
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 4.08727326166749e-07,
+                "linear_m": 8.64655938182954e-05
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 3.7043926808891783e-07,
+                "linear_m": 3.7623202866687406e-05
+              }
+            }
+          },
+          "final_closure": {
+            "angular_max_rad": 1.8476614360581244e-06,
+            "angular_norm_rad": 2.004118707437233e-06,
+            "linear_max_m": 8.656421347908172e-05,
+            "linear_norm_m": 0.00016885258231606284,
+            "per_joint": {
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 1.538366172735606e-07,
+                "linear_m": 7.279098808632232e-05
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 1.8476614360581244e-06,
+                "linear_m": 7.356509612512791e-05
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 3.7847334583777814e-07,
+                "linear_m": 8.656421347908172e-05
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 3.6255751872224073e-07,
+                "linear_m": 3.7625468459142896e-05
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 4.08727326166749e-07,
+                "linear_m": 8.64655938182954e-05
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 3.7043926808891783e-07,
+                "linear_m": 3.7623202866687406e-05
+              }
+            }
+          },
+          "final_pelvis_height_m": 0.042470674961805344,
+          "fixture_asset_root": "/home/jumyungc/.cache/newton/newton-assets_disneyresearch_56289e70_261cd1f4/disneyresearch",
+          "fixture_model_signature": "25cf7e41422a7a99a6548bd91df3634b75b8bf9bea21bf68659e2fb4135ca1ab",
+          "fps": 50,
+          "frames": 180,
+          "global_active": true,
+          "global_island_count": 1,
+          "global_joint_count": 36,
+          "initial_closure": {
+            "angular_max_rad": 0.0,
+            "angular_norm_rad": 0.0,
+            "linear_max_m": 2.6787732192018794e-08,
+            "linear_norm_m": 3.216183543802025e-08,
+            "per_joint": {
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 0.0,
+                "linear_m": 4.255322758112241e-09
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 0.0,
+                "linear_m": 4.93245932210616e-09
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 0.0,
+                "linear_m": 1.1415826782706438e-08
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 0.0,
+                "linear_m": 9.12821587646239e-09
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 0.0,
+                "linear_m": 7.792221107680227e-09
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 0.0,
+                "linear_m": 2.6787732192018794e-08
+              }
+            }
+          },
+          "iterations": 8,
+          "joint_count": 36,
+          "joint_dof_count": 36,
+          "joint_kd": 0.0,
+          "joint_ke": 200000.0,
+          "max_body_speed_mps": 2.2785720825195312,
+          "max_closure_um": 265.8122554718825,
+          "max_contacts": 12,
+          "max_pelvis_tilt_deg": 90.14155668911094,
+          "mean_collision_us": null,
+          "mean_contacts": 10.86111111111111,
+          "mean_graph_step_us": 1187.1429721770041,
+          "mean_solver_us": null,
+          "min_pelvis_height_m": 0.04217185452580452,
+          "mode": "Local-Global VBD, G=1",
+          "newton_path": "/home/jumyungc/JC/git/newton_g1_latest_integration/newton/__init__.py",
+          "p50_collision_us": null,
+          "p50_graph_step_us": 1146.0009845905006,
+          "p50_solver_us": null,
+          "p90_collision_us": null,
+          "p90_graph_step_us": 1209.7418657504022,
+          "p90_solver_us": null,
+          "relaxation": 0.65,
+          "returncode": 0,
+          "rms_all_linear_um": 595.0442967599968,
+          "rms_closure_per_joint_um": 74.30960458629565,
+          "rms_closure_um": 182.02061422440497,
+          "route": "current-g1",
+          "schedule": "8 local sweeps; G1 after sweep 1",
+          "selection_config": {
+            "alpha": 0.0,
+            "contact_scale": 4.0,
+            "iterations": 8,
+            "relaxation": 0.65
+          },
+          "shape_count": 35,
+          "solver": "vbd",
+          "status": "ok",
+          "stderr_tail": "",
+          "substeps_per_frame": 2,
+          "tangential_stiffness_scale": 1.0,
+          "timing_method": "cuda_graph_end_to_end",
+          "vbd_alpha": 0.0,
+          "vbd_solve": "local"
+        }
+      ],
+      "summary": {
+        "max_closure_um": {
+          "max": 265.8122554718825,
+          "median": 265.8122554718825,
+          "min": 265.8122554718825
+        },
+        "max_pelvis_tilt_deg": {
+          "max": 90.14155668911094,
+          "median": 90.14155668911094,
+          "min": 90.14155668911094
+        },
+        "min_pelvis_height_m": {
+          "max": 0.04217185452580452,
+          "median": 0.04217185452580452,
+          "min": 0.04217185452580452
+        },
+        "p50_graph_step_us": {
+          "max": 1147.6054787635803,
+          "median": 1146.0009845905006,
+          "min": 1145.3339830040932
+        },
+        "p90_graph_step_us": {
+          "max": 1219.9147371575236,
+          "median": 1209.7418657504022,
+          "min": 1209.4535864889622
+        },
+        "rms_closure_um": {
+          "max": 182.02061422440497,
+          "median": 182.02061422440497,
+          "min": 182.02061422440497
+        }
+      }
+    },
+    "upstream-main": {
+      "runs": [
+        {
+          "articulation_count": 1,
+          "bilateral_solver": null,
+          "body_count": 31,
+          "closure_joint_count": 6,
+          "closure_joint_labels": [
+            "/DR_Legs/Joints/j6_l_o",
+            "/DR_Legs/Joints/j6_r_o",
+            "/DR_Legs/Joints/j9_l_i",
+            "/DR_Legs/Joints/j9_l_o",
+            "/DR_Legs/Joints/j9_r_i",
+            "/DR_Legs/Joints/j9_r_o"
+          ],
+          "completed_substeps": 360,
+          "constraints_alpha": null,
+          "constraints_gamma": null,
+          "contact_normal_damping_scale": 1.0,
+          "contact_normal_stiffness_scale": 4.0,
+          "contact_pipeline": "Newton",
+          "device": "cuda:0",
+          "diagonal_regularization": 0.0,
+          "disabled_drive_suffixes": [
+            "j6_l_i",
+            "j6_r_i"
+          ],
+          "display_color_rgb": [
+            0.7200000286102295,
+            0.75,
+            0.800000011920929
+          ],
+          "drive_kd": 2.0,
+          "drive_kp": 10.0,
+          "dt": 0.01,
+          "failure_substep": null,
+          "final_all": {
+            "angular_max_rad": 8.154565316917948e-05,
+            "angular_norm_rad": 0.00018128431890948411,
+            "linear_max_m": 0.0019064237337802332,
+            "linear_norm_m": 0.007490208802122566,
+            "per_joint": {
+              "/DR_Legs/Joints/j1_l_i": {
+                "angular_rad": 5.402726765153166e-05,
+                "linear_m": 0.0007021076166684253
+              },
+              "/DR_Legs/Joints/j1_l_o": {
+                "angular_rad": 7.517877157852307e-05,
+                "linear_m": 0.001887720599443193
+              },
+              "/DR_Legs/Joints/j1_r_i": {
+                "angular_rad": 5.759591677545856e-05,
+                "linear_m": 0.0007207038176112977
+              },
+              "/DR_Legs/Joints/j1_r_o": {
+                "angular_rad": 8.154565316917948e-05,
+                "linear_m": 0.0019064237337802332
+              },
+              "/DR_Legs/Joints/j2_l_i": {
+                "angular_rad": 8.583227222684337e-06,
+                "linear_m": 0.001072835476018848
+              },
+              "/DR_Legs/Joints/j2_l_o": {
+                "angular_rad": 2.6601255752272782e-05,
+                "linear_m": 0.0010883485775901732
+              },
+              "/DR_Legs/Joints/j2_r_i": {
+                "angular_rad": 8.76746994687374e-06,
+                "linear_m": 0.00110970651105229
+              },
+              "/DR_Legs/Joints/j2_r_o": {
+                "angular_rad": 2.7716396912621853e-05,
+                "linear_m": 0.0011051129922567615
+              },
+              "/DR_Legs/Joints/j3_l_i": {
+                "angular_rad": 3.9145400753932344e-05,
+                "linear_m": 0.0010730132055832527
+              },
+              "/DR_Legs/Joints/j3_l_o": {
+                "angular_rad": 1.746102265504345e-05,
+                "linear_m": 0.0010869505626522676
+              },
+              "/DR_Legs/Joints/j3_r_i": {
+                "angular_rad": 3.995774913150495e-05,
+                "linear_m": 0.0011099558045486759
+              },
+              "/DR_Legs/Joints/j3_r_o": {
+                "angular_rad": 1.748411734594287e-05,
+                "linear_m": 0.001103715029109038
+              },
+              "/DR_Legs/Joints/j4_l_i": {
+                "angular_rad": 2.2888939998911942e-05,
+                "linear_m": 0.0010942700253393377
+              },
+              "/DR_Legs/Joints/j4_l_o": {
+                "angular_rad": 1.5513024639472956e-05,
+                "linear_m": 0.0018242758078636805
+              },
+              "/DR_Legs/Joints/j4_r_i": {
+                "angular_rad": 2.3254874459692453e-05,
+                "linear_m": 0.0011169730602647642
+              },
+              "/DR_Legs/Joints/j4_r_o": {
+                "angular_rad": 1.5844050621401703e-05,
+                "linear_m": 0.001830544374867749
+              },
+              "/DR_Legs/Joints/j5_l_i": {
+                "angular_rad": 2.8402197668092062e-05,
+                "linear_m": 0.0010951519576096773
+              },
+              "/DR_Legs/Joints/j5_l_o": {
+                "angular_rad": 8.043104980901458e-06,
+                "linear_m": 0.0018273802965095341
+              },
+              "/DR_Legs/Joints/j5_r_i": {
+                "angular_rad": 2.8527440716937492e-05,
+                "linear_m": 0.0011178305304298515
+              },
+              "/DR_Legs/Joints/j5_r_o": {
+                "angular_rad": 1.7732162407165894e-05,
+                "linear_m": 0.001830775014178733
+              },
+              "/DR_Legs/Joints/j6_l_i": {
+                "angular_rad": 1.7744751885741034e-05,
+                "linear_m": 0.0012320561805742054
+              },
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 6.4544507804976526e-06,
+                "linear_m": 0.001827452497044885
+              },
+              "/DR_Legs/Joints/j6_r_i": {
+                "angular_rad": 1.787009185561569e-05,
+                "linear_m": 0.00125026071111229
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 1.589467883400653e-05,
+                "linear_m": 0.0018378380149419026
+              },
+              "/DR_Legs/Joints/j7_l_i": {
+                "angular_rad": 8.45829658165066e-06,
+                "linear_m": 0.0008135528096996135
+              },
+              "/DR_Legs/Joints/j7_l_o": {
+                "angular_rad": 2.4153350680218375e-05,
+                "linear_m": 0.0009503355809423005
+              },
+              "/DR_Legs/Joints/j7_r_i": {
+                "angular_rad": 8.624245768802715e-06,
+                "linear_m": 0.0008130674224751759
+              },
+              "/DR_Legs/Joints/j7_r_o": {
+                "angular_rad": 2.5423624155803634e-05,
+                "linear_m": 0.0009474380579540584
+              },
+              "/DR_Legs/Joints/j8_l_i": {
+                "angular_rad": 9.740110318548882e-06,
+                "linear_m": 0.0008735895284961578
+              },
+              "/DR_Legs/Joints/j8_l_o": {
+                "angular_rad": 4.292690889984727e-06,
+                "linear_m": 0.0010144825802758722
+              },
+              "/DR_Legs/Joints/j8_r_i": {
+                "angular_rad": 9.998358762653933e-06,
+                "linear_m": 0.0008717383185907442
+              },
+              "/DR_Legs/Joints/j8_r_o": {
+                "angular_rad": 4.2455200170465575e-06,
+                "linear_m": 0.001007043889322818
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 3.16719297663451e-05,
+                "linear_m": 0.0008739939626797525
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 2.037025325246073e-05,
+                "linear_m": 0.0010148892163222957
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 3.206122014622032e-05,
+                "linear_m": 0.0008721051334038795
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 2.0563156571145978e-05,
+                "linear_m": 0.0010074318377077164
+              }
+            }
+          },
+          "final_closure": {
+            "angular_max_rad": 3.206122014622032e-05,
+            "angular_norm_rad": 5.624166025502478e-05,
+            "linear_max_m": 0.0018378380149419026,
+            "linear_norm_m": 0.0032072703405958258,
+            "per_joint": {
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 6.4544507804976526e-06,
+                "linear_m": 0.001827452497044885
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 1.589467883400653e-05,
+                "linear_m": 0.0018378380149419026
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 3.16719297663451e-05,
+                "linear_m": 0.0008739939626797525
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 2.037025325246073e-05,
+                "linear_m": 0.0010148892163222957
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 3.206122014622032e-05,
+                "linear_m": 0.0008721051334038795
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 2.0563156571145978e-05,
+                "linear_m": 0.0010074318377077164
+              }
+            }
+          },
+          "final_pelvis_height_m": 0.05701123923063278,
+          "fixture_asset_root": "/home/jumyungc/.cache/newton/newton-assets_disneyresearch_56289e70_261cd1f4/disneyresearch",
+          "fixture_model_signature": "25cf7e41422a7a99a6548bd91df3634b75b8bf9bea21bf68659e2fb4135ca1ab",
+          "fps": 50,
+          "frames": 180,
+          "global_active": false,
+          "global_island_count": 0,
+          "global_joint_count": 0,
+          "initial_closure": {
+            "angular_max_rad": 0.0,
+            "angular_norm_rad": 0.0,
+            "linear_max_m": 2.6787732192018794e-08,
+            "linear_norm_m": 3.216183543802025e-08,
+            "per_joint": {
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 0.0,
+                "linear_m": 4.255322758112241e-09
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 0.0,
+                "linear_m": 4.93245932210616e-09
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 0.0,
+                "linear_m": 1.1415826782706438e-08
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 0.0,
+                "linear_m": 9.12821587646239e-09
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 0.0,
+                "linear_m": 7.792221107680227e-09
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 0.0,
+                "linear_m": 2.6787732192018794e-08
+              }
+            }
+          },
+          "iterations": 8,
+          "joint_count": 36,
+          "joint_dof_count": 36,
+          "joint_kd": 0.0,
+          "joint_ke": 200000.0,
+          "max_body_speed_mps": 1.5696057081222534,
+          "max_closure_um": 5261.462842874045,
+          "max_contacts": 22,
+          "max_pelvis_tilt_deg": 132.11839539083465,
+          "mean_collision_us": null,
+          "mean_contacts": 12.352777777777778,
+          "mean_graph_step_us": 841.4452679811375,
+          "mean_solver_us": null,
+          "min_pelvis_height_m": 0.03634537011384964,
+          "mode": "Upstream main compliant VBD, G=0",
+          "newton_path": "/home/jumyungc/JC/git/newton_upstream_main_20260910/newton/__init__.py",
+          "p50_collision_us": null,
+          "p50_graph_step_us": 792.1999786049128,
+          "p50_solver_us": null,
+          "p90_collision_us": null,
+          "p90_graph_step_us": 871.8740777112544,
+          "p90_solver_us": null,
+          "relaxation": 0.65,
+          "returncode": 0,
+          "rms_all_linear_um": 5583.034711563997,
+          "rms_closure_per_joint_um": 871.2387776723906,
+          "rms_closure_um": 2134.0904494234746,
+          "route": "upstream-main",
+          "schedule": "8 local sweeps",
+          "selection_config": {
+            "alpha": 0.0,
+            "contact_scale": 4.0,
+            "iterations": 8,
+            "relaxation": 0.65
+          },
+          "shape_count": 35,
+          "solver": "vbd",
+          "status": "ok",
+          "stderr_tail": "",
+          "substeps_per_frame": 2,
+          "tangential_stiffness_scale": 1.0,
+          "timing_method": "cuda_graph_end_to_end",
+          "vbd_alpha": 0.0,
+          "vbd_solve": "local"
+        },
+        {
+          "articulation_count": 1,
+          "bilateral_solver": null,
+          "body_count": 31,
+          "closure_joint_count": 6,
+          "closure_joint_labels": [
+            "/DR_Legs/Joints/j6_l_o",
+            "/DR_Legs/Joints/j6_r_o",
+            "/DR_Legs/Joints/j9_l_i",
+            "/DR_Legs/Joints/j9_l_o",
+            "/DR_Legs/Joints/j9_r_i",
+            "/DR_Legs/Joints/j9_r_o"
+          ],
+          "completed_substeps": 360,
+          "constraints_alpha": null,
+          "constraints_gamma": null,
+          "contact_normal_damping_scale": 1.0,
+          "contact_normal_stiffness_scale": 4.0,
+          "contact_pipeline": "Newton",
+          "device": "cuda:0",
+          "diagonal_regularization": 0.0,
+          "disabled_drive_suffixes": [
+            "j6_l_i",
+            "j6_r_i"
+          ],
+          "display_color_rgb": [
+            0.7200000286102295,
+            0.75,
+            0.800000011920929
+          ],
+          "drive_kd": 2.0,
+          "drive_kp": 10.0,
+          "dt": 0.01,
+          "failure_substep": null,
+          "final_all": {
+            "angular_max_rad": 8.154565316917948e-05,
+            "angular_norm_rad": 0.00018128431890948411,
+            "linear_max_m": 0.0019064237337802332,
+            "linear_norm_m": 0.007490208802122566,
+            "per_joint": {
+              "/DR_Legs/Joints/j1_l_i": {
+                "angular_rad": 5.402726765153166e-05,
+                "linear_m": 0.0007021076166684253
+              },
+              "/DR_Legs/Joints/j1_l_o": {
+                "angular_rad": 7.517877157852307e-05,
+                "linear_m": 0.001887720599443193
+              },
+              "/DR_Legs/Joints/j1_r_i": {
+                "angular_rad": 5.759591677545856e-05,
+                "linear_m": 0.0007207038176112977
+              },
+              "/DR_Legs/Joints/j1_r_o": {
+                "angular_rad": 8.154565316917948e-05,
+                "linear_m": 0.0019064237337802332
+              },
+              "/DR_Legs/Joints/j2_l_i": {
+                "angular_rad": 8.583227222684337e-06,
+                "linear_m": 0.001072835476018848
+              },
+              "/DR_Legs/Joints/j2_l_o": {
+                "angular_rad": 2.6601255752272782e-05,
+                "linear_m": 0.0010883485775901732
+              },
+              "/DR_Legs/Joints/j2_r_i": {
+                "angular_rad": 8.76746994687374e-06,
+                "linear_m": 0.00110970651105229
+              },
+              "/DR_Legs/Joints/j2_r_o": {
+                "angular_rad": 2.7716396912621853e-05,
+                "linear_m": 0.0011051129922567615
+              },
+              "/DR_Legs/Joints/j3_l_i": {
+                "angular_rad": 3.9145400753932344e-05,
+                "linear_m": 0.0010730132055832527
+              },
+              "/DR_Legs/Joints/j3_l_o": {
+                "angular_rad": 1.746102265504345e-05,
+                "linear_m": 0.0010869505626522676
+              },
+              "/DR_Legs/Joints/j3_r_i": {
+                "angular_rad": 3.995774913150495e-05,
+                "linear_m": 0.0011099558045486759
+              },
+              "/DR_Legs/Joints/j3_r_o": {
+                "angular_rad": 1.748411734594287e-05,
+                "linear_m": 0.001103715029109038
+              },
+              "/DR_Legs/Joints/j4_l_i": {
+                "angular_rad": 2.2888939998911942e-05,
+                "linear_m": 0.0010942700253393377
+              },
+              "/DR_Legs/Joints/j4_l_o": {
+                "angular_rad": 1.5513024639472956e-05,
+                "linear_m": 0.0018242758078636805
+              },
+              "/DR_Legs/Joints/j4_r_i": {
+                "angular_rad": 2.3254874459692453e-05,
+                "linear_m": 0.0011169730602647642
+              },
+              "/DR_Legs/Joints/j4_r_o": {
+                "angular_rad": 1.5844050621401703e-05,
+                "linear_m": 0.001830544374867749
+              },
+              "/DR_Legs/Joints/j5_l_i": {
+                "angular_rad": 2.8402197668092062e-05,
+                "linear_m": 0.0010951519576096773
+              },
+              "/DR_Legs/Joints/j5_l_o": {
+                "angular_rad": 8.043104980901458e-06,
+                "linear_m": 0.0018273802965095341
+              },
+              "/DR_Legs/Joints/j5_r_i": {
+                "angular_rad": 2.8527440716937492e-05,
+                "linear_m": 0.0011178305304298515
+              },
+              "/DR_Legs/Joints/j5_r_o": {
+                "angular_rad": 1.7732162407165894e-05,
+                "linear_m": 0.001830775014178733
+              },
+              "/DR_Legs/Joints/j6_l_i": {
+                "angular_rad": 1.7744751885741034e-05,
+                "linear_m": 0.0012320561805742054
+              },
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 6.4544507804976526e-06,
+                "linear_m": 0.001827452497044885
+              },
+              "/DR_Legs/Joints/j6_r_i": {
+                "angular_rad": 1.787009185561569e-05,
+                "linear_m": 0.00125026071111229
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 1.589467883400653e-05,
+                "linear_m": 0.0018378380149419026
+              },
+              "/DR_Legs/Joints/j7_l_i": {
+                "angular_rad": 8.45829658165066e-06,
+                "linear_m": 0.0008135528096996135
+              },
+              "/DR_Legs/Joints/j7_l_o": {
+                "angular_rad": 2.4153350680218375e-05,
+                "linear_m": 0.0009503355809423005
+              },
+              "/DR_Legs/Joints/j7_r_i": {
+                "angular_rad": 8.624245768802715e-06,
+                "linear_m": 0.0008130674224751759
+              },
+              "/DR_Legs/Joints/j7_r_o": {
+                "angular_rad": 2.5423624155803634e-05,
+                "linear_m": 0.0009474380579540584
+              },
+              "/DR_Legs/Joints/j8_l_i": {
+                "angular_rad": 9.740110318548882e-06,
+                "linear_m": 0.0008735895284961578
+              },
+              "/DR_Legs/Joints/j8_l_o": {
+                "angular_rad": 4.292690889984727e-06,
+                "linear_m": 0.0010144825802758722
+              },
+              "/DR_Legs/Joints/j8_r_i": {
+                "angular_rad": 9.998358762653933e-06,
+                "linear_m": 0.0008717383185907442
+              },
+              "/DR_Legs/Joints/j8_r_o": {
+                "angular_rad": 4.2455200170465575e-06,
+                "linear_m": 0.001007043889322818
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 3.16719297663451e-05,
+                "linear_m": 0.0008739939626797525
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 2.037025325246073e-05,
+                "linear_m": 0.0010148892163222957
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 3.206122014622032e-05,
+                "linear_m": 0.0008721051334038795
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 2.0563156571145978e-05,
+                "linear_m": 0.0010074318377077164
+              }
+            }
+          },
+          "final_closure": {
+            "angular_max_rad": 3.206122014622032e-05,
+            "angular_norm_rad": 5.624166025502478e-05,
+            "linear_max_m": 0.0018378380149419026,
+            "linear_norm_m": 0.0032072703405958258,
+            "per_joint": {
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 6.4544507804976526e-06,
+                "linear_m": 0.001827452497044885
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 1.589467883400653e-05,
+                "linear_m": 0.0018378380149419026
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 3.16719297663451e-05,
+                "linear_m": 0.0008739939626797525
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 2.037025325246073e-05,
+                "linear_m": 0.0010148892163222957
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 3.206122014622032e-05,
+                "linear_m": 0.0008721051334038795
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 2.0563156571145978e-05,
+                "linear_m": 0.0010074318377077164
+              }
+            }
+          },
+          "final_pelvis_height_m": 0.05701123923063278,
+          "fixture_asset_root": "/home/jumyungc/.cache/newton/newton-assets_disneyresearch_56289e70_261cd1f4/disneyresearch",
+          "fixture_model_signature": "25cf7e41422a7a99a6548bd91df3634b75b8bf9bea21bf68659e2fb4135ca1ab",
+          "fps": 50,
+          "frames": 180,
+          "global_active": false,
+          "global_island_count": 0,
+          "global_joint_count": 0,
+          "initial_closure": {
+            "angular_max_rad": 0.0,
+            "angular_norm_rad": 0.0,
+            "linear_max_m": 2.6787732192018794e-08,
+            "linear_norm_m": 3.216183543802025e-08,
+            "per_joint": {
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 0.0,
+                "linear_m": 4.255322758112241e-09
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 0.0,
+                "linear_m": 4.93245932210616e-09
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 0.0,
+                "linear_m": 1.1415826782706438e-08
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 0.0,
+                "linear_m": 9.12821587646239e-09
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 0.0,
+                "linear_m": 7.792221107680227e-09
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 0.0,
+                "linear_m": 2.6787732192018794e-08
+              }
+            }
+          },
+          "iterations": 8,
+          "joint_count": 36,
+          "joint_dof_count": 36,
+          "joint_kd": 0.0,
+          "joint_ke": 200000.0,
+          "max_body_speed_mps": 1.5696057081222534,
+          "max_closure_um": 5261.462842874045,
+          "max_contacts": 22,
+          "max_pelvis_tilt_deg": 132.11839539083465,
+          "mean_collision_us": null,
+          "mean_contacts": 12.352777777777778,
+          "mean_graph_step_us": 821.7826198019526,
+          "mean_solver_us": null,
+          "min_pelvis_height_m": 0.03634537011384964,
+          "mode": "Upstream main compliant VBD, G=0",
+          "newton_path": "/home/jumyungc/JC/git/newton_upstream_main_20260910/newton/__init__.py",
+          "p50_collision_us": null,
+          "p50_graph_step_us": 792.709004599601,
+          "p50_solver_us": null,
+          "p90_collision_us": null,
+          "p90_graph_step_us": 869.0745336934924,
+          "p90_solver_us": null,
+          "relaxation": 0.65,
+          "returncode": 0,
+          "rms_all_linear_um": 5583.034711563997,
+          "rms_closure_per_joint_um": 871.2387776723906,
+          "rms_closure_um": 2134.0904494234746,
+          "route": "upstream-main",
+          "schedule": "8 local sweeps",
+          "selection_config": {
+            "alpha": 0.0,
+            "contact_scale": 4.0,
+            "iterations": 8,
+            "relaxation": 0.65
+          },
+          "shape_count": 35,
+          "solver": "vbd",
+          "status": "ok",
+          "stderr_tail": "",
+          "substeps_per_frame": 2,
+          "tangential_stiffness_scale": 1.0,
+          "timing_method": "cuda_graph_end_to_end",
+          "vbd_alpha": 0.0,
+          "vbd_solve": "local"
+        },
+        {
+          "articulation_count": 1,
+          "bilateral_solver": null,
+          "body_count": 31,
+          "closure_joint_count": 6,
+          "closure_joint_labels": [
+            "/DR_Legs/Joints/j6_l_o",
+            "/DR_Legs/Joints/j6_r_o",
+            "/DR_Legs/Joints/j9_l_i",
+            "/DR_Legs/Joints/j9_l_o",
+            "/DR_Legs/Joints/j9_r_i",
+            "/DR_Legs/Joints/j9_r_o"
+          ],
+          "completed_substeps": 360,
+          "constraints_alpha": null,
+          "constraints_gamma": null,
+          "contact_normal_damping_scale": 1.0,
+          "contact_normal_stiffness_scale": 4.0,
+          "contact_pipeline": "Newton",
+          "device": "cuda:0",
+          "diagonal_regularization": 0.0,
+          "disabled_drive_suffixes": [
+            "j6_l_i",
+            "j6_r_i"
+          ],
+          "display_color_rgb": [
+            0.7200000286102295,
+            0.75,
+            0.800000011920929
+          ],
+          "drive_kd": 2.0,
+          "drive_kp": 10.0,
+          "dt": 0.01,
+          "failure_substep": null,
+          "final_all": {
+            "angular_max_rad": 8.154565316917948e-05,
+            "angular_norm_rad": 0.00018128431890948411,
+            "linear_max_m": 0.0019064237337802332,
+            "linear_norm_m": 0.007490208802122566,
+            "per_joint": {
+              "/DR_Legs/Joints/j1_l_i": {
+                "angular_rad": 5.402726765153166e-05,
+                "linear_m": 0.0007021076166684253
+              },
+              "/DR_Legs/Joints/j1_l_o": {
+                "angular_rad": 7.517877157852307e-05,
+                "linear_m": 0.001887720599443193
+              },
+              "/DR_Legs/Joints/j1_r_i": {
+                "angular_rad": 5.759591677545856e-05,
+                "linear_m": 0.0007207038176112977
+              },
+              "/DR_Legs/Joints/j1_r_o": {
+                "angular_rad": 8.154565316917948e-05,
+                "linear_m": 0.0019064237337802332
+              },
+              "/DR_Legs/Joints/j2_l_i": {
+                "angular_rad": 8.583227222684337e-06,
+                "linear_m": 0.001072835476018848
+              },
+              "/DR_Legs/Joints/j2_l_o": {
+                "angular_rad": 2.6601255752272782e-05,
+                "linear_m": 0.0010883485775901732
+              },
+              "/DR_Legs/Joints/j2_r_i": {
+                "angular_rad": 8.76746994687374e-06,
+                "linear_m": 0.00110970651105229
+              },
+              "/DR_Legs/Joints/j2_r_o": {
+                "angular_rad": 2.7716396912621853e-05,
+                "linear_m": 0.0011051129922567615
+              },
+              "/DR_Legs/Joints/j3_l_i": {
+                "angular_rad": 3.9145400753932344e-05,
+                "linear_m": 0.0010730132055832527
+              },
+              "/DR_Legs/Joints/j3_l_o": {
+                "angular_rad": 1.746102265504345e-05,
+                "linear_m": 0.0010869505626522676
+              },
+              "/DR_Legs/Joints/j3_r_i": {
+                "angular_rad": 3.995774913150495e-05,
+                "linear_m": 0.0011099558045486759
+              },
+              "/DR_Legs/Joints/j3_r_o": {
+                "angular_rad": 1.748411734594287e-05,
+                "linear_m": 0.001103715029109038
+              },
+              "/DR_Legs/Joints/j4_l_i": {
+                "angular_rad": 2.2888939998911942e-05,
+                "linear_m": 0.0010942700253393377
+              },
+              "/DR_Legs/Joints/j4_l_o": {
+                "angular_rad": 1.5513024639472956e-05,
+                "linear_m": 0.0018242758078636805
+              },
+              "/DR_Legs/Joints/j4_r_i": {
+                "angular_rad": 2.3254874459692453e-05,
+                "linear_m": 0.0011169730602647642
+              },
+              "/DR_Legs/Joints/j4_r_o": {
+                "angular_rad": 1.5844050621401703e-05,
+                "linear_m": 0.001830544374867749
+              },
+              "/DR_Legs/Joints/j5_l_i": {
+                "angular_rad": 2.8402197668092062e-05,
+                "linear_m": 0.0010951519576096773
+              },
+              "/DR_Legs/Joints/j5_l_o": {
+                "angular_rad": 8.043104980901458e-06,
+                "linear_m": 0.0018273802965095341
+              },
+              "/DR_Legs/Joints/j5_r_i": {
+                "angular_rad": 2.8527440716937492e-05,
+                "linear_m": 0.0011178305304298515
+              },
+              "/DR_Legs/Joints/j5_r_o": {
+                "angular_rad": 1.7732162407165894e-05,
+                "linear_m": 0.001830775014178733
+              },
+              "/DR_Legs/Joints/j6_l_i": {
+                "angular_rad": 1.7744751885741034e-05,
+                "linear_m": 0.0012320561805742054
+              },
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 6.4544507804976526e-06,
+                "linear_m": 0.001827452497044885
+              },
+              "/DR_Legs/Joints/j6_r_i": {
+                "angular_rad": 1.787009185561569e-05,
+                "linear_m": 0.00125026071111229
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 1.589467883400653e-05,
+                "linear_m": 0.0018378380149419026
+              },
+              "/DR_Legs/Joints/j7_l_i": {
+                "angular_rad": 8.45829658165066e-06,
+                "linear_m": 0.0008135528096996135
+              },
+              "/DR_Legs/Joints/j7_l_o": {
+                "angular_rad": 2.4153350680218375e-05,
+                "linear_m": 0.0009503355809423005
+              },
+              "/DR_Legs/Joints/j7_r_i": {
+                "angular_rad": 8.624245768802715e-06,
+                "linear_m": 0.0008130674224751759
+              },
+              "/DR_Legs/Joints/j7_r_o": {
+                "angular_rad": 2.5423624155803634e-05,
+                "linear_m": 0.0009474380579540584
+              },
+              "/DR_Legs/Joints/j8_l_i": {
+                "angular_rad": 9.740110318548882e-06,
+                "linear_m": 0.0008735895284961578
+              },
+              "/DR_Legs/Joints/j8_l_o": {
+                "angular_rad": 4.292690889984727e-06,
+                "linear_m": 0.0010144825802758722
+              },
+              "/DR_Legs/Joints/j8_r_i": {
+                "angular_rad": 9.998358762653933e-06,
+                "linear_m": 0.0008717383185907442
+              },
+              "/DR_Legs/Joints/j8_r_o": {
+                "angular_rad": 4.2455200170465575e-06,
+                "linear_m": 0.001007043889322818
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 3.16719297663451e-05,
+                "linear_m": 0.0008739939626797525
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 2.037025325246073e-05,
+                "linear_m": 0.0010148892163222957
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 3.206122014622032e-05,
+                "linear_m": 0.0008721051334038795
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 2.0563156571145978e-05,
+                "linear_m": 0.0010074318377077164
+              }
+            }
+          },
+          "final_closure": {
+            "angular_max_rad": 3.206122014622032e-05,
+            "angular_norm_rad": 5.624166025502478e-05,
+            "linear_max_m": 0.0018378380149419026,
+            "linear_norm_m": 0.0032072703405958258,
+            "per_joint": {
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 6.4544507804976526e-06,
+                "linear_m": 0.001827452497044885
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 1.589467883400653e-05,
+                "linear_m": 0.0018378380149419026
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 3.16719297663451e-05,
+                "linear_m": 0.0008739939626797525
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 2.037025325246073e-05,
+                "linear_m": 0.0010148892163222957
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 3.206122014622032e-05,
+                "linear_m": 0.0008721051334038795
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 2.0563156571145978e-05,
+                "linear_m": 0.0010074318377077164
+              }
+            }
+          },
+          "final_pelvis_height_m": 0.05701123923063278,
+          "fixture_asset_root": "/home/jumyungc/.cache/newton/newton-assets_disneyresearch_56289e70_261cd1f4/disneyresearch",
+          "fixture_model_signature": "25cf7e41422a7a99a6548bd91df3634b75b8bf9bea21bf68659e2fb4135ca1ab",
+          "fps": 50,
+          "frames": 180,
+          "global_active": false,
+          "global_island_count": 0,
+          "global_joint_count": 0,
+          "initial_closure": {
+            "angular_max_rad": 0.0,
+            "angular_norm_rad": 0.0,
+            "linear_max_m": 2.6787732192018794e-08,
+            "linear_norm_m": 3.216183543802025e-08,
+            "per_joint": {
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 0.0,
+                "linear_m": 4.255322758112241e-09
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 0.0,
+                "linear_m": 4.93245932210616e-09
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 0.0,
+                "linear_m": 1.1415826782706438e-08
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 0.0,
+                "linear_m": 9.12821587646239e-09
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 0.0,
+                "linear_m": 7.792221107680227e-09
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 0.0,
+                "linear_m": 2.6787732192018794e-08
+              }
+            }
+          },
+          "iterations": 8,
+          "joint_count": 36,
+          "joint_dof_count": 36,
+          "joint_kd": 0.0,
+          "joint_ke": 200000.0,
+          "max_body_speed_mps": 1.5696057081222534,
+          "max_closure_um": 5261.462842874045,
+          "max_contacts": 22,
+          "max_pelvis_tilt_deg": 132.11839539083465,
+          "mean_collision_us": null,
+          "mean_contacts": 12.352777777777778,
+          "mean_graph_step_us": 822.3057628664023,
+          "mean_solver_us": null,
+          "min_pelvis_height_m": 0.03634537011384964,
+          "mode": "Upstream main compliant VBD, G=0",
+          "newton_path": "/home/jumyungc/JC/git/newton_upstream_main_20260910/newton/__init__.py",
+          "p50_collision_us": null,
+          "p50_graph_step_us": 792.9469575174153,
+          "p50_solver_us": null,
+          "p90_collision_us": null,
+          "p90_graph_step_us": 873.6469666473567,
+          "p90_solver_us": null,
+          "relaxation": 0.65,
+          "returncode": 0,
+          "rms_all_linear_um": 5583.034711563997,
+          "rms_closure_per_joint_um": 871.2387776723906,
+          "rms_closure_um": 2134.0904494234746,
+          "route": "upstream-main",
+          "schedule": "8 local sweeps",
+          "selection_config": {
+            "alpha": 0.0,
+            "contact_scale": 4.0,
+            "iterations": 8,
+            "relaxation": 0.65
+          },
+          "shape_count": 35,
+          "solver": "vbd",
+          "status": "ok",
+          "stderr_tail": "",
+          "substeps_per_frame": 2,
+          "tangential_stiffness_scale": 1.0,
+          "timing_method": "cuda_graph_end_to_end",
+          "vbd_alpha": 0.0,
+          "vbd_solve": "local"
+        }
+      ],
+      "summary": {
+        "max_closure_um": {
+          "max": 5261.462842874045,
+          "median": 5261.462842874045,
+          "min": 5261.462842874045
+        },
+        "max_pelvis_tilt_deg": {
+          "max": 132.11839539083465,
+          "median": 132.11839539083465,
+          "min": 132.11839539083465
+        },
+        "min_pelvis_height_m": {
+          "max": 0.03634537011384964,
+          "median": 0.03634537011384964,
+          "min": 0.03634537011384964
+        },
+        "p50_graph_step_us": {
+          "max": 792.9469575174153,
+          "median": 792.709004599601,
+          "min": 792.1999786049128
+        },
+        "p90_graph_step_us": {
+          "max": 873.6469666473567,
+          "median": 871.8740777112544,
+          "min": 869.0745336934924
+        },
+        "rms_closure_um": {
+          "max": 2134.0904494234746,
+          "median": 2134.0904494234746,
+          "min": 2134.0904494234746
+        }
+      }
+    }
+  },
+  "fixture": {
+    "asset_commit": "261cd1f429619d8ef4f546bd788ab9dea906b5e1",
+    "device": "cuda:0",
+    "frames": 180,
+    "name": "Disney Research DR Legs free-ankle linkage, immutable published fixture",
+    "posture_gate": {
+      "max_pelvis_tilt_deg": 100.0,
+      "min_pelvis_height_m": 0.03
+    },
+    "substeps": 360,
+    "timing": "end-to-end CUDA graph replay including Newton collision"
+  },
+  "generated_at": "2026-09-11T08:26:55.141041+00:00",
+  "repositories": {
+    "current-g1": {
+      "branch": "",
+      "commit": "d711ddf377d642ff040ed887df4adebe16707504",
+      "commit_short": "d711ddf377",
+      "integration_preview": true,
+      "merged_without_commit": "811b7b1ac803e193f063819d6e5d085cebdcddf6",
+      "path": "/home/jumyungc/JC/git/newton_g1_latest_integration"
+    },
+    "upstream-main": {
+      "branch": "",
+      "commit": "811b7b1ac803e193f063819d6e5d085cebdcddf6",
+      "commit_short": "811b7b1ac8",
+      "integration_preview": false,
+      "matches_remote_ref": true,
+      "path": "/home/jumyungc/JC/git/newton_upstream_main_20260910",
+      "remote_commit": "811b7b1ac803e193f063819d6e5d085cebdcddf6",
+      "remote_ref": "upstream/main"
+    }
+  },
+  "routes": {
+    "current-g1": {
+      "poster": "report_media/dr_legs__current-g1.jpg",
+      "runs": [
+        {
+          "articulation_count": 1,
+          "bilateral_solver": null,
+          "body_count": 31,
+          "closure_joint_count": 6,
+          "closure_joint_labels": [
+            "/DR_Legs/Joints/j6_l_o",
+            "/DR_Legs/Joints/j6_r_o",
+            "/DR_Legs/Joints/j9_l_i",
+            "/DR_Legs/Joints/j9_l_o",
+            "/DR_Legs/Joints/j9_r_i",
+            "/DR_Legs/Joints/j9_r_o"
+          ],
+          "completed_substeps": 360,
+          "constraints_alpha": null,
+          "constraints_gamma": null,
+          "contact_normal_damping_scale": 1.0,
+          "contact_normal_stiffness_scale": 4.0,
+          "contact_pipeline": "Newton",
+          "device": "cuda:0",
+          "diagonal_regularization": 0.0,
+          "disabled_drive_suffixes": [
+            "j6_l_i",
+            "j6_r_i"
+          ],
+          "display_color_rgb": [
+            0.7200000286102295,
+            0.75,
+            0.800000011920929
+          ],
+          "drive_kd": 2.0,
+          "drive_kp": 10.0,
+          "dt": 0.01,
+          "failure_substep": null,
+          "final_all": {
+            "angular_max_rad": 2.1640087369010778e-06,
+            "angular_norm_rad": 5.437629947302844e-06,
+            "linear_max_m": 0.0001616473104787858,
+            "linear_norm_m": 0.0005462860010891833,
+            "per_joint": {
+              "/DR_Legs/Joints/j1_l_i": {
+                "angular_rad": 1.2417584295265904e-06,
+                "linear_m": 7.562553266972899e-05
+              },
+              "/DR_Legs/Joints/j1_l_o": {
+                "angular_rad": 3.322489915832018e-07,
+                "linear_m": 7.65828948778792e-05
+              },
+              "/DR_Legs/Joints/j1_r_i": {
+                "angular_rad": 1.1740572747661452e-06,
+                "linear_m": 7.525127194134767e-05
+              },
+              "/DR_Legs/Joints/j1_r_o": {
+                "angular_rad": 3.802653634247281e-07,
+                "linear_m": 7.630058765415837e-05
+              },
+              "/DR_Legs/Joints/j2_l_i": {
+                "angular_rad": 1.648603107197352e-06,
+                "linear_m": 0.00016149455531771784
+              },
+              "/DR_Legs/Joints/j2_l_o": {
+                "angular_rad": 1.139640630783559e-06,
+                "linear_m": 0.00011265070706420436
+              },
+              "/DR_Legs/Joints/j2_r_i": {
+                "angular_rad": 1.5951630220362946e-06,
+                "linear_m": 0.00016091209306097335
+              },
+              "/DR_Legs/Joints/j2_r_o": {
+                "angular_rad": 1.1753635668569066e-06,
+                "linear_m": 0.00011233701145484217
+              },
+              "/DR_Legs/Joints/j3_l_i": {
+                "angular_rad": 1.051645204881151e-06,
+                "linear_m": 0.0001616473104787858
+              },
+              "/DR_Legs/Joints/j3_l_o": {
+                "angular_rad": 6.679212322295131e-07,
+                "linear_m": 0.00011243857010628791
+              },
+              "/DR_Legs/Joints/j3_r_i": {
+                "angular_rad": 1.109647457606354e-06,
+                "linear_m": 0.000161071831123475
+              },
+              "/DR_Legs/Joints/j3_r_o": {
+                "angular_rad": 6.339808954377022e-07,
+                "linear_m": 0.00011214848529546001
+              },
+              "/DR_Legs/Joints/j4_l_i": {
+                "angular_rad": 1.1545421417000312e-06,
+                "linear_m": 7.644906289388322e-05
+              },
+              "/DR_Legs/Joints/j4_l_o": {
+                "angular_rad": 4.15179564112813e-07,
+                "linear_m": 7.372261522669821e-05
+              },
+              "/DR_Legs/Joints/j4_r_i": {
+                "angular_rad": 9.55015050304805e-07,
+                "linear_m": 7.607689809366571e-05
+              },
+              "/DR_Legs/Joints/j4_r_o": {
+                "angular_rad": 2.923026713860158e-07,
+                "linear_m": 7.341155099602721e-05
+              },
+              "/DR_Legs/Joints/j5_l_i": {
+                "angular_rad": 8.874379267545453e-08,
+                "linear_m": 7.664531792714293e-05
+              },
+              "/DR_Legs/Joints/j5_l_o": {
+                "angular_rad": 9.712243645938493e-07,
+                "linear_m": 7.275381906242037e-05
+              },
+              "/DR_Legs/Joints/j5_r_i": {
+                "angular_rad": 2.505269930297591e-07,
+                "linear_m": 7.629144046487954e-05
+              },
+              "/DR_Legs/Joints/j5_r_o": {
+                "angular_rad": 6.473209333300267e-07,
+                "linear_m": 7.337782945631787e-05
+              },
+              "/DR_Legs/Joints/j6_l_i": {
+                "angular_rad": 1.6408720614562217e-06,
+                "linear_m": 7.84936911953967e-05
+              },
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 3.884124860223317e-07,
+                "linear_m": 7.274258284284308e-05
+              },
+              "/DR_Legs/Joints/j6_r_i": {
+                "angular_rad": 1.5385563802208083e-06,
+                "linear_m": 7.812672288952004e-05
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 2.1640087369010778e-06,
+                "linear_m": 7.142459325310487e-05
+              },
+              "/DR_Legs/Joints/j7_l_i": {
+                "angular_rad": 7.161012695703815e-08,
+                "linear_m": 8.594547965150339e-05
+              },
+              "/DR_Legs/Joints/j7_l_o": {
+                "angular_rad": 3.3987870435547845e-07,
+                "linear_m": 3.896200394807237e-05
+              },
+              "/DR_Legs/Joints/j7_r_i": {
+                "angular_rad": 5.519203363231878e-08,
+                "linear_m": 8.574225712182004e-05
+              },
+              "/DR_Legs/Joints/j7_r_o": {
+                "angular_rad": 6.12632674604701e-08,
+                "linear_m": 3.8988178661960884e-05
+              },
+              "/DR_Legs/Joints/j8_l_i": {
+                "angular_rad": 5.83624954325871e-07,
+                "linear_m": 8.593002736679715e-05
+              },
+              "/DR_Legs/Joints/j8_l_o": {
+                "angular_rad": 6.376183460479914e-07,
+                "linear_m": 3.8913432341706894e-05
+              },
+              "/DR_Legs/Joints/j8_r_i": {
+                "angular_rad": 2.7200914421699367e-07,
+                "linear_m": 8.575855801188589e-05
+              },
+              "/DR_Legs/Joints/j8_r_o": {
+                "angular_rad": 3.392977605355441e-07,
+                "linear_m": 3.8915346474440876e-05
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 2.492876432386471e-07,
+                "linear_m": 8.59415590408462e-05
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 4.163797540369054e-07,
+                "linear_m": 3.883143178104625e-05
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 2.0646235982349e-07,
+                "linear_m": 8.573528399971696e-05
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 3.055549741547875e-07,
+                "linear_m": 3.8836407611288905e-05
+              }
+            }
+          },
+          "final_closure": {
+            "angular_max_rad": 2.1640087369010778e-06,
+            "angular_norm_rad": 2.2815137627417847e-06,
+            "linear_max_m": 8.59415590408462e-05,
+            "linear_norm_m": 0.00016776648361105674,
+            "per_joint": {
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 3.884124860223317e-07,
+                "linear_m": 7.274258284284308e-05
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 2.1640087369010778e-06,
+                "linear_m": 7.142459325310487e-05
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 2.492876432386471e-07,
+                "linear_m": 8.59415590408462e-05
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 4.163797540369054e-07,
+                "linear_m": 3.883143178104625e-05
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 2.0646235982349e-07,
+                "linear_m": 8.573528399971696e-05
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 3.055549741547875e-07,
+                "linear_m": 3.8836407611288905e-05
+              }
+            }
+          },
+          "final_pelvis_height_m": 0.04251805692911148,
+          "fixture_asset_root": "/home/jumyungc/.cache/newton/newton-assets_disneyresearch_56289e70_261cd1f4/disneyresearch",
+          "fixture_model_signature": "25cf7e41422a7a99a6548bd91df3634b75b8bf9bea21bf68659e2fb4135ca1ab",
+          "fps": 50,
+          "frames": 180,
+          "global_active": true,
+          "global_island_count": 1,
+          "global_joint_count": 36,
+          "initial_closure": {
+            "angular_max_rad": 0.0,
+            "angular_norm_rad": 0.0,
+            "linear_max_m": 2.6787732192018794e-08,
+            "linear_norm_m": 3.216183543802025e-08,
+            "per_joint": {
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 0.0,
+                "linear_m": 4.255322758112241e-09
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 0.0,
+                "linear_m": 4.93245932210616e-09
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 0.0,
+                "linear_m": 1.1415826782706438e-08
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 0.0,
+                "linear_m": 9.12821587646239e-09
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 0.0,
+                "linear_m": 7.792221107680227e-09
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 0.0,
+                "linear_m": 2.6787732192018794e-08
+              }
+            }
+          },
+          "iterations": 1,
+          "joint_count": 36,
+          "joint_dof_count": 36,
+          "joint_kd": 0.0,
+          "joint_ke": 200000.0,
+          "max_body_speed_mps": 2.1925106048583984,
+          "max_closure_um": 353.7354393437981,
+          "max_contacts": 12,
+          "max_pelvis_tilt_deg": 90.02442977669689,
+          "mean_collision_us": null,
+          "mean_contacts": 10.86111111111111,
+          "mean_graph_step_us": 695.8618332111441,
+          "mean_solver_us": null,
+          "min_pelvis_height_m": 0.04251730442047119,
+          "mode": "Local-Global VBD, G=1",
+          "newton_path": "/home/jumyungc/JC/git/newton_g1_latest_integration/newton/__init__.py",
+          "p50_collision_us": null,
+          "p50_graph_step_us": 625.980959739536,
+          "p50_solver_us": null,
+          "p90_collision_us": null,
+          "p90_graph_step_us": 694.2386040464044,
+          "p90_solver_us": null,
+          "relaxation": 0.65,
+          "returncode": 0,
+          "rms_all_linear_um": 612.5969098153616,
+          "rms_closure_per_joint_um": 76.4823985429648,
+          "rms_closure_um": 187.34285073444735,
+          "route": "current-g1",
+          "schedule": "G1 after local sweep 1 + 1 local reconcile sweep",
+          "selection_config": {
+            "alpha": 0.0,
+            "contact_scale": 4.0,
+            "iterations": 1,
+            "relaxation": 0.65
+          },
+          "shape_count": 35,
+          "solver": "vbd",
+          "status": "ok",
+          "stderr_tail": "",
+          "substeps_per_frame": 2,
+          "tangential_stiffness_scale": 1.0,
+          "timing_method": "cuda_graph_end_to_end",
+          "vbd_alpha": 0.0,
+          "vbd_solve": "local"
+        },
+        {
+          "articulation_count": 1,
+          "bilateral_solver": null,
+          "body_count": 31,
+          "closure_joint_count": 6,
+          "closure_joint_labels": [
+            "/DR_Legs/Joints/j6_l_o",
+            "/DR_Legs/Joints/j6_r_o",
+            "/DR_Legs/Joints/j9_l_i",
+            "/DR_Legs/Joints/j9_l_o",
+            "/DR_Legs/Joints/j9_r_i",
+            "/DR_Legs/Joints/j9_r_o"
+          ],
+          "completed_substeps": 360,
+          "constraints_alpha": null,
+          "constraints_gamma": null,
+          "contact_normal_damping_scale": 1.0,
+          "contact_normal_stiffness_scale": 4.0,
+          "contact_pipeline": "Newton",
+          "device": "cuda:0",
+          "diagonal_regularization": 0.0,
+          "disabled_drive_suffixes": [
+            "j6_l_i",
+            "j6_r_i"
+          ],
+          "display_color_rgb": [
+            0.7200000286102295,
+            0.75,
+            0.800000011920929
+          ],
+          "drive_kd": 2.0,
+          "drive_kp": 10.0,
+          "dt": 0.01,
+          "failure_substep": null,
+          "final_all": {
+            "angular_max_rad": 2.1640087369010778e-06,
+            "angular_norm_rad": 5.437629947302844e-06,
+            "linear_max_m": 0.0001616473104787858,
+            "linear_norm_m": 0.0005462860010891833,
+            "per_joint": {
+              "/DR_Legs/Joints/j1_l_i": {
+                "angular_rad": 1.2417584295265904e-06,
+                "linear_m": 7.562553266972899e-05
+              },
+              "/DR_Legs/Joints/j1_l_o": {
+                "angular_rad": 3.322489915832018e-07,
+                "linear_m": 7.65828948778792e-05
+              },
+              "/DR_Legs/Joints/j1_r_i": {
+                "angular_rad": 1.1740572747661452e-06,
+                "linear_m": 7.525127194134767e-05
+              },
+              "/DR_Legs/Joints/j1_r_o": {
+                "angular_rad": 3.802653634247281e-07,
+                "linear_m": 7.630058765415837e-05
+              },
+              "/DR_Legs/Joints/j2_l_i": {
+                "angular_rad": 1.648603107197352e-06,
+                "linear_m": 0.00016149455531771784
+              },
+              "/DR_Legs/Joints/j2_l_o": {
+                "angular_rad": 1.139640630783559e-06,
+                "linear_m": 0.00011265070706420436
+              },
+              "/DR_Legs/Joints/j2_r_i": {
+                "angular_rad": 1.5951630220362946e-06,
+                "linear_m": 0.00016091209306097335
+              },
+              "/DR_Legs/Joints/j2_r_o": {
+                "angular_rad": 1.1753635668569066e-06,
+                "linear_m": 0.00011233701145484217
+              },
+              "/DR_Legs/Joints/j3_l_i": {
+                "angular_rad": 1.051645204881151e-06,
+                "linear_m": 0.0001616473104787858
+              },
+              "/DR_Legs/Joints/j3_l_o": {
+                "angular_rad": 6.679212322295131e-07,
+                "linear_m": 0.00011243857010628791
+              },
+              "/DR_Legs/Joints/j3_r_i": {
+                "angular_rad": 1.109647457606354e-06,
+                "linear_m": 0.000161071831123475
+              },
+              "/DR_Legs/Joints/j3_r_o": {
+                "angular_rad": 6.339808954377022e-07,
+                "linear_m": 0.00011214848529546001
+              },
+              "/DR_Legs/Joints/j4_l_i": {
+                "angular_rad": 1.1545421417000312e-06,
+                "linear_m": 7.644906289388322e-05
+              },
+              "/DR_Legs/Joints/j4_l_o": {
+                "angular_rad": 4.15179564112813e-07,
+                "linear_m": 7.372261522669821e-05
+              },
+              "/DR_Legs/Joints/j4_r_i": {
+                "angular_rad": 9.55015050304805e-07,
+                "linear_m": 7.607689809366571e-05
+              },
+              "/DR_Legs/Joints/j4_r_o": {
+                "angular_rad": 2.923026713860158e-07,
+                "linear_m": 7.341155099602721e-05
+              },
+              "/DR_Legs/Joints/j5_l_i": {
+                "angular_rad": 8.874379267545453e-08,
+                "linear_m": 7.664531792714293e-05
+              },
+              "/DR_Legs/Joints/j5_l_o": {
+                "angular_rad": 9.712243645938493e-07,
+                "linear_m": 7.275381906242037e-05
+              },
+              "/DR_Legs/Joints/j5_r_i": {
+                "angular_rad": 2.505269930297591e-07,
+                "linear_m": 7.629144046487954e-05
+              },
+              "/DR_Legs/Joints/j5_r_o": {
+                "angular_rad": 6.473209333300267e-07,
+                "linear_m": 7.337782945631787e-05
+              },
+              "/DR_Legs/Joints/j6_l_i": {
+                "angular_rad": 1.6408720614562217e-06,
+                "linear_m": 7.84936911953967e-05
+              },
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 3.884124860223317e-07,
+                "linear_m": 7.274258284284308e-05
+              },
+              "/DR_Legs/Joints/j6_r_i": {
+                "angular_rad": 1.5385563802208083e-06,
+                "linear_m": 7.812672288952004e-05
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 2.1640087369010778e-06,
+                "linear_m": 7.142459325310487e-05
+              },
+              "/DR_Legs/Joints/j7_l_i": {
+                "angular_rad": 7.161012695703815e-08,
+                "linear_m": 8.594547965150339e-05
+              },
+              "/DR_Legs/Joints/j7_l_o": {
+                "angular_rad": 3.3987870435547845e-07,
+                "linear_m": 3.896200394807237e-05
+              },
+              "/DR_Legs/Joints/j7_r_i": {
+                "angular_rad": 5.519203363231878e-08,
+                "linear_m": 8.574225712182004e-05
+              },
+              "/DR_Legs/Joints/j7_r_o": {
+                "angular_rad": 6.12632674604701e-08,
+                "linear_m": 3.8988178661960884e-05
+              },
+              "/DR_Legs/Joints/j8_l_i": {
+                "angular_rad": 5.83624954325871e-07,
+                "linear_m": 8.593002736679715e-05
+              },
+              "/DR_Legs/Joints/j8_l_o": {
+                "angular_rad": 6.376183460479914e-07,
+                "linear_m": 3.8913432341706894e-05
+              },
+              "/DR_Legs/Joints/j8_r_i": {
+                "angular_rad": 2.7200914421699367e-07,
+                "linear_m": 8.575855801188589e-05
+              },
+              "/DR_Legs/Joints/j8_r_o": {
+                "angular_rad": 3.392977605355441e-07,
+                "linear_m": 3.8915346474440876e-05
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 2.492876432386471e-07,
+                "linear_m": 8.59415590408462e-05
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 4.163797540369054e-07,
+                "linear_m": 3.883143178104625e-05
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 2.0646235982349e-07,
+                "linear_m": 8.573528399971696e-05
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 3.055549741547875e-07,
+                "linear_m": 3.8836407611288905e-05
+              }
+            }
+          },
+          "final_closure": {
+            "angular_max_rad": 2.1640087369010778e-06,
+            "angular_norm_rad": 2.2815137627417847e-06,
+            "linear_max_m": 8.59415590408462e-05,
+            "linear_norm_m": 0.00016776648361105674,
+            "per_joint": {
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 3.884124860223317e-07,
+                "linear_m": 7.274258284284308e-05
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 2.1640087369010778e-06,
+                "linear_m": 7.142459325310487e-05
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 2.492876432386471e-07,
+                "linear_m": 8.59415590408462e-05
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 4.163797540369054e-07,
+                "linear_m": 3.883143178104625e-05
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 2.0646235982349e-07,
+                "linear_m": 8.573528399971696e-05
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 3.055549741547875e-07,
+                "linear_m": 3.8836407611288905e-05
+              }
+            }
+          },
+          "final_pelvis_height_m": 0.04251805692911148,
+          "fixture_asset_root": "/home/jumyungc/.cache/newton/newton-assets_disneyresearch_56289e70_261cd1f4/disneyresearch",
+          "fixture_model_signature": "25cf7e41422a7a99a6548bd91df3634b75b8bf9bea21bf68659e2fb4135ca1ab",
+          "fps": 50,
+          "frames": 180,
+          "global_active": true,
+          "global_island_count": 1,
+          "global_joint_count": 36,
+          "initial_closure": {
+            "angular_max_rad": 0.0,
+            "angular_norm_rad": 0.0,
+            "linear_max_m": 2.6787732192018794e-08,
+            "linear_norm_m": 3.216183543802025e-08,
+            "per_joint": {
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 0.0,
+                "linear_m": 4.255322758112241e-09
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 0.0,
+                "linear_m": 4.93245932210616e-09
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 0.0,
+                "linear_m": 1.1415826782706438e-08
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 0.0,
+                "linear_m": 9.12821587646239e-09
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 0.0,
+                "linear_m": 7.792221107680227e-09
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 0.0,
+                "linear_m": 2.6787732192018794e-08
+              }
+            }
+          },
+          "iterations": 1,
+          "joint_count": 36,
+          "joint_dof_count": 36,
+          "joint_kd": 0.0,
+          "joint_ke": 200000.0,
+          "max_body_speed_mps": 2.1925106048583984,
+          "max_closure_um": 353.7354393437981,
+          "max_contacts": 12,
+          "max_pelvis_tilt_deg": 90.02442977669689,
+          "mean_collision_us": null,
+          "mean_contacts": 10.86111111111111,
+          "mean_graph_step_us": 694.3741416120354,
+          "mean_solver_us": null,
+          "min_pelvis_height_m": 0.04251730442047119,
+          "mode": "Local-Global VBD, G=1",
+          "newton_path": "/home/jumyungc/JC/git/newton_g1_latest_integration/newton/__init__.py",
+          "p50_collision_us": null,
+          "p50_graph_step_us": 625.6744964048266,
+          "p50_solver_us": null,
+          "p90_collision_us": null,
+          "p90_graph_step_us": 693.4224627912045,
+          "p90_solver_us": null,
+          "relaxation": 0.65,
+          "returncode": 0,
+          "rms_all_linear_um": 612.5969098153616,
+          "rms_closure_per_joint_um": 76.4823985429648,
+          "rms_closure_um": 187.34285073444735,
+          "route": "current-g1",
+          "schedule": "G1 after local sweep 1 + 1 local reconcile sweep",
+          "selection_config": {
+            "alpha": 0.0,
+            "contact_scale": 4.0,
+            "iterations": 1,
+            "relaxation": 0.65
+          },
+          "shape_count": 35,
+          "solver": "vbd",
+          "status": "ok",
+          "stderr_tail": "",
+          "substeps_per_frame": 2,
+          "tangential_stiffness_scale": 1.0,
+          "timing_method": "cuda_graph_end_to_end",
+          "vbd_alpha": 0.0,
+          "vbd_solve": "local"
+        },
+        {
+          "articulation_count": 1,
+          "bilateral_solver": null,
+          "body_count": 31,
+          "closure_joint_count": 6,
+          "closure_joint_labels": [
+            "/DR_Legs/Joints/j6_l_o",
+            "/DR_Legs/Joints/j6_r_o",
+            "/DR_Legs/Joints/j9_l_i",
+            "/DR_Legs/Joints/j9_l_o",
+            "/DR_Legs/Joints/j9_r_i",
+            "/DR_Legs/Joints/j9_r_o"
+          ],
+          "completed_substeps": 360,
+          "constraints_alpha": null,
+          "constraints_gamma": null,
+          "contact_normal_damping_scale": 1.0,
+          "contact_normal_stiffness_scale": 4.0,
+          "contact_pipeline": "Newton",
+          "device": "cuda:0",
+          "diagonal_regularization": 0.0,
+          "disabled_drive_suffixes": [
+            "j6_l_i",
+            "j6_r_i"
+          ],
+          "display_color_rgb": [
+            0.7200000286102295,
+            0.75,
+            0.800000011920929
+          ],
+          "drive_kd": 2.0,
+          "drive_kp": 10.0,
+          "dt": 0.01,
+          "failure_substep": null,
+          "final_all": {
+            "angular_max_rad": 2.1640087369010778e-06,
+            "angular_norm_rad": 5.437629947302844e-06,
+            "linear_max_m": 0.0001616473104787858,
+            "linear_norm_m": 0.0005462860010891833,
+            "per_joint": {
+              "/DR_Legs/Joints/j1_l_i": {
+                "angular_rad": 1.2417584295265904e-06,
+                "linear_m": 7.562553266972899e-05
+              },
+              "/DR_Legs/Joints/j1_l_o": {
+                "angular_rad": 3.322489915832018e-07,
+                "linear_m": 7.65828948778792e-05
+              },
+              "/DR_Legs/Joints/j1_r_i": {
+                "angular_rad": 1.1740572747661452e-06,
+                "linear_m": 7.525127194134767e-05
+              },
+              "/DR_Legs/Joints/j1_r_o": {
+                "angular_rad": 3.802653634247281e-07,
+                "linear_m": 7.630058765415837e-05
+              },
+              "/DR_Legs/Joints/j2_l_i": {
+                "angular_rad": 1.648603107197352e-06,
+                "linear_m": 0.00016149455531771784
+              },
+              "/DR_Legs/Joints/j2_l_o": {
+                "angular_rad": 1.139640630783559e-06,
+                "linear_m": 0.00011265070706420436
+              },
+              "/DR_Legs/Joints/j2_r_i": {
+                "angular_rad": 1.5951630220362946e-06,
+                "linear_m": 0.00016091209306097335
+              },
+              "/DR_Legs/Joints/j2_r_o": {
+                "angular_rad": 1.1753635668569066e-06,
+                "linear_m": 0.00011233701145484217
+              },
+              "/DR_Legs/Joints/j3_l_i": {
+                "angular_rad": 1.051645204881151e-06,
+                "linear_m": 0.0001616473104787858
+              },
+              "/DR_Legs/Joints/j3_l_o": {
+                "angular_rad": 6.679212322295131e-07,
+                "linear_m": 0.00011243857010628791
+              },
+              "/DR_Legs/Joints/j3_r_i": {
+                "angular_rad": 1.109647457606354e-06,
+                "linear_m": 0.000161071831123475
+              },
+              "/DR_Legs/Joints/j3_r_o": {
+                "angular_rad": 6.339808954377022e-07,
+                "linear_m": 0.00011214848529546001
+              },
+              "/DR_Legs/Joints/j4_l_i": {
+                "angular_rad": 1.1545421417000312e-06,
+                "linear_m": 7.644906289388322e-05
+              },
+              "/DR_Legs/Joints/j4_l_o": {
+                "angular_rad": 4.15179564112813e-07,
+                "linear_m": 7.372261522669821e-05
+              },
+              "/DR_Legs/Joints/j4_r_i": {
+                "angular_rad": 9.55015050304805e-07,
+                "linear_m": 7.607689809366571e-05
+              },
+              "/DR_Legs/Joints/j4_r_o": {
+                "angular_rad": 2.923026713860158e-07,
+                "linear_m": 7.341155099602721e-05
+              },
+              "/DR_Legs/Joints/j5_l_i": {
+                "angular_rad": 8.874379267545453e-08,
+                "linear_m": 7.664531792714293e-05
+              },
+              "/DR_Legs/Joints/j5_l_o": {
+                "angular_rad": 9.712243645938493e-07,
+                "linear_m": 7.275381906242037e-05
+              },
+              "/DR_Legs/Joints/j5_r_i": {
+                "angular_rad": 2.505269930297591e-07,
+                "linear_m": 7.629144046487954e-05
+              },
+              "/DR_Legs/Joints/j5_r_o": {
+                "angular_rad": 6.473209333300267e-07,
+                "linear_m": 7.337782945631787e-05
+              },
+              "/DR_Legs/Joints/j6_l_i": {
+                "angular_rad": 1.6408720614562217e-06,
+                "linear_m": 7.84936911953967e-05
+              },
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 3.884124860223317e-07,
+                "linear_m": 7.274258284284308e-05
+              },
+              "/DR_Legs/Joints/j6_r_i": {
+                "angular_rad": 1.5385563802208083e-06,
+                "linear_m": 7.812672288952004e-05
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 2.1640087369010778e-06,
+                "linear_m": 7.142459325310487e-05
+              },
+              "/DR_Legs/Joints/j7_l_i": {
+                "angular_rad": 7.161012695703815e-08,
+                "linear_m": 8.594547965150339e-05
+              },
+              "/DR_Legs/Joints/j7_l_o": {
+                "angular_rad": 3.3987870435547845e-07,
+                "linear_m": 3.896200394807237e-05
+              },
+              "/DR_Legs/Joints/j7_r_i": {
+                "angular_rad": 5.519203363231878e-08,
+                "linear_m": 8.574225712182004e-05
+              },
+              "/DR_Legs/Joints/j7_r_o": {
+                "angular_rad": 6.12632674604701e-08,
+                "linear_m": 3.8988178661960884e-05
+              },
+              "/DR_Legs/Joints/j8_l_i": {
+                "angular_rad": 5.83624954325871e-07,
+                "linear_m": 8.593002736679715e-05
+              },
+              "/DR_Legs/Joints/j8_l_o": {
+                "angular_rad": 6.376183460479914e-07,
+                "linear_m": 3.8913432341706894e-05
+              },
+              "/DR_Legs/Joints/j8_r_i": {
+                "angular_rad": 2.7200914421699367e-07,
+                "linear_m": 8.575855801188589e-05
+              },
+              "/DR_Legs/Joints/j8_r_o": {
+                "angular_rad": 3.392977605355441e-07,
+                "linear_m": 3.8915346474440876e-05
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 2.492876432386471e-07,
+                "linear_m": 8.59415590408462e-05
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 4.163797540369054e-07,
+                "linear_m": 3.883143178104625e-05
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 2.0646235982349e-07,
+                "linear_m": 8.573528399971696e-05
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 3.055549741547875e-07,
+                "linear_m": 3.8836407611288905e-05
+              }
+            }
+          },
+          "final_closure": {
+            "angular_max_rad": 2.1640087369010778e-06,
+            "angular_norm_rad": 2.2815137627417847e-06,
+            "linear_max_m": 8.59415590408462e-05,
+            "linear_norm_m": 0.00016776648361105674,
+            "per_joint": {
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 3.884124860223317e-07,
+                "linear_m": 7.274258284284308e-05
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 2.1640087369010778e-06,
+                "linear_m": 7.142459325310487e-05
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 2.492876432386471e-07,
+                "linear_m": 8.59415590408462e-05
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 4.163797540369054e-07,
+                "linear_m": 3.883143178104625e-05
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 2.0646235982349e-07,
+                "linear_m": 8.573528399971696e-05
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 3.055549741547875e-07,
+                "linear_m": 3.8836407611288905e-05
+              }
+            }
+          },
+          "final_pelvis_height_m": 0.04251805692911148,
+          "fixture_asset_root": "/home/jumyungc/.cache/newton/newton-assets_disneyresearch_56289e70_261cd1f4/disneyresearch",
+          "fixture_model_signature": "25cf7e41422a7a99a6548bd91df3634b75b8bf9bea21bf68659e2fb4135ca1ab",
+          "fps": 50,
+          "frames": 180,
+          "global_active": true,
+          "global_island_count": 1,
+          "global_joint_count": 36,
+          "initial_closure": {
+            "angular_max_rad": 0.0,
+            "angular_norm_rad": 0.0,
+            "linear_max_m": 2.6787732192018794e-08,
+            "linear_norm_m": 3.216183543802025e-08,
+            "per_joint": {
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 0.0,
+                "linear_m": 4.255322758112241e-09
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 0.0,
+                "linear_m": 4.93245932210616e-09
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 0.0,
+                "linear_m": 1.1415826782706438e-08
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 0.0,
+                "linear_m": 9.12821587646239e-09
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 0.0,
+                "linear_m": 7.792221107680227e-09
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 0.0,
+                "linear_m": 2.6787732192018794e-08
+              }
+            }
+          },
+          "iterations": 1,
+          "joint_count": 36,
+          "joint_dof_count": 36,
+          "joint_kd": 0.0,
+          "joint_ke": 200000.0,
+          "max_body_speed_mps": 2.1925106048583984,
+          "max_closure_um": 353.7354393437981,
+          "max_contacts": 12,
+          "max_pelvis_tilt_deg": 90.02442977669689,
+          "mean_collision_us": null,
+          "mean_contacts": 10.86111111111111,
+          "mean_graph_step_us": 685.9191518742591,
+          "mean_solver_us": null,
+          "min_pelvis_height_m": 0.04251730442047119,
+          "mode": "Local-Global VBD, G=1",
+          "newton_path": "/home/jumyungc/JC/git/newton_g1_latest_integration/newton/__init__.py",
+          "p50_collision_us": null,
+          "p50_graph_step_us": 626.2449896894395,
+          "p50_solver_us": null,
+          "p90_collision_us": null,
+          "p90_graph_step_us": 695.3951437026263,
+          "p90_solver_us": null,
+          "relaxation": 0.65,
+          "returncode": 0,
+          "rms_all_linear_um": 612.5969098153616,
+          "rms_closure_per_joint_um": 76.4823985429648,
+          "rms_closure_um": 187.34285073444735,
+          "route": "current-g1",
+          "schedule": "G1 after local sweep 1 + 1 local reconcile sweep",
+          "selection_config": {
+            "alpha": 0.0,
+            "contact_scale": 4.0,
+            "iterations": 1,
+            "relaxation": 0.65
+          },
+          "shape_count": 35,
+          "solver": "vbd",
+          "status": "ok",
+          "stderr_tail": "",
+          "substeps_per_frame": 2,
+          "tangential_stiffness_scale": 1.0,
+          "timing_method": "cuda_graph_end_to_end",
+          "vbd_alpha": 0.0,
+          "vbd_solve": "local"
+        }
+      ],
+      "summary": {
+        "max_closure_um": {
+          "max": 353.7354393437981,
+          "median": 353.7354393437981,
+          "min": 353.7354393437981
+        },
+        "max_pelvis_tilt_deg": {
+          "max": 90.02442977669689,
+          "median": 90.02442977669689,
+          "min": 90.02442977669689
+        },
+        "min_pelvis_height_m": {
+          "max": 0.04251730442047119,
+          "median": 0.04251730442047119,
+          "min": 0.04251730442047119
+        },
+        "p50_graph_step_us": {
+          "max": 626.2449896894395,
+          "median": 625.980959739536,
+          "min": 625.6744964048266
+        },
+        "p90_graph_step_us": {
+          "max": 695.3951437026263,
+          "median": 694.2386040464044,
+          "min": 693.4224627912045
+        },
+        "rms_closure_um": {
+          "max": 187.34285073444735,
+          "median": 187.34285073444735,
+          "min": 187.34285073444735
+        }
+      },
+      "video": "report_media/dr_legs__current-g1.mp4",
+      "video_run": {
+        "articulation_count": 1,
+        "bilateral_solver": null,
+        "body_count": 31,
+        "closure_joint_count": 6,
+        "closure_joint_labels": [
+          "/DR_Legs/Joints/j6_l_o",
+          "/DR_Legs/Joints/j6_r_o",
+          "/DR_Legs/Joints/j9_l_i",
+          "/DR_Legs/Joints/j9_l_o",
+          "/DR_Legs/Joints/j9_r_i",
+          "/DR_Legs/Joints/j9_r_o"
+        ],
+        "completed_substeps": 360,
+        "constraints_alpha": null,
+        "constraints_gamma": null,
+        "contact_normal_damping_scale": 1.0,
+        "contact_normal_stiffness_scale": 4.0,
+        "contact_pipeline": "Newton",
+        "device": "cuda:0",
+        "diagonal_regularization": 0.0,
+        "disabled_drive_suffixes": [
+          "j6_l_i",
+          "j6_r_i"
+        ],
+        "display_color_rgb": [
+          0.7200000286102295,
+          0.75,
+          0.800000011920929
+        ],
+        "drive_kd": 2.0,
+        "drive_kp": 10.0,
+        "dt": 0.01,
+        "failure_substep": null,
+        "final_all": {
+          "angular_max_rad": 2.1640087369010778e-06,
+          "angular_norm_rad": 5.437629947302844e-06,
+          "linear_max_m": 0.0001616473104787858,
+          "linear_norm_m": 0.0005462860010891833,
+          "per_joint": {
+            "/DR_Legs/Joints/j1_l_i": {
+              "angular_rad": 1.2417584295265904e-06,
+              "linear_m": 7.562553266972899e-05
+            },
+            "/DR_Legs/Joints/j1_l_o": {
+              "angular_rad": 3.322489915832018e-07,
+              "linear_m": 7.65828948778792e-05
+            },
+            "/DR_Legs/Joints/j1_r_i": {
+              "angular_rad": 1.1740572747661452e-06,
+              "linear_m": 7.525127194134767e-05
+            },
+            "/DR_Legs/Joints/j1_r_o": {
+              "angular_rad": 3.802653634247281e-07,
+              "linear_m": 7.630058765415837e-05
+            },
+            "/DR_Legs/Joints/j2_l_i": {
+              "angular_rad": 1.648603107197352e-06,
+              "linear_m": 0.00016149455531771784
+            },
+            "/DR_Legs/Joints/j2_l_o": {
+              "angular_rad": 1.139640630783559e-06,
+              "linear_m": 0.00011265070706420436
+            },
+            "/DR_Legs/Joints/j2_r_i": {
+              "angular_rad": 1.5951630220362946e-06,
+              "linear_m": 0.00016091209306097335
+            },
+            "/DR_Legs/Joints/j2_r_o": {
+              "angular_rad": 1.1753635668569066e-06,
+              "linear_m": 0.00011233701145484217
+            },
+            "/DR_Legs/Joints/j3_l_i": {
+              "angular_rad": 1.051645204881151e-06,
+              "linear_m": 0.0001616473104787858
+            },
+            "/DR_Legs/Joints/j3_l_o": {
+              "angular_rad": 6.679212322295131e-07,
+              "linear_m": 0.00011243857010628791
+            },
+            "/DR_Legs/Joints/j3_r_i": {
+              "angular_rad": 1.109647457606354e-06,
+              "linear_m": 0.000161071831123475
+            },
+            "/DR_Legs/Joints/j3_r_o": {
+              "angular_rad": 6.339808954377022e-07,
+              "linear_m": 0.00011214848529546001
+            },
+            "/DR_Legs/Joints/j4_l_i": {
+              "angular_rad": 1.1545421417000312e-06,
+              "linear_m": 7.644906289388322e-05
+            },
+            "/DR_Legs/Joints/j4_l_o": {
+              "angular_rad": 4.15179564112813e-07,
+              "linear_m": 7.372261522669821e-05
+            },
+            "/DR_Legs/Joints/j4_r_i": {
+              "angular_rad": 9.55015050304805e-07,
+              "linear_m": 7.607689809366571e-05
+            },
+            "/DR_Legs/Joints/j4_r_o": {
+              "angular_rad": 2.923026713860158e-07,
+              "linear_m": 7.341155099602721e-05
+            },
+            "/DR_Legs/Joints/j5_l_i": {
+              "angular_rad": 8.874379267545453e-08,
+              "linear_m": 7.664531792714293e-05
+            },
+            "/DR_Legs/Joints/j5_l_o": {
+              "angular_rad": 9.712243645938493e-07,
+              "linear_m": 7.275381906242037e-05
+            },
+            "/DR_Legs/Joints/j5_r_i": {
+              "angular_rad": 2.505269930297591e-07,
+              "linear_m": 7.629144046487954e-05
+            },
+            "/DR_Legs/Joints/j5_r_o": {
+              "angular_rad": 6.473209333300267e-07,
+              "linear_m": 7.337782945631787e-05
+            },
+            "/DR_Legs/Joints/j6_l_i": {
+              "angular_rad": 1.6408720614562217e-06,
+              "linear_m": 7.84936911953967e-05
+            },
+            "/DR_Legs/Joints/j6_l_o": {
+              "angular_rad": 3.884124860223317e-07,
+              "linear_m": 7.274258284284308e-05
+            },
+            "/DR_Legs/Joints/j6_r_i": {
+              "angular_rad": 1.5385563802208083e-06,
+              "linear_m": 7.812672288952004e-05
+            },
+            "/DR_Legs/Joints/j6_r_o": {
+              "angular_rad": 2.1640087369010778e-06,
+              "linear_m": 7.142459325310487e-05
+            },
+            "/DR_Legs/Joints/j7_l_i": {
+              "angular_rad": 7.161012695703815e-08,
+              "linear_m": 8.594547965150339e-05
+            },
+            "/DR_Legs/Joints/j7_l_o": {
+              "angular_rad": 3.3987870435547845e-07,
+              "linear_m": 3.896200394807237e-05
+            },
+            "/DR_Legs/Joints/j7_r_i": {
+              "angular_rad": 5.519203363231878e-08,
+              "linear_m": 8.574225712182004e-05
+            },
+            "/DR_Legs/Joints/j7_r_o": {
+              "angular_rad": 6.12632674604701e-08,
+              "linear_m": 3.8988178661960884e-05
+            },
+            "/DR_Legs/Joints/j8_l_i": {
+              "angular_rad": 5.83624954325871e-07,
+              "linear_m": 8.593002736679715e-05
+            },
+            "/DR_Legs/Joints/j8_l_o": {
+              "angular_rad": 6.376183460479914e-07,
+              "linear_m": 3.8913432341706894e-05
+            },
+            "/DR_Legs/Joints/j8_r_i": {
+              "angular_rad": 2.7200914421699367e-07,
+              "linear_m": 8.575855801188589e-05
+            },
+            "/DR_Legs/Joints/j8_r_o": {
+              "angular_rad": 3.392977605355441e-07,
+              "linear_m": 3.8915346474440876e-05
+            },
+            "/DR_Legs/Joints/j9_l_i": {
+              "angular_rad": 2.492876432386471e-07,
+              "linear_m": 8.59415590408462e-05
+            },
+            "/DR_Legs/Joints/j9_l_o": {
+              "angular_rad": 4.163797540369054e-07,
+              "linear_m": 3.883143178104625e-05
+            },
+            "/DR_Legs/Joints/j9_r_i": {
+              "angular_rad": 2.0646235982349e-07,
+              "linear_m": 8.573528399971696e-05
+            },
+            "/DR_Legs/Joints/j9_r_o": {
+              "angular_rad": 3.055549741547875e-07,
+              "linear_m": 3.8836407611288905e-05
+            }
+          }
+        },
+        "final_closure": {
+          "angular_max_rad": 2.1640087369010778e-06,
+          "angular_norm_rad": 2.2815137627417847e-06,
+          "linear_max_m": 8.59415590408462e-05,
+          "linear_norm_m": 0.00016776648361105674,
+          "per_joint": {
+            "/DR_Legs/Joints/j6_l_o": {
+              "angular_rad": 3.884124860223317e-07,
+              "linear_m": 7.274258284284308e-05
+            },
+            "/DR_Legs/Joints/j6_r_o": {
+              "angular_rad": 2.1640087369010778e-06,
+              "linear_m": 7.142459325310487e-05
+            },
+            "/DR_Legs/Joints/j9_l_i": {
+              "angular_rad": 2.492876432386471e-07,
+              "linear_m": 8.59415590408462e-05
+            },
+            "/DR_Legs/Joints/j9_l_o": {
+              "angular_rad": 4.163797540369054e-07,
+              "linear_m": 3.883143178104625e-05
+            },
+            "/DR_Legs/Joints/j9_r_i": {
+              "angular_rad": 2.0646235982349e-07,
+              "linear_m": 8.573528399971696e-05
+            },
+            "/DR_Legs/Joints/j9_r_o": {
+              "angular_rad": 3.055549741547875e-07,
+              "linear_m": 3.8836407611288905e-05
+            }
+          }
+        },
+        "final_pelvis_height_m": 0.04251805692911148,
+        "fixture_asset_root": "/home/jumyungc/.cache/newton/newton-assets_disneyresearch_56289e70_261cd1f4/disneyresearch",
+        "fixture_model_signature": "25cf7e41422a7a99a6548bd91df3634b75b8bf9bea21bf68659e2fb4135ca1ab",
+        "fps": 50,
+        "frames": 180,
+        "global_active": true,
+        "global_island_count": 1,
+        "global_joint_count": 36,
+        "initial_closure": {
+          "angular_max_rad": 0.0,
+          "angular_norm_rad": 0.0,
+          "linear_max_m": 2.6787732192018794e-08,
+          "linear_norm_m": 3.216183543802025e-08,
+          "per_joint": {
+            "/DR_Legs/Joints/j6_l_o": {
+              "angular_rad": 0.0,
+              "linear_m": 4.255322758112241e-09
+            },
+            "/DR_Legs/Joints/j6_r_o": {
+              "angular_rad": 0.0,
+              "linear_m": 4.93245932210616e-09
+            },
+            "/DR_Legs/Joints/j9_l_i": {
+              "angular_rad": 0.0,
+              "linear_m": 1.1415826782706438e-08
+            },
+            "/DR_Legs/Joints/j9_l_o": {
+              "angular_rad": 0.0,
+              "linear_m": 9.12821587646239e-09
+            },
+            "/DR_Legs/Joints/j9_r_i": {
+              "angular_rad": 0.0,
+              "linear_m": 7.792221107680227e-09
+            },
+            "/DR_Legs/Joints/j9_r_o": {
+              "angular_rad": 0.0,
+              "linear_m": 2.6787732192018794e-08
+            }
+          }
+        },
+        "iterations": 1,
+        "joint_count": 36,
+        "joint_dof_count": 36,
+        "joint_kd": 0.0,
+        "joint_ke": 200000.0,
+        "max_body_speed_mps": 2.1925106048583984,
+        "max_closure_um": 353.7354393437981,
+        "max_contacts": 12,
+        "max_pelvis_tilt_deg": 90.02442977669689,
+        "mean_collision_us": null,
+        "mean_contacts": 10.86111111111111,
+        "mean_graph_step_us": 696.189997046638,
+        "mean_solver_us": null,
+        "min_pelvis_height_m": 0.04251730442047119,
+        "mode": "Local-Global VBD, G=1",
+        "newton_path": "/home/jumyungc/JC/git/newton_g1_latest_integration/newton/__init__.py",
+        "p50_collision_us": null,
+        "p50_graph_step_us": 625.6280466914177,
+        "p50_solver_us": null,
+        "p90_collision_us": null,
+        "p90_graph_step_us": 693.0951727554202,
+        "p90_solver_us": null,
+        "relaxation": 0.65,
+        "render": {
+          "device": "cuda:0",
+          "failure_frame": null,
+          "finite": true,
+          "fps": 50,
+          "frames": 180,
+          "mode": "Local-Global VBD, G=1",
+          "rms_closure_um": 105.84900463423043,
+          "scenario": "dr-legs"
+        },
+        "returncode": 0,
+        "rms_all_linear_um": 612.5969098153616,
+        "rms_closure_per_joint_um": 76.4823985429648,
+        "rms_closure_um": 187.34285073444735,
+        "route": "current-g1",
+        "schedule": "G1 after local sweep 1 + 1 local reconcile sweep",
+        "selection_config": {
+          "alpha": 0.0,
+          "contact_scale": 4.0,
+          "iterations": 1,
+          "relaxation": 0.65
+        },
+        "shape_count": 35,
+        "solver": "vbd",
+        "status": "ok",
+        "stderr_tail": "",
+        "substeps_per_frame": 2,
+        "tangential_stiffness_scale": 1.0,
+        "timing_method": "cuda_graph_end_to_end",
+        "vbd_alpha": 0.0,
+        "vbd_solve": "local"
+      }
+    },
+    "upstream-main": {
+      "poster": "report_media/dr_legs__upstream-main.jpg",
+      "runs": [
+        {
+          "articulation_count": 1,
+          "bilateral_solver": null,
+          "body_count": 31,
+          "closure_joint_count": 6,
+          "closure_joint_labels": [
+            "/DR_Legs/Joints/j6_l_o",
+            "/DR_Legs/Joints/j6_r_o",
+            "/DR_Legs/Joints/j9_l_i",
+            "/DR_Legs/Joints/j9_l_o",
+            "/DR_Legs/Joints/j9_r_i",
+            "/DR_Legs/Joints/j9_r_o"
+          ],
+          "completed_substeps": 360,
+          "constraints_alpha": null,
+          "constraints_gamma": null,
+          "contact_normal_damping_scale": 1.0,
+          "contact_normal_stiffness_scale": 8.0,
+          "contact_pipeline": "Newton",
+          "device": "cuda:0",
+          "diagonal_regularization": 0.0,
+          "disabled_drive_suffixes": [
+            "j6_l_i",
+            "j6_r_i"
+          ],
+          "display_color_rgb": [
+            0.7200000286102295,
+            0.75,
+            0.800000011920929
+          ],
+          "drive_kd": 2.0,
+          "drive_kp": 10.0,
+          "dt": 0.01,
+          "failure_substep": null,
+          "final_all": {
+            "angular_max_rad": 3.4138735283952435e-05,
+            "angular_norm_rad": 8.577292651728933e-05,
+            "linear_max_m": 0.0007424455600318853,
+            "linear_norm_m": 0.0034750002532967506,
+            "per_joint": {
+              "/DR_Legs/Joints/j1_l_i": {
+                "angular_rad": 2.6176312105683784e-05,
+                "linear_m": 0.00035142769571289286
+              },
+              "/DR_Legs/Joints/j1_l_o": {
+                "angular_rad": 3.4138735283952435e-05,
+                "linear_m": 0.0005304768138015454
+              },
+              "/DR_Legs/Joints/j1_r_i": {
+                "angular_rad": 2.6594800372686726e-05,
+                "linear_m": 0.00035589051582042206
+              },
+              "/DR_Legs/Joints/j1_r_o": {
+                "angular_rad": 3.4064831469514426e-05,
+                "linear_m": 0.0005311001904455752
+              },
+              "/DR_Legs/Joints/j2_l_i": {
+                "angular_rad": 9.920911077789851e-06,
+                "linear_m": 0.0006390729532736439
+              },
+              "/DR_Legs/Joints/j2_l_o": {
+                "angular_rad": 1.1772704244441041e-05,
+                "linear_m": 0.0005721751983934373
+              },
+              "/DR_Legs/Joints/j2_r_i": {
+                "angular_rad": 1.005321856001564e-05,
+                "linear_m": 0.0006451122974378414
+              },
+              "/DR_Legs/Joints/j2_r_o": {
+                "angular_rad": 1.1718069399964578e-05,
+                "linear_m": 0.0005710123686414527
+              },
+              "/DR_Legs/Joints/j3_l_i": {
+                "angular_rad": 1.5144439621579037e-05,
+                "linear_m": 0.000640666643576086
+              },
+              "/DR_Legs/Joints/j3_l_o": {
+                "angular_rad": 1.2944125464711577e-05,
+                "linear_m": 0.0005732856141431481
+              },
+              "/DR_Legs/Joints/j3_r_i": {
+                "angular_rad": 1.4997057472769603e-05,
+                "linear_m": 0.0006467253080169596
+              },
+              "/DR_Legs/Joints/j3_r_o": {
+                "angular_rad": 1.3047067398625949e-05,
+                "linear_m": 0.0005721121481311026
+              },
+              "/DR_Legs/Joints/j4_l_i": {
+                "angular_rad": 1.0553646443898991e-05,
+                "linear_m": 0.0004930446916413783
+              },
+              "/DR_Legs/Joints/j4_l_o": {
+                "angular_rad": 1.4346229492526192e-05,
+                "linear_m": 0.0006012656823514979
+              },
+              "/DR_Legs/Joints/j4_r_i": {
+                "angular_rad": 1.0733274182747072e-05,
+                "linear_m": 0.000501448796535013
+              },
+              "/DR_Legs/Joints/j4_r_o": {
+                "angular_rad": 1.4272070441184818e-05,
+                "linear_m": 0.0006002102870364415
+              },
+              "/DR_Legs/Joints/j5_l_i": {
+                "angular_rad": 5.1785960661413645e-06,
+                "linear_m": 0.0004939062441738852
+              },
+              "/DR_Legs/Joints/j5_l_o": {
+                "angular_rad": 1.6115650578203744e-06,
+                "linear_m": 0.0006078708142369951
+              },
+              "/DR_Legs/Joints/j5_r_i": {
+                "angular_rad": 5.1961307664593884e-06,
+                "linear_m": 0.0005023160473317903
+              },
+              "/DR_Legs/Joints/j5_r_o": {
+                "angular_rad": 7.282359298220648e-06,
+                "linear_m": 0.0006007746526568149
+              },
+              "/DR_Legs/Joints/j6_l_i": {
+                "angular_rad": 3.631755950784741e-06,
+                "linear_m": 0.0005176598356315996
+              },
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 1.354171364648983e-06,
+                "linear_m": 0.000608017677153403
+              },
+              "/DR_Legs/Joints/j6_r_i": {
+                "angular_rad": 3.838206795339118e-06,
+                "linear_m": 0.0005264113562899594
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 3.347951210616506e-06,
+                "linear_m": 0.0006135932439156898
+              },
+              "/DR_Legs/Joints/j7_l_i": {
+                "angular_rad": 6.632963594569508e-06,
+                "linear_m": 0.0004830867040124438
+              },
+              "/DR_Legs/Joints/j7_l_o": {
+                "angular_rad": 1.1480374395740442e-05,
+                "linear_m": 0.0007407819140599751
+              },
+              "/DR_Legs/Joints/j7_r_i": {
+                "angular_rad": 6.887415180476824e-06,
+                "linear_m": 0.00047821840352776744
+              },
+              "/DR_Legs/Joints/j7_r_o": {
+                "angular_rad": 1.1502737912560773e-05,
+                "linear_m": 0.0007424455600318853
+              },
+              "/DR_Legs/Joints/j8_l_i": {
+                "angular_rad": 3.7185826525859096e-07,
+                "linear_m": 0.0004619937832915271
+              },
+              "/DR_Legs/Joints/j8_l_o": {
+                "angular_rad": 2.7694167095487936e-06,
+                "linear_m": 0.0007338840858338575
+              },
+              "/DR_Legs/Joints/j8_r_i": {
+                "angular_rad": 5.626491149966031e-07,
+                "linear_m": 0.0004568804594448511
+              },
+              "/DR_Legs/Joints/j8_r_o": {
+                "angular_rad": 2.842102251217209e-06,
+                "linear_m": 0.0007354247613135158
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 1.3657417426566254e-05,
+                "linear_m": 0.00046189926280863243
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 2.0506226496218682e-05,
+                "linear_m": 0.0007338536302974051
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 1.3793946215525698e-05,
+                "linear_m": 0.00045677536317969165
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 2.038754817459167e-05,
+                "linear_m": 0.0007354011603299554
+              }
+            }
+          },
+          "final_closure": {
+            "angular_max_rad": 2.0506226496218682e-05,
+            "angular_norm_rad": 3.5014254326478416e-05,
+            "linear_max_m": 0.0007354011603299554,
+            "linear_norm_m": 0.0014991773889091382,
+            "per_joint": {
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 1.354171364648983e-06,
+                "linear_m": 0.000608017677153403
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 3.347951210616506e-06,
+                "linear_m": 0.0006135932439156898
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 1.3657417426566254e-05,
+                "linear_m": 0.00046189926280863243
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 2.0506226496218682e-05,
+                "linear_m": 0.0007338536302974051
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 1.3793946215525698e-05,
+                "linear_m": 0.00045677536317969165
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 2.038754817459167e-05,
+                "linear_m": 0.0007354011603299554
+              }
+            }
+          },
+          "final_pelvis_height_m": 0.09199783951044083,
+          "fixture_asset_root": "/home/jumyungc/.cache/newton/newton-assets_disneyresearch_56289e70_261cd1f4/disneyresearch",
+          "fixture_model_signature": "25cf7e41422a7a99a6548bd91df3634b75b8bf9bea21bf68659e2fb4135ca1ab",
+          "fps": 50,
+          "frames": 180,
+          "global_active": false,
+          "global_island_count": 0,
+          "global_joint_count": 0,
+          "initial_closure": {
+            "angular_max_rad": 0.0,
+            "angular_norm_rad": 0.0,
+            "linear_max_m": 2.6787732192018794e-08,
+            "linear_norm_m": 3.216183543802025e-08,
+            "per_joint": {
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 0.0,
+                "linear_m": 4.255322758112241e-09
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 0.0,
+                "linear_m": 4.93245932210616e-09
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 0.0,
+                "linear_m": 1.1415826782706438e-08
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 0.0,
+                "linear_m": 9.12821587646239e-09
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 0.0,
+                "linear_m": 7.792221107680227e-09
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 0.0,
+                "linear_m": 2.6787732192018794e-08
+              }
+            }
+          },
+          "iterations": 16,
+          "joint_count": 36,
+          "joint_dof_count": 36,
+          "joint_kd": 0.0,
+          "joint_ke": 200000.0,
+          "max_body_speed_mps": 1.5696048736572266,
+          "max_closure_um": 3041.60222950733,
+          "max_contacts": 22,
+          "max_pelvis_tilt_deg": 81.53792338864352,
+          "mean_collision_us": null,
+          "mean_contacts": 9.544444444444444,
+          "mean_graph_step_us": 1506.7426296060576,
+          "mean_solver_us": null,
+          "min_pelvis_height_m": 0.03021274507045746,
+          "mode": "Upstream main compliant VBD, G=0",
+          "newton_path": "/home/jumyungc/JC/git/newton_upstream_main_20260910/newton/__init__.py",
+          "p50_collision_us": null,
+          "p50_graph_step_us": 1398.9554718136787,
+          "p50_solver_us": null,
+          "p90_collision_us": null,
+          "p90_graph_step_us": 1745.6050263717777,
+          "p90_solver_us": null,
+          "relaxation": 0.65,
+          "returncode": 0,
+          "rms_all_linear_um": 3036.3538510537296,
+          "rms_closure_per_joint_um": 483.02652260787943,
+          "rms_closure_um": 1183.1685126202276,
+          "route": "upstream-main",
+          "schedule": "16 local sweeps",
+          "selection_config": {
+            "alpha": 0.0,
+            "contact_scale": 8.0,
+            "iterations": 16,
+            "relaxation": 0.65
+          },
+          "shape_count": 35,
+          "solver": "vbd",
+          "status": "ok",
+          "stderr_tail": "",
+          "substeps_per_frame": 2,
+          "tangential_stiffness_scale": 1.0,
+          "timing_method": "cuda_graph_end_to_end",
+          "vbd_alpha": 0.0,
+          "vbd_solve": "local"
+        },
+        {
+          "articulation_count": 1,
+          "bilateral_solver": null,
+          "body_count": 31,
+          "closure_joint_count": 6,
+          "closure_joint_labels": [
+            "/DR_Legs/Joints/j6_l_o",
+            "/DR_Legs/Joints/j6_r_o",
+            "/DR_Legs/Joints/j9_l_i",
+            "/DR_Legs/Joints/j9_l_o",
+            "/DR_Legs/Joints/j9_r_i",
+            "/DR_Legs/Joints/j9_r_o"
+          ],
+          "completed_substeps": 360,
+          "constraints_alpha": null,
+          "constraints_gamma": null,
+          "contact_normal_damping_scale": 1.0,
+          "contact_normal_stiffness_scale": 8.0,
+          "contact_pipeline": "Newton",
+          "device": "cuda:0",
+          "diagonal_regularization": 0.0,
+          "disabled_drive_suffixes": [
+            "j6_l_i",
+            "j6_r_i"
+          ],
+          "display_color_rgb": [
+            0.7200000286102295,
+            0.75,
+            0.800000011920929
+          ],
+          "drive_kd": 2.0,
+          "drive_kp": 10.0,
+          "dt": 0.01,
+          "failure_substep": null,
+          "final_all": {
+            "angular_max_rad": 3.4138735283952435e-05,
+            "angular_norm_rad": 8.577292651728933e-05,
+            "linear_max_m": 0.0007424455600318853,
+            "linear_norm_m": 0.0034750002532967506,
+            "per_joint": {
+              "/DR_Legs/Joints/j1_l_i": {
+                "angular_rad": 2.6176312105683784e-05,
+                "linear_m": 0.00035142769571289286
+              },
+              "/DR_Legs/Joints/j1_l_o": {
+                "angular_rad": 3.4138735283952435e-05,
+                "linear_m": 0.0005304768138015454
+              },
+              "/DR_Legs/Joints/j1_r_i": {
+                "angular_rad": 2.6594800372686726e-05,
+                "linear_m": 0.00035589051582042206
+              },
+              "/DR_Legs/Joints/j1_r_o": {
+                "angular_rad": 3.4064831469514426e-05,
+                "linear_m": 0.0005311001904455752
+              },
+              "/DR_Legs/Joints/j2_l_i": {
+                "angular_rad": 9.920911077789851e-06,
+                "linear_m": 0.0006390729532736439
+              },
+              "/DR_Legs/Joints/j2_l_o": {
+                "angular_rad": 1.1772704244441041e-05,
+                "linear_m": 0.0005721751983934373
+              },
+              "/DR_Legs/Joints/j2_r_i": {
+                "angular_rad": 1.005321856001564e-05,
+                "linear_m": 0.0006451122974378414
+              },
+              "/DR_Legs/Joints/j2_r_o": {
+                "angular_rad": 1.1718069399964578e-05,
+                "linear_m": 0.0005710123686414527
+              },
+              "/DR_Legs/Joints/j3_l_i": {
+                "angular_rad": 1.5144439621579037e-05,
+                "linear_m": 0.000640666643576086
+              },
+              "/DR_Legs/Joints/j3_l_o": {
+                "angular_rad": 1.2944125464711577e-05,
+                "linear_m": 0.0005732856141431481
+              },
+              "/DR_Legs/Joints/j3_r_i": {
+                "angular_rad": 1.4997057472769603e-05,
+                "linear_m": 0.0006467253080169596
+              },
+              "/DR_Legs/Joints/j3_r_o": {
+                "angular_rad": 1.3047067398625949e-05,
+                "linear_m": 0.0005721121481311026
+              },
+              "/DR_Legs/Joints/j4_l_i": {
+                "angular_rad": 1.0553646443898991e-05,
+                "linear_m": 0.0004930446916413783
+              },
+              "/DR_Legs/Joints/j4_l_o": {
+                "angular_rad": 1.4346229492526192e-05,
+                "linear_m": 0.0006012656823514979
+              },
+              "/DR_Legs/Joints/j4_r_i": {
+                "angular_rad": 1.0733274182747072e-05,
+                "linear_m": 0.000501448796535013
+              },
+              "/DR_Legs/Joints/j4_r_o": {
+                "angular_rad": 1.4272070441184818e-05,
+                "linear_m": 0.0006002102870364415
+              },
+              "/DR_Legs/Joints/j5_l_i": {
+                "angular_rad": 5.1785960661413645e-06,
+                "linear_m": 0.0004939062441738852
+              },
+              "/DR_Legs/Joints/j5_l_o": {
+                "angular_rad": 1.6115650578203744e-06,
+                "linear_m": 0.0006078708142369951
+              },
+              "/DR_Legs/Joints/j5_r_i": {
+                "angular_rad": 5.1961307664593884e-06,
+                "linear_m": 0.0005023160473317903
+              },
+              "/DR_Legs/Joints/j5_r_o": {
+                "angular_rad": 7.282359298220648e-06,
+                "linear_m": 0.0006007746526568149
+              },
+              "/DR_Legs/Joints/j6_l_i": {
+                "angular_rad": 3.631755950784741e-06,
+                "linear_m": 0.0005176598356315996
+              },
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 1.354171364648983e-06,
+                "linear_m": 0.000608017677153403
+              },
+              "/DR_Legs/Joints/j6_r_i": {
+                "angular_rad": 3.838206795339118e-06,
+                "linear_m": 0.0005264113562899594
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 3.347951210616506e-06,
+                "linear_m": 0.0006135932439156898
+              },
+              "/DR_Legs/Joints/j7_l_i": {
+                "angular_rad": 6.632963594569508e-06,
+                "linear_m": 0.0004830867040124438
+              },
+              "/DR_Legs/Joints/j7_l_o": {
+                "angular_rad": 1.1480374395740442e-05,
+                "linear_m": 0.0007407819140599751
+              },
+              "/DR_Legs/Joints/j7_r_i": {
+                "angular_rad": 6.887415180476824e-06,
+                "linear_m": 0.00047821840352776744
+              },
+              "/DR_Legs/Joints/j7_r_o": {
+                "angular_rad": 1.1502737912560773e-05,
+                "linear_m": 0.0007424455600318853
+              },
+              "/DR_Legs/Joints/j8_l_i": {
+                "angular_rad": 3.7185826525859096e-07,
+                "linear_m": 0.0004619937832915271
+              },
+              "/DR_Legs/Joints/j8_l_o": {
+                "angular_rad": 2.7694167095487936e-06,
+                "linear_m": 0.0007338840858338575
+              },
+              "/DR_Legs/Joints/j8_r_i": {
+                "angular_rad": 5.626491149966031e-07,
+                "linear_m": 0.0004568804594448511
+              },
+              "/DR_Legs/Joints/j8_r_o": {
+                "angular_rad": 2.842102251217209e-06,
+                "linear_m": 0.0007354247613135158
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 1.3657417426566254e-05,
+                "linear_m": 0.00046189926280863243
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 2.0506226496218682e-05,
+                "linear_m": 0.0007338536302974051
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 1.3793946215525698e-05,
+                "linear_m": 0.00045677536317969165
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 2.038754817459167e-05,
+                "linear_m": 0.0007354011603299554
+              }
+            }
+          },
+          "final_closure": {
+            "angular_max_rad": 2.0506226496218682e-05,
+            "angular_norm_rad": 3.5014254326478416e-05,
+            "linear_max_m": 0.0007354011603299554,
+            "linear_norm_m": 0.0014991773889091382,
+            "per_joint": {
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 1.354171364648983e-06,
+                "linear_m": 0.000608017677153403
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 3.347951210616506e-06,
+                "linear_m": 0.0006135932439156898
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 1.3657417426566254e-05,
+                "linear_m": 0.00046189926280863243
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 2.0506226496218682e-05,
+                "linear_m": 0.0007338536302974051
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 1.3793946215525698e-05,
+                "linear_m": 0.00045677536317969165
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 2.038754817459167e-05,
+                "linear_m": 0.0007354011603299554
+              }
+            }
+          },
+          "final_pelvis_height_m": 0.09199783951044083,
+          "fixture_asset_root": "/home/jumyungc/.cache/newton/newton-assets_disneyresearch_56289e70_261cd1f4/disneyresearch",
+          "fixture_model_signature": "25cf7e41422a7a99a6548bd91df3634b75b8bf9bea21bf68659e2fb4135ca1ab",
+          "fps": 50,
+          "frames": 180,
+          "global_active": false,
+          "global_island_count": 0,
+          "global_joint_count": 0,
+          "initial_closure": {
+            "angular_max_rad": 0.0,
+            "angular_norm_rad": 0.0,
+            "linear_max_m": 2.6787732192018794e-08,
+            "linear_norm_m": 3.216183543802025e-08,
+            "per_joint": {
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 0.0,
+                "linear_m": 4.255322758112241e-09
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 0.0,
+                "linear_m": 4.93245932210616e-09
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 0.0,
+                "linear_m": 1.1415826782706438e-08
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 0.0,
+                "linear_m": 9.12821587646239e-09
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 0.0,
+                "linear_m": 7.792221107680227e-09
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 0.0,
+                "linear_m": 2.6787732192018794e-08
+              }
+            }
+          },
+          "iterations": 16,
+          "joint_count": 36,
+          "joint_dof_count": 36,
+          "joint_kd": 0.0,
+          "joint_ke": 200000.0,
+          "max_body_speed_mps": 1.5696048736572266,
+          "max_closure_um": 3041.60222950733,
+          "max_contacts": 22,
+          "max_pelvis_tilt_deg": 81.53792338864352,
+          "mean_collision_us": null,
+          "mean_contacts": 9.544444444444444,
+          "mean_graph_step_us": 1512.0934475870692,
+          "mean_solver_us": null,
+          "min_pelvis_height_m": 0.03021274507045746,
+          "mode": "Upstream main compliant VBD, G=0",
+          "newton_path": "/home/jumyungc/JC/git/newton_upstream_main_20260910/newton/__init__.py",
+          "p50_collision_us": null,
+          "p50_graph_step_us": 1399.8700305819511,
+          "p50_solver_us": null,
+          "p90_collision_us": null,
+          "p90_graph_step_us": 1889.713143464178,
+          "p90_solver_us": null,
+          "relaxation": 0.65,
+          "returncode": 0,
+          "rms_all_linear_um": 3036.3538510537296,
+          "rms_closure_per_joint_um": 483.02652260787943,
+          "rms_closure_um": 1183.1685126202276,
+          "route": "upstream-main",
+          "schedule": "16 local sweeps",
+          "selection_config": {
+            "alpha": 0.0,
+            "contact_scale": 8.0,
+            "iterations": 16,
+            "relaxation": 0.65
+          },
+          "shape_count": 35,
+          "solver": "vbd",
+          "status": "ok",
+          "stderr_tail": "",
+          "substeps_per_frame": 2,
+          "tangential_stiffness_scale": 1.0,
+          "timing_method": "cuda_graph_end_to_end",
+          "vbd_alpha": 0.0,
+          "vbd_solve": "local"
+        },
+        {
+          "articulation_count": 1,
+          "bilateral_solver": null,
+          "body_count": 31,
+          "closure_joint_count": 6,
+          "closure_joint_labels": [
+            "/DR_Legs/Joints/j6_l_o",
+            "/DR_Legs/Joints/j6_r_o",
+            "/DR_Legs/Joints/j9_l_i",
+            "/DR_Legs/Joints/j9_l_o",
+            "/DR_Legs/Joints/j9_r_i",
+            "/DR_Legs/Joints/j9_r_o"
+          ],
+          "completed_substeps": 360,
+          "constraints_alpha": null,
+          "constraints_gamma": null,
+          "contact_normal_damping_scale": 1.0,
+          "contact_normal_stiffness_scale": 8.0,
+          "contact_pipeline": "Newton",
+          "device": "cuda:0",
+          "diagonal_regularization": 0.0,
+          "disabled_drive_suffixes": [
+            "j6_l_i",
+            "j6_r_i"
+          ],
+          "display_color_rgb": [
+            0.7200000286102295,
+            0.75,
+            0.800000011920929
+          ],
+          "drive_kd": 2.0,
+          "drive_kp": 10.0,
+          "dt": 0.01,
+          "failure_substep": null,
+          "final_all": {
+            "angular_max_rad": 3.4138735283952435e-05,
+            "angular_norm_rad": 8.577292651728933e-05,
+            "linear_max_m": 0.0007424455600318853,
+            "linear_norm_m": 0.0034750002532967506,
+            "per_joint": {
+              "/DR_Legs/Joints/j1_l_i": {
+                "angular_rad": 2.6176312105683784e-05,
+                "linear_m": 0.00035142769571289286
+              },
+              "/DR_Legs/Joints/j1_l_o": {
+                "angular_rad": 3.4138735283952435e-05,
+                "linear_m": 0.0005304768138015454
+              },
+              "/DR_Legs/Joints/j1_r_i": {
+                "angular_rad": 2.6594800372686726e-05,
+                "linear_m": 0.00035589051582042206
+              },
+              "/DR_Legs/Joints/j1_r_o": {
+                "angular_rad": 3.4064831469514426e-05,
+                "linear_m": 0.0005311001904455752
+              },
+              "/DR_Legs/Joints/j2_l_i": {
+                "angular_rad": 9.920911077789851e-06,
+                "linear_m": 0.0006390729532736439
+              },
+              "/DR_Legs/Joints/j2_l_o": {
+                "angular_rad": 1.1772704244441041e-05,
+                "linear_m": 0.0005721751983934373
+              },
+              "/DR_Legs/Joints/j2_r_i": {
+                "angular_rad": 1.005321856001564e-05,
+                "linear_m": 0.0006451122974378414
+              },
+              "/DR_Legs/Joints/j2_r_o": {
+                "angular_rad": 1.1718069399964578e-05,
+                "linear_m": 0.0005710123686414527
+              },
+              "/DR_Legs/Joints/j3_l_i": {
+                "angular_rad": 1.5144439621579037e-05,
+                "linear_m": 0.000640666643576086
+              },
+              "/DR_Legs/Joints/j3_l_o": {
+                "angular_rad": 1.2944125464711577e-05,
+                "linear_m": 0.0005732856141431481
+              },
+              "/DR_Legs/Joints/j3_r_i": {
+                "angular_rad": 1.4997057472769603e-05,
+                "linear_m": 0.0006467253080169596
+              },
+              "/DR_Legs/Joints/j3_r_o": {
+                "angular_rad": 1.3047067398625949e-05,
+                "linear_m": 0.0005721121481311026
+              },
+              "/DR_Legs/Joints/j4_l_i": {
+                "angular_rad": 1.0553646443898991e-05,
+                "linear_m": 0.0004930446916413783
+              },
+              "/DR_Legs/Joints/j4_l_o": {
+                "angular_rad": 1.4346229492526192e-05,
+                "linear_m": 0.0006012656823514979
+              },
+              "/DR_Legs/Joints/j4_r_i": {
+                "angular_rad": 1.0733274182747072e-05,
+                "linear_m": 0.000501448796535013
+              },
+              "/DR_Legs/Joints/j4_r_o": {
+                "angular_rad": 1.4272070441184818e-05,
+                "linear_m": 0.0006002102870364415
+              },
+              "/DR_Legs/Joints/j5_l_i": {
+                "angular_rad": 5.1785960661413645e-06,
+                "linear_m": 0.0004939062441738852
+              },
+              "/DR_Legs/Joints/j5_l_o": {
+                "angular_rad": 1.6115650578203744e-06,
+                "linear_m": 0.0006078708142369951
+              },
+              "/DR_Legs/Joints/j5_r_i": {
+                "angular_rad": 5.1961307664593884e-06,
+                "linear_m": 0.0005023160473317903
+              },
+              "/DR_Legs/Joints/j5_r_o": {
+                "angular_rad": 7.282359298220648e-06,
+                "linear_m": 0.0006007746526568149
+              },
+              "/DR_Legs/Joints/j6_l_i": {
+                "angular_rad": 3.631755950784741e-06,
+                "linear_m": 0.0005176598356315996
+              },
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 1.354171364648983e-06,
+                "linear_m": 0.000608017677153403
+              },
+              "/DR_Legs/Joints/j6_r_i": {
+                "angular_rad": 3.838206795339118e-06,
+                "linear_m": 0.0005264113562899594
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 3.347951210616506e-06,
+                "linear_m": 0.0006135932439156898
+              },
+              "/DR_Legs/Joints/j7_l_i": {
+                "angular_rad": 6.632963594569508e-06,
+                "linear_m": 0.0004830867040124438
+              },
+              "/DR_Legs/Joints/j7_l_o": {
+                "angular_rad": 1.1480374395740442e-05,
+                "linear_m": 0.0007407819140599751
+              },
+              "/DR_Legs/Joints/j7_r_i": {
+                "angular_rad": 6.887415180476824e-06,
+                "linear_m": 0.00047821840352776744
+              },
+              "/DR_Legs/Joints/j7_r_o": {
+                "angular_rad": 1.1502737912560773e-05,
+                "linear_m": 0.0007424455600318853
+              },
+              "/DR_Legs/Joints/j8_l_i": {
+                "angular_rad": 3.7185826525859096e-07,
+                "linear_m": 0.0004619937832915271
+              },
+              "/DR_Legs/Joints/j8_l_o": {
+                "angular_rad": 2.7694167095487936e-06,
+                "linear_m": 0.0007338840858338575
+              },
+              "/DR_Legs/Joints/j8_r_i": {
+                "angular_rad": 5.626491149966031e-07,
+                "linear_m": 0.0004568804594448511
+              },
+              "/DR_Legs/Joints/j8_r_o": {
+                "angular_rad": 2.842102251217209e-06,
+                "linear_m": 0.0007354247613135158
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 1.3657417426566254e-05,
+                "linear_m": 0.00046189926280863243
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 2.0506226496218682e-05,
+                "linear_m": 0.0007338536302974051
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 1.3793946215525698e-05,
+                "linear_m": 0.00045677536317969165
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 2.038754817459167e-05,
+                "linear_m": 0.0007354011603299554
+              }
+            }
+          },
+          "final_closure": {
+            "angular_max_rad": 2.0506226496218682e-05,
+            "angular_norm_rad": 3.5014254326478416e-05,
+            "linear_max_m": 0.0007354011603299554,
+            "linear_norm_m": 0.0014991773889091382,
+            "per_joint": {
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 1.354171364648983e-06,
+                "linear_m": 0.000608017677153403
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 3.347951210616506e-06,
+                "linear_m": 0.0006135932439156898
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 1.3657417426566254e-05,
+                "linear_m": 0.00046189926280863243
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 2.0506226496218682e-05,
+                "linear_m": 0.0007338536302974051
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 1.3793946215525698e-05,
+                "linear_m": 0.00045677536317969165
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 2.038754817459167e-05,
+                "linear_m": 0.0007354011603299554
+              }
+            }
+          },
+          "final_pelvis_height_m": 0.09199783951044083,
+          "fixture_asset_root": "/home/jumyungc/.cache/newton/newton-assets_disneyresearch_56289e70_261cd1f4/disneyresearch",
+          "fixture_model_signature": "25cf7e41422a7a99a6548bd91df3634b75b8bf9bea21bf68659e2fb4135ca1ab",
+          "fps": 50,
+          "frames": 180,
+          "global_active": false,
+          "global_island_count": 0,
+          "global_joint_count": 0,
+          "initial_closure": {
+            "angular_max_rad": 0.0,
+            "angular_norm_rad": 0.0,
+            "linear_max_m": 2.6787732192018794e-08,
+            "linear_norm_m": 3.216183543802025e-08,
+            "per_joint": {
+              "/DR_Legs/Joints/j6_l_o": {
+                "angular_rad": 0.0,
+                "linear_m": 4.255322758112241e-09
+              },
+              "/DR_Legs/Joints/j6_r_o": {
+                "angular_rad": 0.0,
+                "linear_m": 4.93245932210616e-09
+              },
+              "/DR_Legs/Joints/j9_l_i": {
+                "angular_rad": 0.0,
+                "linear_m": 1.1415826782706438e-08
+              },
+              "/DR_Legs/Joints/j9_l_o": {
+                "angular_rad": 0.0,
+                "linear_m": 9.12821587646239e-09
+              },
+              "/DR_Legs/Joints/j9_r_i": {
+                "angular_rad": 0.0,
+                "linear_m": 7.792221107680227e-09
+              },
+              "/DR_Legs/Joints/j9_r_o": {
+                "angular_rad": 0.0,
+                "linear_m": 2.6787732192018794e-08
+              }
+            }
+          },
+          "iterations": 16,
+          "joint_count": 36,
+          "joint_dof_count": 36,
+          "joint_kd": 0.0,
+          "joint_ke": 200000.0,
+          "max_body_speed_mps": 1.5696048736572266,
+          "max_closure_um": 3041.60222950733,
+          "max_contacts": 22,
+          "max_pelvis_tilt_deg": 81.53792338864352,
+          "mean_collision_us": null,
+          "mean_contacts": 9.544444444444444,
+          "mean_graph_step_us": 1509.9199156632976,
+          "mean_solver_us": null,
+          "min_pelvis_height_m": 0.03021274507045746,
+          "mode": "Upstream main compliant VBD, G=0",
+          "newton_path": "/home/jumyungc/JC/git/newton_upstream_main_20260910/newton/__init__.py",
+          "p50_collision_us": null,
+          "p50_graph_step_us": 1400.4480326548219,
+          "p50_solver_us": null,
+          "p90_collision_us": null,
+          "p90_graph_step_us": 1718.120288569481,
+          "p90_solver_us": null,
+          "relaxation": 0.65,
+          "returncode": 0,
+          "rms_all_linear_um": 3036.3538510537296,
+          "rms_closure_per_joint_um": 483.02652260787943,
+          "rms_closure_um": 1183.1685126202276,
+          "route": "upstream-main",
+          "schedule": "16 local sweeps",
+          "selection_config": {
+            "alpha": 0.0,
+            "contact_scale": 8.0,
+            "iterations": 16,
+            "relaxation": 0.65
+          },
+          "shape_count": 35,
+          "solver": "vbd",
+          "status": "ok",
+          "stderr_tail": "",
+          "substeps_per_frame": 2,
+          "tangential_stiffness_scale": 1.0,
+          "timing_method": "cuda_graph_end_to_end",
+          "vbd_alpha": 0.0,
+          "vbd_solve": "local"
+        }
+      ],
+      "summary": {
+        "max_closure_um": {
+          "max": 3041.60222950733,
+          "median": 3041.60222950733,
+          "min": 3041.60222950733
+        },
+        "max_pelvis_tilt_deg": {
+          "max": 81.53792338864352,
+          "median": 81.53792338864352,
+          "min": 81.53792338864352
+        },
+        "min_pelvis_height_m": {
+          "max": 0.03021274507045746,
+          "median": 0.03021274507045746,
+          "min": 0.03021274507045746
+        },
+        "p50_graph_step_us": {
+          "max": 1400.4480326548219,
+          "median": 1399.8700305819511,
+          "min": 1398.9554718136787
+        },
+        "p90_graph_step_us": {
+          "max": 1889.713143464178,
+          "median": 1745.6050263717777,
+          "min": 1718.120288569481
+        },
+        "rms_closure_um": {
+          "max": 1183.1685126202276,
+          "median": 1183.1685126202276,
+          "min": 1183.1685126202276
+        }
+      },
+      "video": "report_media/dr_legs__upstream-main.mp4",
+      "video_run": {
+        "articulation_count": 1,
+        "bilateral_solver": null,
+        "body_count": 31,
+        "closure_joint_count": 6,
+        "closure_joint_labels": [
+          "/DR_Legs/Joints/j6_l_o",
+          "/DR_Legs/Joints/j6_r_o",
+          "/DR_Legs/Joints/j9_l_i",
+          "/DR_Legs/Joints/j9_l_o",
+          "/DR_Legs/Joints/j9_r_i",
+          "/DR_Legs/Joints/j9_r_o"
+        ],
+        "completed_substeps": 360,
+        "constraints_alpha": null,
+        "constraints_gamma": null,
+        "contact_normal_damping_scale": 1.0,
+        "contact_normal_stiffness_scale": 8.0,
+        "contact_pipeline": "Newton",
+        "device": "cuda:0",
+        "diagonal_regularization": 0.0,
+        "disabled_drive_suffixes": [
+          "j6_l_i",
+          "j6_r_i"
+        ],
+        "display_color_rgb": [
+          0.7200000286102295,
+          0.75,
+          0.800000011920929
+        ],
+        "drive_kd": 2.0,
+        "drive_kp": 10.0,
+        "dt": 0.01,
+        "failure_substep": null,
+        "final_all": {
+          "angular_max_rad": 3.4138735283952435e-05,
+          "angular_norm_rad": 8.577292651728933e-05,
+          "linear_max_m": 0.0007424455600318853,
+          "linear_norm_m": 0.0034750002532967506,
+          "per_joint": {
+            "/DR_Legs/Joints/j1_l_i": {
+              "angular_rad": 2.6176312105683784e-05,
+              "linear_m": 0.00035142769571289286
+            },
+            "/DR_Legs/Joints/j1_l_o": {
+              "angular_rad": 3.4138735283952435e-05,
+              "linear_m": 0.0005304768138015454
+            },
+            "/DR_Legs/Joints/j1_r_i": {
+              "angular_rad": 2.6594800372686726e-05,
+              "linear_m": 0.00035589051582042206
+            },
+            "/DR_Legs/Joints/j1_r_o": {
+              "angular_rad": 3.4064831469514426e-05,
+              "linear_m": 0.0005311001904455752
+            },
+            "/DR_Legs/Joints/j2_l_i": {
+              "angular_rad": 9.920911077789851e-06,
+              "linear_m": 0.0006390729532736439
+            },
+            "/DR_Legs/Joints/j2_l_o": {
+              "angular_rad": 1.1772704244441041e-05,
+              "linear_m": 0.0005721751983934373
+            },
+            "/DR_Legs/Joints/j2_r_i": {
+              "angular_rad": 1.005321856001564e-05,
+              "linear_m": 0.0006451122974378414
+            },
+            "/DR_Legs/Joints/j2_r_o": {
+              "angular_rad": 1.1718069399964578e-05,
+              "linear_m": 0.0005710123686414527
+            },
+            "/DR_Legs/Joints/j3_l_i": {
+              "angular_rad": 1.5144439621579037e-05,
+              "linear_m": 0.000640666643576086
+            },
+            "/DR_Legs/Joints/j3_l_o": {
+              "angular_rad": 1.2944125464711577e-05,
+              "linear_m": 0.0005732856141431481
+            },
+            "/DR_Legs/Joints/j3_r_i": {
+              "angular_rad": 1.4997057472769603e-05,
+              "linear_m": 0.0006467253080169596
+            },
+            "/DR_Legs/Joints/j3_r_o": {
+              "angular_rad": 1.3047067398625949e-05,
+              "linear_m": 0.0005721121481311026
+            },
+            "/DR_Legs/Joints/j4_l_i": {
+              "angular_rad": 1.0553646443898991e-05,
+              "linear_m": 0.0004930446916413783
+            },
+            "/DR_Legs/Joints/j4_l_o": {
+              "angular_rad": 1.4346229492526192e-05,
+              "linear_m": 0.0006012656823514979
+            },
+            "/DR_Legs/Joints/j4_r_i": {
+              "angular_rad": 1.0733274182747072e-05,
+              "linear_m": 0.000501448796535013
+            },
+            "/DR_Legs/Joints/j4_r_o": {
+              "angular_rad": 1.4272070441184818e-05,
+              "linear_m": 0.0006002102870364415
+            },
+            "/DR_Legs/Joints/j5_l_i": {
+              "angular_rad": 5.1785960661413645e-06,
+              "linear_m": 0.0004939062441738852
+            },
+            "/DR_Legs/Joints/j5_l_o": {
+              "angular_rad": 1.6115650578203744e-06,
+              "linear_m": 0.0006078708142369951
+            },
+            "/DR_Legs/Joints/j5_r_i": {
+              "angular_rad": 5.1961307664593884e-06,
+              "linear_m": 0.0005023160473317903
+            },
+            "/DR_Legs/Joints/j5_r_o": {
+              "angular_rad": 7.282359298220648e-06,
+              "linear_m": 0.0006007746526568149
+            },
+            "/DR_Legs/Joints/j6_l_i": {
+              "angular_rad": 3.631755950784741e-06,
+              "linear_m": 0.0005176598356315996
+            },
+            "/DR_Legs/Joints/j6_l_o": {
+              "angular_rad": 1.354171364648983e-06,
+              "linear_m": 0.000608017677153403
+            },
+            "/DR_Legs/Joints/j6_r_i": {
+              "angular_rad": 3.838206795339118e-06,
+              "linear_m": 0.0005264113562899594
+            },
+            "/DR_Legs/Joints/j6_r_o": {
+              "angular_rad": 3.347951210616506e-06,
+              "linear_m": 0.0006135932439156898
+            },
+            "/DR_Legs/Joints/j7_l_i": {
+              "angular_rad": 6.632963594569508e-06,
+              "linear_m": 0.0004830867040124438
+            },
+            "/DR_Legs/Joints/j7_l_o": {
+              "angular_rad": 1.1480374395740442e-05,
+              "linear_m": 0.0007407819140599751
+            },
+            "/DR_Legs/Joints/j7_r_i": {
+              "angular_rad": 6.887415180476824e-06,
+              "linear_m": 0.00047821840352776744
+            },
+            "/DR_Legs/Joints/j7_r_o": {
+              "angular_rad": 1.1502737912560773e-05,
+              "linear_m": 0.0007424455600318853
+            },
+            "/DR_Legs/Joints/j8_l_i": {
+              "angular_rad": 3.7185826525859096e-07,
+              "linear_m": 0.0004619937832915271
+            },
+            "/DR_Legs/Joints/j8_l_o": {
+              "angular_rad": 2.7694167095487936e-06,
+              "linear_m": 0.0007338840858338575
+            },
+            "/DR_Legs/Joints/j8_r_i": {
+              "angular_rad": 5.626491149966031e-07,
+              "linear_m": 0.0004568804594448511
+            },
+            "/DR_Legs/Joints/j8_r_o": {
+              "angular_rad": 2.842102251217209e-06,
+              "linear_m": 0.0007354247613135158
+            },
+            "/DR_Legs/Joints/j9_l_i": {
+              "angular_rad": 1.3657417426566254e-05,
+              "linear_m": 0.00046189926280863243
+            },
+            "/DR_Legs/Joints/j9_l_o": {
+              "angular_rad": 2.0506226496218682e-05,
+              "linear_m": 0.0007338536302974051
+            },
+            "/DR_Legs/Joints/j9_r_i": {
+              "angular_rad": 1.3793946215525698e-05,
+              "linear_m": 0.00045677536317969165
+            },
+            "/DR_Legs/Joints/j9_r_o": {
+              "angular_rad": 2.038754817459167e-05,
+              "linear_m": 0.0007354011603299554
+            }
+          }
+        },
+        "final_closure": {
+          "angular_max_rad": 2.0506226496218682e-05,
+          "angular_norm_rad": 3.5014254326478416e-05,
+          "linear_max_m": 0.0007354011603299554,
+          "linear_norm_m": 0.0014991773889091382,
+          "per_joint": {
+            "/DR_Legs/Joints/j6_l_o": {
+              "angular_rad": 1.354171364648983e-06,
+              "linear_m": 0.000608017677153403
+            },
+            "/DR_Legs/Joints/j6_r_o": {
+              "angular_rad": 3.347951210616506e-06,
+              "linear_m": 0.0006135932439156898
+            },
+            "/DR_Legs/Joints/j9_l_i": {
+              "angular_rad": 1.3657417426566254e-05,
+              "linear_m": 0.00046189926280863243
+            },
+            "/DR_Legs/Joints/j9_l_o": {
+              "angular_rad": 2.0506226496218682e-05,
+              "linear_m": 0.0007338536302974051
+            },
+            "/DR_Legs/Joints/j9_r_i": {
+              "angular_rad": 1.3793946215525698e-05,
+              "linear_m": 0.00045677536317969165
+            },
+            "/DR_Legs/Joints/j9_r_o": {
+              "angular_rad": 2.038754817459167e-05,
+              "linear_m": 0.0007354011603299554
+            }
+          }
+        },
+        "final_pelvis_height_m": 0.09199783951044083,
+        "fixture_asset_root": "/home/jumyungc/.cache/newton/newton-assets_disneyresearch_56289e70_261cd1f4/disneyresearch",
+        "fixture_model_signature": "25cf7e41422a7a99a6548bd91df3634b75b8bf9bea21bf68659e2fb4135ca1ab",
+        "fps": 50,
+        "frames": 180,
+        "global_active": false,
+        "global_island_count": 0,
+        "global_joint_count": 0,
+        "initial_closure": {
+          "angular_max_rad": 0.0,
+          "angular_norm_rad": 0.0,
+          "linear_max_m": 2.6787732192018794e-08,
+          "linear_norm_m": 3.216183543802025e-08,
+          "per_joint": {
+            "/DR_Legs/Joints/j6_l_o": {
+              "angular_rad": 0.0,
+              "linear_m": 4.255322758112241e-09
+            },
+            "/DR_Legs/Joints/j6_r_o": {
+              "angular_rad": 0.0,
+              "linear_m": 4.93245932210616e-09
+            },
+            "/DR_Legs/Joints/j9_l_i": {
+              "angular_rad": 0.0,
+              "linear_m": 1.1415826782706438e-08
+            },
+            "/DR_Legs/Joints/j9_l_o": {
+              "angular_rad": 0.0,
+              "linear_m": 9.12821587646239e-09
+            },
+            "/DR_Legs/Joints/j9_r_i": {
+              "angular_rad": 0.0,
+              "linear_m": 7.792221107680227e-09
+            },
+            "/DR_Legs/Joints/j9_r_o": {
+              "angular_rad": 0.0,
+              "linear_m": 2.6787732192018794e-08
+            }
+          }
+        },
+        "iterations": 16,
+        "joint_count": 36,
+        "joint_dof_count": 36,
+        "joint_kd": 0.0,
+        "joint_ke": 200000.0,
+        "max_body_speed_mps": 1.5696048736572266,
+        "max_closure_um": 3041.60222950733,
+        "max_contacts": 22,
+        "max_pelvis_tilt_deg": 81.53792338864352,
+        "mean_collision_us": null,
+        "mean_contacts": 9.544444444444444,
+        "mean_graph_step_us": 1510.1937755175372,
+        "mean_solver_us": null,
+        "min_pelvis_height_m": 0.03021274507045746,
+        "mode": "Upstream main compliant VBD, G=0",
+        "newton_path": "/home/jumyungc/JC/git/newton_upstream_main_20260910/newton/__init__.py",
+        "p50_collision_us": null,
+        "p50_graph_step_us": 1398.293999955058,
+        "p50_solver_us": null,
+        "p90_collision_us": null,
+        "p90_graph_step_us": 1761.8087818846113,
+        "p90_solver_us": null,
+        "relaxation": 0.65,
+        "render": {
+          "device": "cuda:0",
+          "failure_frame": null,
+          "finite": true,
+          "fps": 50,
+          "frames": 180,
+          "mode": "Upstream main compliant VBD, G=0",
+          "rms_closure_um": 1193.6468922046604,
+          "scenario": "dr-legs"
+        },
+        "returncode": 0,
+        "rms_all_linear_um": 3036.3538510537296,
+        "rms_closure_per_joint_um": 483.02652260787943,
+        "rms_closure_um": 1183.1685126202276,
+        "route": "upstream-main",
+        "schedule": "16 local sweeps",
+        "selection_config": {
+          "alpha": 0.0,
+          "contact_scale": 8.0,
+          "iterations": 16,
+          "relaxation": 0.65
+        },
+        "shape_count": 35,
+        "solver": "vbd",
+        "status": "ok",
+        "stderr_tail": "",
+        "substeps_per_frame": 2,
+        "tangential_stiffness_scale": 1.0,
+        "timing_method": "cuda_graph_end_to_end",
+        "vbd_alpha": 0.0,
+        "vbd_solve": "local"
+      }
+    }
+  }
+}
