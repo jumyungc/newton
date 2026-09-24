@@ -26,11 +26,8 @@ from ..vbd.rigid_vbd_kkt import (
     _inverse_spatial_robust,
     _PathBucket,
     _scale_spatial_vector,
-    accumulate_body_quadratic_merit,
-    accumulate_joint_quadratic_merit,
     assemble_joint_path_system,
     compute_path_correction,
-    minimize_quadratic_step,
     suppress_nonfinite_correction,
 )
 from .kernels import update_joint_axis_limits, update_joint_axis_weighted_target
@@ -49,6 +46,88 @@ _SUPPORTED_JOINT_TYPES = {
 # hard world-attachment row. Open paths use a positive Schur system directly
 # and therefore do not need this numerical compliance.
 _TREE_COMPLIANCE_FLOOR = 1.0e-6
+
+
+@wp.kernel
+def accumulate_body_quadratic_merit(
+    body_island: wp.array[int],
+    enabled: wp.array[bool],
+    matrix: wp.array[wp.spatial_matrix],
+    rhs: wp.array[wp.spatial_vector],
+    correction: wp.array[wp.spatial_vector],
+    merit: wp.array[wp.vec2d],
+):
+    """Accumulate linear/quadratic terms of the original primal model."""
+    slot = wp.tid()
+    island = body_island[slot]
+    if not enabled[island]:
+        return
+    delta = correction[slot]
+    block = matrix[slot]
+    linear, quadratic = wp.float64(0.0), wp.float64(0.0)
+    for row in range(6):
+        linear -= wp.float64(rhs[slot][row]) * wp.float64(delta[row])
+        for column in range(6):
+            quadratic += wp.float64(delta[row]) * wp.float64(block[row, column]) * wp.float64(delta[column])
+    wp.atomic_add(merit, island, wp.vec2d(linear, quadratic))
+
+
+@wp.kernel
+def accumulate_joint_quadratic_merit(
+    joint_ids: wp.array[int],
+    joint_parent: wp.array[int],
+    joint_child: wp.array[int],
+    body_slot: wp.array[int],
+    body_island: wp.array[int],
+    jacobian_parent: wp.array[wp.spatial_matrix],
+    jacobian_child: wp.array[wp.spatial_matrix],
+    compliance: wp.array[wp.spatial_matrix],
+    residual: wp.array[wp.spatial_vector],
+    correction: wp.array[wp.spatial_vector],
+    merit: wp.array[wp.vec2d],
+):
+    """Accumulate diagonally compliant rows; Jacobians must not alias factors."""
+    row = wp.tid()
+    joint = joint_ids[row]
+    parent, child = joint_parent[joint], joint_child[joint]
+    p, c = int(-1), int(-1)
+    if parent >= 0:
+        p = body_slot[parent]
+    if child >= 0:
+        c = body_slot[child]
+    slot = wp.max(p, c)
+    if slot < 0:
+        return
+    linear, quadratic = wp.float64(0.0), wp.float64(0.0)
+    jp, jc = jacobian_parent[row], jacobian_child[row]
+    for axis in range(6):
+        value = wp.float64(0.0)
+        for column in range(6):
+            if p >= 0:
+                value += wp.float64(jp[axis, column]) * wp.float64(correction[p][column])
+            if c >= 0:
+                value += wp.float64(jc[axis, column]) * wp.float64(correction[c][column])
+        inverse_compliance = wp.float64(1.0) / wp.float64(compliance[row][axis, axis])
+        linear += value * wp.float64(residual[row][axis]) * inverse_compliance
+        quadratic += value * value * inverse_compliance
+    wp.atomic_add(merit, body_island[slot], wp.vec2d(linear, quadratic))
+
+
+@wp.kernel
+def minimize_quadratic_step(
+    enabled: wp.array[bool],
+    merit: wp.array[wp.vec2d],
+    step_scale: wp.array[float],
+):
+    """Minimize ``a l + a^2 q / 2`` on [0, 1] without a tuned damping factor."""
+    island = wp.tid()
+    scale = 1.0
+    if enabled[island]:
+        value = merit[island]
+        scale = 0.0
+        if wp.isfinite(value[0]) and wp.isfinite(value[1]) and value[1] > wp.float64(0.0):
+            scale = float(wp.clamp(-value[0] / value[1], wp.float64(0.0), wp.float64(1.0)))
+    step_scale[island] = scale
 
 
 @wp.func

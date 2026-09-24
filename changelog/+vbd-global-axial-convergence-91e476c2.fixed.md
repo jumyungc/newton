@@ -1,0 +1,1 @@
+Improve rigid VBD global convergence by removing artificial axial rod stress stiffness and reserving dynamic-contact relaxation for active pairs. Preserve joint forces with whitened material rows and remove unused quadratic line-search work. Leave the zero-global-iteration path and collision pipeline unchanged.

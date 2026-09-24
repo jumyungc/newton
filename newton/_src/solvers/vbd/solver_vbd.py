@@ -450,13 +450,21 @@ class SolverVBD(SolverBase, CouplingInterface):
                 ``rho`` internally for numerical conditioning. Values used with legacy
                 hard constraints may require retuning for the desired deformation.
                 Values must be finite and representable in float32; infinity is unsupported.
-            rigid_joint_global_iterations: Number of compliant-ALM local iterations that
+            rigid_joint_global_iterations: Experimental number of compliant-ALM local iterations that
                 receive an additional global structural correction. ``0`` (default)
                 preserves the baseline local solver exactly. Positive values require
                 ``rigid_compliant_alm=True``, may not exceed ``iterations``, and currently
                 support only rigid-only models integrated directly by ``SolverVBD``. When
-                equal to ``iterations``, one additional local rigid/contact/dual sweep is
-                appended so the timestep ends with locally reconciled nonlinear state.
+                a contact buffer is supplied, local sweeps prepare contact reactions before the
+                global correction when the budget allows, and a directional line search checks it
+                against the current joint and contact forces. Unanchored islands also reconcile
+                common translation after the local sweeps, including without contacts. Collision
+                witnesses must be valid; the global solve cannot repair collision detection or
+                guarantee nonlinear convergence at a fixed iteration budget. Strongly nonlinear
+                graphs may need multiple global corrections; extra local sweeps alone can converge
+                slowly. If every iteration includes a correction, contact mode places the last
+                correction before the last local sweep to preserve the configured local budget; without a contact
+                buffer, one final local sweep is appended to reconcile the corrected pose.
             rigid_avbd_alpha: C0 stabilization strength (``C_stab = C - alpha * C0``). Range: [0, 1].
                 Controls both joints and body-body contacts when neither class-specific
                 override (``rigid_avbd_joint_alpha`` / ``rigid_avbd_contact_alpha``) is set.
@@ -887,6 +895,12 @@ class SolverVBD(SolverBase, CouplingInterface):
         self._rigid_joint_global_iteration_indices = frozenset(
             global_pass * iterations // rigid_joint_global_iterations
             for global_pass in range(rigid_joint_global_iterations)
+        )
+        # Prepare contact reactions before the coupled correction, while
+        # retaining a following local sweep when the iteration budget allows.
+        self._rigid_joint_global_contact_iteration_indices = frozenset(
+            (iteration + min(3, max(0, iterations - 2))) % iterations
+            for iteration in self._rigid_joint_global_iteration_indices
         )
 
         # Rigid integration mode: when True, rigid bodies are integrated by an external
@@ -1415,6 +1429,9 @@ class SolverVBD(SolverBase, CouplingInterface):
             enable_paired_open_chains=(
                 self._rigid_module_options["deterministic"] == wp.DeterministicMode.NOT_GUARANTEED
             ),
+            enable_captured_contact_shortcuts=(
+                self._rigid_module_options["deterministic"] != wp.DeterministicMode.NOT_GUARANTEED
+            ),
         )
         self._structural_graph_kkt_bucket_diagnostics = backend._bucket_diagnostics
         self._structural_graph_kkt_payload_budget_bytes = backend._payload_budget_bytes
@@ -1424,9 +1441,7 @@ class SolverVBD(SolverBase, CouplingInterface):
 
         self._rigid_vbd_kkt = rigid_vbd_kkt
         self._structural_graph_kkt = backend
-        # Dynamic contact curvature is consumed before the backend overwrites
-        # its compact body-matrix workspace.
-        self.body_dynamic_contact_hessian = backend.body_matrix
+        self.body_dynamic_contact_hessian = backend.body_dynamic_contact_hessian
 
     @override
     def coupling_supports_inertial_property_refresh(self) -> bool:
@@ -2527,7 +2542,12 @@ class SolverVBD(SolverBase, CouplingInterface):
             state_in, state_out, contacts, dt, rigid_due=rigid_due, soft_due=soft_due, preserve_history=False
         )
 
-        if not self._rigid_joint_global_iteration_indices or self._structural_graph_kkt is None:
+        backend = self._structural_graph_kkt
+        if (
+            not self._rigid_joint_global_iteration_indices
+            or backend is None
+            or (contacts is not None and self._has_joint_mimics)
+        ):
             # Keep the main G=0 hot path unchanged.
             for iter_num in range(self.iterations):
                 rigid_due = self.collision_pipeline is not None and self._rigid_collision_is_due(iter_num)
@@ -2544,7 +2564,16 @@ class SolverVBD(SolverBase, CouplingInterface):
                 self._mid_step_detection(
                     state_in, state_out, contacts, dt, rigid_due=rigid_due, soft_due=soft_due, preserve_history=True
                 )
-                global_iteration = iter_num in self._rigid_joint_global_iteration_indices
+                global_iteration = iter_num in (
+                    self._rigid_joint_global_contact_iteration_indices
+                    if contacts is not None
+                    else self._rigid_joint_global_iteration_indices
+                )
+                if global_iteration and iter_num == self.iterations - 1 and contacts is not None:
+                    # Reconcile the last correction within the configured local
+                    # budget, including when G == iterations.
+                    self._solve_structural_graph_kkt(state_in, control, contacts, dt)
+                    global_iteration = False
                 self._solve_rigid_body_iteration(
                     state_in,
                     state_out,
@@ -2557,11 +2586,12 @@ class SolverVBD(SolverBase, CouplingInterface):
                     self._solve_structural_graph_kkt(state_in, control, contacts, dt)
                     self._update_rigid_joint_duals(state_in, control, dt)
                 self._solve_particle_iteration(state_in, state_out, contacts, dt)
-            if self.rigid_joint_global_iterations == self.iterations:
-                # Every configured iteration ended with a linearized global
-                # correction. Append one ordinary local sweep so nonlinear
-                # contact/friction and their dual state own the accepted pose.
+
+            if self.rigid_joint_global_iterations == self.iterations and contacts is None:
                 self._solve_rigid_body_iteration(state_in, state_out, control, contacts, dt)
+
+        if backend is not None and backend.has_free_translation and not self._has_joint_mimics:
+            self._solve_structural_graph_kkt(state_in, control, contacts, dt, translation_only=True)
 
         # Snapshot solved rigid contact state for next-frame warm-start.
         self._snapshot_rigid_contact_history(contacts)
@@ -3989,8 +4019,10 @@ class SolverVBD(SolverBase, CouplingInterface):
         control: Control,
         contacts: Contacts | None,
         dt: float,
+        *,
+        translation_only: bool = False,
     ) -> None:
-        """Apply one contact-proximal global structural correction."""
+        """Apply a structural correction or reconcile its free translation."""
         backend = self._structural_graph_kkt
         rigid_vbd_kkt = self._rigid_vbd_kkt
         if backend is None or rigid_vbd_kkt is None:
@@ -4076,6 +4108,12 @@ class SolverVBD(SolverBase, CouplingInterface):
             joint_sigma_start=self.joint_sigma_start,
             joint_C_fric=self.joint_C_fric,
             stab_alpha=self.rigid_joint_alpha,
+            shape_body=model.shape_body,
+            body_contact_buffer_size=self.body_body_contact_buffer_pre_alloc,
+            body_contact_counts=self.body_body_contact_counts,
+            body_contact_indices=self.body_body_contact_indices,
+            refresh_contacts=lambda: self._refresh_structural_contact_objective(state_in, contacts, dt),
+            translation_only=translation_only,
         )
 
     def _solve_rigid_body_iteration(

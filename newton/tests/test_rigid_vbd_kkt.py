@@ -13,6 +13,9 @@ import warp as wp
 
 import newton
 from newton._src.solvers.vbd import rigid_vbd_kkt
+from newton._src.solvers.vbd.rigid_vbd_kernels import (
+    evaluate_angular_constraint_force_hessian,
+)
 from newton._src.solvers.vbd.rigid_vbd_kkt import (
     _CR_PERSISTENT_MAX_ROWS,
     _FUSED_TREE_MAX_LEVEL_WIDTH,
@@ -22,17 +25,21 @@ from newton._src.solvers.vbd.rigid_vbd_kkt import (
     _cr_persistent_max_rows,
     _fused_tree_levels_supported,
     _inverse_spatial_robust,
+    add_joint_stress_majorizer,
     apply_global_correction,
     assemble_closure_schur,
     back_substitute_tree_backbone_cr_in_place,
     build_body_surrogate,
     classify_global_contact_islands,
     limit_dynamic_contact_jacobi_step,
-    limit_global_joint_limit_step,
     linearize_joint_path_rows,
     suppress_nonfinite_correction,
 )
-from newton.tests.unittest_utils import add_function_test, get_cuda_test_devices, get_test_devices
+from newton.tests.unittest_utils import (
+    add_function_test,
+    get_cuda_test_devices,
+    get_test_devices,
+)
 
 
 @wp.kernel
@@ -59,6 +66,34 @@ def _apply_body_force(body: int, force: wp.vec3, body_f: wp.array[wp.spatial_vec
     body_f[body] = wp.spatial_vector(force[0], force[1], force[2], 0.0, 0.0, 0.0)
 
 
+@wp.kernel
+def _evaluate_local_angular_damping(
+    body_q: wp.array[wp.transform],
+    body_q_prev: wp.array[wp.transform],
+    dt: float,
+    result: wp.array[wp.vec3],
+):
+    torque, _hessian, _kappa, _jacobian = evaluate_angular_constraint_force_hessian(
+        wp.transform_get_rotation(body_q[0]),
+        wp.transform_get_rotation(body_q[1]),
+        wp.quat_identity(),
+        wp.quat_identity(),
+        wp.transform_get_rotation(body_q_prev[0]),
+        wp.transform_get_rotation(body_q_prev[1]),
+        False,
+        1.0,
+        0.0,
+        wp.identity(3, float),
+        wp.vec3(0.0),
+        wp.vec3(0.0),
+        0.0,
+        2.0,
+        1,
+        dt,
+    )
+    result[0] = torque
+
+
 def _pin_body(builder: newton.ModelBuilder, body: int) -> None:
     builder.body_mass[body] = 0.0
     builder.body_inv_mass[body] = 0.0
@@ -66,7 +101,15 @@ def _pin_body(builder: newton.ModelBuilder, body: int) -> None:
     builder.body_inv_inertia[body] = wp.mat33(0.0)
 
 
-def _build_chain(device, *, segments=16, stiffness=1.0e7, dahl=False, pinned=True, with_particle=False):
+def _build_chain(
+    device,
+    *,
+    segments=16,
+    stiffness=1.0e7,
+    dahl=False,
+    pinned=True,
+    with_particle=False,
+):
     builder = newton.ModelBuilder()
     if dahl:
         newton.solvers.SolverVBD.register_custom_attributes(builder)
@@ -388,7 +431,14 @@ def _build_mixed_fixed_topologies(device):
 def _build_structural_backend_with_intercepted_bytes(model):
     """Construct one backend while summing unique Warp allocation payloads."""
     allocations = []
-    allocation_functions = ("array", "empty", "empty_like", "zeros", "zeros_like", "ones")
+    allocation_functions = (
+        "array",
+        "empty",
+        "empty_like",
+        "zeros",
+        "zeros_like",
+        "ones",
+    )
     originals = {name: getattr(wp, name) for name in allocation_functions}
     with ExitStack() as patches:
         for name, original in originals.items():
@@ -520,7 +570,14 @@ def _simulate_prismatic_material_chain(device, *, kind, stiffness, global_iterat
     return body_q, coordinates
 
 
-def _build_joint_pair(device, joint_type, *, finite_limit=False, kinematic_parent=False, static_child=False):
+def _build_joint_pair(
+    device,
+    joint_type,
+    *,
+    finite_limit=False,
+    kinematic_parent=False,
+    static_child=False,
+):
     builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
     parent = builder.add_link(xform=wp.transform_identity(), mass=1.0, is_kinematic=kinematic_parent)
     child = builder.add_link(xform=wp.transform(wp.vec3(0.2, 0.0, 0.0), wp.quat_identity()), mass=1.0)
@@ -628,7 +685,15 @@ def _build_grounded_chain(
         rigid_body_contact_buffer_size=contact_buffer_size,
         deterministic=deterministic,
     )
-    return model, pipeline, contacts, solver, np.asarray(bodies, dtype=np.int32), np.asarray(joints), radius
+    return (
+        model,
+        pipeline,
+        contacts,
+        solver,
+        np.asarray(bodies, dtype=np.int32),
+        np.asarray(joints),
+        radius,
+    )
 
 
 def _quat_rotate(quaternion: np.ndarray, vector: np.ndarray) -> np.ndarray:
@@ -639,52 +704,6 @@ def _quat_rotate(quaternion: np.ndarray, vector: np.ndarray) -> np.ndarray:
 
 def _transform_point(transform: np.ndarray, point: np.ndarray) -> np.ndarray:
     return transform[:3] + _quat_rotate(transform[3:7], point)
-
-
-def _contact_normal_material_metrics(model, solver, state, contacts):
-    """Measure finite normal-material and Coulomb consistency at current poses."""
-    count = int(contacts.rigid_contact_count.numpy()[0])
-    if count == 0:
-        return {"max_lambda_n": 0.0, "material_residual": 0.0, "cone_residual": 0.0}
-
-    body_q = state.body_q.numpy()
-    shape_body = model.shape_body.numpy()
-    shape_0 = contacts.rigid_contact_shape0.numpy()[:count]
-    shape_1 = contacts.rigid_contact_shape1.numpy()[:count]
-    point_0 = contacts.rigid_contact_point0.numpy()[:count]
-    point_1 = contacts.rigid_contact_point1.numpy()[:count]
-    normal = contacts.rigid_contact_normal.numpy()[:count]
-    margin_0 = contacts.rigid_contact_margin0.numpy()[:count]
-    margin_1 = contacts.rigid_contact_margin1.numpy()[:count]
-    multiplier = solver.body_body_contact_lambda.numpy()[:count]
-    material_k = solver.body_body_contact_material_ke.numpy()[:count]
-    friction = solver.body_body_contact_material_mu.numpy()[:count]
-
-    separation = np.zeros(count, dtype=np.float64)
-    for row in range(count):
-        body_0 = int(shape_body[shape_0[row]]) if shape_0[row] >= 0 else -1
-        body_1 = int(shape_body[shape_1[row]]) if shape_1[row] >= 0 else -1
-        world_0 = _transform_point(body_q[body_0], point_0[row]) if body_0 >= 0 else point_0[row]
-        world_1 = _transform_point(body_q[body_1], point_1[row]) if body_1 >= 0 else point_1[row]
-        separation[row] = float(np.dot(normal[row], world_1 - world_0) - margin_0[row] - margin_1[row])
-
-    lambda_n = np.sum(multiplier * normal, axis=1)
-    penetration = np.maximum(-separation, 0.0)
-    expected = material_k * penetration
-    material_scale = np.maximum(np.maximum(np.abs(lambda_n), expected), 1.0e-8)
-    material_residual = np.abs(lambda_n - expected) / material_scale
-
-    lambda_t = np.linalg.norm(multiplier - normal * lambda_n[:, None], axis=1)
-    cone_violation = np.maximum(
-        lambda_t - friction * np.maximum(lambda_n, 0.0),
-        np.maximum(-lambda_n, 0.0),
-    )
-    cone_scale = np.maximum(np.linalg.norm(multiplier, axis=1), 1.0e-8)
-    return {
-        "max_lambda_n": float(np.maximum(lambda_n, 0.0).max(initial=0.0)),
-        "material_residual": float(material_residual.max(initial=0.0)),
-        "cone_residual": float((cone_violation / cone_scale).max(initial=0.0)),
-    }
 
 
 def _max_joint_gap(model, body_q: np.ndarray, joint_ids: np.ndarray) -> float:
@@ -1041,7 +1060,10 @@ def _tree_float64_oracle_metrics(
     # body_scale aliases body_correction in production after factorization, so
     # reconstruct the exact equilibration rule from the saved physical blocks.
     body_scales = 1.0 / np.sqrt(
-        np.maximum(np.abs(np.diagonal(captured["body_matrix"][:body_count], axis1=1, axis2=2)), 1.0e-30)
+        np.maximum(
+            np.abs(np.diagonal(captured["body_matrix"][:body_count], axis1=1, axis2=2)),
+            1.0e-30,
+        )
     )
     scales = np.concatenate((body_scales.reshape(-1), row_scales.reshape(-1)))
     reference_correction = reference[: 6 * body_count].reshape(body_count, 6)
@@ -1198,38 +1220,66 @@ def _perturbed_linearization(model, solver, bucket, base_body_q, body, direction
     return bucket.residual.numpy().astype(np.float64)
 
 
-def _simulate_ground_drag(device, global_iterations):
+def _simulate_ground_drag(
+    device,
+    global_iterations,
+    *,
+    substeps=1,
+    iterations=5,
+    contact_history=False,
+    force=45.0,
+    reverse_at=None,
+    weight_fraction=None,
+):
     model, pipeline, contacts, solver, bodies, joints, radius = _build_grounded_chain(
-        device, global_iterations=global_iterations
+        device,
+        global_iterations=global_iterations,
+        iterations=iterations,
+        contact_history=contact_history,
+        deterministic=wp.DeterministicMode.RUN_TO_RUN,
     )
     state_in = model.state()
     state_out = model.state()
     control = model.control()
-    dt = 1.0 / 600.0
+    dt = 1.0 / (600.0 * substeps)
+    if weight_fraction is not None:
+        force = weight_fraction * float(model.body_mass.numpy()[bodies].sum()) * 9.81
     initial_center = 0.0
     minimum_z = np.inf
-    for step in range(240):
+    maximum_center_z = -np.inf
+    for step in range(240 * substeps):
         state_in.clear_forces()
-        if step >= 40:
+        if step >= 40 * substeps:
             wp.launch(
                 _apply_body_force,
                 1,
-                inputs=[int(bodies[-1]), wp.vec3(45.0, 0.0, 0.0)],
+                inputs=[
+                    int(bodies[-1]),
+                    wp.vec3(
+                        force if reverse_at is None or step < reverse_at * substeps else -force,
+                        0.0,
+                        0.0,
+                    ),
+                ],
                 outputs=[state_in.body_f],
                 device=device,
             )
         pipeline.collide(state_in, contacts)
         solver.step(state_in, state_out, control, contacts, dt)
         state_in, state_out = state_out, state_in
-        if step == 39:
+        if step == 40 * substeps - 1:
             initial_center = float(state_in.body_q.numpy()[bodies, 0].mean())
-        elif step >= 40:
-            minimum_z = min(minimum_z, float(state_in.body_q.numpy()[bodies, 2].min()))
+        elif step >= 40 * substeps:
+            positions = state_in.body_q.numpy()[bodies, 2]
+            minimum_z = min(minimum_z, float(positions.min()))
+            maximum_center_z = max(maximum_center_z, float(positions.mean()))
     body_q = state_in.body_q.numpy()
     return {
         "motion": float(body_q[bodies, 0].mean()) - initial_center,
         "penetration": max(0.0, radius - minimum_z),
+        "rise": max(0.0, maximum_center_z - radius),
         "gap": _max_joint_gap(model, body_q, joints),
+        "mass": float(model.body_mass.numpy()[bodies].sum()),
     }
 
 
@@ -1244,6 +1294,7 @@ def _simulate_grounded_loop_load(device, global_iterations):
         rigid_contact_history=False,
         rigid_joint_global_iterations=global_iterations,
         rigid_body_contact_buffer_size=256,
+        deterministic=wp.DeterministicMode.RUN_TO_RUN,
     )
     state_in = model.state()
     state_out = model.state()
@@ -1282,7 +1333,6 @@ def _structural_kkt_selects_supported_complete_graphs(test, device):
     )
     test.assertIsNotNone(elastic_solver._structural_graph_kkt)
     test.assertEqual(elastic_solver._structural_graph_kkt.island_count, 1)
-    test.assertFalse(elastic_solver._structural_graph_kkt.has_joint_limits)
 
     dahl, _, _ = _build_chain(device, dahl=True)
     dahl_solver = newton.solvers.SolverVBD(
@@ -1292,7 +1342,6 @@ def _structural_kkt_selects_supported_complete_graphs(test, device):
         rigid_joint_global_iterations=1,
     )
     test.assertIsNotNone(dahl_solver._structural_graph_kkt)
-    test.assertFalse(dahl_solver._structural_graph_kkt.has_joint_limits)
 
     limited, _, _, _ = _build_joint_pair(device, newton.JointType.REVOLUTE, finite_limit=True)
     limited_solver = newton.solvers.SolverVBD(
@@ -1302,77 +1351,8 @@ def _structural_kkt_selects_supported_complete_graphs(test, device):
         rigid_joint_global_iterations=1,
     )
     test.assertIsNotNone(limited_solver._structural_graph_kkt)
-    test.assertTrue(limited_solver._structural_graph_kkt.has_joint_limits)
     limited_state = _simulate(limited, limited_solver, 2, 1.0 / 600.0)
     test.assertTrue(np.isfinite(limited_state.body_q.numpy()).all())
-
-
-def _structural_kkt_joint_limit_gate_is_runtime_safe_and_endpoint_symmetric(test, device):
-    """Launch live limit protection and support either represented endpoint."""
-    unlimited, _, _, _ = _build_joint_pair(device, newton.JointType.REVOLUTE)
-    unlimited_solver = newton.solvers.SolverVBD(
-        unlimited,
-        iterations=1,
-        rigid_compliant_alm=True,
-        rigid_joint_global_iterations=1,
-    )
-    # The launch gate describes limit-capable topology, not coefficients frozen
-    # at construction; JOINT_DOF_PROPERTIES may enable limits later.
-    test.assertTrue(unlimited_solver._structural_graph_kkt.has_joint_limits)
-
-    model, parent, _, _ = _build_joint_pair(
-        device,
-        newton.JointType.REVOLUTE,
-        finite_limit=True,
-        static_child=True,
-    )
-    solver = newton.solvers.SolverVBD(
-        model,
-        iterations=1,
-        rigid_compliant_alm=True,
-        rigid_joint_global_iterations=1,
-    )
-    backend = solver._structural_graph_kkt
-    test.assertIsNotNone(backend)
-    parent_slot = int(backend.body_slot_by_id.numpy()[parent])
-    test.assertGreaterEqual(parent_slot, 0)
-
-    minimum_scale = 1.0
-    for angular_delta in (-1.0, 1.0):
-        correction_host = np.zeros((backend.graph_body_count, 6), dtype=np.float32)
-        correction_host[parent_slot, 5] = angular_delta
-        correction = wp.array(correction_host, dtype=wp.spatial_vector, device=device)
-        island_scale = wp.ones(backend.island_count, dtype=float, device=device)
-        wp.launch(
-            limit_global_joint_limit_step,
-            backend.graph_joint_ids.shape[0],
-            inputs=[
-                backend.graph_joint_ids,
-                model.joint_type,
-                model.joint_enabled,
-                model.joint_parent,
-                model.joint_child,
-                model.joint_X_p,
-                model.joint_X_c,
-                model.joint_axis,
-                model.joint_qd_start,
-                model.joint_dof_dim,
-                model.joint_limit_lower,
-                model.joint_limit_upper,
-                model.joint_limit_ke,
-                solver.joint_rest_angle,
-                backend.body_slot_by_id,
-                backend.graph_body_island,
-                model.body_q,
-                model.body_q,
-                model.body_com,
-                correction,
-            ],
-            outputs=[island_scale],
-            device=device,
-        )
-        minimum_scale = min(minimum_scale, float(island_scale.numpy().min()))
-    test.assertLess(minimum_scale, 1.0)
 
 
 def _structural_kkt_classifies_dynamic_contact_topology(test, device):
@@ -1474,7 +1454,14 @@ def _structural_kkt_classifies_dynamic_contact_topology(test, device):
     wp.launch(
         apply_global_correction,
         2,
-        inputs=[body_ids, body_island, contact_state, correction, island_scale, body_com],
+        inputs=[
+            body_ids,
+            body_island,
+            contact_state,
+            correction,
+            island_scale,
+            body_com,
+        ],
         outputs=[active_q],
         device=device,
     )
@@ -1602,6 +1589,166 @@ def _structural_kkt_majorizes_only_represented_dynamic_contact(test, device):
     test.assertAlmostEqual(float(value[1, 1]), 1.0, places=5)
 
 
+def _structural_kkt_bounds_material_frame_rod_stress(test, device):
+    """Bound rod stress without resisting common translation or changing forces."""
+    rng = np.random.default_rng(9183)
+    poses_host = np.array(
+        [
+            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+            [0.001, 0.002, 0.0005, 0.0, 0.0, 0.0, 1.0],
+        ],
+        dtype=np.float32,
+    )
+    com_host = np.array([[0.0002, -0.0001, 0.0], [0.0, 0.0001, -0.0002]], dtype=np.float32)
+    anchor_host = np.array([[0.0002, 0.0, -0.0005, 0.0, 0.0, 0.0, 1.0]], dtype=np.float32)
+    rp = poses_host[1, :3].astype(np.float64) + anchor_host[0, :3] - com_host[0]
+    rc = anchor_host[0, :3].astype(np.float64) - com_host[1]
+    length = np.linalg.norm(rp) + np.linalg.norm(rc)
+    ids = wp.array([0], dtype=int, device=device)
+    kind = wp.array([int(newton.JointType.ROD)], dtype=int, device=device)
+    child = wp.array([1], dtype=int, device=device)
+    anchors = wp.array(anchor_host, dtype=wp.transform, device=device)
+    poses = wp.array(poses_host, dtype=wp.transform, device=device)
+    com = wp.array(com_host, dtype=wp.vec3, device=device)
+    inverse_mass = wp.ones(2, dtype=float, device=device)
+    slots = wp.array([0, 1], dtype=int, device=device)
+    for mask in (np.ones(3), np.array([0.0, 0.0, 1.0])):
+        with test.subTest(mask=mask):
+            reaction = np.array([2.0, -3.0, 5.0]) * mask
+            parent_jacobian = np.zeros((6, 6), dtype=np.float32)
+            child_jacobian = np.zeros((6, 6), dtype=np.float32)
+            parent_jacobian[:3, :3] = -np.diag(mask)
+            parent_jacobian[:3, 3:] = np.diag(mask) @ np.asarray(wp.skew(wp.vec3(rp))).reshape(3, 3)
+            child_jacobian[:3, :3] = np.diag(mask)
+            child_jacobian[:3, 3:] = -np.diag(mask) @ np.asarray(wp.skew(wp.vec3(rc))).reshape(3, 3)
+            before_jacobian = np.hstack([parent_jacobian, child_jacobian]).astype(np.float64)
+            before_residual = np.r_[reaction, np.zeros(3)]
+            jp = wp.array([parent_jacobian], dtype=wp.spatial_matrix, device=device)
+            jc = wp.array([child_jacobian], dtype=wp.spatial_matrix, device=device)
+            C = wp.array([np.eye(6)], dtype=wp.spatial_matrix, device=device)
+            c = wp.array([before_residual], dtype=wp.spatial_vector, device=device)
+            matrix = wp.zeros(2, dtype=wp.spatial_matrix, device=device)
+            inputs = [
+                ids,
+                kind,
+                ids,
+                child,
+                anchors,
+                anchors,
+                poses,
+                com,
+                inverse_mass,
+                slots,
+                jp,
+                jc,
+                C,
+                c,
+            ]
+            if device.is_cuda:
+                with wp.ScopedCapture(device=device) as capture:
+                    wp.launch(
+                        add_joint_stress_majorizer,
+                        1,
+                        inputs=inputs,
+                        outputs=[matrix],
+                        device=device,
+                    )
+                wp.capture_launch(capture.graph)
+            else:
+                wp.launch(
+                    add_joint_stress_majorizer,
+                    1,
+                    inputs=inputs,
+                    outputs=[matrix],
+                    device=device,
+                )
+            value = matrix.numpy().astype(np.float64)
+            jacobian = np.hstack([jp.numpy()[0], jc.numpy()[0]]).astype(np.float64)
+            stiffness = np.linalg.inv(C.numpy()[0].astype(np.float64))
+            np.testing.assert_allclose(
+                jacobian.T @ stiffness @ c.numpy()[0],
+                before_jacobian.T @ before_residual,
+                rtol=2e-6,
+                atol=1e-7,
+            )
+            bound_matrix = jacobian.T @ stiffness @ jacobian - before_jacobian.T @ before_jacobian
+            bound_matrix[:6, :6] += value[0]
+            bound_matrix[6:, 6:] += value[1]
+            # A common translation changes no relative strain, even when only
+            # stretch is enabled. The majorizer must not introduce a world pin.
+            for axis in range(3):
+                translation = np.zeros(12)
+                translation[axis] = translation[axis + 6] = 1.0
+                np.testing.assert_allclose(bound_matrix @ translation, 0.0, atol=1e-7)
+            # Material-frame stress couples rotation only to motion transverse
+            # to the force. Do not damp axial convergence with a fictitious spring.
+            axial = np.zeros(12)
+            axial[6:9] = reaction / np.linalg.norm(reaction)
+            test.assertLess(abs(axial @ bound_matrix @ axial), 1.0e-3)
+            for _ in range(128):
+                direction = rng.normal(size=(2, 6))
+                direction[:, :3] *= length
+                vp, vc = direction[:, :3]
+                omega_p, omega_c = direction[:, 3:]
+                stress = reaction @ (
+                    np.cross(omega_p, np.cross(omega_p, rp))
+                    - 2 * np.cross(omega_p, vc - vp)
+                    - 2 * np.cross(omega_p, np.cross(omega_c, rc))
+                    + np.cross(omega_c, np.cross(omega_c, rc))
+                )
+                bound = direction.ravel() @ bound_matrix @ direction.ravel()
+                test.assertLessEqual(abs(stress), bound + 1e-7)
+            c.zero_()
+            matrix.zero_()
+            before = (jp.numpy(), jc.numpy(), C.numpy())
+            wp.launch(
+                add_joint_stress_majorizer,
+                1,
+                inputs=inputs,
+                outputs=[matrix],
+                device=device,
+            )
+            np.testing.assert_array_equal(matrix.numpy(), 0.0)
+            for expected, actual in zip(before, (jp.numpy(), jc.numpy(), C.numpy()), strict=True):
+                np.testing.assert_array_equal(actual, expected)
+
+
+def _structural_kkt_inactive_limit_adds_curvature_without_force(test, device):
+    """A finite, currently open limit adds a metric, never a ghost force."""
+    model, _, _, _ = _build_joint_pair(device, newton.JointType.REVOLUTE, finite_limit=True)
+    solver = newton.solvers.SolverVBD(model, iterations=1, rigid_compliant_alm=True, rigid_joint_global_iterations=1)
+    _simulate(model, solver, 1, 1.0 / 600.0)
+    solver.joint_drive_limit_support.fill_(100.0)
+    solver.joint_drive_lambda.zero_()
+    solver.joint_limit_lambda.zero_()
+    bucket = solver._structural_graph_kkt.buckets[0]
+    _linearize_bucket(model, solver, bucket, model.body_q, 1.0 / 600.0)
+    jacobian = bucket.jacobian_child.numpy()[0]
+    test.assertGreater(abs(float(jacobian[5, 5])), 0.99)
+    np.testing.assert_array_equal(bucket.residual.numpy()[0, 5], 0.0)
+    test.assertGreater(float(bucket.compliance.numpy()[0, 5, 5]), 0.0)
+
+
+def _structural_kkt_open_contact_adds_curvature_without_force(test, device):
+    """An open collision candidate bounds activation but exerts no force."""
+    model, pipeline, contacts, solver, bodies, _, _ = _build_grounded_chain(
+        device, global_iterations=1, iterations=1, segments=4, contact_kd=0.0
+    )
+    model.set_gravity((0.0, 0.0, 0.0))
+    state = model.state()
+    pipeline.collide(state, contacts)
+    test.assertGreater(int(contacts.rigid_contact_count.numpy()[0]), 0)
+    solver.step(state, model.state(), model.control(), contacts, 1.0 / 600.0)
+    solver.body_body_contact_lambda.zero_()
+    solver.body_body_contact_C0.zero_()
+    solver._reset_structural_solve_state()
+    solver._refresh_structural_contact_objective(state, contacts, 1.0 / 600.0)
+    test.assertGreater(float(np.max(solver.body_hessian_ll.numpy()[bodies, 2, 2])), 0.0)
+    np.testing.assert_array_equal(solver.body_forces.numpy()[bodies], 0.0)
+    np.testing.assert_array_equal(solver.body_torques.numpy()[bodies], 0.0)
+    np.testing.assert_array_equal(solver._structural_graph_kkt.island_contact_state.numpy(), 1)
+
+
 def _structural_kkt_inactive_trees_do_not_apply_free_body_corrections(test, device):
     """Suppress tree/closure scatter when no incident structural row is active."""
     for closed in (False, True):
@@ -1685,8 +1832,10 @@ def _structural_kkt_reuses_compact_scratch(test, device):
     test.assertIs(backend.body_inverse, backend.body_matrix)
     test.assertIs(backend.body_free, backend.body_rhs)
     test.assertIs(backend.body_scale, backend.body_correction)
-    test.assertIs(solver.body_dynamic_contact_hessian, backend.body_matrix)
-    test.assertFalse(backend.has_joint_limits)
+    # Contact curvature is read again after factorization to relax the global
+    # correction. It must survive both body assembly and path inversion.
+    _simulate(model, solver, 1, 1.0 / 600.0)
+    np.testing.assert_array_equal(solver.body_dynamic_contact_hessian.numpy(), 0.0)
 
     bucket = backend.path_buckets[0]
     test.assertEqual(len(bucket.lower), 1)
@@ -1811,7 +1960,11 @@ def _cable_kkt_reduces_long_path_error(test, device):
     kkt_gap = _max_joint_gap(kkt_model, kkt_state.body_q.numpy(), kkt_joints)
 
     test.assertTrue(np.isfinite(kkt_state.body_q.numpy()).all())
-    test.assertLess(kkt_gap, 0.05 * local_gap, f"KKT gap {kkt_gap:.3e} did not improve local gap {local_gap:.3e}")
+    test.assertLess(
+        kkt_gap,
+        0.05 * local_gap,
+        f"KKT gap {kkt_gap:.3e} did not improve local gap {local_gap:.3e}",
+    )
 
 
 def _cable_kkt_near_hard_capture_is_finite(test, device):
@@ -1860,7 +2013,7 @@ def _cable_kkt_near_hard_closed_cycle_is_finite_under_capture(test, device):
         rigid_joint_global_iterations=1,
     )
     closed_tree = solver._structural_graph_kkt.closed_tree_buckets[0]
-    test.assertTrue(closed_tree.use_paired_backbone)
+    test.assertEqual(closed_tree.use_paired_backbone, device.is_cuda)
 
     state_0 = model.state()
     state_1 = model.state()
@@ -1896,7 +2049,10 @@ def _cable_kkt_closed_cycle_bounds_multiplier_history(test, device):
         rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
     )
-    test.assertTrue(solver._structural_graph_kkt.closed_tree_buckets[0].use_paired_backbone)
+    test.assertEqual(
+        solver._structural_graph_kkt.closed_tree_buckets[0].use_paired_backbone,
+        device.is_cuda,
+    )
 
     state_0 = model.state()
     state_1 = model.state()
@@ -1970,7 +2126,11 @@ def _cable_kkt_tree_handles_stiff_y_junction(test, device):
     kkt_gap = _max_joint_gap(kkt_model, kkt_state.body_q.numpy(), kkt_joints)
 
     test.assertTrue(np.isfinite(kkt_state.body_q.numpy()).all())
-    test.assertLess(kkt_gap, 0.05 * local_gap, f"Tree KKT gap {kkt_gap:.3e} did not improve {local_gap:.3e}")
+    test.assertLess(
+        kkt_gap,
+        0.05 * local_gap,
+        f"Tree KKT gap {kkt_gap:.3e} did not improve {local_gap:.3e}",
+    )
 
 
 def _cable_kkt_closes_stiff_loop_with_one_global_pass(test, device):
@@ -1997,12 +2157,18 @@ def _cable_kkt_closes_stiff_loop_with_one_global_pass(test, device):
     test.assertLess(len(closed_tree.backbone_cr_levels), len(closed_tree.tree.levels))
     test.assertEqual(backend.joint_count, len(kkt_joints))
     tree = closed_tree.tree
-    test.assertEqual(tree.diagonal.ptr, tree.jacobian_parent.ptr)
+    test.assertNotEqual(tree.diagonal.ptr, tree.jacobian_parent.ptr)
+    test.assertEqual(tree.diagonal.dtype, wp.spatial_matrixd)
+    test.assertEqual(tree.jacobian_parent.dtype, wp.spatial_matrix)
     kkt_state = _simulate(kkt_model, kkt_solver, 20, dt)
     kkt_gap = _max_joint_gap(kkt_model, kkt_state.body_q.numpy(), kkt_joints)
 
     test.assertTrue(np.isfinite(kkt_state.body_q.numpy()).all())
-    test.assertLess(kkt_gap, 0.05 * local_gap, f"Closed KKT gap {kkt_gap:.3e} did not improve {local_gap:.3e}")
+    test.assertLess(
+        kkt_gap,
+        0.05 * local_gap,
+        f"Closed KKT gap {kkt_gap:.3e} did not improve {local_gap:.3e}",
+    )
 
     state_out = kkt_model.state()
     control = kkt_model.control()
@@ -2016,108 +2182,257 @@ def _cable_kkt_closes_stiff_loop_with_one_global_pass(test, device):
     test.assertTrue(np.isfinite(kkt_state.body_q.numpy()).all())
 
 
-def _cable_kkt_preserves_certified_ground_sliding(test, device):
-    """Improve cable closure without increasing certified ground penetration."""
+def _cable_kkt_preserves_local_ground_sliding(test, device):
+    """Accelerate a loaded cable without suppressing its Coulomb sliding mode."""
     local = _simulate_ground_drag(device, 0)
-    kkt = _simulate_ground_drag(device, 2)
+    for g in (1, 2):
+        with test.subTest(global_iterations=g):
+            result = _simulate_ground_drag(device, g)
+            expected = 0.5 * (45.0 / result["mass"] - 0.45 * 9.81) * (200.0 / 600.0) ** 2
+            test.assertGreater(result["motion"], 0.85 * expected)
+            test.assertLess(result["motion"], 1.1 * expected)
+            test.assertLess(result["penetration"], 1.0e-3)
+            test.assertLess(result["gap"], 0.5 * local["gap"])
 
-    test.assertGreater(local["motion"], 1.0)
-    test.assertGreater(kkt["motion"], 0.8 * local["motion"])
-    test.assertLess(kkt["penetration"], 0.01 * local["penetration"])
-    test.assertLess(kkt["gap"], 0.01 * local["gap"])
+
+def _cable_kkt_substeps_preserve_sliding(test, device):
+    """Resolve sliding consistently as the substep budget increases."""
+    for substeps, iterations, g in (
+        (2, 5, 1),
+        (4, 5, 1),
+        (8, 5, 1),
+        (4, 5, 2),
+        (4, 2, 2),
+    ):
+        with test.subTest(substeps=substeps, iterations=iterations, global_iterations=g):
+            result = _simulate_ground_drag(device, g, substeps=substeps, iterations=iterations)
+            expected = 0.5 * (45.0 / result["mass"] - 0.45 * 9.81) * (200.0 / 600.0) ** 2
+            test.assertGreater(result["motion"], 0.95 * expected)
+            test.assertLess(result["motion"], 1.05 * expected)
+            test.assertLess(result["penetration"], 2.0e-4)
+            test.assertLess(result["gap"], 1.0e-4)
 
 
-def _cable_kkt_closes_stiff_loop_on_static_ground(test, device):
-    """Improve a grounded loop while preserving static contact support."""
+def _cable_kkt_substeps_preserve_static_friction(test, device):
+    """Retain static friction under a load inside the Coulomb cone."""
+    for substeps in (2, 8):
+        with test.subTest(substeps=substeps):
+            result = _simulate_ground_drag(device, 1, substeps=substeps, contact_history=True, force=1.0)
+            test.assertLess(1.0, 0.45 * 9.81 * result["mass"])
+            test.assertLess(abs(result["motion"]), 1.0e-3)
+            test.assertLess(result["penetration"], 1.0e-5)
+            test.assertLess(result["gap"], 1.0e-5)
+
+
+def _structural_kkt_preserves_free_translation(test, device):
+    """Internal contact majorizers must not change collective momentum."""
+    ids = wp.array([0, 1], dtype=int, device=device)
+    islands = wp.zeros(2, dtype=int, device=device)
+    enabled = wp.ones(1, dtype=int, device=device)
+    scale = wp.array([0.5], dtype=float, device=device)
+    poses = np.zeros((2, 7), dtype=np.float32)
+    poses[:, 6] = 1.0
+    targets = poses.copy()
+    targets[:, :3] = [[0.3, -0.2, 0.1], [0.1, 0.2, -0.1]]
+    mass = np.array([1.0, 2.0], dtype=np.float32)
+    forces = np.array([[100.0, 20.0, -10.0], [-100.0, -20.0, 10.0]], dtype=np.float32)
+    raw = np.array([[0.03, 0.02, -0.01, 0, 0, 0], [0.04, -0.01, 0.02, 0, 0, 0]], dtype=np.float32)
+    correction = wp.array(raw, dtype=wp.spatial_vector, device=device)
+    # Equal self blocks model an internal contact's diagonal majorizer. Its
+    # exact pair Hessian annihilates a common translation.
+    ghost = np.tile(1.0e6 * np.eye(3, dtype=np.float32), (2, 1, 1))
+    dynamic = np.zeros((2, 6, 6), dtype=np.float32)
+    dynamic[:, :3, :3] = ghost
+    system = wp.zeros(1, dtype=wp.mat44d, device=device)
+    wp.launch(
+        rigid_vbd_kkt.accumulate_free_translation_system,
+        2,
+        inputs=[
+            ids,
+            islands,
+            ids,
+            enabled,
+            enabled,
+            scale,
+            correction,
+            1.0,
+            wp.array(poses, dtype=wp.transform, device=device),
+            wp.array(targets, dtype=wp.transform, device=device),
+            wp.zeros(2, dtype=wp.vec3, device=device),
+            wp.array(mass, dtype=float, device=device),
+            wp.array(1.0 / mass, dtype=float, device=device),
+            wp.array(ghost, dtype=wp.mat33, device=device),
+            wp.zeros(2, dtype=wp.mat33, device=device),
+            wp.array(forces, dtype=wp.vec3, device=device),
+            wp.array(dynamic, dtype=wp.spatial_matrix, device=device),
+            0,
+            None,
+            None,
+            None,
+            None,
+            0,
+            None,
+            None,
+        ],
+        outputs=[system],
+        device=device,
+    )
+    wp.launch(
+        rigid_vbd_kkt.correct_free_translation,
+        2,
+        inputs=[islands, enabled, enabled, scale, system],
+        outputs=[correction],
+        device=device,
+    )
+    accepted = 0.5 * correction.numpy()[:, :3]
+    np.testing.assert_allclose(
+        (mass[:, None] * accepted).sum(axis=0),
+        (mass[:, None] * targets[:, :3]).sum(axis=0),
+        atol=5e-8,
+    )
+    np.testing.assert_allclose(accepted[1] - accepted[0], 0.5 * (raw[1, :3] - raw[0, :3]), atol=2e-8)
+
+
+def _structural_kkt_external_dynamic_contact_blocks_free_translation(test, device):
+    """Do not independently translate islands coupled by a dynamic contact."""
+    ids = wp.array([0, 1], dtype=int, device=device)
+    enabled = wp.ones(2, dtype=int, device=device)
+    scale = wp.ones(2, dtype=float, device=device)
+    pose = wp.array(
+        [wp.transform_identity(), wp.transform_identity()],
+        dtype=wp.transform,
+        device=device,
+    )
+    correction = wp.zeros(2, dtype=wp.spatial_vector, device=device)
+    system = wp.zeros(2, dtype=wp.mat44d, device=device)
+    wp.launch(
+        rigid_vbd_kkt.accumulate_free_translation_system,
+        2,
+        inputs=[
+            ids,
+            ids,
+            ids,
+            enabled,
+            enabled,
+            scale,
+            correction,
+            1.0,
+            pose,
+            pose,
+            wp.zeros(2, dtype=wp.vec3, device=device),
+            wp.ones(2, dtype=float, device=device),
+            wp.ones(2, dtype=float, device=device),
+            wp.zeros(2, dtype=wp.mat33, device=device),
+            wp.zeros(2, dtype=wp.mat33, device=device),
+            wp.ones(2, dtype=wp.vec3, device=device),
+            wp.zeros(2, dtype=wp.spatial_matrix, device=device),
+            1,
+            wp.array([1], dtype=int, device=device),
+            wp.array([0], dtype=int, device=device),
+            wp.array([1], dtype=int, device=device),
+            ids,
+            1,
+            enabled,
+            wp.zeros(2, dtype=int, device=device),
+        ],
+        outputs=[system],
+        device=device,
+    )
+    wp.launch(
+        rigid_vbd_kkt.correct_free_translation,
+        2,
+        inputs=[ids, enabled, enabled, scale, system],
+        outputs=[correction],
+        device=device,
+    )
+    np.testing.assert_array_equal(system.numpy()[:, 3, 3], 1.0)
+    np.testing.assert_array_equal(correction.numpy(), 0.0)
+
+
+def _cable_kkt_preserves_local_grounded_loop(test, device):
+    """Improve stiff-loop closure while maintaining ground support."""
     local = _simulate_grounded_loop_load(device, 0)
-    kkt = _simulate_grounded_loop_load(device, 1)
+    result = _simulate_grounded_loop_load(device, 1)
+    test.assertLess(result["gap"], 0.01 * local["gap"])
+    test.assertLess(result["penetration"], 1.0e-4)
 
-    test.assertLess(kkt["gap"], 0.01 * local["gap"])
-    test.assertLess(kkt["penetration"], 1.0e-4)
 
+def _cable_kkt_closed_cycle_preserves_local_contact(test, device):
+    """Accelerate cyclic contact islands while preserving support under capture."""
 
-def _cable_kkt_closed_cycle_preserves_active_ground_contact(test, device):
-    """Keep a redundant free loop supported by active captured ground contact."""
-    model, bodies, joints = _build_loop_with_branch(
-        device,
-        ring_segments=16,
-        stiffness=1.0e9,
-        bend_stiffness=1.0e4,
-        add_chord=True,
-        grounded=True,
-    )
-    # Remove the helper's world attachment so contact, rather than the branch,
-    # supports the island. Start at contact instead of in the speculative band.
-    enabled = model.joint_enabled.numpy()
-    enabled[joints[-1]] = False
-    model.joint_enabled.assign(enabled)
-    model_pose = model.body_q.numpy()
-    model_pose[bodies, 2] -= 1.0e-3
-    model.body_q.assign(model_pose)
-
-    pipeline = newton.CollisionPipeline(model, contact_matching="latest")
-    contacts = pipeline.contacts()
-    solver = newton.solvers.SolverVBD(
-        model,
-        iterations=2,
-        rigid_compliant_alm=True,
-        rigid_contact_history=False,
-        rigid_joint_global_iterations=1,
-        rigid_body_contact_buffer_size=256,
-    )
-    test.assertTrue(solver._structural_graph_kkt.closed_tree_buckets[0].use_paired_backbone)
-
-    state_0 = model.state()
-    state_1 = model.state()
-    control = model.control()
-    dt = 1.0 / 600.0
-
-    with wp.ScopedCapture(device) as capture:
-        state_0.clear_forces()
-        wp.launch(
-            _apply_body_force,
-            1,
-            inputs=[int(bodies[8]), wp.vec3(-35.0, 0.0, 0.0)],
-            outputs=[state_0.body_f],
-            device=device,
+    def simulate(g):
+        model, bodies, joints = _build_loop_with_branch(
+            device,
+            ring_segments=16,
+            stiffness=1.0e9,
+            bend_stiffness=1.0e4,
+            add_chord=True,
+            grounded=True,
         )
-        pipeline.collide(state_0, contacts)
-        solver.step(state_0, state_1, control, contacts, dt)
-        state_1.clear_forces()
-        wp.launch(
-            _apply_body_force,
-            1,
-            inputs=[int(bodies[8]), wp.vec3(-35.0, 0.0, 0.0)],
-            outputs=[state_1.body_f],
-            device=device,
+        enabled = model.joint_enabled.numpy()
+        enabled[joints[-1]] = False
+        model.joint_enabled.assign(enabled)
+        pose = model.body_q.numpy()
+        pose[bodies, 2] -= 1.0e-3
+        model.body_q.assign(pose)
+        pipeline = newton.CollisionPipeline(model, contact_matching="latest")
+        contacts = pipeline.contacts()
+        solver = newton.solvers.SolverVBD(
+            model,
+            iterations=2,
+            rigid_compliant_alm=True,
+            rigid_contact_history=False,
+            rigid_joint_global_iterations=g,
+            rigid_body_contact_buffer_size=256,
+            deterministic=wp.DeterministicMode.RUN_TO_RUN,
         )
-        pipeline.collide(state_1, contacts)
-        solver.step(state_1, state_0, control, contacts, dt)
+        a, b = model.state(), model.state()
+        control = model.control()
 
-    maximum_penetration = 0.0
-    for _ in range(60):
-        wp.capture_launch(capture.graph)
-        body_q = state_0.body_q.numpy()
-        maximum_penetration = max(maximum_penetration, 0.01 - float(body_q[bodies, 2].min()))
+        def pair():
+            for current, output in ((a, b), (b, a)):
+                current.clear_forces()
+                wp.launch(
+                    _apply_body_force,
+                    1,
+                    inputs=[int(bodies[8]), wp.vec3(-35.0, 0.0, 0.0)],
+                    outputs=[current.body_f],
+                    device=device,
+                )
+                pipeline.collide(current, contacts)
+                solver.step(current, output, control, contacts, 1.0 / 600.0)
 
-    contact_count = int(contacts.rigid_contact_count.numpy()[0])
-    shape_0 = contacts.rigid_contact_shape0.numpy()[:contact_count]
-    shape_1 = contacts.rigid_contact_shape1.numpy()[:contact_count]
-    shape_body = model.shape_body.numpy()
-    body_0 = np.full(contact_count, -1, dtype=np.int32)
-    body_1 = np.full(contact_count, -1, dtype=np.int32)
-    body_0[shape_0 >= 0] = shape_body[shape_0[shape_0 >= 0]]
-    body_1[shape_1 >= 0] = shape_body[shape_1[shape_1 >= 0]]
-    ground = (body_0 < 0) ^ (body_1 < 0)
-    ground_multiplier = solver.body_body_contact_lambda.numpy()[:contact_count][ground]
+        pair()
+        if device.is_cuda:
+            with wp.ScopedCapture(device) as capture:
+                pair()
+            for _ in range(20):
+                wp.capture_launch(capture.graph)
+        else:
+            for _ in range(20):
+                pair()
+        test.assertGreater(int(contacts.rigid_contact_count.numpy()[0]), 0)
+        result = [
+            x.numpy().copy()
+            for x in (
+                a.body_q,
+                a.body_qd,
+                solver.joint_lambda_lin,
+                solver.joint_lambda_ang,
+                solver.body_body_contact_lambda,
+            )
+        ]
+        for value in result:
+            test.assertTrue(np.isfinite(value).all())
+        active_joints = joints[model.joint_enabled.numpy()[joints]]
+        return result, _max_joint_gap(model, result[0], active_joints)
 
-    body_q = state_0.body_q.numpy()
-    test.assertTrue(np.isfinite(body_q).all())
-    test.assertTrue(np.isfinite(state_0.body_qd.numpy()).all())
-    test.assertTrue(np.any(ground))
-    test.assertGreater(float(np.linalg.norm(ground_multiplier, axis=1).max(initial=0.0)), 1.0e-3)
-    test.assertLess(maximum_penetration, 1.0e-4)
-    test.assertLess(_max_joint_gap(model, body_q, joints[:-1]), 1.0e-4)
+    actual, actual_gap = simulate(1)
+    _reference, reference_gap = simulate(0)
+    test.assertLess(actual_gap, 0.5 * reference_gap)
+    test.assertGreater(float(actual[0][:, 2].min()), 0.009)
+    for a, b in zip(actual, simulate(1)[0], strict=True):
+        np.testing.assert_array_equal(a, b)
 
 
 def _cable_kkt_contact_capture_is_finite(test, device):
@@ -2177,7 +2492,11 @@ def _structural_kkt_reduces_fixed_chain_error(test, device):
     # Finite compliant ALM is already much stronger than the former penalty
     # baseline. Require a material additional reduction and a tight absolute
     # gap instead of preserving the obsolete 100x relative threshold.
-    test.assertLess(kkt_gap, 0.25 * local_gap, f"Structural KKT gap {kkt_gap:.3e} did not improve {local_gap:.3e}")
+    test.assertLess(
+        kkt_gap,
+        0.25 * local_gap,
+        f"Structural KKT gap {kkt_gap:.3e} did not improve {local_gap:.3e}",
+    )
     test.assertLess(kkt_gap, 3.0e-5)
 
 
@@ -2276,12 +2595,10 @@ def _structural_kkt_estimates_allocation_payloads_exactly(test, device):
             test.assertIsNone(diagnostics[0].fallback_reason)
             if kind.startswith("closed_tree"):
                 bucket = backend.closed_tree_buckets[0]
-                matrix_bytes = wp.types.type_size_in_bytes(wp.spatial_matrix)
+                matrix_bytes = wp.types.type_size_in_bytes(bucket.closure_schur.dtype)
                 expected_response_bytes = bucket.response_rhs.capacity
                 if bucket.paired_response is not None:
-                    expected_response_bytes += (
-                        bucket.paired_response.capacity + bucket.paired_correction_response.capacity
-                    )
+                    expected_response_bytes += bucket.paired_response.capacity
                 test.assertEqual(
                     diagnostics[0].closure_response_bytes,
                     expected_response_bytes,
@@ -2295,7 +2612,10 @@ def _structural_kkt_estimates_allocation_payloads_exactly(test, device):
                 test.assertEqual(diagnostics[0].batch_count, expected_worlds)
                 test.assertEqual(diagnostics[0].cycle_rank_per_island, expected_closures)
                 test.assertEqual(diagnostics[0].closure_count_per_island, expected_closures)
-                test.assertEqual(diagnostics[0].closure_count_total, expected_worlds * expected_closures)
+                test.assertEqual(
+                    diagnostics[0].closure_count_total,
+                    expected_worlds * expected_closures,
+                )
 
 
 def _structural_kkt_oversized_closure_falls_back_before_allocation(test, device):
@@ -2317,7 +2637,14 @@ def _structural_kkt_oversized_closure_falls_back_before_allocation(test, device)
         mock.patch.object(rigid_vbd_kkt, "_structural_payload_budget", return_value=0),
         ExitStack() as allocation_patches,
     ):
-        allocation_functions = ("array", "empty", "empty_like", "zeros", "zeros_like", "ones")
+        allocation_functions = (
+            "array",
+            "empty",
+            "empty_like",
+            "zeros",
+            "zeros_like",
+            "ones",
+        )
         originals = {name: getattr(wp, name) for name in allocation_functions}
         for name, original in originals.items():
 
@@ -2342,11 +2669,12 @@ def _structural_kkt_oversized_closure_falls_back_before_allocation(test, device)
     test.assertEqual(diagnostics.cycle_rank_per_island, closure_count)
     test.assertEqual(diagnostics.closure_count_per_island, closure_count)
     test.assertEqual(diagnostics.closure_count_total, worlds * closure_count)
-    matrix_bytes = wp.types.type_size_in_bytes(wp.spatial_matrix)
+    matrix_dtype = wp.spatial_matrixd
+    matrix_bytes = wp.types.type_size_in_bytes(matrix_dtype)
     expected_response_bytes = worlds * (2 * link_count) * closure_count * matrix_bytes
     if diagnostics.planned_route == "closed_tree_paired_backbone_cr":
         expected_response_bytes += (
-            2 * worlds * link_count * closure_count * wp.types.type_size_in_bytes(rigid_vbd_kkt._SpatialPairResponse)
+            worlds * link_count * closure_count * wp.types.type_size_in_bytes(rigid_vbd_kkt._SpatialPairResponseD)
         )
     test.assertEqual(
         diagnostics.closure_response_bytes,
@@ -2468,7 +2796,7 @@ def _structural_kkt_mixed_rod_tree_uses_stable_leaf_route(test, device):
     test.assertEqual(bucket._diagnostics.selected_route, "tree_leaf_rake")
     test.assertEqual(bucket._diagnostics.fill_edge_count_total, 0)
     test.assertEqual(bucket._diagnostics.estimated_bytes, bucket._estimated_bytes)
-    test.assertEqual(bucket.use_fused_tree_levels, device.is_cuda)
+    test.assertTrue(bucket.use_fused_tree_levels)
 
     # Preserve the fast route inside its existing homogeneous-ROD coverage.
     homogeneous_model, _, _ = _build_y_tree(device, segments_per_branch=4)
@@ -2514,11 +2842,17 @@ def _structural_kkt_partial_fallback_preserves_healthy_island(test, device):
     test.assertIsNotNone(partial_backend)
     test.assertEqual(partial_backend._estimated_bytes, healthy_payload_budget)
     test.assertEqual(partial_solver._structural_graph_kkt_estimated_bytes, healthy_payload_budget)
-    test.assertEqual(partial_solver._structural_graph_kkt_payload_budget_bytes, healthy_payload_budget)
+    test.assertEqual(
+        partial_solver._structural_graph_kkt_payload_budget_bytes,
+        healthy_payload_budget,
+    )
     test.assertEqual(len(partial_backend.tree_buckets), 1)
     test.assertEqual(len(partial_backend.closed_tree_buckets), 0)
     test.assertEqual(partial_backend.island_count, 1)
-    test.assertEqual([diagnostics.kind for diagnostics in partial_backend._bucket_diagnostics], ["closed_tree", "tree"])
+    test.assertEqual(
+        [diagnostics.kind for diagnostics in partial_backend._bucket_diagnostics],
+        ["closed_tree", "tree"],
+    )
     test.assertEqual(partial_backend._bucket_diagnostics[0].selected_route, "local_vbd")
     test.assertIsNone(partial_backend._bucket_diagnostics[1].fallback_reason)
     np.testing.assert_array_equal(partial_backend.graph_body_ids.numpy(), partial_healthy_bodies)
@@ -2635,12 +2969,36 @@ def _structural_kkt_robust_block_inverse(test, device):
     )
     matrix_device = wp.array(matrix[None], dtype=wp.spatial_matrix, device=device)
     inverse_device = wp.empty_like(matrix_device)
-    wp.launch(_invert_spatial_matrix, 1, inputs=[matrix_device], outputs=[inverse_device], device=device)
+    wp.launch(
+        _invert_spatial_matrix,
+        1,
+        inputs=[matrix_device],
+        outputs=[inverse_device],
+        device=device,
+    )
     inverse = inverse_device.numpy()[0]
     residual = float(np.max(np.abs(matrix @ inverse - np.eye(6))))
 
     test.assertTrue(np.isfinite(inverse).all())
     test.assertLess(residual, 2.0e-2)
+
+    # A well-conditioned, finite matrix can still overflow the determinant
+    # arithmetic in the fast Schur split. Its representable inverse must use
+    # the pivoted fallback rather than silently retiring a global correction.
+    for scale in (1.0e-14, 1.0e20):
+        with test.subTest(scale=scale):
+            scaled = np.eye(6, dtype=np.float32) * scale
+            matrix_device.assign(scaled[None])
+            wp.launch(
+                _invert_spatial_matrix,
+                1,
+                inputs=[matrix_device],
+                outputs=[inverse_device],
+                device=device,
+            )
+            scaled_inverse = inverse_device.numpy()[0]
+            test.assertTrue(np.isfinite(scaled_inverse).all())
+            np.testing.assert_allclose(scaled @ scaled_inverse, np.eye(6), rtol=0.0, atol=1.0e-6)
 
 
 def _structural_kkt_path_matches_float64_oracle(test, device):
@@ -2653,7 +3011,13 @@ def _structural_kkt_path_matches_float64_oracle(test, device):
         # relaxation of the independently checked Delassus identity.
         (128, 1.0e9, 3.0e-2, 2.0e-2, 6.0e-3),
     )
-    for segments, stiffness, residual_limit, multiplier_limit, correction_limit in cases:
+    for (
+        segments,
+        stiffness,
+        residual_limit,
+        multiplier_limit,
+        correction_limit,
+    ) in cases:
         with test.subTest(segments=segments, stiffness=stiffness):
             metrics = _path_float64_oracle_metrics(device, stiffness, segments=segments)
             message = f"segments={segments}, K={stiffness:.1e}: {metrics}"
@@ -2683,6 +3047,45 @@ def _structural_kkt_tree_matches_float64_oracle(test, device):
             test.assertLess(metrics["correction_error"], 1.0e-3, message)
             test.assertLess(metrics["multiplier_error"], 1.0e-2, message)
             test.assertLess(metrics["body_reaction_error"], 2.0e-2, message)
+
+
+def _structural_kkt_dense_closure_matches_float64_oracle(test, device):
+    """Keep batched dense closure solves accurate as cycle rank grows."""
+    rng = np.random.default_rng(20260924)
+    for closures, batches in ((1, 1), (8, 4), (33, 2)):
+        with test.subTest(closures=closures, batches=batches):
+            size = 6 * closures
+            matrix = rng.standard_normal((batches, size, size))
+            matrix = matrix @ matrix.transpose(0, 2, 1) + size * np.eye(size)
+            rhs = rng.standard_normal((batches, size))
+            blocks = matrix.reshape(batches, closures, 6, closures, 6).transpose(0, 1, 3, 2, 4)
+            bucket = SimpleNamespace(
+                closure_count=closures,
+                closure_size=batches * closures,
+                use_fused_closure=device.is_cuda and 4 < closures <= rigid_vbd_kkt._FUSED_CLOSURE_MAX_BLOCKS,
+                spatial_block_dim=32,
+                use_lane_back_substitute=rigid_vbd_kkt._closure_back_substitute_lanes(closures, device),
+                closure_back_partial=wp.zeros(batches * closures, dtype=wp.spatial_vectord, device=device),
+                batch_count=batches,
+                device=device,
+                closure_schur=wp.array(blocks.reshape(-1, 6, 6), dtype=wp.spatial_matrixd, device=device),
+                closure_multiplier=wp.array(rhs.reshape(-1, 6), dtype=wp.spatial_vectord, device=device),
+            )
+            rigid_vbd_kkt._ClosedTreeBucket.solve_closure_schur(bucket)
+            actual = bucket.closure_multiplier.numpy().reshape(batches, size)
+            expected = np.linalg.solve(matrix, rhs[..., None])[..., 0]
+            np.testing.assert_allclose(actual, expected, rtol=1.0e-11, atol=1.0e-13)
+
+
+def _structural_kkt_near_hard_closure_matches_float64_oracle(test, device):
+    """Resolve stiff cyclic corrections without losing observable reactions."""
+    for ring_segments in (32, 64, 128):
+        with test.subTest(ring_segments=ring_segments):
+            metrics = _tree_float64_oracle_metrics(device, 1.0e12, closed=True, ring_segments=ring_segments)
+            test.assertTrue(all(np.isfinite(value) for value in metrics.values()), metrics)
+            test.assertLess(metrics["equilibrated_residual"], 1.0e-4, metrics)
+            test.assertLess(metrics["correction_error"], 1.0e-6, metrics)
+            test.assertLess(metrics["body_reaction_error"], 1.0e-6, metrics)
 
 
 def _structural_kkt_closure_matches_float64_oracle(test, device):
@@ -2914,8 +3317,18 @@ def _structural_kkt_cr_tail_preserves_factors(test, device):
                 )
             baseline.use_persistent_cr = False
             baseline.use_fused_cr_tail = False
-            buffers = [bucket.lower[0], bucket.diagonal[0], bucket.upper[0], bucket.rhs[0]]
-            reference_buffers = [baseline.lower[0], baseline.diagonal[0], baseline.upper[0], baseline.rhs[0]]
+            buffers = [
+                bucket.lower[0],
+                bucket.diagonal[0],
+                bucket.upper[0],
+                bucket.rhs[0],
+            ]
+            reference_buffers = [
+                baseline.lower[0],
+                baseline.diagonal[0],
+                baseline.upper[0],
+                baseline.rhs[0],
+            ]
             capture = None
             for seed in (31, 47):
                 rng = np.random.default_rng(seed)
@@ -2935,7 +3348,11 @@ def _structural_kkt_cr_tail_preserves_factors(test, device):
                 rhs[:, :-1] += np.einsum("bnij,bnj->bni", upper[:, :-1], known[:, 1:])
                 rhs = rhs.astype(np.float32)
                 source = [
-                    wp.array(value.reshape((-1, *value.shape[2:])), dtype=target.dtype, device=device)
+                    wp.array(
+                        value.reshape((-1, *value.shape[2:])),
+                        dtype=target.dtype,
+                        device=device,
+                    )
                     for value, target in zip((lower, diagonal, upper, rhs), buffers, strict=True)
                 ]
                 for target, ref, value in zip(buffers, reference_buffers, source, strict=True):
@@ -2959,7 +3376,10 @@ def _structural_kkt_cr_tail_preserves_factors(test, device):
                 residual[:, 1:] += np.einsum("bnij,bnj->bni", lower[:, 1:], solution[:, :-1])
                 residual[:, :-1] += np.einsum("bnij,bnj->bni", upper[:, :-1], solution[:, 1:])
                 test.assertLess(float(np.linalg.norm(residual) / np.linalg.norm(rhs)), 2.0e-6)
-                test.assertLess(float(np.linalg.norm(solution - known) / np.linalg.norm(known)), 2.0e-6)
+                test.assertLess(
+                    float(np.linalg.norm(solution - known) / np.linalg.norm(known)),
+                    2.0e-6,
+                )
 
 
 def _structural_kkt_cr_tail_preserves_captured_trajectory(test, device):
@@ -2997,12 +3417,19 @@ def _structural_kkt_fused_closure_matches_level_schedule(test, device):
     """Keep closure dispatch bounded and preserve captured pose/velocity updates."""
     for closures, worlds in ((1, 1), (4, 1), (5, 1), (6, 4), (16, 1), (17, 1)):
         model = _build_replicated_fixed_topology(
-            device, closed=True, worlds=worlds, link_count=max(10, closures + 2), closure_count=closures
+            device,
+            closed=True,
+            worlds=worlds,
+            link_count=max(10, closures + 2),
+            closure_count=closures,
         )
 
         def simulate(model, closures, use_fused):
             solver = newton.solvers.SolverVBD(
-                model, iterations=2, rigid_compliant_alm=True, rigid_joint_global_iterations=1
+                model,
+                iterations=2,
+                rigid_compliant_alm=True,
+                rigid_joint_global_iterations=1,
             )
             bucket = solver._structural_graph_kkt.closed_tree_buckets[0]
             expected = device.is_cuda and 4 < closures <= rigid_vbd_kkt._FUSED_CLOSURE_MAX_BLOCKS
@@ -3126,75 +3553,6 @@ def _structural_kkt_paired_coarse_lanes_match_serial_schedule(test, device):
     test.assertFalse(cpu_solver._structural_graph_kkt.closed_tree_buckets[0].use_lane_split_coarse)
 
 
-def _structural_kkt_paired_refinement_lanes_match_serial_schedule(test, device):
-    """Preserve paired defects and scatters while distributing response columns."""
-
-    def simulate(model, use_lanes):
-        solver = newton.solvers.SolverVBD(
-            model,
-            iterations=2,
-            rigid_compliant_alm=True,
-            rigid_joint_global_iterations=1,
-            deterministic=wp.DeterministicMode.RUN_TO_RUN,
-        )
-        bucket = solver._structural_graph_kkt.closed_tree_buckets[0]
-        test.assertTrue(bucket.use_paired_backbone)
-        test.assertTrue(bucket.use_lane_split_refinement)
-        bucket.use_lane_split_refinement = use_lanes
-        state_in = model.state()
-        state_out = model.state()
-        control = model.control()
-        dt = 1.0 / 600.0
-        solver.step(state_in, state_out, control, None, dt)
-        state_in, state_out = state_out, state_in
-        with wp.ScopedCapture(device) as capture:
-            solver.step(state_in, state_out, control, None, dt)
-            solver.step(state_out, state_in, control, None, dt)
-        for _ in range(3):
-            wp.capture_launch(capture.graph)
-        wp.synchronize_device(device)
-        return state_in.body_q.numpy(), state_in.body_qd.numpy()
-
-    # Cover the gate, batching, and closure-column striding beyond one warp.
-    for closures, worlds in ((6, 1), (6, 4), (34, 1)):
-        model = _build_replicated_fixed_topology(
-            device,
-            closed=True,
-            worlds=worlds,
-            link_count=max(10, closures + 2),
-            closure_count=closures,
-        )
-        serial_q, serial_qd = simulate(model, False)
-        lane_q, lane_qd = simulate(model, True)
-        np.testing.assert_array_equal(lane_q, serial_q)
-        np.testing.assert_array_equal(lane_qd, serial_qd)
-
-    narrow = _build_replicated_fixed_topology(device, closed=True, worlds=1, link_count=10, closure_count=3)
-    narrow_solver = newton.solvers.SolverVBD(
-        narrow,
-        iterations=1,
-        rigid_compliant_alm=True,
-        rigid_joint_global_iterations=1,
-    )
-    test.assertFalse(narrow_solver._structural_graph_kkt.closed_tree_buckets[0].use_lane_split_refinement)
-
-    cpu = wp.get_device("cpu")
-    cpu_model = _build_replicated_fixed_topology(
-        cpu,
-        closed=True,
-        worlds=1,
-        link_count=10,
-        closure_count=6,
-    )
-    cpu_solver = newton.solvers.SolverVBD(
-        cpu_model,
-        iterations=1,
-        rigid_compliant_alm=True,
-        rigid_joint_global_iterations=1,
-    )
-    test.assertFalse(cpu_solver._structural_graph_kkt.closed_tree_buckets[0].use_lane_split_refinement)
-
-
 def _structural_kkt_suppresses_nonfinite_correction(test, device):
     """A non-finite correction must retire its whole island, not corrupt poses.
 
@@ -3272,12 +3630,16 @@ def _structural_kkt_fused_tree_levels_match_level_schedule(test, device):
         dt = 1.0 / 600.0
         solver.step(state_in, state_out, control, None, dt)
         state_in, state_out = state_out, state_in
-        with wp.ScopedCapture(device) as capture:
-            solver.step(state_in, state_out, control, None, dt)
-            solver.step(state_out, state_in, control, None, dt)
-        for _ in range(3):
-            wp.capture_launch(capture.graph)
-        wp.synchronize_device(device)
+        if device.is_cuda:
+            with wp.ScopedCapture(device) as capture:
+                solver.step(state_in, state_out, control, None, dt)
+                solver.step(state_out, state_in, control, None, dt)
+            for _ in range(3):
+                wp.capture_launch(capture.graph)
+        else:
+            for _ in range(3):
+                solver.step(state_in, state_out, control, None, dt)
+                solver.step(state_out, state_in, control, None, dt)
         return state_in.body_q.numpy(), state_in.body_qd.numpy(), shared
 
     # Staggered branch depths select leaf rake on their own merits and give
@@ -3347,95 +3709,8 @@ def _structural_kkt_fused_tree_levels_match_level_schedule(test, device):
     test.assertTrue(_fused_tree_levels_supported(narrow, device))
     test.assertFalse(_fused_tree_levels_supported(narrow[: _FUSED_TREE_MIN_LEVELS - 1], device))
     too_wide = [list(range(_FUSED_TREE_MAX_LEVEL_WIDTH + 1)), *narrow]
-    test.assertFalse(_fused_tree_levels_supported(too_wide, device))
-    test.assertFalse(_fused_tree_levels_supported(narrow, wp.get_device("cpu")))
-
-    cpu = wp.get_device("cpu")
-    cpu_model = staggered_tree(cpu)[0]
-    cpu_solver = newton.solvers.SolverVBD(
-        cpu_model,
-        iterations=1,
-        rigid_compliant_alm=True,
-        rigid_joint_global_iterations=1,
-    )
-    test.assertFalse(cpu_solver._structural_graph_kkt.tree_buckets[0].use_fused_tree_levels)
-
-
-def _structural_kkt_paired_persistent_matches_level_schedule(test, device):
-    """Preserve cyclic corrections while collapsing retained-factor launches."""
-
-    def simulate(model, use_persistent):
-        solver = newton.solvers.SolverVBD(
-            model,
-            iterations=1,
-            rigid_compliant_alm=True,
-            rigid_joint_global_iterations=1,
-            deterministic=wp.DeterministicMode.RUN_TO_RUN,
-        )
-        bucket = solver._structural_graph_kkt.closed_tree_buckets[0]
-        schedule = (bucket.use_persistent_repeated_solve, bucket.use_panel_parallel_repeated_solve)
-        if not use_persistent:
-            bucket.use_persistent_repeated_solve = False
-            bucket.use_panel_parallel_repeated_solve = False
-
-        state_in = model.state()
-        state_out = model.state()
-        control = model.control()
-        dt = 1.0 / 600.0
-        solver.step(state_in, state_out, control, None, dt)
-        state_in, state_out = state_out, state_in
-        with wp.ScopedCapture(device) as capture:
-            solver.step(state_in, state_out, control, None, dt)
-            solver.step(state_out, state_in, control, None, dt)
-        for _ in range(4):
-            wp.capture_launch(capture.graph)
-        return state_in.body_q.numpy(), state_in.body_qd.numpy(), schedule
-
-    def build_batch():
-        model = _build_replicated_fixed_topology(device, closed=True, worlds=4, link_count=32)
-        model.set_gravity((0.0, 0.0, -9.81))
-        return model
-
-    def build_multi_closure_batch():
-        model = _build_replicated_fixed_topology(
-            device,
-            closed=True,
-            worlds=4,
-            link_count=32,
-            closure_count=8,
-        )
-        model.set_gravity((0.0, 0.0, -9.81))
-        return model
-
-    cases = (
-        (
-            "single",
-            lambda: _build_loop_with_branch(device, ring_segments=32)[0],
-            (False, True),
-        ),
-        (
-            "batch",
-            build_batch,
-            (True, False),
-        ),
-        (
-            "add_chord",
-            lambda: _build_loop_with_branch(device, ring_segments=8, add_chord=True)[0],
-            (False, True),
-        ),
-        (
-            "multi_closure_batch",
-            build_multi_closure_batch,
-            (False, True),
-        ),
-    )
-    for name, build_model, expected_schedule in cases:
-        with test.subTest(name=name):
-            level_q, level_qd, _ = simulate(build_model(), False)
-            persistent_q, persistent_qd, schedule = simulate(build_model(), True)
-            test.assertEqual(schedule, expected_schedule)
-            np.testing.assert_array_equal(persistent_q, level_q)
-            np.testing.assert_array_equal(persistent_qd, level_qd)
+    test.assertEqual(_fused_tree_levels_supported(too_wide, device), not device.is_cuda)
+    test.assertTrue(_fused_tree_levels_supported(narrow, wp.get_device("cpu")))
 
 
 def _structural_kkt_backbone_tail_response_is_finalized(test, device):
@@ -3480,6 +3755,48 @@ def _structural_kkt_backbone_tail_response_is_finalized(test, device):
 
     expected = 1.75 * np.eye(6, dtype=np.float32)
     np.testing.assert_allclose(response_rhs.numpy()[10], expected, rtol=0.0, atol=1.0e-6)
+
+
+def _structural_kkt_angular_damping_matches_local_force(test, device):
+    """Match local angular damping for finite, noncommuting endpoint rotations."""
+    model, _, _, _ = _build_joint_pair(device, newton.JointType.FIXED)
+    solver = newton.solvers.SolverVBD(
+        model,
+        iterations=1,
+        rigid_compliant_alm=True,
+        rigid_joint_global_iterations=1,
+    )
+    dt = 0.02
+    _simulate(model, solver, 1, dt)
+    solver.joint_material_k.zero_()
+    solver.joint_penalty_kd.assign([0.0, 2.0])
+    solver.joint_lambda_ang.zero_()
+    solver.joint_C0_ang.zero_()
+    current = model.body_q.numpy().copy()
+    previous = current.copy()
+    for body, axis, angle, previous_axis, previous_angle in (
+        (0, (1.0, 2.0, -1.0), 0.7, (-1.0, 1.0, 1.0), 0.4),
+        (1, (-2.0, 1.0, 1.0), 1.0, (1.0, 1.0, -1.0), 0.6),
+    ):
+        current[body, 3:] = wp.quat_from_axis_angle(wp.normalize(wp.vec3(*axis)), angle)
+        previous[body, 3:] = wp.quat_from_axis_angle(wp.normalize(wp.vec3(*previous_axis)), previous_angle)
+    body_q = wp.array(current, dtype=wp.transform, device=device)
+    solver.body_q_prev.assign(previous)
+    bucket = solver._structural_graph_kkt.buckets[0]
+    _linearize_bucket(model, solver, bucket, body_q, dt)
+    residual = bucket.residual.numpy()[0].astype(np.float64)
+    compliance = bucket.compliance.numpy()[0].astype(np.float64)
+    jacobian = bucket.jacobian_child.numpy()[0].astype(np.float64)
+    global_torque = -(jacobian.T @ np.linalg.solve(compliance, residual))[3:]
+    expected = wp.zeros(1, dtype=wp.vec3, device=device)
+    wp.launch(
+        _evaluate_local_angular_damping,
+        1,
+        inputs=[body_q, solver.body_q_prev, dt],
+        outputs=[expected],
+        device=device,
+    )
+    np.testing.assert_allclose(global_torque, expected.numpy()[0], rtol=2.0e-6, atol=2.0e-5)
 
 
 def _structural_kkt_joint_linearizations_match_finite_difference(test, device):
@@ -3676,63 +3993,111 @@ def _structural_kkt_all_memory_fallback_uses_local_schedule(test, device):
     test.assertTrue(np.isfinite(state_out.body_q.numpy()).all())
 
 
-def _structural_kkt_all_global_iterations_end_with_contact_reconciliation(test, device):
-    """Reconcile finite compliant contact state after an all-global budget."""
-    model, pipeline, contacts, solver, bodies, _, _ = _build_grounded_chain(
-        device,
-        global_iterations=1,
-        iterations=1,
-        segments=8,
-        contact_history=True,
-        # Remove damping so lambda_n=K*penetration is the exact finite-material
-        # fixed point measured below.
-        contact_kd=0.0,
-    )
-    model_pose = model.body_q.numpy()
-    model_pose[bodies, 2] -= 0.001
-    model.body_q.assign(model_pose)
+def _structural_kkt_contact_transitions_are_repeatable(test, device):
+    """Keep global contact solves finite and repeatable through contact transitions."""
 
-    state_in = model.state()
-    state_out = model.state()
-    control = model.control()
-    dt = 1.0 / 600.0
-    after_global = {}
-    global_solve = solver._solve_structural_graph_kkt
+    def simulate(g):
+        model, pipeline, contacts, solver, bodies, _, _ = _build_grounded_chain(
+            device,
+            global_iterations=g,
+            iterations=2,
+            segments=8,
+            contact_history=True,
+            deterministic=wp.DeterministicMode.RUN_TO_RUN,
+        )
+        q = model.body_q.numpy()
+        q[bodies, 2] -= 0.001
+        model.body_q.assign(q)
+        a, b = model.state(), model.state()
+        control = model.control()
+        records = []
+        for step in range(12):
+            a.clear_forces()
+            wp.launch(
+                _apply_body_force,
+                1,
+                inputs=[int(bodies[-1]), wp.vec3(10.0, 0.0, 0.0)],
+                outputs=[a.body_f],
+                device=device,
+            )
+            pipeline.collide(a, contacts)
+            if step in (3, 4):
+                contacts.rigid_contact_count.zero_()
+            if device.is_cuda and step == 7:
+                with wp.ScopedCapture(device) as capture:
+                    solver.step(a, b, control, contacts, 1.0 / 600.0)
+                wp.capture_launch(capture.graph)
+            else:
+                solver.step(a, b, control, contacts, 1.0 / 600.0)
+            a, b = b, a
+            records.append(
+                [
+                    value.numpy().copy()
+                    for value in (
+                        a.body_q,
+                        a.body_qd,
+                        solver.joint_lambda_lin,
+                        solver.joint_lambda_ang,
+                        solver.body_body_contact_lambda,
+                        solver.joint_penalty_k,
+                    )
+                ]
+            )
+        return records
 
-    def capture_after_global(current_state, current_control, current_contacts, current_dt):
-        global_solve(current_state, current_control, current_contacts, current_dt)
-        after_global.update(_contact_normal_material_metrics(model, solver, current_state, current_contacts))
+    for g in (1, 2):
+        reference = simulate(g)
+        with test.subTest(global_iterations=g):
+            for actual, expected in zip(simulate(g), reference, strict=True):
+                for a, b in zip(actual, expected, strict=True):
+                    test.assertTrue(np.isfinite(a).all())
+                    np.testing.assert_array_equal(a, b)
 
-    solver._solve_structural_graph_kkt = capture_after_global
 
-    # Establish persistent load-bearing contact before the discriminating step.
-    for _ in range(40):
-        state_in.clear_forces()
-        pipeline.collide(state_in, contacts)
-        solver.step(state_in, state_out, control, contacts, dt)
-        state_in, state_out = state_out, state_in
+def _structural_kkt_contacts_preserve_independent_acceleration(test, device):
+    """Accelerate both collidable and collision-disabled independent islands."""
+    count = 16
+    model = _build_replicated_fixed_topology(device, closed=False, worlds=2, link_count=count)
+    flags = model.shape_flags.numpy().copy()
+    flags[model.shape_body.numpy() >= count] &= ~int(newton.ShapeFlags.COLLIDE_SHAPES)
+    model.shape_flags.assign(flags)
+    pipeline = newton.CollisionPipeline(model)
+    contacts = pipeline.contacts()
 
-    settled = _contact_normal_material_metrics(model, solver, state_in, contacts)
-    test.assertGreater(settled["max_lambda_n"], 1.0e-3)
+    def simulate(g):
+        solver = newton.solvers.SolverVBD(
+            model,
+            iterations=2,
+            rigid_compliant_alm=True,
+            rigid_joint_global_iterations=g,
+            rigid_joint_linear_ke=1.0e9,
+            deterministic=wp.DeterministicMode.RUN_TO_RUN,
+        )
+        a, b = model.state(), model.state()
+        control = model.control()
+        for _ in range(12):
+            a.clear_forces()
+            force = np.zeros((model.body_count, 6), dtype=np.float32)
+            force[[count - 1, 2 * count - 1], 0] = 10.0
+            a.body_f.assign(force)
+            solver.step(a, b, control, contacts, 1.0 / 600.0)
+            a, b = b, a
+        return (
+            a.body_q.numpy(),
+            a.body_qd.numpy(),
+            solver.joint_lambda_lin.numpy(),
+            solver,
+        )
 
-    state_in.clear_forces()
-    wp.launch(
-        _apply_body_force,
-        1,
-        inputs=[int(bodies[-1]), wp.vec3(0.0, 0.0, 80.0)],
-        outputs=[state_in.body_f],
-        device=device,
-    )
-    pipeline.collide(state_in, contacts)
-    after_global.clear()
-    solver.step(state_in, state_out, control, contacts, dt)
-    final = _contact_normal_material_metrics(model, solver, state_out, contacts)
-
-    test.assertGreater(after_global["max_lambda_n"], 1.0e-3)
-    test.assertGreater(after_global["material_residual"], 0.1)
-    test.assertLess(final["material_residual"], 1.0e-3)
-    test.assertLess(final["material_residual"], 0.01 * after_global["material_residual"])
-    test.assertLess(final["cone_residual"], 1.0e-3)
+    reference = simulate(0)
+    for g in (1, 2):
+        with test.subTest(global_iterations=g):
+            actual = simulate(g)
+            for joints in (np.arange(count), np.arange(count, 2 * count)):
+                test.assertLess(
+                    _max_joint_gap(model, actual[0], joints),
+                    0.5 * _max_joint_gap(model, reference[0], joints),
+                )
 
 
 def _structural_kkt_contact_history_requires_valid_matching_provenance(test, device):
@@ -3864,7 +4229,11 @@ def _structural_kkt_preflight_is_deterministic_and_capture_safe(test, device):
         )
         test.assertIsNotNone(solver._structural_graph_kkt)
         with (
-            mock.patch.object(wp, "synchronize", side_effect=AssertionError("diagnostics synchronized the device")),
+            mock.patch.object(
+                wp,
+                "synchronize",
+                side_effect=AssertionError("diagnostics synchronized the device"),
+            ),
             mock.patch.object(
                 wp,
                 "synchronize_device",
@@ -3873,7 +4242,10 @@ def _structural_kkt_preflight_is_deterministic_and_capture_safe(test, device):
         ):
             diagnostics = tuple(solver._structural_graph_kkt_bucket_diagnostics)
         test.assertEqual(len(diagnostics), 1)
-        test.assertEqual(diagnostics[0].selected_route, "closed_tree_paired_backbone_cr")
+        test.assertEqual(
+            diagnostics[0].selected_route,
+            "closed_tree_cpu_float64" if device.is_cpu else "closed_tree_paired_backbone_cr",
+        )
         test.assertIsNone(diagnostics[0].fallback_reason)
 
         state_in = model.state()
@@ -3988,10 +4360,362 @@ def _structural_kkt_free_root_is_constraint_free(test, device):
         np.testing.assert_allclose(results[0][1], results[1][1], atol=2.0e-5)
 
 
+def _structural_kkt_reversing_pull_preserves_support(test, device):
+    """Retain support when a sliding cable reverses its applied load."""
+    for iterations in (1, 5):
+        with test.subTest(iterations=iterations):
+            result = _simulate_ground_drag(device, 1, iterations=iterations, contact_history=True, reverse_at=140)
+            test.assertLess(result["penetration"], 5.0e-4)
+            test.assertLess(result["rise"], 1.0e-2)
+            test.assertLess(result["gap"], 4.0e-4)
+            test.assertGreater(result["motion"], 2.0)
+            test.assertLess(result["motion"], 3.0)
+
+
+def _structural_kkt_axial_pull_converges_without_contacts(test, device):
+    """Resolve a stiff axial load with one global and one local iteration."""
+    model, _, _, solver, bodies, joints, _ = _build_grounded_chain(
+        device,
+        global_iterations=1,
+        iterations=1,
+        contact_history=True,
+        deterministic=wp.DeterministicMode.RUN_TO_RUN,
+    )
+    state_in, state_out, control = model.state(), model.state(), model.control()
+    peak_gap = 0.0
+    for step in range(240):
+        state_in.clear_forces()
+        if step >= 40:
+            wp.launch(
+                _apply_body_force,
+                1,
+                inputs=[int(bodies[-1]), wp.vec3(45.0, 0.0, 0.0)],
+                outputs=[state_in.body_f],
+                device=device,
+            )
+        solver.step(state_in, state_out, control, None, 1.0 / 600.0)
+        state_in, state_out = state_out, state_in
+        if step % 10 == 9:
+            peak_gap = max(peak_gap, _max_joint_gap(model, state_in.body_q.numpy(), joints))
+    test.assertLess(peak_gap, 2.0e-6)
+
+
+def _structural_kkt_translation_resolves_friction_breakaway(test, device):
+    """Resolve sliding just outside the aggregate static friction cone."""
+    result = _simulate_ground_drag(device, 1, contact_history=True, weight_fraction=1.1 * 0.45)
+    expected = 0.5 * (0.1 * 0.45 * 9.81) * (200.0 / 600.0) ** 2
+    test.assertGreater(result["motion"], 0.8 * expected)
+    test.assertLess(result["motion"], 1.3 * expected)
+    test.assertLess(result["penetration"], 5.0e-4)
+
+
+def _structural_kkt_free_translation_preserves_momentum(test, device):
+    """Preserve center-of-mass acceleration after the local joint sweeps."""
+    model, bodies, _ = _build_chain(device, segments=16, pinned=False)
+    solver = newton.solvers.SolverVBD(
+        model,
+        iterations=5,
+        rigid_compliant_alm=True,
+        rigid_joint_global_iterations=1,
+    )
+    a, b = model.state(), model.state()
+    control = model.control()
+    mass = model.body_mass.numpy()[bodies].astype(np.float64)
+    initial = (a.body_q.numpy()[bodies, :3] * mass[:, None]).sum(axis=0) / mass.sum()
+    dt, steps, force = 1.0 / 600.0, 120, 10.0
+    graphs = {}
+    for step in range(steps):
+        a.clear_forces()
+        wp.launch(
+            _apply_body_force,
+            1,
+            inputs=[int(bodies[-1]), wp.vec3(force, 0.0, 0.0)],
+            outputs=[a.body_f],
+            device=device,
+        )
+        if step == 0:
+            solver.step(a, b, control, None, dt)
+        else:
+            parity = step % 2
+            if parity not in graphs:
+                with mock.patch.object(
+                    wp.array,
+                    "numpy",
+                    side_effect=AssertionError("host readback in global solve"),
+                ):
+                    with wp.ScopedCapture(device) as capture:
+                        solver.step(a, b, control, None, dt)
+                graphs[parity] = capture.graph
+            wp.capture_launch(graphs[parity])
+        a, b = b, a
+    final = (a.body_q.numpy()[bodies, :3] * mass[:, None]).sum(axis=0) / mass.sum()
+    expected = np.array([force / mass.sum(), 0.0, -9.81]) * (dt * dt * steps * (steps + 1) / 2)
+    np.testing.assert_allclose(final - initial, expected, atol=1.0e-4, rtol=1.0e-4)
+
+
+@wp.kernel
+def _quartic_directional_slope(
+    pose: wp.array[wp.transform],
+    correction: wp.array[wp.spatial_vector],
+    merit: wp.array[wp.float64],
+    evaluations: wp.array[int],
+):
+    i = wp.tid()
+    if i == 0:
+        evaluations[0] += 1
+    x = wp.transform_get_translation(pose[i])[0]
+    slope = x * x * x * correction[i][0]
+    merit[i] = wp.float64(slope)
+
+
+def _structural_kkt_directional_search_rejects_overshoot(test, device):
+    """Backtrack a nonlinear overshoot and exactly restore a non-finite island."""
+    ids = wp.array([0, 1], dtype=int, device=device)
+    original = wp.array(
+        [wp.transform((1.0, 0.0, 0.0), wp.quat_identity())] * 2,
+        dtype=wp.transform,
+        device=device,
+    )
+    pose = wp.clone(original)
+    correction = wp.array(
+        [[float("nan"), 0, 0, 0, 0, 0], [-4, 0, 0, 0, 0, 0]],
+        dtype=wp.spatial_vector,
+        device=device,
+    )
+    com = wp.zeros(2, dtype=wp.vec3, device=device)
+    state = wp.ones(2, dtype=int, device=device)
+    enabled = wp.ones(2, dtype=bool, device=device)
+    scale = wp.ones(2, dtype=float, device=device)
+    merit = wp.zeros(2, dtype=wp.float64, device=device)
+    pending = wp.ones(1, dtype=int, device=device)
+    evaluations = wp.zeros(1, dtype=int, device=device)
+
+    def solve():
+        wp.copy(pose, original)
+        scale.fill_(1.0)
+        pending.fill_(1)
+        evaluations.zero_()
+        wp.launch(
+            _quartic_directional_slope,
+            2,
+            inputs=[pose, correction],
+            outputs=[merit, evaluations],
+            device=device,
+        )
+        wp.launch(
+            rigid_vbd_kkt._begin_directional_search,
+            2,
+            inputs=[state, merit],
+            outputs=[enabled, scale],
+            device=device,
+        )
+
+        def apply_trial(trial):
+            wp.launch(
+                rigid_vbd_kkt._apply_trial_correction,
+                2,
+                inputs=[ids, ids, correction, scale, com, original],
+                outputs=[pose],
+                device=device,
+            )
+            wp.launch(
+                _quartic_directional_slope,
+                2,
+                inputs=[pose, correction],
+                outputs=[merit, evaluations],
+                device=device,
+            )
+            pending.zero_()
+            wp.launch(
+                rigid_vbd_kkt._update_directional_search,
+                2,
+                inputs=[enabled, merit, trial == 4],
+                outputs=[scale, pending],
+                device=device,
+            )
+
+        for trial in range(5):
+            if device.is_cpu or (device.is_capturing and wp.is_conditional_graph_supported()):
+                wp.capture_if(pending, apply_trial, trial=trial)
+            else:
+                apply_trial(trial)
+        wp.launch(
+            rigid_vbd_kkt._apply_trial_correction,
+            2,
+            inputs=[ids, ids, correction, scale, com, original],
+            outputs=[pose],
+            device=device,
+        )
+
+    solve()
+    with mock.patch.object(wp.array, "numpy", side_effect=AssertionError("host readback in line search")):
+        with wp.ScopedCapture(device) as capture:
+            solve()
+        wp.capture_launch(capture.graph)
+    np.testing.assert_array_equal(pose.numpy()[0], original.numpy()[0])
+    test.assertEqual(float(pose.numpy()[1, 0]), 0.0)
+    np.testing.assert_array_equal(scale.numpy(), [0.0, 0.25])
+    test.assertEqual(
+        int(evaluations.numpy()[0]),
+        4 if device.is_cpu or wp.is_conditional_graph_supported() else 6,
+    )
+
+
+@wp.kernel
+def _count_global_contact_refresh(slot: int, counts: wp.array[int]):
+    counts[slot] += 1
+
+
+def _structural_kkt_captured_contact_shortcut_preserves_state(test, device):
+    """Skip completed GPU trials while preserving contact and joint history."""
+    if not wp.is_conditional_graph_supported():
+        test.skipTest("CUDA conditional graphs are unavailable")
+    model, pipeline, contacts, solver, _, _, _ = _build_grounded_chain(
+        device,
+        global_iterations=1,
+        segments=8,
+        contact_history=True,
+        deterministic=wp.DeterministicMode.RUN_TO_RUN,
+    )
+    state_in, state_out, control = model.state(), model.state(), model.control()
+    backend = solver._structural_graph_kkt
+    solver._structural_graph_kkt = None
+    dt = 1.0 / 600.0
+    for _ in range(15):
+        state_in.clear_forces()
+        pipeline.collide(state_in, contacts)
+        solver.step(state_in, state_out, control, contacts, dt)
+        state_in, state_out = state_out, state_in
+    solver._structural_graph_kkt = backend
+    force = np.zeros((model.body_count, 6), dtype=np.float32)
+    force[model.body_count // 2, :3] = (20.0, 5.0, -1.0)
+    state_in.body_f.assign(force)
+    pipeline.collide(state_in, contacts)
+    test.assertGreater(int(contacts.rigid_contact_count.numpy()[0]), 0)
+
+    counts = wp.zeros(2, dtype=int, device=device)
+    solve = backend.solve
+
+    def counted_solve(*args, **kwargs):
+        slot = int(kwargs.get("translation_only", False))
+        refresh = kwargs["refresh_contacts"]
+
+        def counted_refresh():
+            wp.launch(_count_global_contact_refresh, 1, inputs=[slot], outputs=[counts], device=device)
+            refresh()
+
+        kwargs["refresh_contacts"] = counted_refresh
+        return solve(*args, **kwargs)
+
+    backend.solve = counted_solve
+    saved = []
+    seen = set()
+    for owner in [solver, backend, state_in, state_out, control, contacts, *backend.buckets]:
+        for value in vars(owner).values():
+            if isinstance(value, wp.array) and id(value) not in seen:
+                seen.add(id(value))
+                saved.append((value, wp.clone(value)))
+
+    def restore():
+        for value, original in saved:
+            wp.copy(value, original)
+        counts.zero_()
+
+    solver.step(state_in, state_out, control, contacts, dt)
+    restore()
+    outputs = (
+        state_out.body_q,
+        state_out.body_qd,
+        solver.body_body_contact_lambda,
+        solver.joint_lambda_lin,
+        solver.joint_lambda_ang,
+        solver.joint_drive_lambda,
+        solver.joint_limit_lambda,
+    )
+    results = []
+    refresh_counts = []
+    for conditional in (False, True):
+        with ExitStack() as stack:
+            if not conditional:
+                stack.enter_context(mock.patch.object(wp, "is_conditional_graph_supported", return_value=False))
+            stack.enter_context(mock.patch.object(wp.array, "numpy", side_effect=AssertionError("host readback")))
+            with wp.ScopedCapture(device) as capture:
+                solver.step(state_in, state_out, control, contacts, dt)
+        reference = None
+        for _ in range(5):
+            restore()
+            wp.capture_launch(capture.graph)
+            current = tuple(value.numpy() for value in outputs)
+            if reference is not None:
+                for actual, expected in zip(current, reference, strict=True):
+                    np.testing.assert_array_equal(actual, expected)
+            reference = current
+        results.append(reference)
+        refresh_counts.append(counts.numpy())
+    for actual, expected in zip(results[1], results[0], strict=True):
+        np.testing.assert_array_equal(actual, expected)
+    test.assertLess(refresh_counts[1][0], refresh_counts[0][0])
+
+    # Default atomic reductions must retain fixed scheduling: skipping a
+    # numerically different repeated evaluation changed stiff toy hold motion.
+    with test.subTest(deterministic=False):
+        model, pipeline, contacts, solver, _, _, _ = _build_grounded_chain(
+            device,
+            global_iterations=1,
+            segments=8,
+            contact_history=True,
+            deterministic=wp.DeterministicMode.NOT_GUARANTEED,
+        )
+        state_in, state_out, control = model.state(), model.state(), model.control()
+        pipeline.collide(state_in, contacts)
+        solver.step(state_in, state_out, control, contacts, dt)
+        with (
+            mock.patch.object(wp, "capture_if", side_effect=AssertionError("nondeterministic shortcut")),
+            mock.patch.object(wp.array, "numpy", side_effect=AssertionError("host readback")),
+            wp.ScopedCapture(device) as capture,
+        ):
+            solver.step(state_in, state_out, control, contacts, dt)
+        wp.capture_launch(capture.graph)
+        test.assertTrue(np.isfinite(state_out.body_q.numpy()).all())
+
+
 class TestVBDRigidKKT(unittest.TestCase):
     """Validate the optional rigid VBD structural KKT backend."""
 
     pass
+
+
+for _test in (
+    _structural_kkt_reversing_pull_preserves_support,
+    _structural_kkt_axial_pull_converges_without_contacts,
+    _structural_kkt_translation_resolves_friction_breakaway,
+    _structural_kkt_free_translation_preserves_momentum,
+):
+    add_function_test(TestVBDRigidKKT, "test" + _test.__name__, _test, devices=get_test_devices())
+add_function_test(
+    TestVBDRigidKKT,
+    "test_structural_kkt_directional_search_rejects_overshoot",
+    _structural_kkt_directional_search_rejects_overshoot,
+    devices=get_test_devices(),
+)
+add_function_test(
+    TestVBDRigidKKT,
+    "test_structural_kkt_bounds_material_frame_rod_stress",
+    _structural_kkt_bounds_material_frame_rod_stress,
+    devices=get_test_devices(),
+)
+add_function_test(
+    TestVBDRigidKKT,
+    "test_structural_kkt_inactive_limit_adds_curvature_without_force",
+    _structural_kkt_inactive_limit_adds_curvature_without_force,
+    devices=get_test_devices(),
+)
+add_function_test(
+    TestVBDRigidKKT,
+    "test_structural_kkt_open_contact_adds_curvature_without_force",
+    _structural_kkt_open_contact_adds_curvature_without_force,
+    devices=get_test_devices(),
+)
 
 
 add_function_test(
@@ -4006,12 +4730,6 @@ add_function_test(
     TestVBDRigidKKT,
     "test_structural_kkt_selects_supported_complete_graphs",
     _structural_kkt_selects_supported_complete_graphs,
-    devices=get_test_devices(),
-)
-add_function_test(
-    TestVBDRigidKKT,
-    "test_structural_kkt_joint_limit_gate_is_runtime_safe_and_endpoint_symmetric",
-    _structural_kkt_joint_limit_gate_is_runtime_safe_and_endpoint_symmetric,
     devices=get_test_devices(),
 )
 add_function_test(
@@ -4066,13 +4784,13 @@ add_function_test(
     TestVBDRigidKKT,
     "test_cable_kkt_reduces_long_path_error",
     _cable_kkt_reduces_long_path_error,
-    devices=get_cuda_test_devices(),
+    devices=get_test_devices(),
 )
 add_function_test(
     TestVBDRigidKKT,
     "test_structural_kkt_reduces_fixed_chain_error",
     _structural_kkt_reduces_fixed_chain_error,
-    devices=get_cuda_test_devices(),
+    devices=get_test_devices(),
 )
 add_function_test(
     TestVBDRigidKKT,
@@ -4090,7 +4808,7 @@ add_function_test(
     TestVBDRigidKKT,
     "test_structural_kkt_drive_matches_finite_material_equilibrium",
     _structural_kkt_drive_matches_finite_material_equilibrium,
-    devices=get_cuda_test_devices(),
+    devices=get_test_devices(),
 )
 add_function_test(
     TestVBDRigidKKT,
@@ -4102,7 +4820,7 @@ add_function_test(
     TestVBDRigidKKT,
     "test_cable_kkt_tree_handles_stiff_y_junction",
     _cable_kkt_tree_handles_stiff_y_junction,
-    devices=get_cuda_test_devices(),
+    devices=get_test_devices(),
 )
 add_function_test(
     TestVBDRigidKKT,
@@ -4112,21 +4830,45 @@ add_function_test(
 )
 add_function_test(
     TestVBDRigidKKT,
-    "test_cable_kkt_preserves_certified_ground_sliding",
-    _cable_kkt_preserves_certified_ground_sliding,
-    devices=get_cuda_test_devices(),
+    "test_cable_kkt_preserves_local_ground_sliding",
+    _cable_kkt_preserves_local_ground_sliding,
+    devices=get_test_devices(),
 )
 add_function_test(
     TestVBDRigidKKT,
-    "test_cable_kkt_closes_stiff_loop_on_static_ground",
-    _cable_kkt_closes_stiff_loop_on_static_ground,
-    devices=get_cuda_test_devices(),
+    "test_cable_kkt_substeps_preserve_sliding",
+    _cable_kkt_substeps_preserve_sliding,
+    devices=get_test_devices(),
 )
 add_function_test(
     TestVBDRigidKKT,
-    "test_cable_kkt_closed_cycle_preserves_active_ground_contact",
-    _cable_kkt_closed_cycle_preserves_active_ground_contact,
-    devices=get_cuda_test_devices(),
+    "test_cable_kkt_substeps_preserve_static_friction",
+    _cable_kkt_substeps_preserve_static_friction,
+    devices=get_test_devices(),
+)
+add_function_test(
+    TestVBDRigidKKT,
+    "test_structural_kkt_preserves_free_translation",
+    _structural_kkt_preserves_free_translation,
+    devices=get_test_devices(),
+)
+add_function_test(
+    TestVBDRigidKKT,
+    "test_structural_kkt_external_dynamic_contact_blocks_free_translation",
+    _structural_kkt_external_dynamic_contact_blocks_free_translation,
+    devices=get_test_devices(),
+)
+add_function_test(
+    TestVBDRigidKKT,
+    "test_cable_kkt_preserves_local_grounded_loop",
+    _cable_kkt_preserves_local_grounded_loop,
+    devices=get_test_devices(),
+)
+add_function_test(
+    TestVBDRigidKKT,
+    "test_cable_kkt_closed_cycle_preserves_local_contact",
+    _cable_kkt_closed_cycle_preserves_local_contact,
+    devices=get_test_devices(),
 )
 add_function_test(
     TestVBDRigidKKT,
@@ -4144,13 +4886,13 @@ add_function_test(
     TestVBDRigidKKT,
     "test_cable_kkt_near_hard_closed_cycle_is_finite_under_capture",
     _cable_kkt_near_hard_closed_cycle_is_finite_under_capture,
-    devices=get_cuda_test_devices(),
+    devices=get_test_devices(),
 )
 add_function_test(
     TestVBDRigidKKT,
     "test_cable_kkt_closed_cycle_bounds_multiplier_history",
     _cable_kkt_closed_cycle_bounds_multiplier_history,
-    devices=get_cuda_test_devices(),
+    devices=get_test_devices(),
 )
 add_function_test(
     TestVBDRigidKKT,
@@ -4232,12 +4974,6 @@ add_function_test(
 )
 add_function_test(
     TestVBDRigidKKT,
-    "test_structural_kkt_paired_refinement_lanes_match_serial_schedule",
-    _structural_kkt_paired_refinement_lanes_match_serial_schedule,
-    devices=get_cuda_test_devices(),
-)
-add_function_test(
-    TestVBDRigidKKT,
     "test_structural_kkt_suppresses_nonfinite_correction",
     _structural_kkt_suppresses_nonfinite_correction,
     devices=get_test_devices(),
@@ -4246,18 +4982,18 @@ add_function_test(
     TestVBDRigidKKT,
     "test_structural_kkt_fused_tree_levels_match_level_schedule",
     _structural_kkt_fused_tree_levels_match_level_schedule,
-    devices=get_cuda_test_devices(),
-)
-add_function_test(
-    TestVBDRigidKKT,
-    "test_structural_kkt_paired_persistent_matches_level_schedule",
-    _structural_kkt_paired_persistent_matches_level_schedule,
-    devices=get_cuda_test_devices(),
+    devices=get_test_devices(),
 )
 add_function_test(
     TestVBDRigidKKT,
     "test_structural_kkt_backbone_tail_response_is_finalized",
     _structural_kkt_backbone_tail_response_is_finalized,
+    devices=get_test_devices(),
+)
+add_function_test(
+    TestVBDRigidKKT,
+    "test_structural_kkt_angular_damping_matches_local_force",
+    _structural_kkt_angular_damping_matches_local_force,
     devices=get_test_devices(),
 )
 add_function_test(
@@ -4274,9 +5010,15 @@ add_function_test(
 )
 add_function_test(
     TestVBDRigidKKT,
-    "test_structural_kkt_all_global_iterations_end_with_contact_reconciliation",
-    _structural_kkt_all_global_iterations_end_with_contact_reconciliation,
-    devices=get_cuda_test_devices(),
+    "test_structural_kkt_contact_transitions_are_repeatable",
+    _structural_kkt_contact_transitions_are_repeatable,
+    devices=get_test_devices(),
+)
+add_function_test(
+    TestVBDRigidKKT,
+    "test_structural_kkt_contacts_preserve_independent_acceleration",
+    _structural_kkt_contacts_preserve_independent_acceleration,
+    devices=get_test_devices(),
 )
 add_function_test(
     TestVBDRigidKKT,
@@ -4356,6 +5098,30 @@ add_function_test(
     "test_structural_kkt_partial_fallback_preserves_healthy_island",
     _structural_kkt_partial_fallback_preserves_healthy_island,
     devices=get_test_devices(),
+)
+
+
+add_function_test(
+    TestVBDRigidKKT,
+    "test_structural_kkt_near_hard_closure_matches_float64_oracle",
+    _structural_kkt_near_hard_closure_matches_float64_oracle,
+    devices=get_test_devices(),
+)
+
+
+add_function_test(
+    TestVBDRigidKKT,
+    "test_structural_kkt_dense_closure_matches_float64_oracle",
+    _structural_kkt_dense_closure_matches_float64_oracle,
+    devices=get_test_devices(),
+)
+
+
+add_function_test(
+    TestVBDRigidKKT,
+    "test_structural_kkt_captured_contact_shortcut_preserves_state",
+    _structural_kkt_captured_contact_shortcut_preserves_state,
+    devices=get_cuda_test_devices(),
 )
 
 

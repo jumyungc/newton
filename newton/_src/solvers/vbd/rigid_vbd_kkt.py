@@ -15,7 +15,13 @@ and avoids explicitly forming the stiff primal product ``J^T K J``. This does
 not bound conditioning: redundant constraints, anisotropy, and finite-precision
 elimination can still make near-rigid systems inaccurate or non-finite.
 
-Each connected island is factored by the exact scheme its topology allows.
+Contact candidates participate in the global objective. A device-side
+directional line search shortens steps that cross a force-equilibrium point
+and rejects non-descent or non-finite directions. Contact history and duals
+remain owned by local VBD. This check assumes valid collision witnesses; it
+cannot repair incorrect normals or separations from collision detection.
+
+Each eligible connected island is factored by the exact scheme its topology allows.
 Serial, branched, and cyclic graphs are private factorization schedules of the
 same system, not user-visible solver modes. Existing VBD contact Hessians enter
 as a majorizer -- stiffening supported directions without adding contact-graph
@@ -32,6 +38,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from itertools import pairwise
+from typing import Any
 
 import numpy as np
 import warp as wp
@@ -40,6 +47,7 @@ from newton._src.core.types import MAXVAL
 from newton._src.math import quat_velocity
 from newton._src.sim import JointType
 
+from . import rigid_vbd_kkt_precision
 from .rigid_vbd_kernels import (
     _NUM_CONTACT_THREADS_PER_BODY,
     _SMALL_ANGLE_EPS,
@@ -57,7 +65,6 @@ from .rigid_vbd_kernels import (
     _rod_bend_twist_delta,
     _transported_twist_angle_jacobian_from_measure,
     build_joint_projectors,
-    compute_kappa,
     compute_kappa_and_jacobian,
     compute_kappa_dot,
     contact_surface_separation,
@@ -135,15 +142,6 @@ def _cr_persistent_max_rows(device: wp.context.Device) -> int:
     return _CR_PERSISTENT_MAX_ROWS
 
 
-_PAIRED_PERSISTENT_MAX_ROWS = 32
-"""Largest retained paired factor solved persistently after defect formation."""
-
-_PAIRED_PANEL_MIN_ROWS = 16
-"""Smallest single-island paired solve split into independent RHS panels."""
-
-_PAIRED_MULTI_RHS_PANEL_MIN_ROWS = 8
-"""Smallest measured multi-closure paired solve split into RHS panels."""
-
 _PAIRED_OPEN_CHAIN_MIN_BODIES = 64
 """Smallest open chain admitted to the paired body-row solve."""
 
@@ -178,9 +176,6 @@ block-Thomas tail. Below this the split adds barriers without recovering
 enough width, and a single-closure loop measurably regresses.
 """
 
-_PAIRED_REFINEMENT_LANE_MIN_CLOSURES = 5
-"""Smallest response panel considered for lane-parallel refinement work."""
-
 _FUSED_TREE_MIN_LEVELS = 4
 """Smallest leaf-rake schedule worth collapsing into one synchronized block.
 
@@ -211,9 +206,6 @@ model state have already occupied the device.
 
 _INVERSE_RESIDUAL_TOLERANCE = wp.constant(1.0e-2)
 """Maximum infinity-norm residual accepted from a fast float32 block inverse."""
-
-_JOINT_LIMIT_STEP_FRACTION = wp.constant(0.99)
-"""Fraction-to-boundary safety for nonlinear global joint-limit corrections."""
 
 
 @wp.func_native("""
@@ -312,20 +304,34 @@ def _inverse_spatial_pivoted(matrix: wp.spatial_matrix):
 
 
 @wp.func
+def _inverse_spatial_pivoted(matrix: wp.spatial_matrixd):
+    return rigid_vbd_kkt_precision._inverse_spatial_pivoted(matrix)
+
+
+@wp.func
 def _inverse_spatial_robust(matrix: wp.spatial_matrix):
     """Use the fast SPD inverse unless its computed inverse fails a residual check."""
     inverse = _inverse_spatial(matrix)
     maximum_error = 0.0
+    finite = True
     for row in range(6):
         for column in range(6):
             value = 0.0
             for entry in range(6):
                 value = value + matrix[row, entry] * inverse[entry, column]
             target = 1.0 if row == column else 0.0
+            # wp.max follows fmax semantics and ignores NaN operands. An
+            # overflowed fast inverse must still select the pivoted solve.
+            finite = finite and wp.isfinite(value)
             maximum_error = wp.max(maximum_error, wp.abs(value - target))
-    if not wp.isfinite(maximum_error) or maximum_error > _INVERSE_RESIDUAL_TOLERANCE:
+    if not finite or maximum_error > _INVERSE_RESIDUAL_TOLERANCE:
         inverse = _inverse_spatial_pivoted(matrix)
     return inverse
+
+
+@wp.func
+def _inverse_spatial_robust(matrix: wp.spatial_matrixd):
+    return rigid_vbd_kkt_precision._inverse_spatial_pivoted(matrix)
 
 
 @wp.func
@@ -545,17 +551,34 @@ def accumulate_structural_body_body_contacts(
             stabilized_error = normal_error - stab_alpha * C0_normal
             tangent_C0 = (1.0 - stab_alpha) * (C0 - normal * C0_normal)
 
-        if normal_error <= _SMALL_LENGTH_EPS and multiplier_normal <= 0.0:
-            i += _NUM_CONTACT_THREADS_PER_BODY
-            continue
-
         normal_primal_k, multiplier_normal_eff = _material_force_terms(
             normal_weight,
             material_k,
             multiplier_normal,
             contact_compliant_alm,
         )
-        if normal_primal_k * stabilized_error + multiplier_normal_eff <= 0.0 and multiplier_normal <= 0.0:
+        inactive = multiplier_normal <= 0.0 and (
+            normal_error <= _SMALL_LENGTH_EPS or normal_primal_k * stabilized_error + multiplier_normal_eff <= 0.0
+        )
+        if inactive:
+            # A simultaneous structural step can activate a nearby candidate.
+            # k*j*j^T bounds the squared-hinge normal potential on either side
+            # of activation. Add curvature only: an open contact exerts no force.
+            point = point0 if body == body0 else point1
+            arm = point - wp.transform_point(body_q[body], body_com[body])
+            angular = wp.cross(arm, normal)
+            h_ll = normal_primal_k * wp.outer(normal, normal)
+            h_al = normal_primal_k * wp.outer(angular, normal)
+            h_aa = normal_primal_k * wp.outer(angular, angular)
+            h_ll_acc += h_ll
+            h_al_acc += h_al
+            h_aa_acc += h_aa
+            if dynamic_pair:
+                dynamic_h_ll_acc += h_ll
+                dynamic_h_al_acc += h_al
+                dynamic_h_aa_acc += h_aa
+            # Potential curvature does not make a separated pair active.
+            # Retain its metric without triggering active-contact relaxation.
             i += _NUM_CONTACT_THREADS_PER_BODY
             continue
 
@@ -778,6 +801,127 @@ def build_body_surrogate(
     body_matrix = _set_spatial_block(body_matrix, 1, 1, h_aa)
     body_matrix_out[slot] = body_matrix
     body_rhs_out[slot] = wp.spatial_vector(force, torque)
+
+
+@wp.kernel
+def add_joint_stress_majorizer(
+    joint_ids: wp.array[int],
+    joint_type: wp.array[int],
+    joint_parent: wp.array[int],
+    joint_child: wp.array[int],
+    joint_X_p: wp.array[wp.transform],
+    joint_X_c: wp.array[wp.transform],
+    body_q: wp.array[wp.transform],
+    body_com: wp.array[wp.vec3],
+    body_inv_mass: wp.array[float],
+    body_slot: wp.array[int],
+    jacobian_parent: wp.array[wp.spatial_matrix],
+    jacobian_child: wp.array[wp.spatial_matrix],
+    compliance: wp.array[wp.spatial_matrix],
+    residual: wp.array[wp.spatial_vector],
+    body_matrix: wp.array[wp.spatial_matrix],
+):
+    """Bound positional joint stress curvature omitted by Gauss--Newton.
+
+    This changes only the solve metric, not forces, materials, or ALM state.
+    The bound is local to the current pose, not a finite-step descent proof.
+    """
+    row = wp.tid()
+    joint = joint_ids[row]
+    parent, child = joint_parent[joint], joint_child[joint]
+    reaction = _inverse_spatial_robust(compliance[row]) * residual[row]
+    if joint_type[joint] == JointType.ROD and parent >= 0:
+        anchor = wp.transform_point(body_q[child], wp.transform_get_translation(joint_X_c[joint]))
+        rp = anchor - wp.transform_point(body_q[parent], body_com[parent])
+        rc = anchor - wp.transform_point(body_q[child], body_com[child])
+        lp, lc = wp.length(rp), wp.length(rc)
+        length = lp + lc
+        force_norm = wp.length(wp.spatial_top(wp.transpose(jacobian_parent[row]) * reaction))
+        if length > 0.0 and force_norm > 0.0:
+            # Let d = vc-vp-Wp*rp+Wc*rc be the relative anchor increment.
+            # Material-frame stress is f dot (-Wp^2*rp - 2*Wp*d + Wc^2*rc).
+            # Since f dot (Wp*d) ignores d parallel to f, Young's inequality
+            # needs only |f|/length * |(I-n*n^T)*d|^2, n = f/|f|, plus
+            # rotational self blocks. This preserves common translation and
+            # avoids fictitious axial stiffness in a loaded straight rod.
+            added = force_norm / length
+            metric_compliance = wp.spatial_matrix(compliance[row])
+            metric_residual = residual[row] + wp.spatial_vector()
+            jp = wp.spatial_matrix(jacobian_parent[row])
+            jc = wp.spatial_matrix(jacobian_child[row])
+            material_from_world = wp.quat_to_matrix(
+                wp.quat_inverse(wp.transform_get_rotation(body_q[parent] * joint_X_p[joint]))
+            )
+            normal = wp.normalize(wp.vec3d(wp.spatial_top(reaction)))
+            metric = wp.mat33d(0.0)
+            for axis in range(3):
+                enabled = wp.length_sq(wp.vec3(jc[axis, 0], jc[axis, 1], jc[axis, 2])) > 0.0
+                tangent = 1.0 / metric_compliance[axis, axis] if enabled else 0.0
+                for column in range(3):
+                    metric[axis, column] = -wp.float64(added) * wp.float64(normal[axis]) * wp.float64(normal[column])
+                metric[axis, axis] += wp.float64(tangent) + wp.float64(added)
+            # Whiten the three linear rows: M = L*L^T, J_new = L^T*J,
+            # c_new = L^-1*f, C_new = I. Thus J_new^T*c_new = J^T*f.
+            # A dense float32 inverse compliance loses this force identity
+            # when material and stress eigenvalues differ substantially.
+            lower = wp.mat33d(0.0)
+            normalized_force = wp.vec3d(0.0)
+            for axis in range(3):
+                for column in range(axis + 1):
+                    value = metric[axis, column]
+                    for k in range(column):
+                        value -= lower[axis, k] * lower[column, k]
+                    lower[axis, column] = wp.sqrt(value) if column == axis else value / lower[column, column]
+                value = wp.float64(reaction[axis])
+                for column in range(axis):
+                    value -= lower[axis, column] * normalized_force[column]
+                normalized_force[axis] = value / lower[axis, axis]
+                metric_residual[axis] = float(normalized_force[axis])
+                for column in range(3):
+                    metric_compliance[axis, column] = 1.0 if axis == column else 0.0
+            weighted_frame = wp.mat33(wp.transpose(lower)) * material_from_world
+            jp = _set_spatial_block(jp, 0, 0, -weighted_frame)
+            jp = _set_spatial_block(jp, 0, 1, weighted_frame * wp.skew(rp))
+            jc = _set_spatial_block(jc, 0, 0, weighted_frame)
+            jc = _set_spatial_block(jc, 0, 1, -weighted_frame * wp.skew(rc))
+            jacobian_parent[row] = jp
+            jacobian_child[row] = jc
+            compliance[row] = metric_compliance
+            residual[row] = metric_residual
+            for side in range(2):
+                body = parent if side == 0 else child
+                slot = body_slot[body]
+                if slot >= 0 and body_inv_mass[body] > 0.0:
+                    angular = force_norm * (lp + length) if side == 0 else force_norm * lc
+                    block = wp.spatial_matrix(0.0)
+                    for axis in range(3):
+                        block[axis + 3, axis + 3] = angular
+                    wp.atomic_add(body_matrix, slot, block)
+        return
+
+    # Ordinary world-frame anchor errors have only rotational self stress.
+    for side in range(2):
+        body = parent if side == 0 else child
+        if body >= 0:
+            slot = body_slot[body]
+            if slot >= 0 and body_inv_mass[body] > 0.0:
+                frame = joint_X_p[joint] if side == 0 else joint_X_c[joint]
+                lever = wp.quat_rotate(
+                    wp.transform_get_rotation(body_q[body]),
+                    wp.transform_get_translation(frame) - body_com[body],
+                )
+                jacobian = jacobian_parent[row] if side == 0 else jacobian_child[row]
+                force = -wp.spatial_top(wp.transpose(jacobian) * reaction)
+                curvature = wp.dot(lever, force) * wp.identity(3, float) - 0.5 * (
+                    wp.outer(lever, force) + wp.outer(force, lever)
+                )
+                eigenvectors, eigenvalues = wp.eig3(curvature)
+                positive = wp.mat33(0.0)
+                for axis in range(3):
+                    positive[axis, axis] = wp.max(eigenvalues[axis], 0.0)
+                positive = eigenvectors * positive * wp.transpose(eigenvectors)
+                block = _set_spatial_block(wp.spatial_matrix(0.0), 1, 1, positive)
+                wp.atomic_add(body_matrix, slot, block)
 
 
 @wp.kernel
@@ -1085,7 +1229,6 @@ def linearize_joint_path_rows(
         return
 
     kappa, angular_jacobian_world = compute_kappa_and_jacobian(q_wp, q_wc, q_wp_rest, q_wc_rest)
-    kappa_prev = compute_kappa(q_wp_prev, q_wc_prev, q_wp_rest, q_wc_rest)
 
     lin_count = 0
     ang_count = 0
@@ -1158,7 +1301,10 @@ def linearize_joint_path_rows(
         jp = _set_spatial_block(jp, 1, 1, -angular_jacobian)
         jc = _set_spatial_block(jc, 1, 1, angular_jacobian)
         angular_error = p_angular * (kappa - stab_alpha * joint_C0_ang[joint])
-        angular_rate = p_angular * (kappa - kappa_prev)
+        # Match local VBD's current-Jacobian angular-velocity damping.
+        omega_parent = quat_velocity(q_wp, q_wp_prev, dt)
+        omega_child = quat_velocity(q_wc, q_wc_prev, dt)
+        angular_rate = dt * (p_angular * compute_kappa_dot(angular_jacobian_world, omega_parent, omega_child))
         bend_scale = bend_primal_k + bend_d
         angular_compliance = (1.0 / bend_scale) * p_angular + (wp.identity(3, float) - p_angular)
         material_compliance = _set_spatial_block(material_compliance, 1, 1, angular_compliance)
@@ -1251,6 +1397,14 @@ def linearize_joint_path_rows(
                 joint_limit_lambda[dof],
                 inv_dt,
             )
+            if has_limit and limit_tangent == 0.0:
+                # The squared distance to an interval has this curvature bound
+                # even inside the interval. Anticipate activation without
+                # adding a limit force or replacing finite compliance by a gate.
+                _, limit_tangent, _ = _compliant_alm_coefficients(
+                    joint_limit_ke[dof] + joint_limit_kd[dof] * inv_dt,
+                    joint_drive_limit_support[dof],
+                )
             force = force + limit_force
             tangent = tangent + limit_tangent
             normalized_defect = force / tangent if tangent > 0.0 else 0.0
@@ -1338,6 +1492,11 @@ def linearize_joint_path_rows(
                     joint_limit_lambda[dof],
                     inv_dt,
                 )
+                if has_limit and limit_tangent == 0.0:
+                    _, limit_tangent, _ = _compliant_alm_coefficients(
+                        joint_limit_ke[dof] + joint_limit_kd[dof] * inv_dt,
+                        joint_drive_limit_support[dof],
+                    )
                 force = force + limit_force
                 tangent = tangent + limit_tangent
                 normalized_defect = force / tangent if tangent > 0.0 else 0.0
@@ -1728,40 +1887,35 @@ class _SpatialPairEliminationFactor:
 
 
 @wp.func
-def _zero_spatial_pair_matrix():
-    result = _SpatialPairMatrix()
-    result.m00 = wp.spatial_matrix(0.0)
-    result.m01 = wp.spatial_matrix(0.0)
-    result.m10 = wp.spatial_matrix(0.0)
-    result.m11 = wp.spatial_matrix(0.0)
-    return result
+def _zero_spatial_pair_matrix(matrix: Any):
+    return type(matrix)()
 
 
 @wp.func
-def _spatial_pair_matrix_vector_multiply(matrix: _SpatialPairMatrix, vector: _SpatialPairVector):
-    result = _SpatialPairVector()
+def _spatial_pair_matrix_vector_multiply(matrix: Any, vector: Any):
+    result = type(vector)()
     result.v0 = matrix.m00 * vector.v0 + matrix.m01 * vector.v1
     result.v1 = matrix.m10 * vector.v0 + matrix.m11 * vector.v1
     return result
 
 
 @wp.func
-def _spatial_pair_matrix_response_multiply(matrix: _SpatialPairMatrix, response: _SpatialPairResponse):
-    result = _SpatialPairResponse()
+def _spatial_pair_matrix_response_multiply(matrix: Any, response: Any):
+    result = type(response)()
     result.v0 = matrix.m00 * response.v0 + matrix.m01 * response.v1
     result.v1 = matrix.m10 * response.v0 + matrix.m11 * response.v1
     return result
 
 
 @wp.func
-def _inverse_spatial_pair_body_first(matrix: _SpatialPairMatrix):
+def _inverse_spatial_pair_body_first(matrix: Any):
     """Invert one symbolic body-row saddle pair through its body block."""
     inverse_body = _inverse_spatial_pivoted(matrix.m00)
     inverse_body_coupling = inverse_body * matrix.m01
     schur = matrix.m11 - matrix.m10 * inverse_body_coupling
     inverse_schur = _inverse_spatial_pivoted(schur)
 
-    result = _SpatialPairMatrix()
+    result = type(matrix)()
     result.m01 = -(inverse_body_coupling * inverse_schur)
     result.m10 = -(inverse_schur * matrix.m10 * inverse_body)
     result.m00 = inverse_body + inverse_body_coupling * inverse_schur * matrix.m10 * inverse_body
@@ -1774,9 +1928,9 @@ def initialize_tree_backbone_edges(
     row_count: int,
     backbone_nodes: wp.array[wp.int32],
     parent_node: wp.array[wp.int32],
-    coupling: wp.array[wp.spatial_matrix],
-    lower: wp.array[wp.spatial_matrix],
-    upper: wp.array[wp.spatial_matrix],
+    coupling: wp.array[Any],
+    lower: wp.array[Any],
+    upper: wp.array[Any],
 ):
     """Gather the two oriented edge blocks of a tree backbone."""
     index = wp.tid()
@@ -1784,7 +1938,7 @@ def initialize_tree_backbone_edges(
     row = index - batch * row_count
     base = batch * row_count
     node = backbone_nodes[index]
-    lower_value = wp.spatial_matrix(0.0)
+    lower_value = coupling.dtype(0.0)
     if row > 0:
         previous = backbone_nodes[base + row - 1]
         if parent_node[node] == previous:
@@ -1792,7 +1946,7 @@ def initialize_tree_backbone_edges(
         else:
             lower_value = wp.transpose(coupling[previous])
 
-    upper_value = wp.spatial_matrix(0.0)
+    upper_value = coupling.dtype(0.0)
     if row + 1 < row_count:
         following = backbone_nodes[base + row + 1]
         if parent_node[node] == following:
@@ -1810,14 +1964,14 @@ def initialize_paired_tree_backbone(
     pair_count: int,
     backbone_node_count: int,
     backbone_nodes: wp.array[wp.int32],
-    backbone_lower: wp.array[wp.spatial_matrix],
-    backbone_upper: wp.array[wp.spatial_matrix],
-    diagonal: wp.array[wp.spatial_matrix],
-    rhs: wp.array[wp.spatial_vector],
-    pair_lower: wp.array[_SpatialPairMatrix],
-    pair_diagonal: wp.array[_SpatialPairMatrix],
-    pair_upper: wp.array[_SpatialPairMatrix],
-    pair_rhs: wp.array[_SpatialPairVector],
+    backbone_lower: wp.array[Any],
+    backbone_upper: wp.array[Any],
+    diagonal: wp.array[Any],
+    rhs: wp.array[Any],
+    pair_lower: wp.array[Any],
+    pair_diagonal: wp.array[Any],
+    pair_upper: wp.array[Any],
+    pair_rhs: wp.array[Any],
 ):
     """Pack an alternating body-row backbone into symbolic saddle pairs."""
     index = wp.tid()
@@ -1828,11 +1982,11 @@ def initialize_paired_tree_backbone(
     first_node = backbone_nodes[backbone_base + first_row]
     has_second = first_row + 1 < backbone_node_count
 
-    diagonal_value = _zero_spatial_pair_matrix()
+    diagonal_value = _zero_spatial_pair_matrix(pair_lower[0])
     diagonal_value.m00 = diagonal[first_node]
-    rhs_value = _SpatialPairVector()
+    rhs_value = pair_rhs.dtype()
     rhs_value.v0 = rhs[first_node]
-    rhs_value.v1 = wp.spatial_vector()
+    rhs_value.v1 = rhs.dtype()
     if has_second:
         second_node = backbone_nodes[backbone_base + first_row + 1]
         diagonal_value.m01 = backbone_upper[backbone_base + first_row]
@@ -1842,14 +1996,14 @@ def initialize_paired_tree_backbone(
     else:
         # Pad an odd body-ended backbone with an uncoupled identity block so
         # every CR unknown has the same symbolic 12x12 layout.
-        diagonal_value.m11 = wp.identity(6, float)
+        diagonal_value.m11 = wp.identity(6, backbone_lower.dtype.dtype)
 
-    lower_value = _zero_spatial_pair_matrix()
+    lower_value = _zero_spatial_pair_matrix(pair_lower[0])
     if local_pair > 0:
         # Current body (component 0) couples to the previous row (component 1).
         lower_value.m01 = backbone_lower[backbone_base + first_row]
 
-    upper_value = _zero_spatial_pair_matrix()
+    upper_value = _zero_spatial_pair_matrix(pair_lower[0])
     if has_second and local_pair + 1 < pair_count:
         # Current row (component 1) couples to the following body (component 0).
         upper_value.m10 = backbone_upper[backbone_base + first_row + 1]
@@ -1867,8 +2021,8 @@ def initialize_paired_tree_backbone_response(
     backbone_node_count: int,
     closure_count: int,
     backbone_nodes: wp.array[wp.int32],
-    response_rhs: wp.array[wp.spatial_matrix],
-    pair_response: wp.array[_SpatialPairResponse],
+    response_rhs: wp.array[Any],
+    pair_response: wp.array[Any],
 ):
     """Pack all closure-response columns into the paired backbone layout."""
     index = wp.tid()
@@ -1880,9 +2034,9 @@ def initialize_paired_tree_backbone_response(
     first_row = 2 * local_pair
     first_node = backbone_nodes[backbone_base + first_row]
 
-    value = _SpatialPairResponse()
+    value = pair_response.dtype()
     value.v0 = response_rhs[first_node * closure_count + closure]
-    value.v1 = wp.spatial_matrix(0.0)
+    value.v1 = response_rhs.dtype(0.0)
     if first_row + 1 < backbone_node_count:
         second_node = backbone_nodes[backbone_base + first_row + 1]
         value.v1 = response_rhs[second_node * closure_count + closure]
@@ -1894,10 +2048,10 @@ def invert_paired_tree_backbone_cr_eliminated(
     stride: int,
     pair_count: int,
     eliminated_count: int,
-    lower: wp.array[_SpatialPairMatrix],
-    diagonal: wp.array[_SpatialPairMatrix],
-    upper: wp.array[_SpatialPairMatrix],
-    elimination_factor: wp.array[_SpatialPairEliminationFactor],
+    lower: wp.array[Any],
+    diagonal: wp.array[Any],
+    upper: wp.array[Any],
+    elimination_factor: wp.array[Any],
 ):
     """Invert one CR level and retain its sparse forward multipliers."""
     index = wp.tid()
@@ -1910,8 +2064,8 @@ def invert_paired_tree_backbone_cr_eliminated(
         inverse = _inverse_spatial_pair_body_first(diagonal[pair])
         diagonal[pair] = inverse
 
-        zero = wp.spatial_matrix(0.0)
-        factor = _SpatialPairEliminationFactor()
+        zero = type(lower[0].m00)(0.0)
+        factor = elimination_factor.dtype()
         factor.to_left0 = zero
         factor.to_left1 = zero
         factor.to_right0 = zero
@@ -1936,12 +2090,12 @@ def reduce_paired_tree_backbone_cr_in_place(
     survivor_count: int,
     closure_count: int,
     factorize: int,
-    lower: wp.array[_SpatialPairMatrix],
-    diagonal: wp.array[_SpatialPairMatrix],
-    upper: wp.array[_SpatialPairMatrix],
-    elimination_factor: wp.array[_SpatialPairEliminationFactor],
-    rhs: wp.array[_SpatialPairVector],
-    response_rhs: wp.array[_SpatialPairResponse],
+    lower: wp.array[Any],
+    diagonal: wp.array[Any],
+    upper: wp.array[Any],
+    elimination_factor: wp.array[Any],
+    rhs: wp.array[Any],
+    response_rhs: wp.array[Any],
 ):
     """Reduce paired right-hand sides, optionally building this CR level."""
     index = wp.tid()
@@ -1953,9 +2107,9 @@ def reduce_paired_tree_backbone_cr_in_place(
         return
     row = base + local_row
 
-    lower_value = _zero_spatial_pair_matrix()
+    lower_value = _zero_spatial_pair_matrix(lower[0])
     diagonal_value = diagonal[row]
-    upper_value = _zero_spatial_pair_matrix()
+    upper_value = _zero_spatial_pair_matrix(lower[0])
     rhs_value = rhs[row]
     if local_row >= stride:
         eliminated = base + local_row - stride
@@ -2007,12 +2161,12 @@ def reduce_paired_tree_backbone_cr_lanes(
     survivor_count: int,
     closure_count: int,
     factorize: int,
-    lower: wp.array[_SpatialPairMatrix],
-    diagonal: wp.array[_SpatialPairMatrix],
-    upper: wp.array[_SpatialPairMatrix],
-    elimination_factor: wp.array[_SpatialPairEliminationFactor],
-    rhs: wp.array[_SpatialPairVector],
-    response_rhs: wp.array[_SpatialPairResponse],
+    lower: wp.array[Any],
+    diagonal: wp.array[Any],
+    upper: wp.array[Any],
+    elimination_factor: wp.array[Any],
+    rhs: wp.array[Any],
+    response_rhs: wp.array[Any],
 ):
     """Reduce one paired CR level with its closure columns split across lanes.
 
@@ -2045,9 +2199,9 @@ def reduce_paired_tree_backbone_cr_lanes(
         return
     row = base + local_row
 
-    lower_value = _zero_spatial_pair_matrix()
+    lower_value = _zero_spatial_pair_matrix(lower[0])
     diagonal_value = diagonal[row]
-    upper_value = _zero_spatial_pair_matrix()
+    upper_value = _zero_spatial_pair_matrix(lower[0])
     rhs_value = rhs[row]
     if local_row >= stride:
         eliminated = base + local_row - stride
@@ -2103,11 +2257,11 @@ def solve_paired_tree_backbone_cr_coarse(
     pair_count: int,
     closure_count: int,
     factorize: int,
-    lower: wp.array[_SpatialPairMatrix],
-    diagonal: wp.array[_SpatialPairMatrix],
-    upper: wp.array[_SpatialPairMatrix],
-    rhs: wp.array[_SpatialPairVector],
-    response_rhs: wp.array[_SpatialPairResponse],
+    lower: wp.array[Any],
+    diagonal: wp.array[Any],
+    upper: wp.array[Any],
+    rhs: wp.array[Any],
+    response_rhs: wp.array[Any],
 ):
     """Solve the block-Thomas tail, optionally building its factor."""
     batch = wp.tid()
@@ -2176,11 +2330,11 @@ def solve_paired_tree_backbone_cr_coarse_lanes(
     pair_count: int,
     closure_count: int,
     factorize: int,
-    lower: wp.array[_SpatialPairMatrix],
-    diagonal: wp.array[_SpatialPairMatrix],
-    upper: wp.array[_SpatialPairMatrix],
-    rhs: wp.array[_SpatialPairVector],
-    response_rhs: wp.array[_SpatialPairResponse],
+    lower: wp.array[Any],
+    diagonal: wp.array[Any],
+    upper: wp.array[Any],
+    rhs: wp.array[Any],
+    response_rhs: wp.array[Any],
 ):
     """Solve the same block-Thomas tail with its closure columns lane-split.
 
@@ -2290,11 +2444,11 @@ def back_substitute_paired_tree_backbone_cr_in_place(
     pair_count: int,
     eliminated_count: int,
     closure_count: int,
-    lower: wp.array[_SpatialPairMatrix],
-    diagonal: wp.array[_SpatialPairMatrix],
-    upper: wp.array[_SpatialPairMatrix],
-    rhs: wp.array[_SpatialPairVector],
-    response_rhs: wp.array[_SpatialPairResponse],
+    lower: wp.array[Any],
+    diagonal: wp.array[Any],
+    upper: wp.array[Any],
+    rhs: wp.array[Any],
+    response_rhs: wp.array[Any],
 ):
     """Recover one eliminated paired-backbone level for every right-hand side."""
     index = wp.tid()
@@ -2331,11 +2485,11 @@ def back_substitute_paired_tree_backbone_cr_lanes(
     pair_count: int,
     eliminated_count: int,
     closure_count: int,
-    lower: wp.array[_SpatialPairMatrix],
-    diagonal: wp.array[_SpatialPairMatrix],
-    upper: wp.array[_SpatialPairMatrix],
-    rhs: wp.array[_SpatialPairVector],
-    response_rhs: wp.array[_SpatialPairResponse],
+    lower: wp.array[Any],
+    diagonal: wp.array[Any],
+    upper: wp.array[Any],
+    rhs: wp.array[Any],
+    response_rhs: wp.array[Any],
 ):
     """Recover one paired level with its closure columns split across lanes.
 
@@ -2381,335 +2535,32 @@ def back_substitute_paired_tree_backbone_cr_lanes(
 
 
 @wp.kernel
-def solve_paired_tree_backbone_reused_persistent(
-    pair_count: int,
-    terminal_size: int,
-    closure_count: int,
-    lower: wp.array[_SpatialPairMatrix],
-    diagonal: wp.array[_SpatialPairMatrix],
-    upper: wp.array[_SpatialPairMatrix],
-    elimination_factor: wp.array[_SpatialPairEliminationFactor],
-    rhs: wp.array[_SpatialPairVector],
-    response_rhs: wp.array[_SpatialPairResponse],
-):
-    """Apply one retained paired-CR factor in a synchronized CUDA block."""
-    index = wp.tid()
-    block_dim = wp.block_dim()
-    lane = index % block_dim
-    batch = index // block_dim
-    base = batch * pair_count
-
-    # Explicit casts make these loop-carried values dynamic in Warp codegen.
-    stride = int(1)
-    active_count = int(pair_count)
-    while active_count > terminal_size:
-        survivor_count = (pair_count + 2 * stride - 1) // (2 * stride)
-        local = lane
-        while local < survivor_count:
-            local_row = 2 * stride * local
-            if local_row < pair_count:
-                row = base + local_row
-                rhs_value = rhs[row]
-                if local_row >= stride:
-                    eliminated = base + local_row - stride
-                    factor = elimination_factor[eliminated]
-                    eliminated_rhs = rhs[eliminated]
-                    rhs_value.v0 = rhs_value.v0 - (
-                        factor.to_right0 * eliminated_rhs.v0 + factor.to_right1 * eliminated_rhs.v1
-                    )
-                    for closure in range(closure_count):
-                        response_index = row * closure_count + closure
-                        eliminated_response_index = eliminated * closure_count + closure
-                        response_value = response_rhs[response_index]
-                        eliminated_response = response_rhs[eliminated_response_index]
-                        response_value.v0 = response_value.v0 - (
-                            factor.to_right0 * eliminated_response.v0 + factor.to_right1 * eliminated_response.v1
-                        )
-                        response_rhs[response_index] = response_value
-                if local_row + stride < pair_count:
-                    eliminated = base + local_row + stride
-                    factor = elimination_factor[eliminated]
-                    eliminated_rhs = rhs[eliminated]
-                    rhs_value.v1 = rhs_value.v1 - (
-                        factor.to_left0 * eliminated_rhs.v0 + factor.to_left1 * eliminated_rhs.v1
-                    )
-                    for closure in range(closure_count):
-                        response_index = row * closure_count + closure
-                        eliminated_response_index = eliminated * closure_count + closure
-                        response_value = response_rhs[response_index]
-                        eliminated_response = response_rhs[eliminated_response_index]
-                        response_value.v1 = response_value.v1 - (
-                            factor.to_left0 * eliminated_response.v0 + factor.to_left1 * eliminated_response.v1
-                        )
-                        response_rhs[response_index] = response_value
-                rhs[row] = rhs_value
-            local += block_dim
-        _synchronize_cr_block()
-        stride *= 2
-        active_count = survivor_count
-
-    if lane == 0:
-        for local in range(1, active_count):
-            previous = base + (local - 1) * stride
-            row = base + local * stride
-            multiplier0 = lower[row].m00
-            multiplier1 = lower[row].m01
-            previous_rhs = rhs[previous]
-            row_rhs = rhs[row]
-            row_rhs.v0 = row_rhs.v0 - (multiplier0 * previous_rhs.v0 + multiplier1 * previous_rhs.v1)
-            rhs[row] = row_rhs
-            for closure in range(closure_count):
-                response_index = row * closure_count + closure
-                previous_response_index = previous * closure_count + closure
-                response_value = response_rhs[response_index]
-                previous_response = response_rhs[previous_response_index]
-                response_value.v0 = response_value.v0 - (
-                    multiplier0 * previous_response.v0 + multiplier1 * previous_response.v1
-                )
-                response_rhs[response_index] = response_value
-
-        last = base + (active_count - 1) * stride
-        rhs[last] = _spatial_pair_matrix_vector_multiply(diagonal[last], rhs[last])
-        for closure in range(closure_count):
-            response_index = last * closure_count + closure
-            response_rhs[response_index] = _spatial_pair_matrix_response_multiply(
-                diagonal[last], response_rhs[response_index]
-            )
-
-        for reverse_local in range(1, active_count):
-            row = base + (active_count - 1 - reverse_local) * stride
-            following = row + stride
-            rhs_value = rhs[row]
-            rhs_value.v1 = rhs_value.v1 - upper[row].m10 * rhs[following].v0
-            rhs[row] = _spatial_pair_matrix_vector_multiply(diagonal[row], rhs_value)
-            for closure in range(closure_count):
-                response_index = row * closure_count + closure
-                following_response_index = following * closure_count + closure
-                response_value = response_rhs[response_index]
-                response_value.v1 = response_value.v1 - upper[row].m10 * response_rhs[following_response_index].v0
-                response_rhs[response_index] = _spatial_pair_matrix_response_multiply(diagonal[row], response_value)
-    _synchronize_cr_block()
-
-    stride //= 2
-    while stride >= 1:
-        eliminated_count = (pair_count + stride - 1) // (2 * stride)
-        local = lane
-        while local < eliminated_count:
-            local_row = stride + 2 * stride * local
-            if local_row < pair_count:
-                row = base + local_row
-                previous = row - stride
-                rhs_value = rhs[row]
-                rhs_value.v0 = rhs_value.v0 - lower[row].m01 * rhs[previous].v1
-                if local_row + stride < pair_count:
-                    following = row + stride
-                    rhs_value.v1 = rhs_value.v1 - upper[row].m10 * rhs[following].v0
-                rhs[row] = _spatial_pair_matrix_vector_multiply(diagonal[row], rhs_value)
-
-                for closure in range(closure_count):
-                    response_index = row * closure_count + closure
-                    previous_response_index = previous * closure_count + closure
-                    response_value = response_rhs[response_index]
-                    response_value.v0 = response_value.v0 - lower[row].m01 * response_rhs[previous_response_index].v1
-                    if local_row + stride < pair_count:
-                        following = row + stride
-                        following_response_index = following * closure_count + closure
-                        response_value.v1 = (
-                            response_value.v1 - upper[row].m10 * response_rhs[following_response_index].v0
-                        )
-                    response_rhs[response_index] = _spatial_pair_matrix_response_multiply(diagonal[row], response_value)
-            local += block_dim
-        _synchronize_cr_block()
-        stride //= 2
-
-
-@wp.kernel
-def solve_paired_tree_backbone_reused_panel_persistent(
-    pair_count: int,
-    terminal_size: int,
-    closure_count: int,
-    lower: wp.array[_SpatialPairMatrix],
-    diagonal: wp.array[_SpatialPairMatrix],
-    upper: wp.array[_SpatialPairMatrix],
-    elimination_factor: wp.array[_SpatialPairEliminationFactor],
-    rhs: wp.array[_SpatialPairVector],
-    response_rhs: wp.array[_SpatialPairResponse],
-):
-    """Apply one retained factor with independent primary/response panels."""
-    index = wp.tid()
-    block_dim = wp.block_dim()
-    lane = index % block_dim
-    block = index // block_dim
-    panel_count = closure_count + 1
-    batch = block // panel_count
-    panel = block - batch * panel_count
-    base = batch * pair_count
-    closure = panel - 1
-
-    stride = int(1)
-    active_count = int(pair_count)
-    while active_count > terminal_size:
-        survivor_count = (pair_count + 2 * stride - 1) // (2 * stride)
-        local = lane
-        while local < survivor_count:
-            local_row = 2 * stride * local
-            if local_row < pair_count:
-                row = base + local_row
-                if panel == 0:
-                    rhs_value = rhs[row]
-                    if local_row >= stride:
-                        eliminated = base + local_row - stride
-                        factor = elimination_factor[eliminated]
-                        eliminated_rhs = rhs[eliminated]
-                        rhs_value.v0 = rhs_value.v0 - (
-                            factor.to_right0 * eliminated_rhs.v0 + factor.to_right1 * eliminated_rhs.v1
-                        )
-                    if local_row + stride < pair_count:
-                        eliminated = base + local_row + stride
-                        factor = elimination_factor[eliminated]
-                        eliminated_rhs = rhs[eliminated]
-                        rhs_value.v1 = rhs_value.v1 - (
-                            factor.to_left0 * eliminated_rhs.v0 + factor.to_left1 * eliminated_rhs.v1
-                        )
-                    rhs[row] = rhs_value
-                else:
-                    response_index = row * closure_count + closure
-                    response_value = response_rhs[response_index]
-                    if local_row >= stride:
-                        eliminated = base + local_row - stride
-                        factor = elimination_factor[eliminated]
-                        eliminated_response_index = eliminated * closure_count + closure
-                        eliminated_response = response_rhs[eliminated_response_index]
-                        response_value.v0 = response_value.v0 - (
-                            factor.to_right0 * eliminated_response.v0 + factor.to_right1 * eliminated_response.v1
-                        )
-                    if local_row + stride < pair_count:
-                        eliminated = base + local_row + stride
-                        factor = elimination_factor[eliminated]
-                        eliminated_response_index = eliminated * closure_count + closure
-                        eliminated_response = response_rhs[eliminated_response_index]
-                        response_value.v1 = response_value.v1 - (
-                            factor.to_left0 * eliminated_response.v0 + factor.to_left1 * eliminated_response.v1
-                        )
-                    response_rhs[response_index] = response_value
-            local += block_dim
-        _synchronize_cr_block()
-        stride *= 2
-        active_count = survivor_count
-
-    if lane == 0:
-        if panel == 0:
-            for local in range(1, active_count):
-                previous = base + (local - 1) * stride
-                row = base + local * stride
-                multiplier0 = lower[row].m00
-                multiplier1 = lower[row].m01
-                previous_rhs = rhs[previous]
-                row_rhs = rhs[row]
-                row_rhs.v0 = row_rhs.v0 - (multiplier0 * previous_rhs.v0 + multiplier1 * previous_rhs.v1)
-                rhs[row] = row_rhs
-
-            last = base + (active_count - 1) * stride
-            rhs[last] = _spatial_pair_matrix_vector_multiply(diagonal[last], rhs[last])
-            for reverse_local in range(1, active_count):
-                row = base + (active_count - 1 - reverse_local) * stride
-                following = row + stride
-                rhs_value = rhs[row]
-                rhs_value.v1 = rhs_value.v1 - upper[row].m10 * rhs[following].v0
-                rhs[row] = _spatial_pair_matrix_vector_multiply(diagonal[row], rhs_value)
-        else:
-            for local in range(1, active_count):
-                previous = base + (local - 1) * stride
-                row = base + local * stride
-                multiplier0 = lower[row].m00
-                multiplier1 = lower[row].m01
-                response_index = row * closure_count + closure
-                previous_response_index = previous * closure_count + closure
-                response_value = response_rhs[response_index]
-                previous_response = response_rhs[previous_response_index]
-                response_value.v0 = response_value.v0 - (
-                    multiplier0 * previous_response.v0 + multiplier1 * previous_response.v1
-                )
-                response_rhs[response_index] = response_value
-
-            last = base + (active_count - 1) * stride
-            response_index = last * closure_count + closure
-            response_rhs[response_index] = _spatial_pair_matrix_response_multiply(
-                diagonal[last], response_rhs[response_index]
-            )
-            for reverse_local in range(1, active_count):
-                row = base + (active_count - 1 - reverse_local) * stride
-                following = row + stride
-                response_index = row * closure_count + closure
-                following_response_index = following * closure_count + closure
-                response_value = response_rhs[response_index]
-                response_value.v1 = response_value.v1 - upper[row].m10 * response_rhs[following_response_index].v0
-                response_rhs[response_index] = _spatial_pair_matrix_response_multiply(diagonal[row], response_value)
-    _synchronize_cr_block()
-
-    stride //= 2
-    while stride >= 1:
-        eliminated_count = (pair_count + stride - 1) // (2 * stride)
-        local = lane
-        while local < eliminated_count:
-            local_row = stride + 2 * stride * local
-            if local_row < pair_count:
-                row = base + local_row
-                previous = row - stride
-                if panel == 0:
-                    rhs_value = rhs[row]
-                    rhs_value.v0 = rhs_value.v0 - lower[row].m01 * rhs[previous].v1
-                    if local_row + stride < pair_count:
-                        following = row + stride
-                        rhs_value.v1 = rhs_value.v1 - upper[row].m10 * rhs[following].v0
-                    rhs[row] = _spatial_pair_matrix_vector_multiply(diagonal[row], rhs_value)
-                else:
-                    response_index = row * closure_count + closure
-                    previous_response_index = previous * closure_count + closure
-                    response_value = response_rhs[response_index]
-                    response_value.v0 = response_value.v0 - lower[row].m01 * response_rhs[previous_response_index].v1
-                    if local_row + stride < pair_count:
-                        following = row + stride
-                        following_response_index = following * closure_count + closure
-                        response_value.v1 = (
-                            response_value.v1 - upper[row].m10 * response_rhs[following_response_index].v0
-                        )
-                    response_rhs[response_index] = _spatial_pair_matrix_response_multiply(diagonal[row], response_value)
-            local += block_dim
-        _synchronize_cr_block()
-        stride //= 2
-
-
-@wp.kernel
 def scatter_paired_tree_backbone_solution(
     pair_count: int,
     backbone_node_count: int,
     closure_count: int,
-    backbone_nodes: wp.array[wp.int32],
-    pair_rhs: wp.array[_SpatialPairVector],
-    pair_response: wp.array[_SpatialPairResponse],
-    rhs: wp.array[wp.spatial_vector],
-    response_rhs: wp.array[wp.spatial_matrix],
+    backbone_nodes: wp.array[int],
+    pair_rhs: wp.array[Any],
+    pair_response: wp.array[Any],
+    solution: wp.array[Any],
+    response: wp.array[Any],
 ):
-    """Unpack paired solutions into the existing tree and response buffers."""
     index = wp.tid()
-    batch = index // pair_count
-    local_pair = index - batch * pair_count
-    backbone_base = batch * backbone_node_count
-    first_row = 2 * local_pair
-    first_node = backbone_nodes[backbone_base + first_row]
-    value = pair_rhs[index]
-    rhs[first_node] = value.v0
-    if first_row + 1 < backbone_node_count:
-        second_node = backbone_nodes[backbone_base + first_row + 1]
-        rhs[second_node] = value.v1
-
-    for closure in range(closure_count):
-        response = pair_response[index * closure_count + closure]
-        response_rhs[first_node * closure_count + closure] = response.v0
-        if first_row + 1 < backbone_node_count:
-            second_node = backbone_nodes[backbone_base + first_row + 1]
-            response_rhs[second_node * closure_count + closure] = response.v1
+    pair = index // (closure_count + 1)
+    column = index % (closure_count + 1)
+    batch = pair // pair_count
+    first = 2 * (pair % pair_count)
+    node = backbone_nodes[batch * backbone_node_count + first]
+    if column == closure_count:
+        solution[node] = pair_rhs[pair].v0
+        if first + 1 < backbone_node_count:
+            second = backbone_nodes[batch * backbone_node_count + first + 1]
+            solution[second] = pair_rhs[pair].v1
+    else:
+        response[node * closure_count + column] = pair_response[pair * closure_count + column].v0
+        if first + 1 < backbone_node_count:
+            second = backbone_nodes[batch * backbone_node_count + first + 1]
+            response[second * closure_count + column] = pair_response[pair * closure_count + column].v1
 
 
 @wp.kernel
@@ -2718,15 +2569,15 @@ def compute_paired_tree_backbone_residual(
     backbone_node_count: int,
     closure_count: int,
     backbone_nodes: wp.array[wp.int32],
-    backbone_lower: wp.array[wp.spatial_matrix],
-    backbone_upper: wp.array[wp.spatial_matrix],
-    diagonal: wp.array[wp.spatial_matrix],
-    original_rhs: wp.array[wp.spatial_vector],
-    original_response: wp.array[wp.spatial_matrix],
-    pair_solution: wp.array[_SpatialPairVector],
-    pair_response_solution: wp.array[_SpatialPairResponse],
-    residual: wp.array[_SpatialPairVector],
-    response_residual: wp.array[_SpatialPairResponse],
+    backbone_lower: wp.array[Any],
+    backbone_upper: wp.array[Any],
+    diagonal: wp.array[Any],
+    original_rhs: wp.array[Any],
+    original_response: wp.array[Any],
+    pair_solution: wp.array[Any],
+    pair_response_solution: wp.array[Any],
+    residual: wp.array[Any],
+    response_residual: wp.array[Any],
 ):
     """Evaluate one paired-factor defect against the unmodified backbone."""
     index = wp.tid()
@@ -2739,9 +2590,9 @@ def compute_paired_tree_backbone_residual(
     solution = pair_solution[index]
     first_solution = solution.v0
 
-    value = _SpatialPairVector()
+    value = pair_solution.dtype()
     value.v0 = original_rhs[first_node] - diagonal[first_node] * first_solution
-    value.v1 = wp.spatial_vector()
+    value.v1 = original_rhs.dtype()
     if first_row > 0:
         value.v0 = value.v0 - backbone_lower[first_index] * pair_solution[index - 1].v1
 
@@ -2761,11 +2612,11 @@ def compute_paired_tree_backbone_residual(
         response_index = index * closure_count + closure
         pair_response = pair_response_solution[response_index]
         first_response = pair_response.v0
-        response_value = _SpatialPairResponse()
+        response_value = pair_response_solution.dtype()
         response_value.v0 = (
             original_response[first_node * closure_count + closure] - diagonal[first_node] * first_response
         )
-        response_value.v1 = wp.spatial_matrix(0.0)
+        response_value.v1 = backbone_lower.dtype(0.0)
         if first_row > 0:
             previous_response = pair_response_solution[(index - 1) * closure_count + closure].v1
             response_value.v0 = response_value.v0 - backbone_lower[first_index] * previous_response
@@ -2782,83 +2633,6 @@ def compute_paired_tree_backbone_residual(
                 following_response = pair_response_solution[(index + 1) * closure_count + closure].v0
                 response_value.v1 = response_value.v1 - backbone_upper[second_index] * following_response
         response_residual[response_index] = response_value
-
-
-@wp.kernel
-def compute_paired_tree_backbone_residual_lanes(
-    pair_count: int,
-    backbone_node_count: int,
-    closure_count: int,
-    backbone_nodes: wp.array[wp.int32],
-    backbone_lower: wp.array[wp.spatial_matrix],
-    backbone_upper: wp.array[wp.spatial_matrix],
-    diagonal: wp.array[wp.spatial_matrix],
-    original_rhs: wp.array[wp.spatial_vector],
-    original_response: wp.array[wp.spatial_matrix],
-    pair_solution: wp.array[_SpatialPairVector],
-    pair_response_solution: wp.array[_SpatialPairResponse],
-    residual: wp.array[_SpatialPairVector],
-    response_residual: wp.array[_SpatialPairResponse],
-):
-    """Evaluate a pair defect while distributing response columns over lanes."""
-    thread = wp.tid()
-    width = wp.block_dim()
-    lane = thread % width
-    index = thread // width
-    batch = index // pair_count
-    local_pair = index - batch * pair_count
-    backbone_base = batch * backbone_node_count
-    first_row = 2 * local_pair
-    first_index = backbone_base + first_row
-    first_node = backbone_nodes[first_index]
-    has_second = first_row + 1 < backbone_node_count
-
-    if lane == 0:
-        pair_value = pair_solution[index]
-        first_solution = pair_value.v0
-        value = _SpatialPairVector()
-        value.v0 = original_rhs[first_node] - diagonal[first_node] * first_solution
-        value.v1 = wp.spatial_vector()
-        if first_row > 0:
-            value.v0 = value.v0 - backbone_lower[first_index] * pair_solution[index - 1].v1
-        if has_second:
-            second_index = first_index + 1
-            second_node = backbone_nodes[second_index]
-            second_solution = pair_value.v1
-            value.v0 = value.v0 - backbone_upper[first_index] * second_solution
-            value.v1 = original_rhs[second_node] - diagonal[second_node] * second_solution
-            value.v1 = value.v1 - backbone_lower[second_index] * first_solution
-            if first_row + 2 < backbone_node_count:
-                value.v1 = value.v1 - backbone_upper[second_index] * pair_solution[index + 1].v0
-        residual[index] = value
-
-    closure = lane
-    while closure < closure_count:
-        response_index = index * closure_count + closure
-        pair_response = pair_response_solution[response_index]
-        first_response = pair_response.v0
-        response_value = _SpatialPairResponse()
-        response_value.v0 = (
-            original_response[first_node * closure_count + closure] - diagonal[first_node] * first_response
-        )
-        response_value.v1 = wp.spatial_matrix(0.0)
-        if first_row > 0:
-            previous_response = pair_response_solution[(index - 1) * closure_count + closure].v1
-            response_value.v0 = response_value.v0 - backbone_lower[first_index] * previous_response
-        if has_second:
-            second_index = first_index + 1
-            second_node = backbone_nodes[second_index]
-            second_response = pair_response.v1
-            response_value.v0 = response_value.v0 - backbone_upper[first_index] * second_response
-            response_value.v1 = (
-                original_response[second_node * closure_count + closure] - diagonal[second_node] * second_response
-            )
-            response_value.v1 = response_value.v1 - backbone_lower[second_index] * first_response
-            if first_row + 2 < backbone_node_count:
-                following_response = pair_response_solution[(index + 1) * closure_count + closure].v0
-                response_value.v1 = response_value.v1 - backbone_upper[second_index] * following_response
-        response_residual[response_index] = response_value
-        closure += width
 
 
 @wp.kernel
@@ -2867,12 +2641,12 @@ def scatter_refined_paired_tree_backbone_solution(
     backbone_node_count: int,
     closure_count: int,
     backbone_nodes: wp.array[wp.int32],
-    pair_solution: wp.array[_SpatialPairVector],
-    pair_response_solution: wp.array[_SpatialPairResponse],
-    pair_correction: wp.array[_SpatialPairVector],
-    pair_response_correction: wp.array[_SpatialPairResponse],
-    solution: wp.array[wp.spatial_vector],
-    response_solution: wp.array[wp.spatial_matrix],
+    pair_solution: wp.array[Any],
+    pair_response_solution: wp.array[Any],
+    pair_correction: wp.array[Any],
+    pair_response_correction: wp.array[Any],
+    solution: wp.array[Any],
+    response_solution: wp.array[Any],
 ):
     """Unpack the base solve and its defect correction in one write."""
     index = wp.tid()
@@ -2900,50 +2674,247 @@ def scatter_refined_paired_tree_backbone_solution(
             response_solution[second_response_index] = response.v1 + response_correction.v1
 
 
-@wp.kernel
-def scatter_refined_paired_tree_backbone_solution_lanes(
-    pair_count: int,
-    backbone_node_count: int,
-    closure_count: int,
-    backbone_nodes: wp.array[wp.int32],
-    pair_solution: wp.array[_SpatialPairVector],
-    pair_response_solution: wp.array[_SpatialPairResponse],
-    pair_correction: wp.array[_SpatialPairVector],
-    pair_response_correction: wp.array[_SpatialPairResponse],
-    solution: wp.array[wp.spatial_vector],
-    response_solution: wp.array[wp.spatial_matrix],
-):
-    """Scatter one refined pair while distributing response columns over lanes."""
-    thread = wp.tid()
-    width = wp.block_dim()
-    lane = thread % width
-    index = thread // width
-    batch = index // pair_count
-    local_pair = index - batch * pair_count
-    backbone_base = batch * backbone_node_count
-    first_row = 2 * local_pair
-    first_node = backbone_nodes[backbone_base + first_row]
+@wp.struct
+class _SpatialPairMatrixD:
+    """A 2x2 matrix whose entries are 6x6 spatial blocks."""
 
-    if lane == 0:
-        value = pair_solution[index]
-        correction = pair_correction[index]
-        solution[first_node] = value.v0 + correction.v0
-        if first_row + 1 < backbone_node_count:
-            second_node = backbone_nodes[backbone_base + first_row + 1]
-            solution[second_node] = value.v1 + correction.v1
+    m00: wp.spatial_matrixd
+    m01: wp.spatial_matrixd
+    m10: wp.spatial_matrixd
+    m11: wp.spatial_matrixd
 
-    closure = lane
-    while closure < closure_count:
-        response_index = index * closure_count + closure
-        response = pair_response_solution[response_index]
-        response_correction = pair_response_correction[response_index]
-        first_response_index = first_node * closure_count + closure
-        response_solution[first_response_index] = response.v0 + response_correction.v0
-        if first_row + 1 < backbone_node_count:
-            second_node = backbone_nodes[backbone_base + first_row + 1]
-            second_response_index = second_node * closure_count + closure
-            response_solution[second_response_index] = response.v1 + response_correction.v1
-        closure += width
+
+@wp.struct
+class _SpatialPairVectorD:
+    """A two-entry vector of spatial vectors."""
+
+    v0: wp.spatial_vectord
+    v1: wp.spatial_vectord
+
+
+@wp.struct
+class _SpatialPairResponseD:
+    """A two-entry vector of 6-column spatial response blocks."""
+
+    v0: wp.spatial_matrixd
+    v1: wp.spatial_matrixd
+
+
+@wp.struct
+class _SpatialPairEliminationFactorD:
+    """The two sparse multiplier rows adjacent to one eliminated pair."""
+
+    to_left0: wp.spatial_matrixd
+    to_left1: wp.spatial_matrixd
+    to_right0: wp.spatial_matrixd
+    to_right1: wp.spatial_matrixd
+
+
+def _register_paired_precision(matrix, vector, pair_matrix, pair_vector, pair_response, pair_factor):
+    """Register both numeric layouts before CUDA capture can specialize kernels."""
+    wp.overload(
+        initialize_tree_backbone_edges,
+        [
+            int,
+            wp.array[wp.int32],
+            wp.array[wp.int32],
+            wp.array[matrix],
+            wp.array[matrix],
+            wp.array[matrix],
+        ],
+    )
+    wp.overload(
+        initialize_paired_tree_backbone,
+        [
+            int,
+            int,
+            int,
+            wp.array[wp.int32],
+            wp.array[matrix],
+            wp.array[matrix],
+            wp.array[matrix],
+            wp.array[vector],
+            wp.array[pair_matrix],
+            wp.array[pair_matrix],
+            wp.array[pair_matrix],
+            wp.array[pair_vector],
+        ],
+    )
+    wp.overload(
+        initialize_paired_tree_backbone_response,
+        [
+            int,
+            int,
+            int,
+            wp.array[wp.int32],
+            wp.array[matrix],
+            wp.array[pair_response],
+        ],
+    )
+    wp.overload(
+        invert_paired_tree_backbone_cr_eliminated,
+        [
+            int,
+            int,
+            int,
+            wp.array[pair_matrix],
+            wp.array[pair_matrix],
+            wp.array[pair_matrix],
+            wp.array[pair_factor],
+        ],
+    )
+    wp.overload(
+        reduce_paired_tree_backbone_cr_in_place,
+        [
+            int,
+            int,
+            int,
+            int,
+            int,
+            wp.array[pair_matrix],
+            wp.array[pair_matrix],
+            wp.array[pair_matrix],
+            wp.array[pair_factor],
+            wp.array[pair_vector],
+            wp.array[pair_response],
+        ],
+    )
+    wp.overload(
+        reduce_paired_tree_backbone_cr_lanes,
+        [
+            int,
+            int,
+            int,
+            int,
+            int,
+            wp.array[pair_matrix],
+            wp.array[pair_matrix],
+            wp.array[pair_matrix],
+            wp.array[pair_factor],
+            wp.array[pair_vector],
+            wp.array[pair_response],
+        ],
+    )
+    wp.overload(
+        solve_paired_tree_backbone_cr_coarse,
+        [
+            int,
+            int,
+            int,
+            int,
+            wp.array[pair_matrix],
+            wp.array[pair_matrix],
+            wp.array[pair_matrix],
+            wp.array[pair_vector],
+            wp.array[pair_response],
+        ],
+    )
+    wp.overload(
+        solve_paired_tree_backbone_cr_coarse_lanes,
+        [
+            int,
+            int,
+            int,
+            int,
+            wp.array[pair_matrix],
+            wp.array[pair_matrix],
+            wp.array[pair_matrix],
+            wp.array[pair_vector],
+            wp.array[pair_response],
+        ],
+    )
+    wp.overload(
+        back_substitute_paired_tree_backbone_cr_in_place,
+        [
+            int,
+            int,
+            int,
+            int,
+            wp.array[pair_matrix],
+            wp.array[pair_matrix],
+            wp.array[pair_matrix],
+            wp.array[pair_vector],
+            wp.array[pair_response],
+        ],
+    )
+    wp.overload(
+        back_substitute_paired_tree_backbone_cr_lanes,
+        [
+            int,
+            int,
+            int,
+            int,
+            wp.array[pair_matrix],
+            wp.array[pair_matrix],
+            wp.array[pair_matrix],
+            wp.array[pair_vector],
+            wp.array[pair_response],
+        ],
+    )
+    wp.overload(
+        scatter_paired_tree_backbone_solution,
+        [
+            int,
+            int,
+            int,
+            wp.array[wp.int32],
+            wp.array[pair_vector],
+            wp.array[pair_response],
+            wp.array[vector],
+            wp.array[matrix],
+        ],
+    )
+    wp.overload(
+        compute_paired_tree_backbone_residual,
+        [
+            int,
+            int,
+            int,
+            wp.array[wp.int32],
+            wp.array[matrix],
+            wp.array[matrix],
+            wp.array[matrix],
+            wp.array[vector],
+            wp.array[matrix],
+            wp.array[pair_vector],
+            wp.array[pair_response],
+            wp.array[pair_vector],
+            wp.array[pair_response],
+        ],
+    )
+    wp.overload(
+        scatter_refined_paired_tree_backbone_solution,
+        [
+            int,
+            int,
+            int,
+            wp.array[wp.int32],
+            wp.array[pair_vector],
+            wp.array[pair_response],
+            wp.array[pair_vector],
+            wp.array[pair_response],
+            wp.array[vector],
+            wp.array[matrix],
+        ],
+    )
+
+
+_register_paired_precision(
+    wp.spatial_matrix,
+    wp.spatial_vector,
+    _SpatialPairMatrix,
+    _SpatialPairVector,
+    _SpatialPairResponse,
+    _SpatialPairEliminationFactor,
+)
+_register_paired_precision(
+    wp.spatial_matrixd,
+    wp.spatial_vectord,
+    _SpatialPairMatrixD,
+    _SpatialPairVectorD,
+    _SpatialPairResponseD,
+    _SpatialPairEliminationFactorD,
+)
 
 
 @wp.kernel
@@ -3189,28 +3160,6 @@ def _corrected_pose(
     return wp.transform(position_new, rotation_new)
 
 
-@wp.func
-def _fraction_to_interval(value: float, value_corrected: float, lower: float, upper: float):
-    """Return the largest step in [0, 1] that does not cross a bound."""
-    delta = value_corrected - value
-    if value < lower:
-        if delta <= 0.0:
-            return 0.0
-        if value_corrected >= lower:
-            return _JOINT_LIMIT_STEP_FRACTION * wp.clamp((lower - value) / delta, 0.0, 1.0)
-    elif value > upper:
-        if delta >= 0.0:
-            return 0.0
-        if value_corrected <= upper:
-            return _JOINT_LIMIT_STEP_FRACTION * wp.clamp((upper - value) / delta, 0.0, 1.0)
-    else:
-        if value_corrected < lower and delta < 0.0:
-            return _JOINT_LIMIT_STEP_FRACTION * wp.clamp((lower - value) / delta, 0.0, 1.0)
-        if value_corrected > upper and delta > 0.0:
-            return _JOINT_LIMIT_STEP_FRACTION * wp.clamp((upper - value) / delta, 0.0, 1.0)
-    return 1.0
-
-
 @wp.kernel
 def limit_dynamic_contact_jacobi_step(
     body_ids: wp.array[wp.int32],
@@ -3270,126 +3219,113 @@ def limit_dynamic_contact_jacobi_step(
 
 
 @wp.kernel
-def limit_global_joint_limit_step(
-    joint_ids: wp.array[wp.int32],
-    joint_type: wp.array[int],
-    joint_enabled: wp.array[bool],
-    joint_parent: wp.array[int],
-    joint_child: wp.array[int],
-    joint_X_p: wp.array[wp.transform],
-    joint_X_c: wp.array[wp.transform],
-    joint_axis: wp.array[wp.vec3],
-    joint_qd_start: wp.array[int],
-    joint_dof_dim: wp.array2d[int],
-    joint_limit_lower: wp.array[float],
-    joint_limit_upper: wp.array[float],
-    joint_limit_ke: wp.array[float],
-    joint_rest_angle: wp.array[float],
+def accumulate_free_translation_system(
+    body_ids: wp.array[int],
+    body_island: wp.array[int],
     body_slot: wp.array[int],
-    graph_body_island: wp.array[int],
-    body_q: wp.array[wp.transform],
-    body_q_rest: wp.array[wp.transform],
-    body_com: wp.array[wp.vec3],
+    translation_free: wp.array[int],
+    island_state: wp.array[int],
+    step_scale: wp.array[float],
     correction: wp.array[wp.spatial_vector],
-    island_step_scale: wp.array[float],
+    dt: float,
+    body_q: wp.array[wp.transform],
+    body_inertia_q: wp.array[wp.transform],
+    body_com: wp.array[wp.vec3],
+    body_mass: wp.array[float],
+    body_inv_mass: wp.array[float],
+    contact_hessian_ll: wp.array[wp.mat33],
+    contact_hessian_al: wp.array[wp.mat33],
+    contact_forces: wp.array[wp.vec3],
+    dynamic_contact_hessian: wp.array[wp.spatial_matrix],
+    has_contacts: int,
+    contact_count: wp.array[int],
+    contact_shape0: wp.array[int],
+    contact_shape1: wp.array[int],
+    shape_body: wp.array[int],
+    contact_buffer_size: int,
+    body_contact_counts: wp.array[int],
+    body_contact_indices: wp.array[int],
+    system: wp.array[wp.mat44d],
 ):
-    """Keep a unilateral joint-limit linearization in its current active set.
+    """Restrict the physical quadratic to an island's rigid translation.
 
-    An active finite limit is a one-sided row.  If the global Newton correction
-    would cross its boundary, accept only the fraction that reaches the
-    boundary.  Corrections that reduce violation without crossing remain
-    unrestricted.  The island-wide minimum preserves structural coherence.
+    Internal joints and contacts do no work in this subspace. Their diagonal
+    solve majorizers must not damp it. External dynamic contacts disable this
+    independent correction because their relative motion couples islands.
     """
-    index = wp.tid()
-    joint = joint_ids[index]
-    jt = joint_type[joint]
-    if not joint_enabled[joint] or not (jt == JointType.REVOLUTE or jt == JointType.PRISMATIC or jt == JointType.D6):
+    slot = wp.tid()
+    island = body_island[slot]
+    if translation_free[island] == 0 or island_state[island] < -1:
         return
+    body = body_ids[slot]
+    contribution = wp.mat44d(0.0)
+    if has_contacts != 0:
+        for i in range(wp.min(body_contact_counts[body], contact_buffer_size)):
+            contact = body_contact_indices[body * contact_buffer_size + i]
+            if contact >= contact_count[0]:
+                continue
+            shape0, shape1 = contact_shape0[contact], contact_shape1[contact]
+            body0 = shape_body[shape0] if shape0 >= 0 else -1
+            body1 = shape_body[shape1] if shape1 >= 0 else -1
+            other = body1 if body == body0 else body0
+            if other >= 0 and body_inv_mass[other] > 0.0:
+                other_slot = body_slot[other]
+                if other_slot < 0 or body_island[other_slot] != island:
+                    contribution[3, 3] = wp.float64(1.0)
+                    wp.atomic_add(system, island, contribution)
+                    return
 
-    parent = joint_parent[joint]
-    child = joint_child[joint]
-    parent_slot = body_slot[parent] if parent >= 0 else -1
-    child_slot = body_slot[child] if child >= 0 else -1
-    if parent_slot < 0 and child_slot < 0:
-        return
-    island = graph_body_island[parent_slot if parent_slot >= 0 else child_slot]
-
-    parent_pose = wp.transform_identity()
-    parent_rest = parent_pose
-    parent_corrected = parent_pose
-    if parent >= 0:
-        parent_pose = body_q[parent]
-        parent_rest = body_q_rest[parent]
-        parent_corrected = parent_pose
-        if parent_slot >= 0:
-            parent_corrected = _corrected_pose(
-                parent_pose,
-                correction[parent_slot],
-                body_com[parent],
-                1.0,
-            )
-    child_pose = body_q[child]
-    child_corrected = child_pose
-    if child_slot >= 0:
-        child_corrected = _corrected_pose(child_pose, correction[child_slot], body_com[child], 1.0)
-    child_rest = body_q_rest[child]
-
-    X_wp = parent_pose * joint_X_p[joint]
-    X_wc = child_pose * joint_X_c[joint]
-    X_wp_corrected = parent_corrected * joint_X_p[joint]
-    X_wc_corrected = child_corrected * joint_X_c[joint]
-    X_wp_rest = parent_rest * joint_X_p[joint]
-    X_wc_rest = child_rest * joint_X_c[joint]
-
-    q_wp = wp.transform_get_rotation(X_wp)
-    q_wc = wp.transform_get_rotation(X_wc)
-    q_wp_corrected = wp.transform_get_rotation(X_wp_corrected)
-    q_wc_corrected = wp.transform_get_rotation(X_wc_corrected)
-    q_wp_rest = wp.transform_get_rotation(X_wp_rest)
-    q_wc_rest = wp.transform_get_rotation(X_wc_rest)
-
-    lin_count = 0
-    ang_count = 0
-    if jt == JointType.PRISMATIC:
-        lin_count = 1
-    elif jt == JointType.REVOLUTE:
-        ang_count = 1
-    elif jt == JointType.D6:
-        lin_count = joint_dof_dim[joint, 0]
-        ang_count = joint_dof_dim[joint, 1]
-    qd_start = joint_qd_start[joint]
-
-    relative_linear = wp.transform_get_translation(X_wc) - wp.transform_get_translation(X_wp)
-    relative_linear_corrected = wp.transform_get_translation(X_wc_corrected) - wp.transform_get_translation(
-        X_wp_corrected
+    inertial_delta = wp.transform_point(body_inertia_q[body], body_com[body]) - wp.transform_point(
+        body_q[body], body_com[body]
     )
-    for axis_index in range(3):
-        if axis_index < lin_count:
-            dof = qd_start + axis_index
-            if joint_limit_ke[dof] > 0.0:
-                axis = wp.normalize(wp.quat_rotate(q_wp, joint_axis[dof]))
-                axis_corrected = wp.normalize(wp.quat_rotate(q_wp_corrected, joint_axis[dof]))
-                value = wp.dot(relative_linear, axis)
-                value_corrected = wp.dot(relative_linear_corrected, axis_corrected)
-                lower = joint_limit_lower[dof]
-                upper = joint_limit_upper[dof]
-                bound = _fraction_to_interval(value, value_corrected, lower, upper)
-                wp.atomic_min(island_step_scale, island, bound)
+    mass = wp.float64(body_mass[body]) / (wp.float64(dt) * wp.float64(dt))
+    delta = correction[slot] * step_scale[island]
+    h_ll, h_al = contact_hessian_ll[body], contact_hessian_al[body]
+    dynamic = dynamic_contact_hessian[slot]
+    for row in range(3):
+        rhs = mass * wp.float64(inertial_delta[row]) + wp.float64(contact_forces[body][row])
+        for column in range(3):
+            # Subtract before adding inertia, in double precision: internal
+            # contact curvature can be much larger than the island's mass.
+            value = wp.float64(h_ll[row, column]) - wp.float64(dynamic[row, column])
+            if row == column:
+                value += mass
+            contribution[row, column] = value
+            rhs -= value * wp.float64(delta[column])
+            angular = wp.float64(h_al[column, row]) - wp.float64(dynamic[column + 3, row])
+            rhs -= angular * wp.float64(delta[column + 3])
+        contribution[row, 3] = rhs
+    wp.atomic_add(system, island, contribution)
 
-    if ang_count > 0:
-        kappa = compute_kappa(q_wp, q_wc, q_wp_rest, q_wc_rest)
-        kappa_corrected = compute_kappa(q_wp_corrected, q_wc_corrected, q_wp_rest, q_wc_rest)
-        for axis_index in range(3):
-            if axis_index < ang_count:
-                dof = qd_start + lin_count + axis_index
-                if joint_limit_ke[dof] > 0.0:
-                    axis = wp.normalize(joint_axis[dof])
-                    value = wp.dot(kappa, axis) + joint_rest_angle[dof]
-                    value_corrected = wp.dot(kappa_corrected, axis) + joint_rest_angle[dof]
-                    lower = joint_limit_lower[dof]
-                    upper = joint_limit_upper[dof]
-                    bound = _fraction_to_interval(value, value_corrected, lower, upper)
-                    wp.atomic_min(island_step_scale, island, bound)
+
+@wp.kernel
+def correct_free_translation(
+    body_island: wp.array[int],
+    translation_free: wp.array[int],
+    island_state: wp.array[int],
+    step_scale: wp.array[float],
+    system: wp.array[wp.mat44d],
+    correction: wp.array[wp.spatial_vector],
+):
+    """Minimize the three-dimensional translation quadratic without refactoring."""
+    slot = wp.tid()
+    island = body_island[slot]
+    scale = step_scale[island]
+    packed = system[island]
+    if translation_free[island] == 0 or island_state[island] < -1 or packed[3, 3] != wp.float64(0.0) or scale <= 0.0:
+        return
+    matrix = wp.mat33d(0.0)
+    rhs = wp.vec3d(0.0)
+    for row in range(3):
+        rhs[row] = packed[row, 3]
+        for column in range(3):
+            matrix[row, column] = packed[row, column]
+    shift = wp.inverse(matrix) * rhs
+    if wp.isfinite(shift[0]) and wp.isfinite(shift[1]) and wp.isfinite(shift[2]):
+        value = correction[slot]
+        for axis in range(3):
+            value[axis] += float(shift[axis]) / scale
+        correction[slot] = value
 
 
 @wp.kernel
@@ -3412,31 +3348,27 @@ def apply_global_correction(
 
 
 @wp.kernel
-def accumulate_body_quadratic_merit(
+def accumulate_body_directional_derivative(
     body_island: wp.array[int],
     enabled: wp.array[bool],
-    matrix: wp.array[wp.spatial_matrix],
     rhs: wp.array[wp.spatial_vector],
     correction: wp.array[wp.spatial_vector],
-    merit: wp.array[wp.vec2d],
+    merit: wp.array[wp.float64],
 ):
-    """Accumulate linear/quadratic terms of the original primal model."""
+    """Accumulate the inertial/contact slope along the global correction."""
     slot = wp.tid()
     island = body_island[slot]
     if not enabled[island]:
         return
     delta = correction[slot]
-    block = matrix[slot]
-    linear, quadratic = wp.float64(0.0), wp.float64(0.0)
+    linear = wp.float64(0.0)
     for row in range(6):
         linear -= wp.float64(rhs[slot][row]) * wp.float64(delta[row])
-        for column in range(6):
-            quadratic += wp.float64(delta[row]) * wp.float64(block[row, column]) * wp.float64(delta[column])
-    wp.atomic_add(merit, island, wp.vec2d(linear, quadratic))
+    wp.atomic_add(merit, island, linear)
 
 
 @wp.kernel
-def accumulate_joint_quadratic_merit(
+def accumulate_joint_directional_derivative(
     joint_ids: wp.array[int],
     joint_parent: wp.array[int],
     joint_child: wp.array[int],
@@ -3447,7 +3379,7 @@ def accumulate_joint_quadratic_merit(
     compliance: wp.array[wp.spatial_matrix],
     residual: wp.array[wp.spatial_vector],
     correction: wp.array[wp.spatial_vector],
-    merit: wp.array[wp.vec2d],
+    merit: wp.array[wp.float64],
 ):
     """Accumulate diagonally compliant rows; Jacobians must not alias factors."""
     row = wp.tid()
@@ -3461,7 +3393,7 @@ def accumulate_joint_quadratic_merit(
     slot = wp.max(p, c)
     if slot < 0:
         return
-    linear, quadratic = wp.float64(0.0), wp.float64(0.0)
+    linear = wp.float64(0.0)
     jp, jc = jacobian_parent[row], jacobian_child[row]
     for axis in range(6):
         value = wp.float64(0.0)
@@ -3472,25 +3404,7 @@ def accumulate_joint_quadratic_merit(
                 value += wp.float64(jc[axis, column]) * wp.float64(correction[c][column])
         inverse_compliance = wp.float64(1.0) / wp.float64(compliance[row][axis, axis])
         linear += value * wp.float64(residual[row][axis]) * inverse_compliance
-        quadratic += value * value * inverse_compliance
-    wp.atomic_add(merit, body_island[slot], wp.vec2d(linear, quadratic))
-
-
-@wp.kernel
-def minimize_quadratic_step(
-    enabled: wp.array[bool],
-    merit: wp.array[wp.vec2d],
-    step_scale: wp.array[float],
-):
-    """Minimize ``a l + a^2 q / 2`` on [0, 1] without a tuned damping factor."""
-    island = wp.tid()
-    scale = 1.0
-    if enabled[island]:
-        value = merit[island]
-        scale = 0.0
-        if wp.isfinite(value[0]) and wp.isfinite(value[1]) and value[1] > wp.float64(0.0):
-            scale = float(wp.clamp(-value[0] / value[1], wp.float64(0.0), wp.float64(1.0)))
-    step_scale[island] = scale
+    wp.atomic_add(merit, body_island[slot], linear)
 
 
 @wp.kernel
@@ -3728,14 +3642,28 @@ def _fused_tree_level_schedule(levels: list[list[int]], parent_node: list[int]):
         recipients.append(0)
     if not message_nodes:
         message_nodes.append(0)
-    return kinds, node_start, nodes, recipient_start, recipients, message_offsets, message_nodes
+    return (
+        kinds,
+        node_start,
+        nodes,
+        recipient_start,
+        recipients,
+        message_offsets,
+        message_nodes,
+    )
 
 
 def _make_fused_tree_levels(levels: list[list[int]], parent_node: list[int], device):
     """Encode the fused leaf-rake schedule as contiguous device arrays."""
-    kinds, node_start, nodes, recipient_start, recipients, message_offsets, message_nodes = _fused_tree_level_schedule(
-        levels, parent_node
-    )
+    (
+        kinds,
+        node_start,
+        nodes,
+        recipient_start,
+        recipients,
+        message_offsets,
+        message_nodes,
+    ) = _fused_tree_level_schedule(levels, parent_node)
     return (
         wp.array(kinds, dtype=wp.int32, device=device),
         wp.array(node_start, dtype=wp.int32, device=device),
@@ -3749,22 +3677,36 @@ def _make_fused_tree_levels(levels: list[list[int]], parent_node: list[int], dev
 
 def _fused_tree_levels_payload_bytes(levels: list[list[int]], parent_node: list[int]) -> int:
     """Count the arrays emitted by ``_make_fused_tree_levels`` exactly."""
-    kinds, node_start, nodes, recipient_start, recipients, message_offsets, message_nodes = _fused_tree_level_schedule(
-        levels, parent_node
-    )
+    (
+        kinds,
+        node_start,
+        nodes,
+        recipient_start,
+        recipients,
+        message_offsets,
+        message_nodes,
+    ) = _fused_tree_level_schedule(levels, parent_node)
     total = 0
-    for payload in (kinds, node_start, nodes, recipient_start, recipients, message_offsets, message_nodes):
+    for payload in (
+        kinds,
+        node_start,
+        nodes,
+        recipient_start,
+        recipients,
+        message_offsets,
+        message_nodes,
+    ):
         total += _array_payload_bytes(len(payload), wp.int32)
     return total
 
 
 def _fused_tree_levels_supported(levels: list[list[int]], device) -> bool:
-    """Return whether one synchronized block should own this leaf schedule."""
-    if not device.is_cuda:
-        return False
+    """Avoid per-level launches when one block can replay the leaf schedule."""
     if len(levels) < _FUSED_TREE_MIN_LEVELS:
         return False
-    return all(len(level) <= _FUSED_TREE_MAX_LEVEL_WIDTH for level in levels)
+    # CPU uses one lane per tree, so the same kernel needs neither a barrier
+    # nor a width limit. Node and shared-recipient ordering remain identical.
+    return not device.is_cuda or all(len(level) <= _FUSED_TREE_MAX_LEVEL_WIDTH for level in levels)
 
 
 def _tree_level_launch_count(levels: list[list[int]], parent_node: list[int]) -> int:
@@ -4012,7 +3954,10 @@ def _structural_payload_budget(device) -> int:
         return _STRUCTURAL_MEMORY_CAP_BYTES
     total_memory = int(device.total_memory)
     if total_memory > 0:
-        return min(total_memory // _STRUCTURAL_MEMORY_CAPACITY_DIVISOR, _STRUCTURAL_MEMORY_CAP_BYTES)
+        return min(
+            total_memory // _STRUCTURAL_MEMORY_CAPACITY_DIVISOR,
+            _STRUCTURAL_MEMORY_CAP_BYTES,
+        )
     return _STRUCTURAL_MEMORY_CAP_BYTES
 
 
@@ -4186,6 +4131,7 @@ def _tree_bucket_diagnostics(
     *,
     symbolics: _TreeBucketSymbolics | None = None,
     allow_fused_tree_levels: bool = True,
+    factor_dtype=wp.float32,
 ) -> _BucketDiagnostics:
     """Plan the exact device payload of one normalized tree bucket."""
     tree = trees[0]
@@ -4204,6 +4150,8 @@ def _tree_bucket_diagnostics(
     node_count = batch_count * tree_node_count
     backbone_size = batch_count * len(symbolics.backbone)
 
+    matrix_dtype = wp.spatial_matrixd if factor_dtype == wp.float64 else wp.spatial_matrix
+    vector_dtype = wp.spatial_vectord if factor_dtype == wp.float64 else wp.spatial_vector
     estimated_bytes = 0
     estimated_bytes += _array_payload_bytes(batch_count, wp.int32)
     estimated_bytes += _array_payload_bytes(row_count, wp.int32)
@@ -4218,8 +4166,10 @@ def _tree_bucket_diagnostics(
     estimated_bytes += _array_payload_bytes(row_count, wp.spatial_matrix)
     estimated_bytes += 2 * _array_payload_bytes(row_count, wp.spatial_vector)
     estimated_bytes += _array_payload_bytes(row_count, wp.int32)
-    estimated_bytes += _array_payload_bytes(node_count, wp.spatial_vector)
-    estimated_bytes += _array_payload_bytes(node_count, wp.spatial_matrix)
+    estimated_bytes += _array_payload_bytes(node_count, vector_dtype)
+    estimated_bytes += _array_payload_bytes(node_count, matrix_dtype)
+    if factor_dtype == wp.float64:
+        estimated_bytes += _array_payload_bytes(node_count, matrix_dtype)
     estimated_bytes += _tree_levels_payload_bytes(tree.elimination_levels, tree.parent_node, batch_count)
     if (
         allow_fused_tree_levels
@@ -4230,7 +4180,7 @@ def _tree_bucket_diagnostics(
         estimated_bytes += _fused_tree_levels_payload_bytes(tree.elimination_levels, tree.parent_node)
     estimated_bytes += _array_payload_bytes(backbone_size, wp.int32)
     estimated_bytes += _tree_levels_payload_bytes(symbolics.branch_levels, tree.parent_node, batch_count)
-    estimated_bytes += 2 * _array_payload_bytes(backbone_size, wp.spatial_matrix)
+    estimated_bytes += 2 * _array_payload_bytes(backbone_size, matrix_dtype)
     if symbolics.use_paired_open_backbone:
         paired_backbone_count = (len(symbolics.backbone) + 1) // 2
         paired_backbone_size = batch_count * paired_backbone_count
@@ -4308,6 +4258,7 @@ def _closed_tree_bucket_diagnostics(
         device,
         symbolics=tree_symbolics,
         allow_fused_tree_levels=False,
+        factor_dtype=wp.float64,
     )
     batch_count = len(components)
     closure_count = len(component.closure_joints)
@@ -4316,7 +4267,10 @@ def _closed_tree_bucket_diagnostics(
     node_count = batch_count * tree_node_count
     body_count = tree_diagnostics.body_count_total
 
+    matrix_dtype = wp.spatial_matrixd
+    vector_dtype = wp.spatial_vectord
     estimated_bytes = tree_diagnostics.estimated_bytes
+    estimated_bytes += _array_payload_bytes(sum(map(len, component.tree.elimination_levels)), wp.int32)
     estimated_bytes += 3 * _array_payload_bytes(closure_size, wp.int32)
     estimated_bytes += _array_payload_bytes(body_count + 1, wp.int32)
     estimated_bytes += _array_payload_bytes(
@@ -4327,37 +4281,37 @@ def _closed_tree_bucket_diagnostics(
     estimated_bytes += 2 * _array_payload_bytes(closure_size, wp.spatial_vector)
     estimated_bytes += _array_payload_bytes(closure_size, wp.int32)
 
-    closure_response_bytes = _array_payload_bytes(node_count * closure_count, wp.spatial_matrix)
+    closure_response_bytes = _array_payload_bytes(node_count * closure_count, matrix_dtype)
     closure_schur_bytes = _array_payload_bytes(
         batch_count * closure_count * closure_count,
-        wp.spatial_matrix,
+        matrix_dtype,
     )
     estimated_bytes += closure_response_bytes
     estimated_bytes += closure_schur_bytes
     if _closure_back_substitute_lanes(closure_count, device):
-        estimated_bytes += _array_payload_bytes(closure_size, wp.spatial_vector)
-    estimated_bytes += _array_payload_bytes(closure_size, wp.spatial_vector)
+        estimated_bytes += _array_payload_bytes(closure_size, vector_dtype)
+    estimated_bytes += _array_payload_bytes(closure_size, vector_dtype)
 
     local_backbone = tree_symbolics.backbone
-    use_paired_backbone = all(
+    use_paired_backbone = not device.is_cpu and all(
         component.tree.node_body[node] >= 0 if index % 2 == 0 else component.tree.node_row[node] >= 0
         for index, node in enumerate(local_backbone)
     )
     if use_paired_backbone:
         paired_backbone_count = (len(local_backbone) + 1) // 2
         paired_backbone_size = batch_count * paired_backbone_count
-        estimated_bytes += 3 * _array_payload_bytes(paired_backbone_size, _SpatialPairMatrix)
-        estimated_bytes += _array_payload_bytes(paired_backbone_size, _SpatialPairEliminationFactor)
-        estimated_bytes += 2 * _array_payload_bytes(paired_backbone_size, _SpatialPairVector)
-        paired_response_bytes = 2 * _array_payload_bytes(
+        estimated_bytes += 3 * _array_payload_bytes(paired_backbone_size, _SpatialPairMatrixD)
+        estimated_bytes += _array_payload_bytes(paired_backbone_size, _SpatialPairEliminationFactorD)
+        estimated_bytes += _array_payload_bytes(paired_backbone_size, _SpatialPairVectorD)
+        paired_response_bytes = _array_payload_bytes(
             paired_backbone_size * closure_count,
-            _SpatialPairResponse,
+            _SpatialPairResponseD,
         )
         estimated_bytes += paired_response_bytes
         closure_response_bytes += paired_response_bytes
         route = "closed_tree_paired_backbone_cr"
     else:
-        route = "closed_tree_backbone_cr"
+        route = "closed_tree_cpu_float64" if device.is_cpu else "closed_tree_serial_float64"
 
     return _BucketDiagnostics(
         kind="closed_tree",
@@ -4390,9 +4344,15 @@ def _shared_structural_payload_bytes(
         + _array_payload_bytes(island_count, wp.int32)
         + _array_payload_bytes(joint_count, wp.int32)
         + _array_payload_bytes(model_body_count, wp.int32)
+        + _array_payload_bytes(model_body_count, wp.transform)
+        + _array_payload_bytes(island_count, wp.bool)
+        + _array_payload_bytes(island_count, wp.float64)
+        + _array_payload_bytes(1, wp.int32)
         + _array_payload_bytes(graph_body_count, wp.spatial_vector)
+        + _array_payload_bytes(island_count, wp.int32)
+        + _array_payload_bytes(island_count, wp.mat44d)
         + _array_payload_bytes(island_count, wp.float32)
-        + _array_payload_bytes(graph_body_count, wp.spatial_matrix)
+        + 2 * _array_payload_bytes(graph_body_count, wp.spatial_matrix)
         + _array_payload_bytes(graph_body_count, wp.spatial_vector)
     )
 
@@ -4665,7 +4625,10 @@ def _make_tree(
     distance_from_second = distances(second)
     root = min(
         range(len(bodies)),
-        key=lambda node: (max(distance_from_first[node], distance_from_second[node]), bodies[node]),
+        key=lambda node: (
+            max(distance_from_first[node], distance_from_second[node]),
+            bodies[node],
+        ),
     )
     active = set(range(node_count))
     parent_node = [-1] * node_count
@@ -4950,7 +4913,7 @@ def initialize_tree_couplings(
 @wp.kernel
 def invert_tree_leaves(
     leaves: wp.array[wp.int32],
-    diagonal: wp.array[wp.spatial_matrix],
+    diagonal: wp.array[Any],
 ):
     """Factor leaves whose messages share a recipient."""
     node = leaves[wp.tid()]
@@ -4961,11 +4924,11 @@ def invert_tree_leaves(
 def eliminate_tree_unique_leaves(
     leaves: wp.array[wp.int32],
     parent_node: wp.array[wp.int32],
-    diagonal: wp.array[wp.spatial_matrix],
-    rhs: wp.array[wp.spatial_vector],
-    coupling: wp.array[wp.spatial_matrix],
-    saved_inverse: wp.array[wp.spatial_matrix],
-    saved_rhs: wp.array[wp.spatial_vector],
+    diagonal: wp.array[Any],
+    rhs: wp.array[Any],
+    coupling: wp.array[Any],
+    saved_inverse: wp.array[Any],
+    saved_rhs: wp.array[Any],
 ):
     """Eliminate leaves whose recipients are unique within this level."""
     node = leaves[wp.tid()]
@@ -4983,11 +4946,11 @@ def accumulate_tree_messages(
     recipients: wp.array[wp.int32],
     recipient_offsets: wp.array[wp.int32],
     message_nodes: wp.array[wp.int32],
-    coupling: wp.array[wp.spatial_matrix],
-    saved_inverse: wp.array[wp.spatial_matrix],
-    saved_rhs: wp.array[wp.spatial_vector],
-    diagonal: wp.array[wp.spatial_matrix],
-    rhs: wp.array[wp.spatial_vector],
+    coupling: wp.array[Any],
+    saved_inverse: wp.array[Any],
+    saved_rhs: wp.array[Any],
+    diagonal: wp.array[Any],
+    rhs: wp.array[Any],
 ):
     index = wp.tid()
     recipient = recipients[index]
@@ -5019,10 +4982,10 @@ def solve_tree_roots(
 def back_substitute_tree_level(
     leaves: wp.array[wp.int32],
     parent_node: wp.array[wp.int32],
-    coupling: wp.array[wp.spatial_matrix],
-    saved_inverse: wp.array[wp.spatial_matrix],
-    saved_rhs: wp.array[wp.spatial_vector],
-    solution: wp.array[wp.spatial_vector],
+    coupling: wp.array[Any],
+    saved_inverse: wp.array[Any],
+    saved_rhs: wp.array[Any],
+    solution: wp.array[Any],
 ):
     node = leaves[wp.tid()]
     parent = parent_node[node]
@@ -5173,11 +5136,19 @@ def eliminate_tree_contraction_level(
     if second_neighbor >= 0:
         first_edge = edges[index][0]
         first_a = _load_tree_contraction_edge(
-            first_edge, transpose_edges[index][0], original_edge_count, coupling, fill_edges
+            first_edge,
+            transpose_edges[index][0],
+            original_edge_count,
+            coupling,
+            fill_edges,
         )
         second_edge = edges[index][1]
         second_a = _load_tree_contraction_edge(
-            second_edge, transpose_edges[index][1], original_edge_count, coupling, fill_edges
+            second_edge,
+            transpose_edges[index][1],
+            original_edge_count,
+            coupling,
+            fill_edges,
         )
         # The generated edge is oriented neighbor[0] -> neighbor[1].
         fill_edges[generated_edges[index] - original_edge_count] = -(wp.transpose(first_a) * inverse * second_a)
@@ -5242,14 +5213,22 @@ def back_substitute_tree_contraction_level(
     value = saved_rhs[node]
 
     first_a = _load_tree_contraction_edge(
-        edges[index][0], transpose_edges[index][0], original_edge_count, coupling, fill_edges
+        edges[index][0],
+        transpose_edges[index][0],
+        original_edge_count,
+        coupling,
+        fill_edges,
     )
     value = value - first_a * solution[neighbors[index][0]]
 
     second_neighbor = neighbors[index][1]
     if second_neighbor >= 0:
         second_a = _load_tree_contraction_edge(
-            edges[index][1], transpose_edges[index][1], original_edge_count, coupling, fill_edges
+            edges[index][1],
+            transpose_edges[index][1],
+            original_edge_count,
+            coupling,
+            fill_edges,
         )
         value = value - second_a * solution[second_neighbor]
     solution[node] = saved_inverse[node] * value
@@ -5313,9 +5292,9 @@ def eliminate_tree_response_unique_leaves(
     leaves: wp.array[wp.int32],
     closure_count: int,
     parent_node: wp.array[wp.int32],
-    coupling: wp.array[wp.spatial_matrix],
-    saved_inverse: wp.array[wp.spatial_matrix],
-    response_rhs: wp.array[wp.spatial_matrix],
+    coupling: wp.array[Any],
+    saved_inverse: wp.array[Any],
+    response_rhs: wp.array[Any],
 ):
     index = wp.tid()
     node = leaves[index // closure_count]
@@ -5332,9 +5311,9 @@ def accumulate_tree_response_messages(
     recipient_offsets: wp.array[wp.int32],
     message_nodes: wp.array[wp.int32],
     closure_count: int,
-    coupling: wp.array[wp.spatial_matrix],
-    saved_inverse: wp.array[wp.spatial_matrix],
-    response_rhs: wp.array[wp.spatial_matrix],
+    coupling: wp.array[Any],
+    saved_inverse: wp.array[Any],
+    response_rhs: wp.array[Any],
 ):
     index = wp.tid()
     recipient_index = index // closure_count
@@ -5354,10 +5333,10 @@ def back_substitute_tree_response_level(
     leaves: wp.array[wp.int32],
     closure_count: int,
     parent_node: wp.array[wp.int32],
-    coupling: wp.array[wp.spatial_matrix],
-    saved_inverse: wp.array[wp.spatial_matrix],
-    response_rhs: wp.array[wp.spatial_matrix],
-    response_solution: wp.array[wp.spatial_matrix],
+    coupling: wp.array[Any],
+    saved_inverse: wp.array[Any],
+    response_rhs: wp.array[Any],
+    response_solution: wp.array[Any],
 ):
     index = wp.tid()
     node = leaves[index // closure_count]
@@ -5387,12 +5366,18 @@ def assemble_closure_rhs(
     parent_node = closure_parent_node[closure]
     if parent_node >= 0:
         coupling = _scale_spatial_matrix(
-            row_scale[closure], jacobian_parent[closure], body_scale[node_body[parent_node]]
+            row_scale[closure],
+            jacobian_parent[closure],
+            body_scale[node_body[parent_node]],
         )
         rhs = rhs + coupling * tree_solution[parent_node]
     child_node = closure_child_node[closure]
     if child_node >= 0:
-        coupling = _scale_spatial_matrix(row_scale[closure], jacobian_child[closure], body_scale[node_body[child_node]])
+        coupling = _scale_spatial_matrix(
+            row_scale[closure],
+            jacobian_child[closure],
+            body_scale[node_body[child_node]],
+        )
         rhs = rhs + coupling * tree_solution[child_node]
     closure_rhs[closure] = rhs
 
@@ -5461,7 +5446,7 @@ def solve_block_dense_serial(
 def invert_block_dense_pivot(
     pivot: int,
     block_count: int,
-    matrix: wp.array[wp.spatial_matrix],
+    matrix: wp.array[Any],
 ):
     """Invert one block pivot in every independent dense system."""
     batch = wp.tid()
@@ -5473,8 +5458,8 @@ def invert_block_dense_pivot(
 def factor_block_ldlt_pivot_rows(
     pivot: int,
     block_count: int,
-    matrix: wp.array[wp.spatial_matrix],
-    rhs: wp.array[wp.spatial_vector],
+    matrix: wp.array[Any],
+    rhs: wp.array[Any],
 ):
     """Form one block-LDLT column and forward-eliminate its rhs rows."""
     index = wp.tid()
@@ -5497,7 +5482,7 @@ def update_block_ldlt_lower_triangle(
     pivot: int,
     block_count: int,
     trailing_count: int,
-    matrix: wp.array[wp.spatial_matrix],
+    matrix: wp.array[Any],
 ):
     """Update the symmetric trailing block matrix in parallel."""
     index = wp.tid()
@@ -5520,8 +5505,8 @@ def update_block_ldlt_lower_triangle(
 @wp.kernel
 def solve_block_ldlt_diagonal(
     block_count: int,
-    matrix: wp.array[wp.spatial_matrix],
-    rhs_solution: wp.array[wp.spatial_vector],
+    matrix: wp.array[Any],
+    rhs_solution: wp.array[Any],
 ):
     """Apply independent inverse diagonal blocks after forward elimination."""
     index = wp.tid()
@@ -5534,8 +5519,8 @@ def solve_block_ldlt_diagonal(
 @wp.kernel
 def back_substitute_block_ldlt_serial(
     block_count: int,
-    matrix: wp.array[wp.spatial_matrix],
-    rhs_solution: wp.array[wp.spatial_vector],
+    matrix: wp.array[Any],
+    rhs_solution: wp.array[Any],
 ):
     """Back-substitute one block-LDLT system per batch."""
     batch = wp.tid()
@@ -5553,9 +5538,9 @@ def back_substitute_block_ldlt_serial(
 @wp.kernel
 def back_substitute_block_ldlt_lanes(
     block_count: int,
-    matrix: wp.array[wp.spatial_matrix],
-    partial: wp.array[wp.spatial_vector],
-    rhs_solution: wp.array[wp.spatial_vector],
+    matrix: wp.array[Any],
+    partial: wp.array[Any],
+    rhs_solution: wp.array[Any],
 ):
     """Back-substitute one dense block-LDLT system with lane-parallel products.
 
@@ -5600,8 +5585,8 @@ def back_substitute_block_ldlt_lanes(
 @wp.kernel
 def solve_block_ldlt_persistent(
     block_count: int,
-    matrix: wp.array[wp.spatial_matrix],
-    rhs: wp.array[wp.spatial_vector],
+    matrix: wp.array[Any],
+    rhs: wp.array[Any],
 ):
     """Replay dense block LDLT within one CUDA block per independent system.
 
@@ -5717,7 +5702,12 @@ class _PathBucket:
             body_ids.extend(path.bodies)
             for incident in path.body_rows:
                 encoded = [(row << 1) | side for row, side in incident]
-                body_incident_rows.append((encoded[0] if encoded else -1, encoded[1] if len(encoded) > 1 else -1))
+                body_incident_rows.append(
+                    (
+                        encoded[0] if encoded else -1,
+                        encoded[1] if len(encoded) > 1 else -1,
+                    )
+                )
 
         self.joint_ids_host = np.asarray(joint_ids, dtype=np.int64)
         self.joint_ids = wp.array(self.joint_ids_host, dtype=wp.int32, device=device)
@@ -5762,7 +5752,10 @@ class _PathBucket:
     def bind_body_endpoints(self, parent: np.ndarray, child: np.ndarray, body_slot: dict[int, int]):
         self.row_body = wp.array(
             [
-                (body_slot.get(int(parent[joint]), -1), body_slot.get(int(child[joint]), -1))
+                (
+                    body_slot.get(int(parent[joint]), -1),
+                    body_slot.get(int(child[joint]), -1),
+                )
                 for joint in self.joint_ids_host
             ],
             dtype=wp.vec2i,
@@ -5839,6 +5832,7 @@ class _TreeBucket:
         *,
         symbolics: _TreeBucketSymbolics | None = None,
         allow_fused_tree_levels: bool = True,
+        factor_dtype=wp.float32,
     ):
         if isinstance(trees, _Tree):
             trees = [trees]
@@ -5849,6 +5843,8 @@ class _TreeBucket:
         if symbolics is None:
             symbolics = _tree_bucket_symbolics(tree)
 
+        matrix_dtype = wp.spatial_matrixd if factor_dtype == wp.float64 else wp.spatial_matrix
+        vector_dtype = wp.spatial_vectord if factor_dtype == wp.float64 else wp.spatial_vector
         self.device = device
         self.spatial_block_dim = _SPATIAL_GPU_BLOCK_DIM if device.is_cuda else 1
         self.batch_count = len(trees)
@@ -5912,20 +5908,26 @@ class _TreeBucket:
         self.node_row = wp.array(node_row, dtype=wp.int32, device=device)
         self.parent_node = wp.array(parent_node, dtype=wp.int32, device=device)
         self.coupling_side = wp.array(coupling_side, dtype=wp.int32, device=device)
-        # Joint Jacobians are dead once node couplings are initialized. Reuse
-        # their contiguous workspace for the tree diagonal/inverse factors.
+        # Float32 open trees reuse dead row Jacobians for numeric factors.
+        # Precise closed trees retain these source rows in separate storage.
         self.matrix_workspace = wp.zeros(
-            max(2 * self.row_count, self.node_count), dtype=wp.spatial_matrix, device=device
+            max(2 * self.row_count, self.node_count),
+            dtype=wp.spatial_matrix,
+            device=device,
         )
         self.jacobian_parent = self.matrix_workspace[: self.row_count]
         self.jacobian_child = self.matrix_workspace[self.row_count : 2 * self.row_count]
-        self.diagonal = self.matrix_workspace[: self.node_count]
+        self.diagonal = (
+            wp.zeros(self.node_count, dtype=matrix_dtype, device=device)
+            if factor_dtype == wp.float64
+            else self.matrix_workspace[: self.node_count]
+        )
         self.compliance = wp.zeros(self.row_count, dtype=wp.spatial_matrix, device=device)
         self.row_scale = wp.zeros(self.row_count, dtype=wp.spatial_vector, device=device)
         self.residual = wp.zeros(self.row_count, dtype=wp.spatial_vector, device=device)
         self.row_active = wp.zeros(self.row_count, dtype=wp.int32, device=device)
-        self.rhs = wp.zeros(self.node_count, dtype=wp.spatial_vector, device=device)
-        self.coupling = wp.zeros(self.node_count, dtype=wp.spatial_matrix, device=device)
+        self.rhs = wp.zeros(self.node_count, dtype=vector_dtype, device=device)
+        self.coupling = wp.zeros(self.node_count, dtype=matrix_dtype, device=device)
         # Eliminated node blocks and rhs values are dead in the forward pass;
         # keep their inverse and later solution in those same node slots.
         self.saved_inverse = self.diagonal
@@ -5972,7 +5974,9 @@ class _TreeBucket:
         ]
         self.branch_levels = _make_device_tree_levels(batched_branch_levels, parent_node, device)
         self.backbone_lower = wp.zeros(
-            self.batch_count * self.backbone_node_count, dtype=wp.spatial_matrix, device=device
+            self.batch_count * self.backbone_node_count,
+            dtype=matrix_dtype,
+            device=device,
         )
         self.backbone_upper = wp.zeros_like(self.backbone_lower)
         self.backbone_cr_levels: list[tuple[int, int, int]] = []
@@ -6124,12 +6128,24 @@ class _TreeBucket:
 
     def eliminate_levels(self, levels):
         """Eliminate a precomputed set of tree leaves toward its survivor."""
-        for leaves, recipients, recipient_offsets, message_nodes, recipients_are_unique in levels:
+        for (
+            leaves,
+            recipients,
+            recipient_offsets,
+            message_nodes,
+            recipients_are_unique,
+        ) in levels:
             if recipients_are_unique:
                 wp.launch(
                     eliminate_tree_unique_leaves,
                     leaves.shape[0],
-                    inputs=[leaves, self.parent_node, self.diagonal, self.rhs, self.coupling],
+                    inputs=[
+                        leaves,
+                        self.parent_node,
+                        self.diagonal,
+                        self.rhs,
+                        self.coupling,
+                    ],
                     outputs=[self.saved_inverse, self.saved_rhs],
                     device=self.device,
                     block_dim=self.spatial_block_dim,
@@ -6206,7 +6222,12 @@ class _TreeBucket:
         wp.launch(
             initialize_tree_backbone_edges,
             self.batch_count * self.backbone_node_count,
-            inputs=[self.backbone_node_count, self.backbone_nodes, self.parent_node, self.coupling],
+            inputs=[
+                self.backbone_node_count,
+                self.backbone_nodes,
+                self.parent_node,
+                self.coupling,
+            ],
             outputs=[self.backbone_lower, self.backbone_upper],
             device=self.device,
             block_dim=self.spatial_block_dim,
@@ -6215,7 +6236,12 @@ class _TreeBucket:
             wp.launch(
                 invert_tree_backbone_cr_eliminated,
                 self.batch_count * eliminated_count,
-                inputs=[stride, self.backbone_node_count, eliminated_count, self.backbone_nodes],
+                inputs=[
+                    stride,
+                    self.backbone_node_count,
+                    eliminated_count,
+                    self.backbone_nodes,
+                ],
                 outputs=[self.diagonal],
                 device=self.device,
                 block_dim=self.spatial_block_dim,
@@ -6223,7 +6249,13 @@ class _TreeBucket:
             wp.launch(
                 reduce_tree_backbone_cr_in_place,
                 self.batch_count * survivor_count,
-                inputs=[stride, self.backbone_node_count, survivor_count, 0, self.backbone_nodes],
+                inputs=[
+                    stride,
+                    self.backbone_node_count,
+                    survivor_count,
+                    0,
+                    self.backbone_nodes,
+                ],
                 outputs=[
                     self.backbone_lower,
                     self.diagonal,
@@ -6237,7 +6269,12 @@ class _TreeBucket:
         wp.launch(
             solve_tree_backbone_cr_coarse,
             self.batch_count,
-            inputs=[self.backbone_terminal_stride, self.backbone_node_count, 0, self.backbone_nodes],
+            inputs=[
+                self.backbone_terminal_stride,
+                self.backbone_node_count,
+                0,
+                self.backbone_nodes,
+            ],
             outputs=[
                 self.backbone_lower,
                 self.diagonal,
@@ -6280,7 +6317,14 @@ class _TreeBucket:
             wp.launch(
                 eliminate_tree_contraction_level,
                 nodes.shape[0],
-                inputs=[self.node_count, nodes, neighbors, edges, transpose_edges, generated_edges],
+                inputs=[
+                    self.node_count,
+                    nodes,
+                    neighbors,
+                    edges,
+                    transpose_edges,
+                    generated_edges,
+                ],
                 outputs=[
                     self.diagonal,
                     self.rhs,
@@ -6340,7 +6384,12 @@ class _TreeBucket:
         wp.launch(
             initialize_tree_backbone_edges,
             self.batch_count * self.backbone_node_count,
-            inputs=[self.backbone_node_count, self.backbone_nodes, self.parent_node, self.coupling],
+            inputs=[
+                self.backbone_node_count,
+                self.backbone_nodes,
+                self.parent_node,
+                self.coupling,
+            ],
             outputs=[self.backbone_lower, self.backbone_upper],
             device=self.device,
             block_dim=self.spatial_block_dim,
@@ -6358,7 +6407,12 @@ class _TreeBucket:
                 self.diagonal,
                 self.rhs,
             ],
-            outputs=[self.paired_lower, self.paired_diagonal, self.paired_upper, self.paired_rhs],
+            outputs=[
+                self.paired_lower,
+                self.paired_diagonal,
+                self.paired_upper,
+                self.paired_rhs,
+            ],
             device=self.device,
             block_dim=self.spatial_block_dim,
         )
@@ -6515,6 +6569,7 @@ class _ClosedTreeBucket:
             device,
             symbolics=tree_symbolics,
             allow_fused_tree_levels=False,
+            factor_dtype=wp.float64,
         )
         self.spatial_block_dim = self.tree.spatial_block_dim
         # Cyclic islands use the same exact tree backbone schedule before the
@@ -6531,6 +6586,16 @@ class _ClosedTreeBucket:
         self.body_size = self.tree.body_count
         self.closure_count = len(component.closure_joints)
         self.closure_size = self.batch_count * self.closure_count
+        matrix_dtype = wp.spatial_matrixd
+        vector_dtype = wp.spatial_vectord
+        # Keep the original row Jacobians separate from numeric factors.
+        self.elimination_nodes = wp.array(
+            [node for level in component.tree.elimination_levels for node in sorted(level)],
+            dtype=wp.int32,
+            device=device,
+        )
+        self.factor_diagonal = self.tree.diagonal
+        self.factor_coupling = self.tree.coupling
         self.use_fused_closure = (
             device.is_cuda and _CR_SERIAL_TERMINAL_SIZE < self.closure_count <= _FUSED_CLOSURE_MAX_BLOCKS
         )
@@ -6567,20 +6632,18 @@ class _ClosedTreeBucket:
         self.closure_row_active = wp.zeros(self.closure_size, dtype=wp.int32, device=device)
         self.closure_row_scale = wp.zeros(self.closure_size, dtype=wp.spatial_vector, device=device)
         response_size = self.tree.node_count * self.closure_count
-        self.response_rhs = wp.zeros(response_size, dtype=wp.spatial_matrix, device=device)
+        self.response_rhs = wp.zeros(response_size, dtype=matrix_dtype, device=device)
         self.response_solution = self.response_rhs
         self.closure_schur = wp.zeros(
             self.batch_count * self.closure_count * self.closure_count,
-            dtype=wp.spatial_matrix,
+            dtype=matrix_dtype,
             device=device,
         )
-        self.closure_rhs = wp.zeros(self.closure_size, dtype=wp.spatial_vector, device=device)
+        self.closure_rhs = wp.zeros(self.closure_size, dtype=vector_dtype, device=device)
         self.closure_multiplier = self.closure_rhs
         self.use_lane_back_substitute = _closure_back_substitute_lanes(self.closure_count, device)
         self.closure_back_partial = (
-            wp.zeros(self.closure_size, dtype=wp.spatial_vector, device=device)
-            if self.use_lane_back_substitute
-            else None
+            wp.zeros(self.closure_size, dtype=vector_dtype, device=device) if self.use_lane_back_substitute else None
         )
 
         # Closed-tree backbones alternate body and row nodes. Group each body
@@ -6588,7 +6651,7 @@ class _ClosedTreeBucket:
         # an isolated CR pivot. An odd body-ended backbone receives one padded
         # identity row in the packing kernel.
         local_backbone = tree_symbolics.backbone
-        self.use_paired_backbone = all(
+        self.use_paired_backbone = not device.is_cpu and all(
             component.tree.node_body[node] >= 0 if index % 2 == 0 else component.tree.node_row[node] >= 0
             for index, node in enumerate(local_backbone)
         )
@@ -6598,24 +6661,21 @@ class _ClosedTreeBucket:
         # are independent. Give the block that width only when there are enough
         # columns to repay the barriers; one column measurably regresses.
         self.use_lane_split_coarse = self.device.is_cuda and self.closure_count >= _PAIRED_COARSE_MIN_CLOSURES
-        self.use_lane_split_refinement = (
-            self.device.is_cuda and self.closure_count >= _PAIRED_REFINEMENT_LANE_MIN_CLOSURES
-        )
         if self.use_paired_backbone:
-            self.paired_lower = wp.zeros(self.paired_backbone_size, dtype=_SpatialPairMatrix, device=self.device)
+            self.paired_lower = wp.zeros(self.paired_backbone_size, dtype=_SpatialPairMatrixD, device=self.device)
             self.paired_diagonal = wp.zeros_like(self.paired_lower)
             self.paired_upper = wp.zeros_like(self.paired_lower)
             self.paired_elimination_factor = wp.zeros(
-                self.paired_backbone_size, dtype=_SpatialPairEliminationFactor, device=self.device
-            )
-            self.paired_rhs = wp.zeros(self.paired_backbone_size, dtype=_SpatialPairVector, device=self.device)
-            self.paired_correction_rhs = wp.zeros_like(self.paired_rhs)
-            self.paired_response = wp.zeros(
-                self.paired_backbone_size * self.closure_count,
-                dtype=_SpatialPairResponse,
+                self.paired_backbone_size,
+                dtype=_SpatialPairEliminationFactorD,
                 device=self.device,
             )
-            self.paired_correction_response = wp.zeros_like(self.paired_response)
+            self.paired_rhs = wp.zeros(self.paired_backbone_size, dtype=_SpatialPairVectorD, device=self.device)
+            self.paired_response = wp.zeros(
+                self.paired_backbone_size * self.closure_count,
+                dtype=_SpatialPairResponseD,
+                device=self.device,
+            )
             self.paired_cr_levels: list[tuple[int, int, int]] = []
             stride = 1
             active_count = self.paired_backbone_count
@@ -6626,30 +6686,15 @@ class _ClosedTreeBucket:
                 stride *= 2
                 active_count = survivor_count
             self.paired_terminal_stride = stride
-            # The factor is read-only during defect correction. Multiple
-            # closure responses provide enough independent panels even for a
-            # short or batched backbone; retain the size gate for one closure.
-            persistent_repeated_solve = device.is_cuda and self.paired_backbone_count <= _PAIRED_PERSISTENT_MAX_ROWS
-            self.use_panel_parallel_repeated_solve = persistent_repeated_solve and (
-                (self.closure_count > 1 and self.paired_backbone_count >= _PAIRED_MULTI_RHS_PANEL_MIN_ROWS)
-                or (self.batch_count == 1 and self.paired_backbone_count >= _PAIRED_PANEL_MIN_ROWS)
-            )
-            self.use_persistent_repeated_solve = (
-                persistent_repeated_solve and not self.use_panel_parallel_repeated_solve
-            )
         else:
             self.paired_lower = None
             self.paired_diagonal = None
             self.paired_upper = None
             self.paired_elimination_factor = None
             self.paired_rhs = None
-            self.paired_correction_rhs = None
             self.paired_response = None
-            self.paired_correction_response = None
             self.paired_cr_levels = []
             self.paired_terminal_stride = 1
-            self.use_persistent_repeated_solve = False
-            self.use_panel_parallel_repeated_solve = False
 
     def _solve_paired_backbone_system(self, factorize: bool, rhs, response_rhs):
         """Solve packed right-hand sides, building or reusing the pair factor."""
@@ -6727,7 +6772,12 @@ class _ClosedTreeBucket:
                 if self.use_lane_split_coarse
                 else back_substitute_paired_tree_backbone_cr_in_place,
                 self.batch_count * eliminated_count * (self.spatial_block_dim if self.use_lane_split_coarse else 1),
-                inputs=[stride, self.paired_backbone_count, eliminated_count, self.closure_count],
+                inputs=[
+                    stride,
+                    self.paired_backbone_count,
+                    eliminated_count,
+                    self.closure_count,
+                ],
                 outputs=[
                     self.paired_lower,
                     self.paired_diagonal,
@@ -6740,7 +6790,7 @@ class _ClosedTreeBucket:
             )
 
     def solve_paired_backbone(self):
-        """Solve and defect-correct the cyclic base with symbolic pair pivots."""
+        """Solve the precise cyclic base with body-first pair pivots."""
         wp.launch(
             initialize_paired_tree_backbone,
             self.paired_backbone_size,
@@ -6778,130 +6828,33 @@ class _ClosedTreeBucket:
             block_dim=self.spatial_block_dim,
         )
         self._solve_paired_backbone_system(True, self.paired_rhs, self.paired_response)
-        # Form the defect before scattering, while the tree buffers still hold
-        # the unmodified branch-reduced right-hand sides. This avoids copies.
-        if self.use_lane_split_refinement:
-            wp.launch(
-                compute_paired_tree_backbone_residual_lanes,
-                self.paired_backbone_size * self.spatial_block_dim,
-                inputs=[
-                    self.paired_backbone_count,
-                    self.backbone_node_count,
-                    self.closure_count,
-                    self.backbone_nodes,
-                    self.backbone_lower,
-                    self.backbone_upper,
-                    self.tree.diagonal,
-                    self.tree.rhs,
-                    self.response_rhs,
-                    self.paired_rhs,
-                    self.paired_response,
-                ],
-                outputs=[self.paired_correction_rhs, self.paired_correction_response],
-                device=self.device,
-                block_dim=self.spatial_block_dim,
-            )
-        else:
-            wp.launch(
-                compute_paired_tree_backbone_residual,
-                self.paired_backbone_size,
-                inputs=[
-                    self.paired_backbone_count,
-                    self.backbone_node_count,
-                    self.closure_count,
-                    self.backbone_nodes,
-                    self.backbone_lower,
-                    self.backbone_upper,
-                    self.tree.diagonal,
-                    self.tree.rhs,
-                    self.response_rhs,
-                    self.paired_rhs,
-                    self.paired_response,
-                ],
-                outputs=[self.paired_correction_rhs, self.paired_correction_response],
-                device=self.device,
-                block_dim=self.spatial_block_dim,
-            )
-        self._solve_paired_backbone_repeated()
-        if self.use_lane_split_refinement:
-            wp.launch(
-                scatter_refined_paired_tree_backbone_solution_lanes,
-                self.paired_backbone_size * self.spatial_block_dim,
-                inputs=[
-                    self.paired_backbone_count,
-                    self.backbone_node_count,
-                    self.closure_count,
-                    self.backbone_nodes,
-                    self.paired_rhs,
-                    self.paired_response,
-                    self.paired_correction_rhs,
-                    self.paired_correction_response,
-                ],
-                outputs=[self.tree.rhs, self.response_rhs],
-                device=self.device,
-                block_dim=self.spatial_block_dim,
-            )
-        else:
-            wp.launch(
-                scatter_refined_paired_tree_backbone_solution,
-                self.paired_backbone_size,
-                inputs=[
-                    self.paired_backbone_count,
-                    self.backbone_node_count,
-                    self.closure_count,
-                    self.backbone_nodes,
-                    self.paired_rhs,
-                    self.paired_response,
-                    self.paired_correction_rhs,
-                    self.paired_correction_response,
-                ],
-                outputs=[self.tree.rhs, self.response_rhs],
-                device=self.device,
-                block_dim=self.spatial_block_dim,
-            )
-
-    def _solve_paired_backbone_repeated(self):
-        """Apply retained factors to the paired defect right-hand sides."""
-        if self.use_panel_parallel_repeated_solve:
-            wp.launch(
-                solve_paired_tree_backbone_reused_panel_persistent,
-                self.batch_count * (self.closure_count + 1) * self.spatial_block_dim,
-                inputs=[
-                    self.paired_backbone_count,
-                    _CR_SERIAL_TERMINAL_SIZE,
-                    self.closure_count,
-                    self.paired_lower,
-                    self.paired_diagonal,
-                    self.paired_upper,
-                    self.paired_elimination_factor,
-                ],
-                outputs=[self.paired_correction_rhs, self.paired_correction_response],
-                device=self.device,
-                block_dim=self.spatial_block_dim,
-            )
-            return
-        if self.use_persistent_repeated_solve:
-            wp.launch(
-                solve_paired_tree_backbone_reused_persistent,
-                self.batch_count * self.spatial_block_dim,
-                inputs=[
-                    self.paired_backbone_count,
-                    _CR_SERIAL_TERMINAL_SIZE,
-                    self.closure_count,
-                    self.paired_lower,
-                    self.paired_diagonal,
-                    self.paired_upper,
-                    self.paired_elimination_factor,
-                ],
-                outputs=[self.paired_correction_rhs, self.paired_correction_response],
-                device=self.device,
-                block_dim=self.spatial_block_dim,
-            )
-            return
-        self._solve_paired_backbone_system(False, self.paired_correction_rhs, self.paired_correction_response)
+        wp.launch(
+            scatter_paired_tree_backbone_solution,
+            self.paired_backbone_size * (self.closure_count + 1),
+            inputs=[
+                self.paired_backbone_count,
+                self.backbone_node_count,
+                self.closure_count,
+                self.backbone_nodes,
+                self.paired_rhs,
+                self.paired_response,
+            ],
+            outputs=[self.tree.solution, self.response_rhs],
+            device=self.device,
+            block_dim=self.spatial_block_dim,
+        )
 
     def solve_closure_schur(self):
         """Solve the dense closure system, parallelizing independent rows."""
+        if self.device.is_cpu and self.closure_schur.dtype == wp.spatial_matrixd:
+            wp.launch(
+                rigid_vbd_kkt_precision.solve_block_dense_serial,
+                self.batch_count,
+                inputs=[self.closure_count],
+                outputs=[self.closure_schur, self.closure_multiplier],
+                device=self.device,
+            )
+            return
         if self.use_fused_closure:
             wp.launch(
                 solve_block_ldlt_persistent,
@@ -6914,7 +6867,9 @@ class _ClosedTreeBucket:
             return
         if self.closure_count <= _CR_SERIAL_TERMINAL_SIZE or not self.device.is_cuda:
             wp.launch(
-                solve_block_dense_serial,
+                rigid_vbd_kkt_precision.solve_block_dense_serial
+                if self.closure_schur.dtype == wp.spatial_matrixd
+                else solve_block_dense_serial,
                 self.batch_count,
                 inputs=[self.closure_count],
                 outputs=[self.closure_schur, self.closure_multiplier],
@@ -6961,7 +6916,11 @@ class _ClosedTreeBucket:
             wp.launch(
                 back_substitute_block_ldlt_lanes,
                 self.batch_count * self.spatial_block_dim,
-                inputs=[self.closure_count, self.closure_schur, self.closure_back_partial],
+                inputs=[
+                    self.closure_count,
+                    self.closure_schur,
+                    self.closure_back_partial,
+                ],
                 outputs=[self.closure_multiplier],
                 device=self.device,
                 block_dim=self.spatial_block_dim,
@@ -6976,20 +6935,68 @@ class _ClosedTreeBucket:
             )
 
     def solve_tree(self, body_matrix, body_rhs, body_scale, body_correction):
-        self.tree.initialize_system(body_matrix, body_rhs, body_scale)
+        """Solve a CPU island without rounding its closure response or recovery."""
+        tree = self.tree
+        device = self.device
+        wp.launch(
+            equilibrate_tree_bodies,
+            tree.body_count,
+            inputs=[tree.body_slots, body_matrix],
+            outputs=[body_scale],
+            device=device,
+        )
+        wp.launch(
+            equilibrate_tree_rows,
+            tree.row_count,
+            inputs=[tree.compliance],
+            outputs=[tree.row_scale],
+            device=device,
+        )
+        wp.launch(
+            rigid_vbd_kkt_precision.initialize_tree_nodes,
+            tree.node_count,
+            inputs=[
+                tree.node_body,
+                tree.node_row,
+                body_matrix,
+                body_rhs,
+                body_scale,
+                tree.compliance,
+                tree.residual,
+                tree.row_scale,
+            ],
+            outputs=[self.factor_diagonal, tree.solution],
+            device=device,
+        )
+        wp.launch(
+            rigid_vbd_kkt_precision.initialize_tree_couplings,
+            tree.node_count,
+            inputs=[
+                tree.node_body,
+                tree.node_row,
+                tree.parent_node,
+                tree.coupling_side,
+                body_scale,
+                tree.row_scale,
+                tree.jacobian_parent,
+                tree.jacobian_child,
+            ],
+            outputs=[self.factor_coupling],
+            device=device,
+        )
         wp.launch(
             equilibrate_tree_rows,
             self.closure_size,
             inputs=[self.closure_compliance],
             outputs=[self.closure_row_scale],
-            device=self.device,
+            device=device,
         )
         wp.launch(
-            initialize_closure_response,
-            self.tree.node_count * self.closure_count,
+            rigid_vbd_kkt_precision.initialize_closure_response,
+            tree.node_count * self.closure_count,
             inputs=[
-                self.tree.node_body,
-                self.tree.tree_node_count,
+                tree.node_body,
+                tree.tree_node_count,
                 self.closure_count,
                 self.closure_parent_node,
                 self.closure_child_node,
@@ -6999,13 +7006,111 @@ class _ClosedTreeBucket:
                 self.closure_jacobian_child,
             ],
             outputs=[self.response_rhs],
-            device=self.device,
-            block_dim=self.spatial_block_dim,
+            device=device,
+        )
+        if self.device.is_cuda and self.use_paired_backbone:
+            self._solve_tree_gpu()
+        else:
+            wp.launch(
+                rigid_vbd_kkt_precision.eliminate_tree_nodes,
+                self.batch_count,
+                inputs=[
+                    tree.tree_node_count,
+                    self.elimination_nodes,
+                    self.closure_count,
+                    tree.parent_node,
+                    self.factor_coupling,
+                ],
+                outputs=[self.factor_diagonal, tree.solution, self.response_rhs],
+                device=device,
+            )
+            wp.launch(
+                rigid_vbd_kkt_precision.solve_tree_roots,
+                self.batch_count,
+                inputs=[tree.roots, self.closure_count],
+                outputs=[self.factor_diagonal, tree.solution, self.response_rhs],
+                device=device,
+            )
+            wp.launch(
+                rigid_vbd_kkt_precision.back_substitute_tree_nodes,
+                self.batch_count,
+                inputs=[
+                    tree.tree_node_count,
+                    self.elimination_nodes,
+                    self.closure_count,
+                    tree.parent_node,
+                    self.factor_coupling,
+                ],
+                outputs=[self.factor_diagonal, tree.solution, self.response_rhs],
+                device=device,
+            )
+        wp.launch(
+            rigid_vbd_kkt_precision.assemble_closure_rhs,
+            self.closure_size,
+            inputs=[
+                tree.node_body,
+                self.closure_parent_node,
+                self.closure_child_node,
+                body_scale,
+                self.closure_row_scale,
+                self.closure_jacobian_parent,
+                self.closure_jacobian_child,
+                self.closure_residual,
+                tree.solution,
+            ],
+            outputs=[self.closure_rhs],
+            device=device,
+        )
+        wp.launch(
+            rigid_vbd_kkt_precision.assemble_closure_schur,
+            self.batch_count * self.closure_count * self.closure_count,
+            inputs=[
+                self.closure_count,
+                tree.node_body,
+                self.closure_parent_node,
+                self.closure_child_node,
+                body_scale,
+                self.closure_row_scale,
+                self.closure_jacobian_parent,
+                self.closure_jacobian_child,
+                self.closure_compliance,
+                self.response_solution,
+            ],
+            outputs=[self.closure_schur],
+            device=device,
+        )
+        self.solve_closure_schur()
+        wp.launch(
+            rigid_vbd_kkt_precision.scatter_closed_tree_body_correction,
+            tree.body_count,
+            inputs=[
+                tree.body_nodes,
+                tree.body_slots,
+                tree.body_row_offsets,
+                tree.body_rows,
+                tree.row_active,
+                self.body_closure_offsets,
+                self.body_closure_rows,
+                self.closure_row_active,
+                tree.tree_body_count,
+                self.closure_count,
+                body_scale,
+                tree.solution,
+                self.response_solution,
+                self.closure_multiplier,
+            ],
+            outputs=[body_correction],
+            device=device,
         )
 
-        # Eliminate only the shallow side branches. The remaining long tree
-        # backbone is block tridiagonal and is solved in logarithmic CR depth.
-        for leaves, recipients, recipient_offsets, message_nodes, recipients_are_unique in self.branch_levels:
+    def _solve_tree_gpu(self):
+        for (
+            leaves,
+            recipients,
+            recipient_offsets,
+            message_nodes,
+            recipients_are_unique,
+        ) in self.branch_levels:
             if recipients_are_unique:
                 wp.launch(
                     eliminate_tree_unique_leaves,
@@ -7080,83 +7185,17 @@ class _ClosedTreeBucket:
         wp.launch(
             initialize_tree_backbone_edges,
             self.batch_count * self.backbone_node_count,
-            inputs=[self.backbone_node_count, self.backbone_nodes, self.tree.parent_node, self.tree.coupling],
+            inputs=[
+                self.backbone_node_count,
+                self.backbone_nodes,
+                self.tree.parent_node,
+                self.tree.coupling,
+            ],
             outputs=[self.backbone_lower, self.backbone_upper],
             device=self.device,
             block_dim=self.spatial_block_dim,
         )
-        if self.use_paired_backbone:
-            self.solve_paired_backbone()
-        else:
-            for stride, eliminated_count, survivor_count in self.backbone_cr_levels:
-                wp.launch(
-                    invert_tree_backbone_cr_eliminated,
-                    self.batch_count * eliminated_count,
-                    inputs=[
-                        stride,
-                        self.backbone_node_count,
-                        eliminated_count,
-                        self.backbone_nodes,
-                    ],
-                    outputs=[self.tree.diagonal],
-                    device=self.device,
-                    block_dim=self.spatial_block_dim,
-                )
-                wp.launch(
-                    reduce_tree_backbone_cr_in_place,
-                    self.batch_count * survivor_count,
-                    inputs=[
-                        stride,
-                        self.backbone_node_count,
-                        survivor_count,
-                        self.closure_count,
-                        self.backbone_nodes,
-                    ],
-                    outputs=[
-                        self.backbone_lower,
-                        self.tree.diagonal,
-                        self.backbone_upper,
-                        self.tree.rhs,
-                        self.response_rhs,
-                    ],
-                    device=self.device,
-                    block_dim=self.spatial_block_dim,
-                )
-            wp.launch(
-                solve_tree_backbone_cr_coarse,
-                self.batch_count,
-                inputs=[
-                    self.backbone_terminal_stride,
-                    self.backbone_node_count,
-                    self.closure_count,
-                    self.backbone_nodes,
-                ],
-                outputs=[
-                    self.backbone_lower,
-                    self.tree.diagonal,
-                    self.backbone_upper,
-                    self.tree.rhs,
-                    self.response_rhs,
-                ],
-                device=self.device,
-            )
-            for stride, eliminated_count, _ in reversed(self.backbone_cr_levels):
-                wp.launch(
-                    back_substitute_tree_backbone_cr_in_place,
-                    self.batch_count * eliminated_count,
-                    inputs=[
-                        stride,
-                        self.backbone_node_count,
-                        eliminated_count,
-                        self.closure_count,
-                        self.backbone_nodes,
-                        self.backbone_lower,
-                        self.backbone_upper,
-                    ],
-                    outputs=[self.tree.diagonal, self.tree.rhs, self.response_rhs],
-                    device=self.device,
-                    block_dim=self.spatial_block_dim,
-                )
+        self.solve_paired_backbone()
 
         for leaves, _, _, _, _ in reversed(self.branch_levels):
             wp.launch(
@@ -7189,68 +7228,6 @@ class _ClosedTreeBucket:
                 block_dim=self.spatial_block_dim,
             )
 
-        wp.launch(
-            assemble_closure_rhs,
-            self.closure_size,
-            inputs=[
-                self.tree.node_body,
-                self.closure_parent_node,
-                self.closure_child_node,
-                body_scale,
-                self.closure_row_scale,
-                self.closure_jacobian_parent,
-                self.closure_jacobian_child,
-                self.closure_residual,
-                self.tree.solution,
-            ],
-            outputs=[self.closure_rhs],
-            device=self.device,
-            block_dim=self.spatial_block_dim,
-        )
-        wp.launch(
-            assemble_closure_schur,
-            self.batch_count * self.closure_count * self.closure_count,
-            inputs=[
-                self.closure_count,
-                self.tree.node_body,
-                self.closure_parent_node,
-                self.closure_child_node,
-                body_scale,
-                self.closure_row_scale,
-                self.closure_jacobian_parent,
-                self.closure_jacobian_child,
-                self.closure_compliance,
-                self.response_solution,
-            ],
-            outputs=[self.closure_schur],
-            device=self.device,
-            block_dim=self.spatial_block_dim,
-        )
-        self.solve_closure_schur()
-        wp.launch(
-            scatter_closed_tree_body_correction,
-            self.tree.body_count,
-            inputs=[
-                self.tree.body_nodes,
-                self.tree.body_slots,
-                self.tree.body_row_offsets,
-                self.tree.body_rows,
-                self.tree.row_active,
-                self.body_closure_offsets,
-                self.body_closure_rows,
-                self.closure_row_active,
-                self.tree.tree_body_count,
-                self.closure_count,
-                body_scale,
-                self.tree.solution,
-                self.response_solution,
-                self.closure_multiplier,
-            ],
-            outputs=[body_correction],
-            device=self.device,
-            block_dim=self.spatial_block_dim,
-        )
-
 
 class StructuralGraphKKT:
     """Graph-capturable compliance-KKT backend for paths, trees, and cyclic graphs."""
@@ -7261,11 +7238,15 @@ class StructuralGraphKKT:
         body_inv_mass,
         *,
         enable_paired_open_chains=False,
+        enable_captured_contact_shortcuts=False,
         allow_general_joint_paths=False,
         supported_joint_types: set[int] | None = None,
         ignore_free_completion_joints=False,
     ):
         self.device = model.device
+        # Repeated nondeterministic reductions at an unchanged pose can still
+        # change rounded contact forces. Shortcuts require reproducible sums.
+        self.enable_captured_contact_shortcuts = enable_captured_contact_shortcuts
         self.spatial_block_dim = _SPATIAL_GPU_BLOCK_DIM if self.device.is_cuda else 1
         self.path_buckets: list[_PathBucket] = []
         self.tree_buckets: list[_TreeBucket] = []
@@ -7275,7 +7256,6 @@ class StructuralGraphKKT:
         self._payload_budget_bytes = _structural_payload_budget(self.device)
         self._estimated_bytes = 0
         self.graph_body_count = 0
-        self.has_joint_limits = False
         self.use_fused_solve_reset = True
         self.use_fused_contact_classification = True
 
@@ -7504,7 +7484,11 @@ class StructuralGraphKKT:
             bucket._diagnostics = plan.diagnostics
             bucket._estimated_bytes = plan.diagnostics.estimated_bytes
 
-        self.buckets = [*self.path_buckets, *self.tree_buckets, *self.closed_tree_buckets]
+        self.buckets = [
+            *self.path_buckets,
+            *self.tree_buckets,
+            *self.closed_tree_buckets,
+        ]
         for bucket in self.path_buckets:
             bucket.bind_body_endpoints(parent, child, body_slot)
 
@@ -7514,13 +7498,42 @@ class StructuralGraphKKT:
         # Per-island contact topology: 1 = no active dynamic-dynamic contact,
         # -1 = active dynamic-dynamic contact.
         self.island_contact_state = wp.ones(len(components), dtype=wp.int32, device=self.device)
+        # Conservative topology check: only islands with no world/static joint
+        # endpoint have an unrestricted rigid translation. FREE completion rows
+        # carry no energy and do not anchor an island.
+        translation_free = [
+            int(
+                all(body_inv_mass_host[body] > 0.0 for body in component.bodies)
+                and all(
+                    joint_type[joint] == JointType.FREE
+                    or (
+                        parent[joint] >= 0
+                        and child[joint] >= 0
+                        and body_inv_mass_host[parent[joint]] > 0.0
+                        and body_inv_mass_host[child[joint]] > 0.0
+                    )
+                    for joint in component.joints
+                )
+            )
+            for component in components
+        ]
+        self.has_free_translation = any(translation_free)
+        self.island_translation_free = wp.array(translation_free, dtype=wp.int32, device=self.device)
+        self.translation_system = wp.zeros(len(components), dtype=wp.mat44d, device=self.device)
         body_slot_by_id = np.full(model.body_count, -1, dtype=np.int32)
         body_slot_by_id[graph_body_ids] = np.arange(len(graph_body_ids), dtype=np.int32)
         self.graph_joint_ids = wp.array(graph_joint_ids, dtype=wp.int32, device=self.device)
         self.body_slot_by_id = wp.array(body_slot_by_id, dtype=wp.int32, device=self.device)
+        self.line_search_pose = wp.empty_like(model.body_q)
+        self.line_search_enabled = wp.ones(len(components), dtype=bool, device=self.device)
+        self.line_search_slope = wp.zeros(len(components), dtype=wp.float64, device=self.device)
+        self.line_search_pending = wp.ones(1, dtype=int, device=self.device)
         self.body_correction = wp.zeros(self.graph_body_count, dtype=wp.spatial_vector, device=self.device)
         self.island_step_scale = wp.ones(len(components), dtype=float, device=self.device)
         self.body_matrix = wp.zeros(self.graph_body_count, dtype=wp.spatial_matrix, device=self.device)
+        # The relaxation pass reads contact curvature after body factorization.
+        # Its lifetime overlaps the body metric and its in-place path inverse.
+        self.body_dynamic_contact_hessian = wp.zeros(self.graph_body_count, dtype=wp.spatial_matrix, device=self.device)
         self.body_rhs = wp.zeros(self.graph_body_count, dtype=wp.spatial_vector, device=self.device)
         # Tree equilibration is consumed before its scatter writes the final
         # correction, so both lifetimes share the same compact body buffer.
@@ -7535,22 +7548,6 @@ class StructuralGraphKKT:
             len(components),
             len(graph_joint_ids),
         )
-        joint_type = np.asarray(model.joint_type.numpy(), dtype=np.int64)
-        dof_dim = np.asarray(model.joint_dof_dim.numpy(), dtype=np.int64)
-        # This is a topology-only launch gate. Limit coefficients/bounds remain
-        # live device state and may be enabled after construction through
-        # JOINT_DOF_PROPERTIES without rebuilding the backend.
-        for joint in graph_joint_ids:
-            if joint_type[joint] not in (
-                int(JointType.REVOLUTE),
-                int(JointType.PRISMATIC),
-                int(JointType.D6),
-            ):
-                continue
-            count = int(dof_dim[joint, 0] + dof_dim[joint, 1])
-            if count > 0:
-                self.has_joint_limits = True
-                break
 
     @property
     def active(self) -> bool:
@@ -7618,124 +7615,342 @@ class StructuralGraphKKT:
         joint_sigma_start,
         joint_C_fric,
         stab_alpha,
+        shape_body,
+        body_contact_buffer_size,
+        body_contact_counts,
+        body_contact_indices,
+        refresh_contacts=None,
+        translation_only=False,
     ):
-        wp.launch(
-            build_body_surrogate,
-            self.graph_body_ids.shape[0],
-            inputs=[
-                self.graph_body_ids,
-                dt,
-                body_q,
-                body_inertia_q,
-                body_mass,
-                body_inv_mass,
-                body_inertia,
-                body_com,
-                contact_hessian_ll,
-                contact_hessian_al,
-                contact_hessian_aa,
-                contact_forces,
-                contact_torques,
-                dynamic_contact_hessian,
-            ],
-            outputs=[self.body_matrix, self.body_rhs],
-            device=self.device,
-            block_dim=self.spatial_block_dim,
-        )
-        for bucket in self.buckets:
-            linearizations = (
-                (
-                    (
-                        bucket.tree.joint_ids,
-                        bucket.tree.size,
-                        bucket.tree.jacobian_parent,
-                        bucket.tree.jacobian_child,
-                        bucket.tree.compliance,
-                        bucket.tree.residual,
-                        bucket.tree.row_active,
-                    ),
-                    (
-                        bucket.closure_joint_ids,
-                        bucket.closure_size,
-                        bucket.closure_jacobian_parent,
-                        bucket.closure_jacobian_child,
-                        bucket.closure_compliance,
-                        bucket.closure_residual,
-                        bucket.closure_row_active,
-                    ),
-                )
-                if isinstance(bucket, _ClosedTreeBucket)
-                else (
-                    (
-                        bucket.joint_ids,
-                        bucket.size,
-                        bucket.jacobian_parent,
-                        bucket.jacobian_child,
-                        bucket.compliance,
-                        bucket.residual,
-                        bucket.row_active,
-                    ),
-                )
+        def linearize(*, build_majorizer=True):
+            wp.launch(
+                build_body_surrogate,
+                self.graph_body_ids.shape[0],
+                inputs=[
+                    self.graph_body_ids,
+                    dt,
+                    body_q,
+                    body_inertia_q,
+                    body_mass,
+                    body_inv_mass,
+                    body_inertia,
+                    body_com,
+                    contact_hessian_ll,
+                    contact_hessian_al,
+                    contact_hessian_aa,
+                    contact_forces,
+                    contact_torques,
+                    dynamic_contact_hessian,
+                ],
+                outputs=[self.body_matrix, self.body_rhs],
+                device=self.device,
+                block_dim=self.spatial_block_dim,
             )
-            for (
-                linearization_joint_ids,
-                linearization_size,
-                jacobian_parent,
-                jacobian_child,
-                compliance,
-                residual,
-                row_active,
-            ) in linearizations:
-                wp.launch(
-                    linearize_joint_path_rows,
-                    linearization_size,
-                    inputs=[
-                        linearization_joint_ids,
-                        joint_type,
-                        joint_enabled,
-                        joint_parent,
-                        joint_child,
-                        joint_X_p,
-                        joint_X_c,
-                        joint_axis,
-                        joint_rod_rest_kb_local,
-                        joint_rod_rest_twist,
-                        joint_qd_start,
-                        joint_target_q_start,
-                        joint_dof_dim,
-                        joint_constraint_start,
-                        joint_material_k,
-                        joint_rho,
-                        joint_penalty_kd,
-                        joint_lambda_lin,
-                        joint_lambda_ang,
-                        joint_C0_lin,
-                        joint_C0_ang,
-                        joint_sigma_start,
-                        joint_C_fric,
-                        joint_target_ke,
-                        joint_target_kd,
-                        joint_target_q,
-                        joint_target_qd,
-                        joint_limit_lower,
-                        joint_limit_upper,
-                        joint_limit_ke,
-                        joint_limit_kd,
-                        joint_rest_angle,
-                        joint_drive_limit_support,
-                        joint_drive_lambda,
-                        joint_limit_lambda,
-                        stab_alpha,
-                        body_q,
-                        body_q_prev,
-                        body_q_rest,
-                        body_com,
-                        dt,
-                    ],
-                    outputs=[jacobian_parent, jacobian_child, compliance, residual, row_active],
-                    device=self.device,
-                    block_dim=self.spatial_block_dim,
+            for bucket in self.buckets:
+                linearizations = (
+                    (
+                        (
+                            bucket.tree.joint_ids,
+                            bucket.tree.size,
+                            bucket.tree.jacobian_parent,
+                            bucket.tree.jacobian_child,
+                            bucket.tree.compliance,
+                            bucket.tree.residual,
+                            bucket.tree.row_active,
+                        ),
+                        (
+                            bucket.closure_joint_ids,
+                            bucket.closure_size,
+                            bucket.closure_jacobian_parent,
+                            bucket.closure_jacobian_child,
+                            bucket.closure_compliance,
+                            bucket.closure_residual,
+                            bucket.closure_row_active,
+                        ),
+                    )
+                    if isinstance(bucket, _ClosedTreeBucket)
+                    else (
+                        (
+                            bucket.joint_ids,
+                            bucket.size,
+                            bucket.jacobian_parent,
+                            bucket.jacobian_child,
+                            bucket.compliance,
+                            bucket.residual,
+                            bucket.row_active,
+                        ),
+                    )
                 )
+                for (
+                    linearization_joint_ids,
+                    linearization_size,
+                    jacobian_parent,
+                    jacobian_child,
+                    compliance,
+                    residual,
+                    row_active,
+                ) in linearizations:
+                    wp.launch(
+                        linearize_joint_path_rows,
+                        linearization_size,
+                        inputs=[
+                            linearization_joint_ids,
+                            joint_type,
+                            joint_enabled,
+                            joint_parent,
+                            joint_child,
+                            joint_X_p,
+                            joint_X_c,
+                            joint_axis,
+                            joint_rod_rest_kb_local,
+                            joint_rod_rest_twist,
+                            joint_qd_start,
+                            joint_target_q_start,
+                            joint_dof_dim,
+                            joint_constraint_start,
+                            joint_material_k,
+                            joint_rho,
+                            joint_penalty_kd,
+                            joint_lambda_lin,
+                            joint_lambda_ang,
+                            joint_C0_lin,
+                            joint_C0_ang,
+                            joint_sigma_start,
+                            joint_C_fric,
+                            joint_target_ke,
+                            joint_target_kd,
+                            joint_target_q,
+                            joint_target_qd,
+                            joint_limit_lower,
+                            joint_limit_upper,
+                            joint_limit_ke,
+                            joint_limit_kd,
+                            joint_rest_angle,
+                            joint_drive_limit_support,
+                            joint_drive_lambda,
+                            joint_limit_lambda,
+                            stab_alpha,
+                            body_q,
+                            body_q_prev,
+                            body_q_rest,
+                            body_com,
+                            dt,
+                        ],
+                        outputs=[
+                            jacobian_parent,
+                            jacobian_child,
+                            compliance,
+                            residual,
+                            row_active,
+                        ],
+                        device=self.device,
+                        block_dim=self.spatial_block_dim,
+                    )
+                    if build_majorizer:
+                        wp.launch(
+                            add_joint_stress_majorizer,
+                            linearization_size,
+                            inputs=[
+                                linearization_joint_ids,
+                                joint_type,
+                                joint_parent,
+                                joint_child,
+                                joint_X_p,
+                                joint_X_c,
+                                body_q,
+                                body_com,
+                                body_inv_mass,
+                                self.body_slot_by_id,
+                                jacobian_parent,
+                                jacobian_child,
+                                compliance,
+                                residual,
+                            ],
+                            outputs=[self.body_matrix],
+                            device=self.device,
+                            block_dim=self.spatial_block_dim,
+                        )
+
+        def refresh_contact_objective():
+            wp.launch(
+                clear_structural_contact_objective,
+                self.graph_body_count,
+                inputs=[self.graph_body_ids],
+                outputs=[
+                    contact_forces,
+                    contact_torques,
+                    contact_hessian_ll,
+                    contact_hessian_al,
+                    contact_hessian_aa,
+                    dynamic_contact_hessian,
+                ],
+                device=self.device,
+            )
+            refresh_contacts()
+
+        def directional_derivative(*, refresh=True):
+            if refresh:
+                refresh_contact_objective()
+            linearize(build_majorizer=False)
+            self.line_search_slope.zero_()
+            wp.launch(
+                accumulate_body_directional_derivative,
+                self.graph_body_count,
+                inputs=[
+                    self.graph_body_island,
+                    self.line_search_enabled,
+                    self.body_rhs,
+                    self.body_correction,
+                ],
+                outputs=[self.line_search_slope],
+                device=self.device,
+            )
+            for bucket in self.buckets:
+                groups = (
+                    (
+                        (
+                            bucket.tree.joint_ids,
+                            bucket.tree.size,
+                            bucket.tree.jacobian_parent,
+                            bucket.tree.jacobian_child,
+                            bucket.tree.compliance,
+                            bucket.tree.residual,
+                        ),
+                        (
+                            bucket.closure_joint_ids,
+                            bucket.closure_size,
+                            bucket.closure_jacobian_parent,
+                            bucket.closure_jacobian_child,
+                            bucket.closure_compliance,
+                            bucket.closure_residual,
+                        ),
+                    )
+                    if isinstance(bucket, _ClosedTreeBucket)
+                    else (
+                        (
+                            bucket.joint_ids,
+                            bucket.size,
+                            bucket.jacobian_parent,
+                            bucket.jacobian_child,
+                            bucket.compliance,
+                            bucket.residual,
+                        ),
+                    )
+                )
+                for ids, size, jp, jc, compliance, residual in groups:
+                    wp.launch(
+                        accumulate_joint_directional_derivative,
+                        size,
+                        inputs=[
+                            ids,
+                            joint_parent,
+                            joint_child,
+                            self.body_slot_by_id,
+                            self.graph_body_island,
+                            jp,
+                            jc,
+                            compliance,
+                            residual,
+                            self.body_correction,
+                        ],
+                        outputs=[self.line_search_slope],
+                        device=self.device,
+                    )
+
+        def balance_translation():
+            if self.has_free_translation:
+                self.translation_system.zero_()
+                wp.launch(
+                    accumulate_free_translation_system,
+                    self.graph_body_count,
+                    inputs=[
+                        self.graph_body_ids,
+                        self.graph_body_island,
+                        self.body_slot_by_id,
+                        self.island_translation_free,
+                        self.island_contact_state,
+                        self.island_step_scale,
+                        self.body_correction,
+                        dt,
+                        body_q,
+                        body_inertia_q,
+                        body_com,
+                        body_mass,
+                        body_inv_mass,
+                        contact_hessian_ll,
+                        contact_hessian_al,
+                        contact_forces,
+                        dynamic_contact_hessian,
+                        int(contacts is not None),
+                        contacts.rigid_contact_count if contacts is not None else None,
+                        contacts.rigid_contact_shape0 if contacts is not None else None,
+                        contacts.rigid_contact_shape1 if contacts is not None else None,
+                        shape_body,
+                        body_contact_buffer_size,
+                        body_contact_counts,
+                        body_contact_indices,
+                    ],
+                    outputs=[self.translation_system],
+                    device=self.device,
+                )
+                wp.launch(
+                    correct_free_translation,
+                    self.graph_body_count,
+                    inputs=[
+                        self.graph_body_island,
+                        self.island_translation_free,
+                        self.island_contact_state,
+                        self.island_step_scale,
+                        self.translation_system,
+                    ],
+                    outputs=[self.body_correction],
+                    device=self.device,
+                )
+
+        if translation_only:
+            # Local contact reconciliation can disturb common translation.
+            # Resolve only this three-dimensional mode; internal joint errors
+            # and internal contact separations are invariant under the shift.
+            self.island_step_scale.fill_(1.0)
+            self.line_search_pending.fill_(1)
+
+            def translate(*, refresh=True):
+                self.body_correction.zero_()
+                if refresh:
+                    refresh_contact_objective()
+                balance_translation()
+                self.line_search_pending.zero_()
+                wp.launch(
+                    _apply_translation_correction,
+                    self.graph_body_count,
+                    inputs=[
+                        self.graph_body_ids,
+                        self.graph_body_island,
+                        self.island_contact_state,
+                        self.body_correction,
+                    ],
+                    outputs=[body_q, self.line_search_pending],
+                    device=self.device,
+                )
+
+            # Friction active sets can require several Newton updates around
+            # breakaway. Stop at float32 position roundoff on CPU and
+            # deterministic captured CUDA. Other CUDA modes keep the fixed
+            # schedule without readback or changed contact rounding.
+            for iteration in range(1 if contacts is None else 16):
+                # The caller supplied contacts at the starting pose. Only
+                # subsequent translation trials need another evaluation.
+                if self.device.is_cpu or (
+                    self.enable_captured_contact_shortcuts
+                    and self.device.is_capturing
+                    and wp.is_conditional_graph_supported()
+                ):
+                    wp.capture_if(self.line_search_pending, translate, refresh=iteration > 0)
+                else:
+                    translate(refresh=iteration > 0)
+            return
+
+        linearize()
 
         # Trees consume the body metric directly. Path Schur systems consume
         # its inverse, so solve trees first and then change the shared body
@@ -7776,7 +7991,12 @@ class StructuralGraphKKT:
                     bucket.compliance,
                     bucket.residual,
                 ],
-                outputs=[bucket.lower[0], bucket.diagonal[0], bucket.upper[0], bucket.rhs[0]],
+                outputs=[
+                    bucket.lower[0],
+                    bucket.diagonal[0],
+                    bucket.upper[0],
+                    bucket.rhs[0],
+                ],
                 device=self.device,
                 block_dim=self.spatial_block_dim,
             )
@@ -7826,35 +8046,10 @@ class StructuralGraphKKT:
                 outputs=[self.island_step_scale],
                 device=self.device,
             )
-        if self.has_joint_limits:
-            wp.launch(
-                limit_global_joint_limit_step,
-                self.graph_joint_ids.shape[0],
-                inputs=[
-                    self.graph_joint_ids,
-                    joint_type,
-                    joint_enabled,
-                    joint_parent,
-                    joint_child,
-                    joint_X_p,
-                    joint_X_c,
-                    joint_axis,
-                    joint_qd_start,
-                    joint_dof_dim,
-                    joint_limit_lower,
-                    joint_limit_upper,
-                    joint_limit_ke,
-                    joint_rest_angle,
-                    self.body_slot_by_id,
-                    self.graph_body_island,
-                    body_q,
-                    body_q_rest,
-                    body_com,
-                    self.body_correction,
-                ],
-                outputs=[self.island_step_scale],
-                device=self.device,
-            )
+        # Finite limits remain compliant force rows. An additional hard
+        # feasibility projection can suppress an entire island at equilibrium
+        # (where load requires finite violation), or freeze its active set.
+        # The following local sweeps own limit/contact dual reconciliation.
         wp.launch(
             suppress_nonfinite_correction,
             self.graph_body_count,
@@ -7862,6 +8057,79 @@ class StructuralGraphKKT:
             outputs=[self.island_contact_state],
             device=self.device,
         )
+        balance_translation()
+        if contacts is not None and refresh_contacts is not None:
+            wp.copy(self.line_search_pose, body_q)
+
+            self.line_search_enabled.fill_(True)
+            # Factorization and translation balancing only changed scratch;
+            # the caller's contact objective still describes this body pose.
+            directional_derivative(refresh=False)
+            wp.launch(
+                _begin_directional_search,
+                self.island_count,
+                inputs=[self.island_contact_state, self.line_search_slope],
+                outputs=[self.line_search_enabled, self.island_step_scale],
+                device=self.device,
+            )
+            self.line_search_pending.fill_(1)
+
+            def apply_trial(trial):
+                wp.launch(
+                    _apply_trial_correction,
+                    self.graph_body_count,
+                    inputs=[
+                        self.graph_body_ids,
+                        self.graph_body_island,
+                        self.body_correction,
+                        self.island_step_scale,
+                        body_com,
+                        self.line_search_pose,
+                    ],
+                    outputs=[body_q],
+                    device=self.device,
+                )
+                directional_derivative()
+                self.line_search_pending.zero_()
+                wp.launch(
+                    _update_directional_search,
+                    self.island_count,
+                    inputs=[
+                        self.line_search_enabled,
+                        self.line_search_slope,
+                        trial == 4,
+                    ],
+                    outputs=[self.island_step_scale, self.line_search_pending],
+                    device=self.device,
+                )
+
+            for trial in range(5):
+                if self.device.is_cpu or (
+                    self.enable_captured_contact_shortcuts
+                    and self.device.is_capturing
+                    and wp.is_conditional_graph_supported()
+                ):
+                    # Captured CUDA conditionals read the predicate on device.
+                    # Eager CUDA retains its fixed schedule without readback.
+                    wp.capture_if(self.line_search_pending, apply_trial, trial=trial)
+                else:
+                    apply_trial(trial)
+            wp.launch(
+                _apply_trial_correction,
+                self.graph_body_count,
+                inputs=[
+                    self.graph_body_ids,
+                    self.graph_body_island,
+                    self.body_correction,
+                    self.island_step_scale,
+                    body_com,
+                    self.line_search_pose,
+                ],
+                outputs=[body_q],
+                device=self.device,
+            )
+            return
+
         wp.launch(
             apply_global_correction,
             self.graph_body_count,
@@ -7876,3 +8144,280 @@ class StructuralGraphKKT:
             outputs=[body_q],
             device=self.device,
         )
+
+
+@wp.kernel
+def _apply_translation_correction(
+    body_ids: wp.array[int],
+    body_island: wp.array[int],
+    island_state: wp.array[int],
+    correction: wp.array[wp.spatial_vector],
+    body_q: wp.array[wp.transform],
+    pending: wp.array[int],
+):
+    slot = wp.tid()
+    if island_state[body_island[slot]] < -1:
+        return
+    body = body_ids[slot]
+    pose = body_q[body]
+    position = wp.transform_get_translation(pose)
+    translated = position + wp.spatial_top(correction[slot])
+    body_q[body] = wp.transform(translated, wp.transform_get_rotation(pose))
+    for axis in range(3):
+        # Two float32 rounding errors, independent of authored material scales.
+        roundoff = 2.384185791015625e-7 * wp.max(wp.abs(position[axis]), wp.abs(translated[axis]))
+        if wp.abs(translated[axis] - position[axis]) > roundoff:
+            wp.atomic_max(pending, 0, 1)
+
+
+@wp.kernel
+def _begin_directional_search(
+    contact_state: wp.array[int],
+    merit: wp.array[wp.float64],
+    enabled: wp.array[bool],
+    scale: wp.array[float],
+):
+    island = wp.tid()
+    slope = merit[island]
+    good = contact_state[island] >= -1 and wp.isfinite(slope) and slope < wp.float64(0.0)
+    enabled[island] = good
+    if not good:
+        scale[island] = 0.0
+
+
+@wp.kernel
+def _update_directional_search(
+    enabled: wp.array[bool],
+    merit: wp.array[wp.float64],
+    last_trial: bool,
+    scale: wp.array[float],
+    pending: wp.array[int],
+):
+    island = wp.tid()
+    slope = merit[island]
+    if enabled[island] and (not wp.isfinite(slope) or slope > wp.float64(0.0)):
+        scale[island] = 0.0 if last_trial else 0.5 * scale[island]
+        if not last_trial:
+            wp.atomic_max(pending, 0, 1)
+
+
+@wp.kernel
+def _apply_trial_correction(
+    body_ids: wp.array[int],
+    body_island: wp.array[int],
+    correction: wp.array[wp.spatial_vector],
+    scale: wp.array[float],
+    body_com: wp.array[wp.vec3],
+    original: wp.array[wp.transform],
+    body_q: wp.array[wp.transform],
+):
+    slot = wp.tid()
+    body = body_ids[slot]
+    alpha = scale[body_island[slot]]
+    body_q[body] = original[body]
+    if alpha > 0.0:
+        body_q[body] = _corrected_pose(original[body], correction[slot], body_com[body], alpha)
+
+
+# Resolve numeric overloads before graph capture.
+wp.overload(
+    solve_block_ldlt_persistent,
+    [int, wp.array[wp.spatial_matrix], wp.array[wp.spatial_vector]],
+)
+wp.overload(
+    solve_block_ldlt_persistent,
+    [int, wp.array[wp.spatial_matrixd], wp.array[wp.spatial_vectord]],
+)
+wp.overload(
+    back_substitute_block_ldlt_lanes,
+    [
+        int,
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_vector],
+        wp.array[wp.spatial_vector],
+    ],
+)
+wp.overload(
+    back_substitute_block_ldlt_lanes,
+    [
+        int,
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_vectord],
+        wp.array[wp.spatial_vectord],
+    ],
+)
+wp.overload(
+    back_substitute_block_ldlt_serial,
+    [int, wp.array[wp.spatial_matrix], wp.array[wp.spatial_vector]],
+)
+wp.overload(
+    back_substitute_block_ldlt_serial,
+    [int, wp.array[wp.spatial_matrixd], wp.array[wp.spatial_vectord]],
+)
+wp.overload(
+    solve_block_ldlt_diagonal,
+    [int, wp.array[wp.spatial_matrix], wp.array[wp.spatial_vector]],
+)
+wp.overload(
+    solve_block_ldlt_diagonal,
+    [int, wp.array[wp.spatial_matrixd], wp.array[wp.spatial_vectord]],
+)
+wp.overload(update_block_ldlt_lower_triangle, [int, int, int, wp.array[wp.spatial_matrix]])
+wp.overload(
+    update_block_ldlt_lower_triangle,
+    [int, int, int, wp.array[wp.spatial_matrixd]],
+)
+wp.overload(
+    factor_block_ldlt_pivot_rows,
+    [int, int, wp.array[wp.spatial_matrix], wp.array[wp.spatial_vector]],
+)
+wp.overload(
+    factor_block_ldlt_pivot_rows,
+    [int, int, wp.array[wp.spatial_matrixd], wp.array[wp.spatial_vectord]],
+)
+wp.overload(invert_block_dense_pivot, [int, int, wp.array[wp.spatial_matrix]])
+wp.overload(invert_block_dense_pivot, [int, int, wp.array[wp.spatial_matrixd]])
+wp.overload(
+    back_substitute_tree_response_level,
+    [
+        wp.array[wp.int32],
+        int,
+        wp.array[wp.int32],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_matrix],
+    ],
+)
+wp.overload(
+    back_substitute_tree_response_level,
+    [
+        wp.array[wp.int32],
+        int,
+        wp.array[wp.int32],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_matrixd],
+    ],
+)
+wp.overload(
+    accumulate_tree_response_messages,
+    [
+        wp.array[wp.int32],
+        wp.array[wp.int32],
+        wp.array[wp.int32],
+        int,
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_matrix],
+    ],
+)
+wp.overload(
+    accumulate_tree_response_messages,
+    [
+        wp.array[wp.int32],
+        wp.array[wp.int32],
+        wp.array[wp.int32],
+        int,
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_matrixd],
+    ],
+)
+wp.overload(
+    eliminate_tree_response_unique_leaves,
+    [
+        wp.array[wp.int32],
+        int,
+        wp.array[wp.int32],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_matrix],
+    ],
+)
+wp.overload(
+    eliminate_tree_response_unique_leaves,
+    [
+        wp.array[wp.int32],
+        int,
+        wp.array[wp.int32],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_matrixd],
+    ],
+)
+wp.overload(
+    back_substitute_tree_level,
+    [
+        wp.array[wp.int32],
+        wp.array[wp.int32],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_vector],
+        wp.array[wp.spatial_vector],
+    ],
+)
+wp.overload(
+    back_substitute_tree_level,
+    [
+        wp.array[wp.int32],
+        wp.array[wp.int32],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_vectord],
+        wp.array[wp.spatial_vectord],
+    ],
+)
+wp.overload(
+    accumulate_tree_messages,
+    [
+        wp.array[wp.int32],
+        wp.array[wp.int32],
+        wp.array[wp.int32],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_vector],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_vector],
+    ],
+)
+wp.overload(
+    accumulate_tree_messages,
+    [
+        wp.array[wp.int32],
+        wp.array[wp.int32],
+        wp.array[wp.int32],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_vectord],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_vectord],
+    ],
+)
+wp.overload(
+    eliminate_tree_unique_leaves,
+    [
+        wp.array[wp.int32],
+        wp.array[wp.int32],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_vector],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_vector],
+    ],
+)
+wp.overload(
+    eliminate_tree_unique_leaves,
+    [
+        wp.array[wp.int32],
+        wp.array[wp.int32],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_vectord],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_vectord],
+    ],
+)
+wp.overload(invert_tree_leaves, [wp.array[wp.int32], wp.array[wp.spatial_matrix]])
+wp.overload(invert_tree_leaves, [wp.array[wp.int32], wp.array[wp.spatial_matrixd]])

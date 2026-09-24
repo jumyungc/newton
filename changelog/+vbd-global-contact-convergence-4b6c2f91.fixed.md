@@ -1,0 +1,1 @@
+Enable rigid VBD global corrections on contact islands with directional backtracking and local contact preparation. Resolve free-island translation through friction breakaway and preserve momentum without contacts. Skip accepted CPU line-search trials and unnecessary trial curvature assembly. Keep zero global iterations on the original local solver path.

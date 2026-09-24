@@ -1,0 +1,1 @@
+Improve global rigid VBD convergence for stiff closed graphs with double-precision tree and closure recovery on CPU and CUDA, preserving the parallel CUDA factorization. Reduce CPU tree launch overhead and redundant captured contact evaluations with deterministic reductions, preserving the existing contact schedule in default CUDA mode.
