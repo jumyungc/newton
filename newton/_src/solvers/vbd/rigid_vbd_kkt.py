@@ -447,6 +447,7 @@ def accumulate_structural_body_body_contacts(
     rigid_contact_shape1: wp.array[int],
     rigid_contact_point0: wp.array[wp.vec3],
     rigid_contact_point1: wp.array[wp.vec3],
+    rigid_contact_surface_velocity: wp.array[wp.vec3],
     rigid_contact_offset0: wp.array[wp.vec3],
     rigid_contact_offset1: wp.array[wp.vec3],
     rigid_contact_normal: wp.array[wp.vec3],
@@ -582,6 +583,10 @@ def accumulate_structural_body_body_contacts(
             i += _NUM_CONTACT_THREADS_PER_BODY
             continue
 
+        surface_velocity = wp.vec3(0.0)
+        if rigid_contact_surface_velocity:
+            surface_velocity = rigid_contact_surface_velocity[contact]
+
         (
             force0,
             torque0,
@@ -601,6 +606,7 @@ def accumulate_structural_body_body_contacts(
             body_com,
             point0_local,
             point1_local,
+            surface_velocity,
             point0_offset,
             point1_offset,
             normal,
