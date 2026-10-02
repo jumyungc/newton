@@ -59,9 +59,19 @@ def test_directional_step_guard(test, device):
     enabled = wp.empty(7, dtype=bool, device=device)
     slope = wp.array(terms, dtype=wp.float64, device=device)
     scale = wp.ones(7, dtype=float, device=device)
-    wp.launch(kkt._begin_directional_search, 7, inputs=[contact_state, slope], outputs=[enabled, scale], device=device)
+    initial_slope = wp.empty(7, dtype=wp.float64, device=device)
+    pending = wp.zeros(1, dtype=int, device=device)
+    wp.launch(
+        kkt._begin_directional_search,
+        7,
+        inputs=[contact_state, slope],
+        outputs=[enabled, scale, initial_slope, pending],
+        device=device,
+    )
     np.testing.assert_array_equal(enabled.numpy(), [True, True, False, False, False, False, False])
     np.testing.assert_array_equal(scale.numpy(), [1, 1, 0, 0, 0, 0, 0])
+    np.testing.assert_array_equal(initial_slope.numpy(), terms)
+    np.testing.assert_array_equal(pending.numpy(), [1])
 
 
 def test_directional_derivative_matches_dense_model(test, device):

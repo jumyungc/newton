@@ -2280,8 +2280,8 @@ def _structural_kkt_preserves_free_translation(test, device):
     wp.launch(
         rigid_vbd_kkt.correct_free_translation,
         2,
-        inputs=[islands, enabled, enabled, scale, system],
-        outputs=[correction],
+        inputs=[islands, enabled, enabled, scale, system, correction, False, False, True, ids],
+        outputs=[None, None],
         device=device,
     )
     accepted = 0.5 * correction.numpy()[:, :3]
@@ -2341,8 +2341,8 @@ def _structural_kkt_external_dynamic_contact_blocks_free_translation(test, devic
     wp.launch(
         rigid_vbd_kkt.correct_free_translation,
         2,
-        inputs=[ids, enabled, enabled, scale, system],
-        outputs=[correction],
+        inputs=[ids, enabled, enabled, scale, system, correction, False, False, True, ids],
+        outputs=[None, None],
         device=device,
     )
     np.testing.assert_array_equal(system.numpy()[:, 3, 3], 1.0)
@@ -4487,6 +4487,7 @@ def _structural_kkt_directional_search_rejects_overshoot(test, device):
     enabled = wp.ones(2, dtype=bool, device=device)
     scale = wp.ones(2, dtype=float, device=device)
     merit = wp.zeros(2, dtype=wp.float64, device=device)
+    initial_slope = wp.empty(2, dtype=wp.float64, device=device)
     pending = wp.ones(1, dtype=int, device=device)
     evaluations = wp.zeros(1, dtype=int, device=device)
 
@@ -4506,7 +4507,7 @@ def _structural_kkt_directional_search_rejects_overshoot(test, device):
             rigid_vbd_kkt._begin_directional_search,
             2,
             inputs=[state, merit],
-            outputs=[enabled, scale],
+            outputs=[enabled, scale, initial_slope, pending],
             device=device,
         )
 
@@ -4515,7 +4516,7 @@ def _structural_kkt_directional_search_rejects_overshoot(test, device):
                 rigid_vbd_kkt._apply_trial_correction,
                 2,
                 inputs=[ids, ids, correction, scale, com, original],
-                outputs=[pose],
+                outputs=[pose, pending],
                 device=device,
             )
             wp.launch(
@@ -4529,7 +4530,7 @@ def _structural_kkt_directional_search_rejects_overshoot(test, device):
             wp.launch(
                 rigid_vbd_kkt._update_directional_search,
                 2,
-                inputs=[enabled, merit, trial == 4],
+                inputs=[enabled, merit, initial_slope, trial == 4],
                 outputs=[scale, pending],
                 device=device,
             )
@@ -4543,7 +4544,7 @@ def _structural_kkt_directional_search_rejects_overshoot(test, device):
             rigid_vbd_kkt._apply_trial_correction,
             2,
             inputs=[ids, ids, correction, scale, com, original],
-            outputs=[pose],
+            outputs=[pose, pending],
             device=device,
         )
 

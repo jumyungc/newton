@@ -454,11 +454,14 @@ class SolverVBD(SolverBase, CouplingInterface):
                 receive an additional global structural correction. ``0`` (default)
                 preserves the baseline local solver exactly. Positive values require
                 ``rigid_compliant_alm=True``, may not exceed ``iterations``, and currently
-                support only rigid-only models integrated directly by ``SolverVBD``. When
-                a contact buffer is supplied, local sweeps prepare contact reactions before the
-                global correction when the budget allows, and a directional line search checks it
-                against the current joint and contact forces. Unanchored islands also reconcile
-                common translation after the local sweeps, including without contacts. Collision
+                support only rigid-only models integrated directly by ``SolverVBD``.
+                Corrections start after the first local sweep and are distributed over the
+                local budget, regardless of whether a contact buffer is supplied. Joint duals
+                are updated after the paired local/global correction. With contact, a
+                directional search checks the current joint and contact forces. Eligible
+                unanchored rod islands also receive a six-dimensional collective rigid-motion
+                correction before acceptance; anchored or dynamically coupled islands do not.
+                Unanchored islands reconcile common translation after the local sweeps. Collision
                 witnesses must be valid; the global solve cannot repair collision detection or
                 guarantee nonlinear convergence at a fixed iteration budget. Strongly nonlinear
                 graphs may need multiple global corrections; extra local sweeps alone can converge
@@ -899,15 +902,11 @@ class SolverVBD(SolverBase, CouplingInterface):
         self.rigid_soft_contact_use_log_barrier = bool(rigid_soft_contact_use_log_barrier)
         self._joint_mode_deprecation_warned = False
         self.rigid_joint_global_iterations = rigid_joint_global_iterations
+        # Pair the first local/global correction, then leave local work to
+        # reconcile contact. Contact-buffer allocation must not select a delay.
         self._rigid_joint_global_iteration_indices = frozenset(
             global_pass * iterations // rigid_joint_global_iterations
             for global_pass in range(rigid_joint_global_iterations)
-        )
-        # Prepare contact reactions before the coupled correction, while
-        # retaining a following local sweep when the iteration budget allows.
-        self._rigid_joint_global_contact_iteration_indices = frozenset(
-            (iteration + min(3, max(0, iterations - 2))) % iterations
-            for iteration in self._rigid_joint_global_iteration_indices
         )
 
         # Rigid integration mode: when True, rigid bodies are integrated by an external
@@ -2550,6 +2549,8 @@ class SolverVBD(SolverBase, CouplingInterface):
         )
 
         backend = self._structural_graph_kkt
+        if backend is not None:
+            backend.refresh_translation_freedom(self.model.joint_enabled)
         if (
             not self._rigid_joint_global_iteration_indices
             or backend is None
@@ -2571,14 +2572,10 @@ class SolverVBD(SolverBase, CouplingInterface):
                 self._mid_step_detection(
                     state_in, state_out, contacts, dt, rigid_due=rigid_due, soft_due=soft_due, preserve_history=True
                 )
-                global_iteration = iter_num in (
-                    self._rigid_joint_global_contact_iteration_indices
-                    if contacts is not None
-                    else self._rigid_joint_global_iteration_indices
-                )
+                global_iteration = iter_num in self._rigid_joint_global_iteration_indices
                 if global_iteration and iter_num == self.iterations - 1 and contacts is not None:
-                    # Reconcile the last correction within the configured local
-                    # budget, including when G == iterations.
+                    # Preserve the existing G == iterations contact budget,
+                    # including I1/G1: the last local sweep reconciles contact.
                     self._solve_structural_graph_kkt(state_in, control, contacts, dt)
                     global_iteration = False
                 self._solve_rigid_body_iteration(
@@ -2598,7 +2595,18 @@ class SolverVBD(SolverBase, CouplingInterface):
                 self._solve_rigid_body_iteration(state_in, state_out, control, contacts, dt)
 
         if backend is not None and backend.has_free_translation and not self._has_joint_mimics:
-            self._solve_structural_graph_kkt(state_in, control, contacts, dt, translation_only=True)
+            if backend.has_switchable_translation and self.device.is_capturing and wp.is_conditional_graph_supported():
+                wp.capture_if(
+                    backend.translation_active,
+                    self._solve_structural_graph_kkt,
+                    state_in=state_in,
+                    control=control,
+                    contacts=contacts,
+                    dt=dt,
+                    translation_only=True,
+                )
+            else:
+                self._solve_structural_graph_kkt(state_in, control, contacts, dt, translation_only=True)
 
         # Snapshot solved rigid contact state for next-frame warm-start.
         self._snapshot_rigid_contact_history(contacts)
@@ -3912,6 +3920,8 @@ class SolverVBD(SolverBase, CouplingInterface):
         state_in: State,
         contacts: Contacts | None,
         dt: float,
+        *,
+        translation_only: bool = False,
     ) -> None:
         """Relinearize contact at the pose consumed by the global correction."""
         backend = self._structural_graph_kkt
@@ -3959,6 +3969,11 @@ class SolverVBD(SolverBase, CouplingInterface):
                 backend.body_slot_by_id,
                 backend.graph_body_island,
                 int(backend.use_fused_contact_classification),
+                translation_only,
+                self.body_inertia_q,
+                self.model.body_mass,
+                backend.island_translation_free,
+                backend.translation_system,
                 self.body_body_contact_buffer_pre_alloc,
                 self.body_body_contact_counts,
                 self.body_body_contact_indices,
@@ -4058,7 +4073,9 @@ class SolverVBD(SolverBase, CouplingInterface):
                 outputs=[backend.island_contact_state],
                 device=self.device,
             )
-        self._refresh_structural_contact_objective(state_in, contacts, dt)
+        if translation_only:
+            backend.translation_system.zero_()
+        self._refresh_structural_contact_objective(state_in, contacts, dt, translation_only=translation_only)
         backend.solve(
             dt=dt,
             contacts=contacts,
@@ -4115,7 +4132,9 @@ class SolverVBD(SolverBase, CouplingInterface):
             body_contact_buffer_size=self.body_body_contact_buffer_pre_alloc,
             body_contact_counts=self.body_body_contact_counts,
             body_contact_indices=self.body_body_contact_indices,
-            refresh_contacts=lambda: self._refresh_structural_contact_objective(state_in, contacts, dt),
+            refresh_contacts=lambda translation=False: self._refresh_structural_contact_objective(
+                state_in, contacts, dt, translation_only=translation
+            ),
             translation_only=translation_only,
         )
 

@@ -47,7 +47,6 @@ from newton._src.core.types import MAXVAL
 from newton._src.math import quat_velocity
 from newton._src.sim import JointType
 
-from . import rigid_vbd_kkt_precision
 from .rigid_vbd_kernels import (
     _NUM_CONTACT_THREADS_PER_BODY,
     _SMALL_ANGLE_EPS,
@@ -305,7 +304,37 @@ def _inverse_spatial_pivoted(matrix: wp.spatial_matrix):
 
 @wp.func
 def _inverse_spatial_pivoted(matrix: wp.spatial_matrixd):
-    return rigid_vbd_kkt_precision._inverse_spatial_pivoted(matrix)
+    """Invert a general 6x6 frontal block with row partial pivoting."""
+    value = matrix
+    inverse = wp.identity(6, wp.float64)
+    for column in range(6):
+        pivot = column
+        pivot_magnitude = wp.abs(value[column, column])
+        for row in range(column + 1, 6):
+            magnitude = wp.abs(value[row, column])
+            if magnitude > pivot_magnitude:
+                pivot = row
+                pivot_magnitude = magnitude
+        if pivot != column:
+            for entry in range(6):
+                temporary = value[column, entry]
+                value[column, entry] = value[pivot, entry]
+                value[pivot, entry] = temporary
+                temporary = inverse[column, entry]
+                inverse[column, entry] = inverse[pivot, entry]
+                inverse[pivot, entry] = temporary
+
+        reciprocal = wp.float64(1.0) / value[column, column]
+        for entry in range(6):
+            value[column, entry] = reciprocal * value[column, entry]
+            inverse[column, entry] = reciprocal * inverse[column, entry]
+        for row in range(6):
+            if row != column:
+                factor = value[row, column]
+                for entry in range(6):
+                    value[row, entry] = value[row, entry] - factor * value[column, entry]
+                    inverse[row, entry] = inverse[row, entry] - factor * inverse[column, entry]
+    return inverse
 
 
 @wp.func
@@ -331,7 +360,7 @@ def _inverse_spatial_robust(matrix: wp.spatial_matrix):
 
 @wp.func
 def _inverse_spatial_robust(matrix: wp.spatial_matrixd):
-    return rigid_vbd_kkt_precision._inverse_spatial_pivoted(matrix)
+    return _inverse_spatial_pivoted(matrix)
 
 
 @wp.func
@@ -457,6 +486,11 @@ def accumulate_structural_body_body_contacts(
     body_slot_by_id: wp.array[wp.int32],
     graph_body_island: wp.array[wp.int32],
     classify_islands: int,
+    translation_only: bool,
+    body_inertia_q: wp.array[wp.transform],
+    body_mass: wp.array[float],
+    island_translation_free: wp.array[int],
+    translation_system: wp.array[wp.mat44d],
     body_contact_buffer_pre_alloc: int,
     body_contact_counts: wp.array[wp.int32],
     body_contact_indices: wp.array[wp.int32],
@@ -484,6 +518,11 @@ def accumulate_structural_body_body_contacts(
     if classify_islands == 1 and contact_thread == 0 and body_contact_count > body_contact_buffer_pre_alloc:
         wp.atomic_min(island_contact_state, island, -2)
     num_contacts = wp.min(body_contact_count, body_contact_buffer_pre_alloc)
+    if contact_thread >= num_contacts and not (translation_only and contact_thread == 0):
+        # Translation lane zero also owns the body's inertial contribution.
+        return
+    if translation_only and island_translation_free[island] == 0:
+        return
     contact_count = rigid_contact_count[0]
     force_acc = wp.vec3(0.0)
     torque_acc = wp.vec3(0.0)
@@ -526,6 +565,19 @@ def accumulate_structural_body_body_contacts(
 
         other_body = body1 if body == body0 else body0
         dynamic_pair = other_body >= 0 and body_inv_mass[other_body] > 0.0 and body_slot_by_id[other_body] >= 0
+        if translation_only and other_body >= 0 and body_inv_mass[other_body] > 0.0:
+            other_slot = body_slot_by_id[other_body]
+            if other_slot < 0 or graph_body_island[other_slot] != island:
+                # A dynamic contact crossing islands couples their translations.
+                blocked = wp.mat44d(0.0)
+                blocked[3, 3] = wp.float64(1.0)
+                wp.atomic_add(translation_system, island, blocked)
+                return
+        if translation_only and dynamic_pair and graph_body_island[body_slot_by_id[other_body]] == island:
+            # A common translation does no work on an internal pair. Omit
+            # both endpoint forces instead of cancelling rounded sums.
+            i += _NUM_CONTACT_THREADS_PER_BODY
+            continue
         if classify_islands == 1 and dynamic_pair:
             separation = (
                 wp.dot(normal, point1 - point0) - rigid_contact_margin0[contact] - rigid_contact_margin1[contact]
@@ -562,24 +614,9 @@ def accumulate_structural_body_body_contacts(
             normal_error <= _SMALL_LENGTH_EPS or normal_primal_k * stabilized_error + multiplier_normal_eff <= 0.0
         )
         if inactive:
-            # A simultaneous structural step can activate a nearby candidate.
-            # k*j*j^T bounds the squared-hinge normal potential on either side
-            # of activation. Add curvature only: an open contact exerts no force.
-            point = point0 if body == body0 else point1
-            arm = point - wp.transform_point(body_q[body], body_com[body])
-            angular = wp.cross(arm, normal)
-            h_ll = normal_primal_k * wp.outer(normal, normal)
-            h_al = normal_primal_k * wp.outer(angular, normal)
-            h_aa = normal_primal_k * wp.outer(angular, angular)
-            h_ll_acc += h_ll
-            h_al_acc += h_al
-            h_aa_acc += h_aa
-            if dynamic_pair:
-                dynamic_h_ll_acc += h_ll
-                dynamic_h_al_acc += h_al
-                dynamic_h_aa_acc += h_aa
-            # Potential curvature does not make a separated pair active.
-            # Retain its metric without triggering active-contact relaxation.
+            # Use the local active-set metric: a zero-reaction, open contact
+            # adds neither force nor curvature. Trial contact refresh still
+            # detects activation along a simultaneous structural correction.
             i += _NUM_CONTACT_THREADS_PER_BODY
             continue
 
@@ -646,18 +683,40 @@ def accumulate_structural_body_body_contacts(
                 dynamic_h_aa_acc += h_aa1
         i += _NUM_CONTACT_THREADS_PER_BODY
 
+    if translation_only:
+        # Restrict directly to the three common-translation coordinates.
+        # No rotational scratch or body-matrix gather is consumed here.
+        contribution = wp.mat44d(0.0)
+        inertial_delta = wp.transform_point(body_inertia_q[body], body_com[body]) - wp.transform_point(
+            body_q[body], body_com[body]
+        )
+        mass = wp.float64(0.0)
+        if contact_thread == 0:
+            mass = wp.float64(body_mass[body]) / (wp.float64(dt) * wp.float64(dt))
+        for row in range(3):
+            contribution[row, 3] = mass * wp.float64(inertial_delta[row]) + wp.float64(force_acc[row])
+            for column in range(3):
+                value = wp.float64(h_ll_acc[row, column])
+                if row == column:
+                    value += mass
+                contribution[row, column] = value
+        wp.atomic_add(translation_system, island, contribution)
+        return
+
     wp.atomic_add(body_forces, body, force_acc)
-    wp.atomic_add(body_torques, body, torque_acc)
     wp.atomic_add(body_hessian_ll, body, h_ll_acc)
-    wp.atomic_add(body_hessian_al, body, h_al_acc)
-    wp.atomic_add(body_hessian_aa, body, h_aa_acc)
+    if not translation_only:
+        wp.atomic_add(body_torques, body, torque_acc)
+        wp.atomic_add(body_hessian_al, body, h_al_acc)
+        wp.atomic_add(body_hessian_aa, body, h_aa_acc)
     dynamic_hessian = wp.spatial_matrix(0.0)
     for row in range(3):
         for column in range(3):
             dynamic_hessian[row, column] = dynamic_h_ll_acc[row, column]
-            dynamic_hessian[row, column + 3] = dynamic_h_al_acc[column, row]
-            dynamic_hessian[row + 3, column] = dynamic_h_al_acc[row, column]
-            dynamic_hessian[row + 3, column + 3] = dynamic_h_aa_acc[row, column]
+            if not translation_only:
+                dynamic_hessian[row, column + 3] = dynamic_h_al_acc[column, row]
+                dynamic_hessian[row + 3, column] = dynamic_h_al_acc[row, column]
+                dynamic_hessian[row + 3, column + 3] = dynamic_h_aa_acc[row, column]
     wp.atomic_add(body_dynamic_contact_hessian, body_slot, dynamic_hessian)
 
 
@@ -723,6 +782,71 @@ def classify_global_contact_islands(
         wp.atomic_min(island_contact_state, island1, -1)
 
 
+@wp.func
+def _body_objective_rhs(
+    pose: wp.transform,
+    inertial_pose: wp.transform,
+    mass: float,
+    inertia: wp.mat33,
+    com_local: wp.vec3,
+    contact_force: wp.vec3,
+    contact_torque: wp.vec3,
+    dt_inv_sq: float,
+):
+    rotation = wp.transform_get_rotation(pose)
+    inertial_rotation = wp.transform_get_rotation(inertial_pose)
+    com = wp.transform_point(pose, com_local)
+    inertial_com = wp.transform_point(inertial_pose, com_local)
+    force = (mass * dt_inv_sq) * (inertial_com - com) + contact_force
+    rotation_delta = wp.quat_inverse(rotation) * inertial_rotation
+    if rotation_delta[3] < 0.0:
+        rotation_delta = wp.quat(
+            -rotation_delta[0],
+            -rotation_delta[1],
+            -rotation_delta[2],
+            -rotation_delta[3],
+        )
+    axis, angle = wp.quat_to_axis_angle(rotation_delta)
+    torque = wp.quat_rotate(rotation, inertia * (axis * angle * dt_inv_sq)) + contact_torque
+    return wp.spatial_vector(force, torque)
+
+
+@wp.func
+def _body_surrogate_matrix(
+    rotation: wp.quat,
+    mass: float,
+    inertia: wp.mat33,
+    contact_ll: wp.mat33,
+    contact_al: wp.mat33,
+    contact_aa: wp.mat33,
+    dynamic: wp.spatial_matrix,
+    dt_inv_sq: float,
+):
+    """Share the unstressed body metric between structural and rigid-mode solves."""
+    # Off-topology dynamic pairs require an extra self block, not doubled
+    # curvature for unrelated static/kinematic support.
+    h_ll = mass * dt_inv_sq * wp.identity(3, float) + contact_ll + _spatial_block(dynamic, 0, 0)
+    rotation_matrix = wp.quat_to_matrix(rotation)
+    h_aa = (
+        dt_inv_sq * rotation_matrix * inertia * wp.transpose(rotation_matrix)
+        + contact_aa
+        + _spatial_block(dynamic, 1, 1)
+    )
+    h_al = contact_al + _spatial_block(dynamic, 1, 0)
+    # Match local VBD regularization and the existing structural body solve.
+    eps_l = 1.0e-9 * (wp.trace(h_ll) / 3.0 + 1.0)
+    eps_a = 1.0e-9 * (wp.trace(h_aa) / 3.0 + 1.0)
+    for axis in range(3):
+        h_ll[axis, axis] = h_ll[axis, axis] + eps_l
+        h_aa[axis, axis] = h_aa[axis, axis] + eps_a
+    matrix = wp.spatial_matrix(0.0)
+    matrix = _set_spatial_block(matrix, 0, 0, h_ll)
+    matrix = _set_spatial_block(matrix, 0, 1, wp.transpose(h_al))
+    matrix = _set_spatial_block(matrix, 1, 0, h_al)
+    matrix = _set_spatial_block(matrix, 1, 1, h_aa)
+    return matrix
+
+
 @wp.kernel
 def build_body_surrogate(
     body_ids: wp.array[wp.int32],
@@ -754,59 +878,28 @@ def build_body_surrogate(
     pose = body_q[body]
     inertial_pose = body_inertia_q[body]
     rotation = wp.transform_get_rotation(pose)
-    inertial_rotation = wp.transform_get_rotation(inertial_pose)
     com_local = body_com[body]
 
-    mass_scale = body_mass[body] * dt_inv_sq
-
-    identity = wp.identity(3, float)
-    # Contacts whose other endpoint is represented by this backend are
-    # off-topology pair edges. Add one extra self block for exactly those
-    # contacts, yielding H_static + 2*H_dynamic without doubling unrelated
-    # static/kinematic support on the same island.
-    dynamic_h_ll = _spatial_block(dynamic_contact_hessian[slot], 0, 0)
-    dynamic_h_al = _spatial_block(dynamic_contact_hessian[slot], 1, 0)
-    dynamic_h_aa = _spatial_block(dynamic_contact_hessian[slot], 1, 1)
-    h_ll = mass_scale * identity + contact_hessian_ll[body] + dynamic_h_ll
-    rotation_matrix = wp.quat_to_matrix(rotation)
-    h_aa = (
-        dt_inv_sq * rotation_matrix * body_inertia[body] * wp.transpose(rotation_matrix)
-        + contact_hessian_aa[body]
-        + dynamic_h_aa
+    body_matrix_out[slot] = _body_surrogate_matrix(
+        rotation,
+        body_mass[body],
+        body_inertia[body],
+        contact_hessian_ll[body],
+        contact_hessian_al[body],
+        contact_hessian_aa[body],
+        dynamic_contact_hessian[slot],
+        dt_inv_sq,
     )
-    h_al = contact_hessian_al[body] + dynamic_h_al
-
-    com = wp.transform_point(pose, com_local)
-    inertial_com = wp.transform_point(inertial_pose, com_local)
-    # Use the same current inertial/contact residual as local VBD.  Contact
-    # multipliers remain local state; the following local sweep relinearizes
-    # and accepts the globally coupled predictor.
-    force = mass_scale * (inertial_com - com) + contact_forces[body]
-    rotation_delta = wp.quat_inverse(rotation) * inertial_rotation
-    if rotation_delta[3] < 0.0:
-        rotation_delta = wp.quat(
-            -rotation_delta[0],
-            -rotation_delta[1],
-            -rotation_delta[2],
-            -rotation_delta[3],
-        )
-    axis, angle = wp.quat_to_axis_angle(rotation_delta)
-    torque = wp.quat_rotate(rotation, body_inertia[body] * (axis * angle * dt_inv_sq)) + contact_torques[body]
-
-    # Match the local VBD regularization while keeping the compliance solve SPD.
-    eps_l = 1.0e-9 * (wp.trace(h_ll) / 3.0 + 1.0)
-    eps_a = 1.0e-9 * (wp.trace(h_aa) / 3.0 + 1.0)
-    for diagonal_axis in range(3):
-        h_ll[diagonal_axis, diagonal_axis] = h_ll[diagonal_axis, diagonal_axis] + eps_l
-        h_aa[diagonal_axis, diagonal_axis] = h_aa[diagonal_axis, diagonal_axis] + eps_a
-
-    body_matrix = wp.spatial_matrix(0.0)
-    body_matrix = _set_spatial_block(body_matrix, 0, 0, h_ll)
-    body_matrix = _set_spatial_block(body_matrix, 0, 1, wp.transpose(h_al))
-    body_matrix = _set_spatial_block(body_matrix, 1, 0, h_al)
-    body_matrix = _set_spatial_block(body_matrix, 1, 1, h_aa)
-    body_matrix_out[slot] = body_matrix
-    body_rhs_out[slot] = wp.spatial_vector(force, torque)
+    body_rhs_out[slot] = _body_objective_rhs(
+        pose,
+        inertial_pose,
+        body_mass[body],
+        body_inertia[body],
+        com_local,
+        contact_forces[body],
+        contact_torques[body],
+        dt_inv_sq,
+    )
 
 
 @wp.kernel
@@ -949,6 +1042,52 @@ def invert_body_surrogate_in_place(
     body_rhs_and_free[slot] = inverse * body_rhs_and_free[slot]
 
 
+@wp.func
+def _accumulate_joint_slope(
+    parent: int,
+    child: int,
+    body_slot: wp.array[int],
+    body_island: wp.array[int],
+    jp: wp.spatial_matrix,
+    jc: wp.spatial_matrix,
+    compliance: wp.spatial_matrix,
+    residual: wp.spatial_vector,
+    objective_force: wp.spatial_vector,
+    diagonal_rows: bool,
+    correction: wp.array[wp.spatial_vector],
+    merit: wp.array[wp.float64],
+):
+    """Apply the current joint force to a body-tangent direction.
+
+    Rod rows are diagonal in their material frame. General joint rows may
+    contain rotated projectors: their force must not be approximated by
+    dividing the residual by the diagonal of a full compliance matrix.
+    """
+    p, c = int(-1), int(-1)
+    if parent >= 0:
+        p = body_slot[parent]
+    if child >= 0:
+        c = body_slot[child]
+    slot = wp.max(p, c)
+    if slot < 0:
+        return
+    linear = wp.float64(0.0)
+    for axis in range(6):
+        value = wp.float64(0.0)
+        for column in range(6):
+            if p >= 0:
+                value += wp.float64(jp[axis, column]) * wp.float64(correction[p][column])
+            if c >= 0:
+                value += wp.float64(jc[axis, column]) * wp.float64(correction[c][column])
+        if diagonal_rows:
+            # Keep the rod path's previous FP64 arithmetic order.
+            inverse_compliance = wp.float64(1.0) / wp.float64(compliance[axis, axis])
+            linear += value * wp.float64(residual[axis]) * inverse_compliance
+        else:
+            linear += value * wp.float64(objective_force[axis])
+    wp.atomic_add(merit, body_island[slot], linear)
+
+
 @wp.kernel
 def linearize_joint_path_rows(
     joint_ids: wp.array[wp.int32],
@@ -992,13 +1131,18 @@ def linearize_joint_path_rows(
     body_q_rest: wp.array[wp.transform],
     body_com: wp.array[wp.vec3],
     dt: float,
+    slope_only: bool,
+    body_slot: wp.array[int],
+    body_island: wp.array[int],
+    correction: wp.array[wp.spatial_vector],
+    merit: wp.array[wp.float64],
     jacobian_parent: wp.array[wp.spatial_matrix],
     jacobian_child: wp.array[wp.spatial_matrix],
     compliance: wp.array[wp.spatial_matrix],
     residual: wp.array[wp.spatial_vector],
     row_active: wp.array[wp.int32],
 ):
-    """Linearize one projected joint row in body tangent coordinates."""
+    """Linearize a joint or accumulate its slope without storing unused rows."""
     row = wp.tid()
     joint = joint_ids[row]
     zero_matrix = wp.spatial_matrix(0.0)
@@ -1012,6 +1156,8 @@ def linearize_joint_path_rows(
         or jt == JointType.D6
     )
     if not supported or not joint_enabled[joint]:
+        if slope_only:
+            return
         jacobian_parent[row] = zero_matrix
         jacobian_child[row] = zero_matrix
         compliance[row] = wp.identity(6, float)
@@ -1215,13 +1361,30 @@ def linearize_joint_path_rows(
         material_compliance = wp.spatial_matrix(0.0)
         material_compliance = _set_spatial_block(material_compliance, 0, 0, linear_compliance)
         material_compliance = _set_spatial_block(material_compliance, 1, 1, angular_compliance)
-        jacobian_parent[row] = jp
-        jacobian_child[row] = jc
-        compliance[row] = material_compliance
-        residual[row] = wp.spatial_vector(
+        defect = wp.spatial_vector(
             wp.vec3(shear_defect_x, shear_defect_y, stretch_defect),
             wp.vec3(bend_defect_x, bend_defect_y, twist_defect),
         )
+        if slope_only:
+            _accumulate_joint_slope(
+                parent,
+                child,
+                body_slot,
+                body_island,
+                jp,
+                jc,
+                material_compliance,
+                defect,
+                wp.spatial_vector(),
+                True,
+                correction,
+                merit,
+            )
+            return
+        jacobian_parent[row] = jp
+        jacobian_child[row] = jc
+        compliance[row] = material_compliance
+        residual[row] = defect
         row_active[row] = (
             1
             if shear_tangent > 0.0
@@ -1322,6 +1485,12 @@ def linearize_joint_path_rows(
     else:
         for axis in range(3):
             material_compliance[axis + 3, axis + 3] = 1.0
+
+    # Recover the projected force before adding free-axis drive/limit rows.
+    # These separate coefficients avoid inverting a rotated FP32 compliance
+    # whose small eigenvalues can be lost at large stiffness ratios.
+    objective_linear = stretch_scale * c_linear
+    objective_angular = (bend_primal_k + bend_d) * c_angular
 
     # Free-axis compliance is filled directly below.  Keeping the temporary
     # unit eigenvalue and later applying ``I + (1/tangent - 1) aa^T`` loses
@@ -1435,6 +1604,7 @@ def linearize_joint_path_rows(
                 linear_compliance = linear_compliance + (1.0 / tangent) * axis_projector
                 material_compliance = _set_spatial_block(material_compliance, 0, 0, linear_compliance)
                 c_linear = c_linear + normalized_defect * axis_world
+                objective_linear = objective_linear + force * axis_world
             else:
                 linear_compliance = _spatial_block(material_compliance, 0, 0)
                 material_compliance = _set_spatial_block(
@@ -1516,6 +1686,7 @@ def linearize_joint_path_rows(
                     angular_compliance = angular_compliance + (1.0 / tangent) * axis_projector
                     material_compliance = _set_spatial_block(material_compliance, 1, 1, angular_compliance)
                     c_angular = c_angular + normalized_defect * axis_local
+                    objective_angular = objective_angular + force * axis_local
                 else:
                     angular_compliance = _spatial_block(material_compliance, 1, 1)
                     material_compliance = _set_spatial_block(
@@ -1525,6 +1696,22 @@ def linearize_joint_path_rows(
                         angular_compliance + wp.outer(axis_local, axis_local),
                     )
 
+    if slope_only:
+        _accumulate_joint_slope(
+            parent,
+            child,
+            body_slot,
+            body_island,
+            jp,
+            jc,
+            material_compliance,
+            wp.spatial_vector(c_linear, c_angular),
+            wp.spatial_vector(objective_linear, objective_angular),
+            jt == JointType.BALL or jt == JointType.FIXED,
+            correction,
+            merit,
+        )
+        return
     jacobian_parent[row] = jp
     jacobian_child[row] = jc
     compliance[row] = material_compliance
@@ -3225,6 +3412,26 @@ def limit_dynamic_contact_jacobi_step(
 
 
 @wp.kernel
+def refresh_translation_freedom(
+    candidate: wp.array[int],
+    anchor_offsets: wp.array[int],
+    anchor_joints: wp.array[int],
+    joint_enabled: wp.array[bool],
+    translation_free: wp.array[int],
+    active: wp.array[int],
+):
+    """Read live anchor enables without rebuilding the structural graph."""
+    island = wp.tid()
+    free = candidate[island]
+    for index in range(anchor_offsets[island], anchor_offsets[island + 1]):
+        if joint_enabled[anchor_joints[index]]:
+            free = 0
+    translation_free[island] = free
+    if free != 0:
+        wp.atomic_max(active, 0, 1)
+
+
+@wp.kernel
 def accumulate_free_translation_system(
     body_ids: wp.array[int],
     body_island: wp.array[int],
@@ -3312,14 +3519,24 @@ def correct_free_translation(
     step_scale: wp.array[float],
     system: wp.array[wp.mat44d],
     correction: wp.array[wp.spatial_vector],
+    apply_translation: bool,
+    track_pending: bool,
+    stop_at_roundoff: bool,
+    body_ids: wp.array[int],
+    body_q: wp.array[wp.transform],
+    pending: wp.array[int],
 ):
-    """Minimize the three-dimensional translation quadratic without refactoring."""
+    """Minimize common translation, optionally applying its isolated update."""
     slot = wp.tid()
     island = body_island[slot]
     scale = step_scale[island]
     packed = system[island]
     if translation_free[island] == 0 or island_state[island] < -1 or packed[3, 3] != wp.float64(0.0) or scale <= 0.0:
         return
+    if apply_translation and track_pending and not stop_at_roundoff:
+        # Keep all iterations whenever any island admits this correction.
+        # A blocked island never writes poses, even if its factor is nonfinite.
+        wp.atomic_max(pending, 0, 1)
     matrix = wp.mat33d(0.0)
     rhs = wp.vec3d(0.0)
     for row in range(3):
@@ -3328,10 +3545,191 @@ def correct_free_translation(
             matrix[row, column] = packed[row, column]
     shift = wp.inverse(matrix) * rhs
     if wp.isfinite(shift[0]) and wp.isfinite(shift[1]) and wp.isfinite(shift[2]):
-        value = correction[slot]
-        for axis in range(3):
-            value[axis] += float(shift[axis]) / scale
-        correction[slot] = value
+        if apply_translation:
+            # This path solves only common translation, with unit step scale
+            # and zero base correction. Keep the correction buffer zero for
+            # the next restricted solve instead of writing then clearing it.
+            body = body_ids[slot]
+            pose = body_q[body]
+            position = wp.transform_get_translation(pose)
+            translated = position + wp.vec3(float(shift[0]), float(shift[1]), float(shift[2]))
+            body_q[body] = wp.transform(translated, wp.transform_get_rotation(pose))
+            if track_pending and stop_at_roundoff:
+                for axis in range(3):
+                    roundoff = 2.384185791015625e-7 * wp.max(wp.abs(position[axis]), wp.abs(translated[axis]))
+                    if wp.abs(translated[axis] - position[axis]) > roundoff:
+                        wp.atomic_max(pending, 0, 1)
+        else:
+            value = correction[slot]
+            for axis in range(3):
+                value[axis] += float(shift[axis]) / scale
+            correction[slot] = value
+
+
+@wp.func
+def _free_rigid_basis(offset: wp.vec3d):
+    basis = wp.spatial_matrixd(0.0)
+    for axis in range(6):
+        basis[axis, axis] = wp.float64(1.0)
+    cross = -wp.skew(offset)
+    for row in range(3):
+        for column in range(3):
+            basis[row, column + 3] = cross[row, column]
+    return basis
+
+
+@wp.kernel
+def accumulate_free_rigid_center(
+    body_ids: wp.array[int],
+    body_island: wp.array[int],
+    free: wp.array[int],
+    candidate: wp.array[int],
+    state: wp.array[int],
+    translation_system: wp.array[wp.mat44d],
+    body_q: wp.array[wp.transform],
+    body_com: wp.array[wp.vec3],
+    body_mass: wp.array[float],
+    center: wp.array[wp.vec4d],
+):
+    slot = wp.tid()
+    island = body_island[slot]
+    if (
+        candidate[island] == 0
+        or free[island] == 0
+        or state[island] != 1
+        or translation_system[island][3, 3] != wp.float64(0.0)
+    ):
+        return
+    body = body_ids[slot]
+    mass = wp.float64(body_mass[body])
+    position = wp.vec3d(wp.transform_point(body_q[body], body_com[body]))
+    wp.atomic_add(center, island, wp.vec4d(mass * position[0], mass * position[1], mass * position[2], mass))
+
+
+@wp.kernel
+def accumulate_free_rigid_system(
+    body_ids: wp.array[int],
+    body_island: wp.array[int],
+    center: wp.array[wp.vec4d],
+    scale: wp.array[float],
+    correction: wp.array[wp.spatial_vector],
+    dt: float,
+    body_q: wp.array[wp.transform],
+    body_inertia_q: wp.array[wp.transform],
+    body_com: wp.array[wp.vec3],
+    body_mass: wp.array[float],
+    body_inertia: wp.array[wp.mat33],
+    contact_hessian_ll: wp.array[wp.mat33],
+    contact_hessian_al: wp.array[wp.mat33],
+    contact_hessian_aa: wp.array[wp.mat33],
+    contact_forces: wp.array[wp.vec3],
+    contact_torques: wp.array[wp.vec3],
+    dynamic_hessian: wp.array[wp.spatial_matrix],
+    matrix: wp.array[wp.spatial_matrixd],
+    rhs: wp.array[wp.spatial_vectord],
+):
+    slot = wp.tid()
+    island = body_island[slot]
+    packed = center[island]
+    if packed[3] <= wp.float64(0.0) or scale[island] <= 0.0:
+        return
+    body = body_ids[slot]
+    pose = body_q[body]
+    position = wp.vec3d(wp.transform_point(pose, body_com[body]))
+    origin = wp.vec3d(packed[0], packed[1], packed[2]) / packed[3]
+    basis = _free_rigid_basis(position - origin)
+    inv_dt_sq = 1.0 / (dt * dt)
+    metric = _body_surrogate_matrix(
+        wp.transform_get_rotation(pose),
+        body_mass[body],
+        body_inertia[body],
+        contact_hessian_ll[body],
+        contact_hessian_al[body],
+        contact_hessian_aa[body],
+        dynamic_hessian[slot],
+        inv_dt_sq,
+    )
+    force = _body_objective_rhs(
+        pose,
+        body_inertia_q[body],
+        body_mass[body],
+        body_inertia[body],
+        body_com[body],
+        contact_forces[body],
+        contact_torques[body],
+        inv_dt_sq,
+    )
+    metric_d = wp.spatial_matrixd(metric)
+    current = wp.spatial_vectord(correction[slot]) * wp.float64(scale[island])
+    defect = wp.spatial_vectord(force) - metric_d * current
+    wp.atomic_add(matrix, island, wp.transpose(basis) * metric_d * basis)
+    wp.atomic_add(rhs, island, wp.transpose(basis) * defect)
+
+
+@wp.kernel
+def solve_free_rigid_system(
+    center: wp.array[wp.vec4d],
+    matrix: wp.array[wp.spatial_matrixd],
+    rhs: wp.array[wp.spatial_vectord],
+    result: wp.array[wp.spatial_vectord],
+):
+    island = wp.tid()
+    result[island] = wp.spatial_vectord(0.0)
+    if center[island][3] <= wp.float64(0.0):
+        return
+    lower = wp.spatial_matrixd(0.0)
+    for row in range(6):
+        for column in range(row + 1):
+            value = matrix[island][row, column]
+            for k in range(column):
+                value -= lower[row, k] * lower[column, k]
+            if row == column:
+                if not wp.isfinite(value) or value <= wp.float64(0.0):
+                    return
+                lower[row, column] = wp.sqrt(value)
+            else:
+                lower[row, column] = value / lower[column, column]
+    solution = wp.spatial_vectord(0.0)
+    for row in range(6):
+        value = rhs[island][row]
+        for k in range(row):
+            value -= lower[row, k] * solution[k]
+        solution[row] = value / lower[row, row]
+    for reverse in range(6):
+        row = 5 - reverse
+        value = solution[row]
+        for k in range(row + 1, 6):
+            value -= lower[k, row] * solution[k]
+        solution[row] = value / lower[row, row]
+        if not wp.isfinite(solution[row]):
+            return
+    result[island] = solution
+
+
+@wp.kernel
+def enrich_free_rigid_correction(
+    body_ids: wp.array[int],
+    body_island: wp.array[int],
+    center: wp.array[wp.vec4d],
+    shift: wp.array[wp.spatial_vectord],
+    scale: wp.array[float],
+    body_q: wp.array[wp.transform],
+    body_com: wp.array[wp.vec3],
+    correction: wp.array[wp.spatial_vector],
+):
+    slot = wp.tid()
+    island = body_island[slot]
+    packed = center[island]
+    if packed[3] <= wp.float64(0.0) or scale[island] <= 0.0:
+        return
+    body = body_ids[slot]
+    position = wp.vec3d(wp.transform_point(body_q[body], body_com[body]))
+    origin = wp.vec3d(packed[0], packed[1], packed[2]) / packed[3]
+    update = _free_rigid_basis(position - origin) * shift[island]
+    value = correction[slot]
+    for axis in range(6):
+        value[axis] = float(wp.float64(value[axis]) + update[axis] / wp.float64(scale[island]))
+    correction[slot] = value
 
 
 @wp.kernel
@@ -3355,62 +3753,42 @@ def apply_global_correction(
 
 @wp.kernel
 def accumulate_body_directional_derivative(
+    body_ids: wp.array[int],
     body_island: wp.array[int],
     enabled: wp.array[bool],
-    rhs: wp.array[wp.spatial_vector],
+    body_q: wp.array[wp.transform],
+    body_inertia_q: wp.array[wp.transform],
+    body_mass: wp.array[float],
+    body_inv_mass: wp.array[float],
+    body_inertia: wp.array[wp.mat33],
+    body_com: wp.array[wp.vec3],
+    contact_forces: wp.array[wp.vec3],
+    contact_torques: wp.array[wp.vec3],
+    dt: float,
     correction: wp.array[wp.spatial_vector],
     merit: wp.array[wp.float64],
 ):
-    """Accumulate the inertial/contact slope along the global correction."""
+    """Evaluate the slope without rebuilding unused body Hessians."""
     slot = wp.tid()
     island = body_island[slot]
-    if not enabled[island]:
+    body = body_ids[slot]
+    if not enabled[island] or body_inv_mass[body] <= 0.0:
         return
+    rhs = _body_objective_rhs(
+        body_q[body],
+        body_inertia_q[body],
+        body_mass[body],
+        body_inertia[body],
+        body_com[body],
+        contact_forces[body],
+        contact_torques[body],
+        1.0 / (dt * dt),
+    )
     delta = correction[slot]
     linear = wp.float64(0.0)
     for row in range(6):
-        linear -= wp.float64(rhs[slot][row]) * wp.float64(delta[row])
+        linear -= wp.float64(rhs[row]) * wp.float64(delta[row])
     wp.atomic_add(merit, island, linear)
-
-
-@wp.kernel
-def accumulate_joint_directional_derivative(
-    joint_ids: wp.array[int],
-    joint_parent: wp.array[int],
-    joint_child: wp.array[int],
-    body_slot: wp.array[int],
-    body_island: wp.array[int],
-    jacobian_parent: wp.array[wp.spatial_matrix],
-    jacobian_child: wp.array[wp.spatial_matrix],
-    compliance: wp.array[wp.spatial_matrix],
-    residual: wp.array[wp.spatial_vector],
-    correction: wp.array[wp.spatial_vector],
-    merit: wp.array[wp.float64],
-):
-    """Accumulate diagonally compliant rows; Jacobians must not alias factors."""
-    row = wp.tid()
-    joint = joint_ids[row]
-    parent, child = joint_parent[joint], joint_child[joint]
-    p, c = int(-1), int(-1)
-    if parent >= 0:
-        p = body_slot[parent]
-    if child >= 0:
-        c = body_slot[child]
-    slot = wp.max(p, c)
-    if slot < 0:
-        return
-    linear = wp.float64(0.0)
-    jp, jc = jacobian_parent[row], jacobian_child[row]
-    for axis in range(6):
-        value = wp.float64(0.0)
-        for column in range(6):
-            if p >= 0:
-                value += wp.float64(jp[axis, column]) * wp.float64(correction[p][column])
-            if c >= 0:
-                value += wp.float64(jc[axis, column]) * wp.float64(correction[c][column])
-        inverse_compliance = wp.float64(1.0) / wp.float64(compliance[row][axis, axis])
-        linear += value * wp.float64(residual[row][axis]) * inverse_compliance
-    wp.atomic_add(merit, body_island[slot], linear)
 
 
 @wp.kernel
@@ -4352,11 +4730,16 @@ def _shared_structural_payload_bytes(
         + _array_payload_bytes(model_body_count, wp.int32)
         + _array_payload_bytes(model_body_count, wp.transform)
         + _array_payload_bytes(island_count, wp.bool)
-        + _array_payload_bytes(island_count, wp.float64)
+        + 2 * _array_payload_bytes(island_count, wp.float64)
         + _array_payload_bytes(1, wp.int32)
         + _array_payload_bytes(graph_body_count, wp.spatial_vector)
         + _array_payload_bytes(island_count, wp.int32)
         + _array_payload_bytes(island_count, wp.mat44d)
+        + _array_payload_bytes(island_count, wp.int32)
+        + _array_payload_bytes(island_count, wp.vec4d)
+        + _array_payload_bytes(island_count, wp.spatial_matrixd)
+        + 2 * _array_payload_bytes(island_count, wp.spatial_vectord)
+        + _array_payload_bytes(joint_count + 2 * island_count + 2, wp.int32)
         + _array_payload_bytes(island_count, wp.float32)
         + 2 * _array_payload_bytes(graph_body_count, wp.spatial_matrix)
         + _array_payload_bytes(graph_body_count, wp.spatial_vector)
@@ -4861,6 +5244,315 @@ def equilibrate_tree_bodies(
     for axis in range(6):
         scale[axis] = 1.0 / wp.sqrt(wp.max(wp.abs(body_matrix[body][axis, axis]), 1.0e-30))
     body_scale[body] = scale
+
+
+# Closed islands retain double precision through equilibration, elimination,
+# closure assembly, and recovery; only the final body correction is rounded.
+@wp.func
+def _scale_spatial_matrix_fp64(
+    left_scale: wp.spatial_vector,
+    matrix: wp.spatial_matrix,
+    right_scale: wp.spatial_vector,
+):
+    result = wp.spatial_matrixd(0.0)
+    for row in range(6):
+        for column in range(6):
+            result[row, column] = (
+                wp.float64(left_scale[row]) * wp.float64(matrix[row, column]) * wp.float64(right_scale[column])
+            )
+    return result
+
+
+@wp.func
+def _scale_spatial_vector_fp64(scale: wp.spatial_vector, value: wp.spatial_vector):
+    result = wp.spatial_vectord()
+    for row in range(6):
+        result[row] = wp.float64(scale[row]) * wp.float64(value[row])
+    return result
+
+
+@wp.kernel
+def _initialize_tree_nodes_fp64(
+    node_body: wp.array[wp.int32],
+    node_row: wp.array[wp.int32],
+    body_matrix: wp.array[wp.spatial_matrix],
+    body_rhs: wp.array[wp.spatial_vector],
+    body_scale: wp.array[wp.spatial_vector],
+    compliance: wp.array[wp.spatial_matrix],
+    residual: wp.array[wp.spatial_vector],
+    row_scale: wp.array[wp.spatial_vector],
+    diagonal: wp.array[wp.spatial_matrixd],
+    rhs: wp.array[wp.spatial_vectord],
+):
+    node = wp.tid()
+    body = node_body[node]
+    if body >= 0:
+        scale = body_scale[body]
+        diagonal[node] = _scale_spatial_matrix_fp64(scale, body_matrix[body], scale)
+        rhs[node] = _scale_spatial_vector_fp64(scale, body_rhs[body])
+    else:
+        row = node_row[node]
+        scale = row_scale[row]
+        diagonal[node] = -_scale_spatial_matrix_fp64(scale, compliance[row], scale)
+        rhs[node] = -_scale_spatial_vector_fp64(scale, residual[row])
+
+
+@wp.kernel
+def _initialize_tree_couplings_fp64(
+    node_body: wp.array[wp.int32],
+    node_row: wp.array[wp.int32],
+    parent_node: wp.array[wp.int32],
+    coupling_side: wp.array[wp.int32],
+    body_scale: wp.array[wp.spatial_vector],
+    row_scale: wp.array[wp.spatial_vector],
+    jacobian_parent: wp.array[wp.spatial_matrix],
+    jacobian_child: wp.array[wp.spatial_matrix],
+    coupling: wp.array[wp.spatial_matrixd],
+):
+    node = wp.tid()
+    parent = parent_node[node]
+    if parent < 0:
+        coupling[node] = wp.spatial_matrixd(0.0)
+        return
+    row = node_row[node]
+    node_is_joint = row >= 0
+    if not node_is_joint:
+        row = node_row[parent]
+    body = node_body[parent] if node_is_joint else node_body[node]
+    jacobian = jacobian_parent[row] if coupling_side[node] == 0 else jacobian_child[row]
+    value = _scale_spatial_matrix_fp64(row_scale[row], jacobian, body_scale[body])
+    coupling[node] = value if node_is_joint else wp.transpose(value)
+
+
+@wp.kernel
+def _initialize_closure_response_fp64(
+    node_body: wp.array[wp.int32],
+    tree_node_count: int,
+    closure_count: int,
+    closure_parent_node: wp.array[wp.int32],
+    closure_child_node: wp.array[wp.int32],
+    body_scale: wp.array[wp.spatial_vector],
+    row_scale: wp.array[wp.spatial_vector],
+    jacobian_parent: wp.array[wp.spatial_matrix],
+    jacobian_child: wp.array[wp.spatial_matrix],
+    response_rhs: wp.array[wp.spatial_matrixd],
+):
+    """Build the six tree right-hand sides induced by every closure row."""
+    index = wp.tid()
+    node = index // closure_count
+    batch = node // tree_node_count
+    closure = batch * closure_count + index % closure_count
+    value = wp.spatial_matrixd(0.0)
+    if node == closure_parent_node[closure]:
+        coupling = _scale_spatial_matrix_fp64(row_scale[closure], jacobian_parent[closure], body_scale[node_body[node]])
+        value = value + wp.transpose(coupling)
+    if node == closure_child_node[closure]:
+        coupling = _scale_spatial_matrix_fp64(row_scale[closure], jacobian_child[closure], body_scale[node_body[node]])
+        value = value + wp.transpose(coupling)
+    response_rhs[index] = value
+
+
+@wp.kernel
+def _eliminate_tree_nodes_fp64(
+    tree_node_count: int,
+    elimination_nodes: wp.array[int],
+    closure_count: int,
+    parent_node: wp.array[int],
+    coupling: wp.array[wp.spatial_matrixd],
+    diagonal: wp.array[wp.spatial_matrixd],
+    rhs: wp.array[wp.spatial_vectord],
+    response: wp.array[wp.spatial_matrixd],
+):
+    """Eliminate one CPU tree in the existing message order."""
+    base = wp.tid() * tree_node_count
+    for index in range(elimination_nodes.shape[0]):
+        node = base + elimination_nodes[index]
+        parent = parent_node[node]
+        inverse = _inverse_spatial_pivoted(diagonal[node])
+        a = coupling[node]
+        diagonal[node] = inverse
+        diagonal[parent] = diagonal[parent] - wp.transpose(a) * inverse * a
+        rhs[parent] = rhs[parent] - wp.transpose(a) * inverse * rhs[node]
+        for closure in range(closure_count):
+            target = parent * closure_count + closure
+            response[target] = response[target] - (wp.transpose(a) * inverse * response[node * closure_count + closure])
+
+
+@wp.kernel
+def _solve_tree_roots_fp64(
+    roots: wp.array[int],
+    closure_count: int,
+    diagonal: wp.array[wp.spatial_matrixd],
+    rhs: wp.array[wp.spatial_vectord],
+    response: wp.array[wp.spatial_matrixd],
+):
+    """Solve the remaining root block and its closure responses."""
+    root = roots[wp.tid()]
+    inverse = _inverse_spatial_pivoted(diagonal[root])
+    rhs[root] = inverse * rhs[root]
+    for closure in range(closure_count):
+        index = root * closure_count + closure
+        response[index] = inverse * response[index]
+
+
+@wp.kernel
+def _back_substitute_tree_nodes_fp64(
+    tree_node_count: int,
+    elimination_nodes: wp.array[int],
+    closure_count: int,
+    parent_node: wp.array[int],
+    coupling: wp.array[wp.spatial_matrixd],
+    diagonal: wp.array[wp.spatial_matrixd],
+    rhs: wp.array[wp.spatial_vectord],
+    response: wp.array[wp.spatial_matrixd],
+):
+    """Recover CPU tree motion and closure responses without level launches."""
+    base = wp.tid() * tree_node_count
+    for reverse in range(elimination_nodes.shape[0]):
+        node = base + elimination_nodes[elimination_nodes.shape[0] - 1 - reverse]
+        parent = parent_node[node]
+        rhs[node] = diagonal[node] * (rhs[node] - coupling[node] * rhs[parent])
+        for closure in range(closure_count):
+            target = node * closure_count + closure
+            response[target] = diagonal[node] * (
+                response[target] - coupling[node] * response[parent * closure_count + closure]
+            )
+
+
+@wp.kernel
+def _solve_block_dense_serial_fp64(
+    block_count: int,
+    matrix: wp.array[wp.spatial_matrixd],
+    rhs_solution: wp.array[wp.spatial_vectord],
+):
+    """Solve one dense SPD block system per batch with Gaussian elimination."""
+    batch = wp.tid()
+    matrix_base = batch * block_count * block_count
+    rhs_base = batch * block_count
+    for pivot in range(block_count):
+        pivot_index = matrix_base + pivot * block_count + pivot
+        pivot_inverse = _inverse_spatial_pivoted(matrix[pivot_index])
+        matrix[pivot_index] = pivot_inverse
+        for row in range(pivot + 1, block_count):
+            factor = matrix[matrix_base + row * block_count + pivot] * pivot_inverse
+            for column in range(pivot + 1, block_count):
+                target = matrix_base + row * block_count + column
+                matrix[target] = matrix[target] - factor * matrix[matrix_base + pivot * block_count + column]
+            rhs_solution[rhs_base + row] = rhs_solution[rhs_base + row] - factor * rhs_solution[rhs_base + pivot]
+    for reverse_index in range(block_count):
+        row = block_count - 1 - reverse_index
+        value = rhs_solution[rhs_base + row]
+        for column in range(row + 1, block_count):
+            value = value - matrix[matrix_base + row * block_count + column] * rhs_solution[rhs_base + column]
+        rhs_solution[rhs_base + row] = matrix[matrix_base + row * block_count + row] * value
+
+
+@wp.kernel
+def _assemble_closure_rhs_fp64(
+    node_body: wp.array[wp.int32],
+    closure_parent_node: wp.array[wp.int32],
+    closure_child_node: wp.array[wp.int32],
+    body_scale: wp.array[wp.spatial_vector],
+    row_scale: wp.array[wp.spatial_vector],
+    jacobian_parent: wp.array[wp.spatial_matrix],
+    jacobian_child: wp.array[wp.spatial_matrix],
+    residual: wp.array[wp.spatial_vector],
+    tree_solution: wp.array[wp.spatial_vectord],
+    closure_rhs: wp.array[wp.spatial_vectord],
+):
+    closure = wp.tid()
+    rhs = _scale_spatial_vector_fp64(row_scale[closure], residual[closure])
+    parent_node = closure_parent_node[closure]
+    if parent_node >= 0:
+        coupling = _scale_spatial_matrix_fp64(
+            row_scale[closure],
+            jacobian_parent[closure],
+            body_scale[node_body[parent_node]],
+        )
+        rhs = rhs + coupling * tree_solution[parent_node]
+    child_node = closure_child_node[closure]
+    if child_node >= 0:
+        coupling = _scale_spatial_matrix_fp64(
+            row_scale[closure],
+            jacobian_child[closure],
+            body_scale[node_body[child_node]],
+        )
+        rhs = rhs + coupling * tree_solution[child_node]
+    closure_rhs[closure] = rhs
+
+
+@wp.kernel
+def _assemble_closure_schur_fp64(
+    closure_count: int,
+    node_body: wp.array[wp.int32],
+    closure_parent_node: wp.array[wp.int32],
+    closure_child_node: wp.array[wp.int32],
+    body_scale: wp.array[wp.spatial_vector],
+    row_scale: wp.array[wp.spatial_vector],
+    jacobian_parent: wp.array[wp.spatial_matrix],
+    jacobian_child: wp.array[wp.spatial_matrix],
+    compliance: wp.array[wp.spatial_matrix],
+    response_solution: wp.array[wp.spatial_matrixd],
+    schur: wp.array[wp.spatial_matrixd],
+):
+    index = wp.tid()
+    row = index // closure_count
+    column = index % closure_count
+    local_row = row % closure_count
+    value = wp.spatial_matrixd(0.0)
+    if local_row == column:
+        value = _scale_spatial_matrix_fp64(row_scale[row], compliance[row], row_scale[row])
+    parent_node = closure_parent_node[row]
+    if parent_node >= 0:
+        coupling = _scale_spatial_matrix_fp64(row_scale[row], jacobian_parent[row], body_scale[node_body[parent_node]])
+        value = value + coupling * response_solution[parent_node * closure_count + column]
+    child_node = closure_child_node[row]
+    if child_node >= 0:
+        coupling = _scale_spatial_matrix_fp64(row_scale[row], jacobian_child[row], body_scale[node_body[child_node]])
+        value = value + coupling * response_solution[child_node * closure_count + column]
+    schur[index] = value
+
+
+@wp.kernel
+def _scatter_closed_tree_body_correction_fp64(
+    body_nodes: wp.array[wp.int32],
+    body_slots: wp.array[wp.int32],
+    body_row_offsets: wp.array[wp.int32],
+    body_rows: wp.array[wp.int32],
+    tree_row_active: wp.array[wp.int32],
+    body_closure_offsets: wp.array[wp.int32],
+    body_closure_rows: wp.array[wp.int32],
+    closure_row_active: wp.array[wp.int32],
+    tree_body_count: int,
+    closure_count: int,
+    body_scale: wp.array[wp.spatial_vector],
+    tree_solution: wp.array[wp.spatial_vectord],
+    response_solution: wp.array[wp.spatial_matrixd],
+    closure_multiplier: wp.array[wp.spatial_vectord],
+    body_correction: wp.array[wp.spatial_vector],
+):
+    index = wp.tid()
+    batch = index // tree_body_count
+    node = body_nodes[index]
+    slot = body_slots[index]
+    active = int(0)
+    for cursor in range(body_row_offsets[index], body_row_offsets[index + 1]):
+        active = active + tree_row_active[body_rows[cursor]]
+    for cursor in range(body_closure_offsets[index], body_closure_offsets[index + 1]):
+        active = active + closure_row_active[body_closure_rows[cursor]]
+    if active == 0:
+        body_correction[slot] = wp.spatial_vector()
+        return
+    correction = tree_solution[node]
+    for closure in range(closure_count):
+        correction = (
+            correction
+            - response_solution[node * closure_count + closure] * closure_multiplier[batch * closure_count + closure]
+        )
+    rounded = wp.spatial_vector()
+    for axis in range(6):
+        rounded[axis] = float(wp.float64(body_scale[slot][axis]) * correction[axis])
+    body_correction[slot] = rounded
 
 
 @wp.kernel
@@ -6854,7 +7546,7 @@ class _ClosedTreeBucket:
         """Solve the dense closure system, parallelizing independent rows."""
         if self.device.is_cpu and self.closure_schur.dtype == wp.spatial_matrixd:
             wp.launch(
-                rigid_vbd_kkt_precision.solve_block_dense_serial,
+                _solve_block_dense_serial_fp64,
                 self.batch_count,
                 inputs=[self.closure_count],
                 outputs=[self.closure_schur, self.closure_multiplier],
@@ -6873,7 +7565,7 @@ class _ClosedTreeBucket:
             return
         if self.closure_count <= _CR_SERIAL_TERMINAL_SIZE or not self.device.is_cuda:
             wp.launch(
-                rigid_vbd_kkt_precision.solve_block_dense_serial
+                _solve_block_dense_serial_fp64
                 if self.closure_schur.dtype == wp.spatial_matrixd
                 else solve_block_dense_serial,
                 self.batch_count,
@@ -6941,7 +7633,7 @@ class _ClosedTreeBucket:
             )
 
     def solve_tree(self, body_matrix, body_rhs, body_scale, body_correction):
-        """Solve a CPU island without rounding its closure response or recovery."""
+        """Solve a closed island without rounding its closure response or recovery."""
         tree = self.tree
         device = self.device
         wp.launch(
@@ -6959,7 +7651,7 @@ class _ClosedTreeBucket:
             device=device,
         )
         wp.launch(
-            rigid_vbd_kkt_precision.initialize_tree_nodes,
+            _initialize_tree_nodes_fp64,
             tree.node_count,
             inputs=[
                 tree.node_body,
@@ -6975,7 +7667,7 @@ class _ClosedTreeBucket:
             device=device,
         )
         wp.launch(
-            rigid_vbd_kkt_precision.initialize_tree_couplings,
+            _initialize_tree_couplings_fp64,
             tree.node_count,
             inputs=[
                 tree.node_body,
@@ -6998,7 +7690,7 @@ class _ClosedTreeBucket:
             device=device,
         )
         wp.launch(
-            rigid_vbd_kkt_precision.initialize_closure_response,
+            _initialize_closure_response_fp64,
             tree.node_count * self.closure_count,
             inputs=[
                 tree.node_body,
@@ -7018,7 +7710,7 @@ class _ClosedTreeBucket:
             self._solve_tree_gpu()
         else:
             wp.launch(
-                rigid_vbd_kkt_precision.eliminate_tree_nodes,
+                _eliminate_tree_nodes_fp64,
                 self.batch_count,
                 inputs=[
                     tree.tree_node_count,
@@ -7031,14 +7723,14 @@ class _ClosedTreeBucket:
                 device=device,
             )
             wp.launch(
-                rigid_vbd_kkt_precision.solve_tree_roots,
+                _solve_tree_roots_fp64,
                 self.batch_count,
                 inputs=[tree.roots, self.closure_count],
                 outputs=[self.factor_diagonal, tree.solution, self.response_rhs],
                 device=device,
             )
             wp.launch(
-                rigid_vbd_kkt_precision.back_substitute_tree_nodes,
+                _back_substitute_tree_nodes_fp64,
                 self.batch_count,
                 inputs=[
                     tree.tree_node_count,
@@ -7051,7 +7743,7 @@ class _ClosedTreeBucket:
                 device=device,
             )
         wp.launch(
-            rigid_vbd_kkt_precision.assemble_closure_rhs,
+            _assemble_closure_rhs_fp64,
             self.closure_size,
             inputs=[
                 tree.node_body,
@@ -7068,7 +7760,7 @@ class _ClosedTreeBucket:
             device=device,
         )
         wp.launch(
-            rigid_vbd_kkt_precision.assemble_closure_schur,
+            _assemble_closure_schur_fp64,
             self.batch_count * self.closure_count * self.closure_count,
             inputs=[
                 self.closure_count,
@@ -7087,7 +7779,7 @@ class _ClosedTreeBucket:
         )
         self.solve_closure_schur()
         wp.launch(
-            rigid_vbd_kkt_precision.scatter_closed_tree_body_correction,
+            _scatter_closed_tree_body_correction_fp64,
             tree.body_count,
             inputs=[
                 tree.body_nodes,
@@ -7250,8 +7942,9 @@ class StructuralGraphKKT:
         ignore_free_completion_joints=False,
     ):
         self.device = model.device
-        # Repeated nondeterministic reductions at an unchanged pose can still
-        # change rounded contact forces. Shortcuts require reproducible sums.
+        # Translation refinement may accumulate rounded shifts on each pass.
+        # Its early exit is restricted to reproducible reductions. A completed
+        # directional search, in contrast, needs no further trial evaluation.
         self.enable_captured_contact_shortcuts = enable_captured_contact_shortcuts
         self.spatial_block_dim = _SPATIAL_GPU_BLOCK_DIM if self.device.is_cuda else 1
         self.path_buckets: list[_PathBucket] = []
@@ -7504,28 +8197,59 @@ class StructuralGraphKKT:
         # Per-island contact topology: 1 = no active dynamic-dynamic contact,
         # -1 = active dynamic-dynamic contact.
         self.island_contact_state = wp.ones(len(components), dtype=wp.int32, device=self.device)
-        # Conservative topology check: only islands with no world/static joint
-        # endpoint have an unrestricted rigid translation. FREE completion rows
-        # carry no energy and do not anchor an island.
-        translation_free = [
-            int(
-                all(body_inv_mass_host[body] > 0.0 for body in component.bodies)
-                and all(
-                    joint_type[joint] == JointType.FREE
-                    or (
-                        parent[joint] >= 0
-                        and child[joint] >= 0
-                        and body_inv_mass_host[parent[joint]] > 0.0
-                        and body_inv_mass_host[child[joint]] > 0.0
-                    )
-                    for joint in component.joints
-                )
-            )
-            for component in components
+        # Disabling a represented world/static joint can release translation
+        # inside an existing CUDA graph. FREE rows carry no anchoring energy.
+        translation_candidate = [
+            int(all(body_inv_mass_host[body] > 0.0 for body in component.bodies)) for component in components
         ]
-        self.has_free_translation = any(translation_free)
+        anchor_offsets = [0]
+        anchor_joints = []
+        joint_enabled_host = np.asarray(model.joint_enabled.numpy(), dtype=bool)
+        translation_free = []
+        for candidate, component in zip(translation_candidate, components, strict=True):
+            anchors = [
+                joint
+                for joint in component.joints
+                if joint_type[joint] != JointType.FREE
+                and (
+                    parent[joint] < 0
+                    or child[joint] < 0
+                    or body_inv_mass_host[parent[joint]] <= 0.0
+                    or body_inv_mass_host[child[joint]] <= 0.0
+                )
+            ]
+            anchor_joints.extend(anchors)
+            anchor_offsets.append(len(anchor_joints))
+            translation_free.append(int(candidate and not any(joint_enabled_host[joint] for joint in anchors)))
+        self.has_free_translation = any(translation_candidate)
+        self.has_switchable_translation = self.has_free_translation and bool(anchor_joints)
+        # Bound storage by the selected joint count, also used by the planner.
+        anchor_storage = np.full(len(graph_joint_ids), -1, dtype=np.int32)
+        anchor_storage[: len(anchor_joints)] = anchor_joints
+        self.translation_candidate = wp.array(translation_candidate, dtype=wp.int32, device=self.device)
+        self.translation_anchor_offsets = wp.array(anchor_offsets, dtype=wp.int32, device=self.device)
+        self.translation_anchor_joints = wp.array(anchor_storage, dtype=wp.int32, device=self.device)
+        self.translation_active = wp.array([int(any(translation_free))], dtype=wp.int32, device=self.device)
         self.island_translation_free = wp.array(translation_free, dtype=wp.int32, device=self.device)
         self.translation_system = wp.zeros(len(components), dtype=wp.mat44d, device=self.device)
+        # Material-frame rod residuals are invariant under collective rigid motion.
+        # Ordinary world-frame joint duals need their projected rows included.
+        rigid_mode_candidates = [
+            int(all(joint_type[joint] in (JointType.ROD, JointType.FREE) for joint in component.joints))
+            for component in components
+        ]
+        self.has_free_rigid_modes = any(
+            rod and dynamic for rod, dynamic in zip(rigid_mode_candidates, translation_candidate, strict=True)
+        )
+        self.rigid_mode_candidate = wp.array(
+            rigid_mode_candidates,
+            dtype=wp.int32,
+            device=self.device,
+        )
+        self.rigid_mode_center = wp.zeros(len(components), dtype=wp.vec4d, device=self.device)
+        self.rigid_mode_matrix = wp.zeros(len(components), dtype=wp.spatial_matrixd, device=self.device)
+        self.rigid_mode_rhs = wp.zeros(len(components), dtype=wp.spatial_vectord, device=self.device)
+        self.rigid_mode_shift = wp.zeros(len(components), dtype=wp.spatial_vectord, device=self.device)
         body_slot_by_id = np.full(model.body_count, -1, dtype=np.int32)
         body_slot_by_id[graph_body_ids] = np.arange(len(graph_body_ids), dtype=np.int32)
         self.graph_joint_ids = wp.array(graph_joint_ids, dtype=wp.int32, device=self.device)
@@ -7533,6 +8257,7 @@ class StructuralGraphKKT:
         self.line_search_pose = wp.empty_like(model.body_q)
         self.line_search_enabled = wp.ones(len(components), dtype=bool, device=self.device)
         self.line_search_slope = wp.zeros(len(components), dtype=wp.float64, device=self.device)
+        self.line_search_initial_slope = wp.empty_like(self.line_search_slope)
         self.line_search_pending = wp.ones(1, dtype=int, device=self.device)
         self.body_correction = wp.zeros(self.graph_body_count, dtype=wp.spatial_vector, device=self.device)
         self.island_step_scale = wp.ones(len(components), dtype=float, device=self.device)
@@ -7566,6 +8291,24 @@ class StructuralGraphKKT:
     @property
     def joint_count(self) -> int:
         return sum(bucket.size for bucket in self.buckets)
+
+    def refresh_translation_freedom(self, joint_enabled):
+        """Keep released-anchor momentum reconciliation graph resident."""
+        if not self.has_switchable_translation:
+            return
+        self.translation_active.zero_()
+        wp.launch(
+            refresh_translation_freedom,
+            self.island_count,
+            inputs=[
+                self.translation_candidate,
+                self.translation_anchor_offsets,
+                self.translation_anchor_joints,
+                joint_enabled,
+            ],
+            outputs=[self.island_translation_free, self.translation_active],
+            device=self.device,
+        )
 
     def solve(
         self,
@@ -7628,30 +8371,31 @@ class StructuralGraphKKT:
         refresh_contacts=None,
         translation_only=False,
     ):
-        def linearize(*, build_majorizer=True):
-            wp.launch(
-                build_body_surrogate,
-                self.graph_body_ids.shape[0],
-                inputs=[
-                    self.graph_body_ids,
-                    dt,
-                    body_q,
-                    body_inertia_q,
-                    body_mass,
-                    body_inv_mass,
-                    body_inertia,
-                    body_com,
-                    contact_hessian_ll,
-                    contact_hessian_al,
-                    contact_hessian_aa,
-                    contact_forces,
-                    contact_torques,
-                    dynamic_contact_hessian,
-                ],
-                outputs=[self.body_matrix, self.body_rhs],
-                device=self.device,
-                block_dim=self.spatial_block_dim,
-            )
+        def linearize(*, build_majorizer=True, build_body=True, slope_only=False):
+            if build_body:
+                wp.launch(
+                    build_body_surrogate,
+                    self.graph_body_ids.shape[0],
+                    inputs=[
+                        self.graph_body_ids,
+                        dt,
+                        body_q,
+                        body_inertia_q,
+                        body_mass,
+                        body_inv_mass,
+                        body_inertia,
+                        body_com,
+                        contact_hessian_ll,
+                        contact_hessian_al,
+                        contact_hessian_aa,
+                        contact_forces,
+                        contact_torques,
+                        dynamic_contact_hessian,
+                    ],
+                    outputs=[self.body_matrix, self.body_rhs],
+                    device=self.device,
+                    block_dim=self.spatial_block_dim,
+                )
             for bucket in self.buckets:
                 linearizations = (
                     (
@@ -7741,6 +8485,11 @@ class StructuralGraphKKT:
                             body_q_rest,
                             body_com,
                             dt,
+                            slope_only,
+                            self.body_slot_by_id,
+                            self.graph_body_island,
+                            self.body_correction,
+                            self.line_search_slope,
                         ],
                         outputs=[
                             jacobian_parent,
@@ -7777,7 +8526,11 @@ class StructuralGraphKKT:
                             block_dim=self.spatial_block_dim,
                         )
 
-        def refresh_contact_objective():
+        def refresh_contact_objective(*, translation=False):
+            if translation:
+                self.translation_system.zero_()
+                refresh_contacts(True)
+                return
             wp.launch(
                 clear_structural_contact_objective,
                 self.graph_body_count,
@@ -7792,79 +8545,39 @@ class StructuralGraphKKT:
                 ],
                 device=self.device,
             )
-            refresh_contacts()
+            refresh_contacts(translation)
 
         def directional_derivative(*, refresh=True):
             if refresh:
                 refresh_contact_objective()
-            linearize(build_majorizer=False)
             self.line_search_slope.zero_()
             wp.launch(
                 accumulate_body_directional_derivative,
                 self.graph_body_count,
                 inputs=[
+                    self.graph_body_ids,
                     self.graph_body_island,
                     self.line_search_enabled,
-                    self.body_rhs,
+                    body_q,
+                    body_inertia_q,
+                    body_mass,
+                    body_inv_mass,
+                    body_inertia,
+                    body_com,
+                    contact_forces,
+                    contact_torques,
+                    dt,
                     self.body_correction,
                 ],
                 outputs=[self.line_search_slope],
                 device=self.device,
             )
-            for bucket in self.buckets:
-                groups = (
-                    (
-                        (
-                            bucket.tree.joint_ids,
-                            bucket.tree.size,
-                            bucket.tree.jacobian_parent,
-                            bucket.tree.jacobian_child,
-                            bucket.tree.compliance,
-                            bucket.tree.residual,
-                        ),
-                        (
-                            bucket.closure_joint_ids,
-                            bucket.closure_size,
-                            bucket.closure_jacobian_parent,
-                            bucket.closure_jacobian_child,
-                            bucket.closure_compliance,
-                            bucket.closure_residual,
-                        ),
-                    )
-                    if isinstance(bucket, _ClosedTreeBucket)
-                    else (
-                        (
-                            bucket.joint_ids,
-                            bucket.size,
-                            bucket.jacobian_parent,
-                            bucket.jacobian_child,
-                            bucket.compliance,
-                            bucket.residual,
-                        ),
-                    )
-                )
-                for ids, size, jp, jc, compliance, residual in groups:
-                    wp.launch(
-                        accumulate_joint_directional_derivative,
-                        size,
-                        inputs=[
-                            ids,
-                            joint_parent,
-                            joint_child,
-                            self.body_slot_by_id,
-                            self.graph_body_island,
-                            jp,
-                            jc,
-                            compliance,
-                            residual,
-                            self.body_correction,
-                        ],
-                        outputs=[self.line_search_slope],
-                        device=self.device,
-                    )
+            linearize(build_majorizer=False, build_body=False, slope_only=True)
 
-        def balance_translation():
-            if self.has_free_translation:
+        def balance_translation(
+            *, apply_translation=False, track_pending=False, stop_at_roundoff=True, restricted_ready=False
+        ):
+            if self.has_free_translation and not restricted_ready:
                 self.translation_system.zero_()
                 wp.launch(
                     accumulate_free_translation_system,
@@ -7899,6 +8612,7 @@ class StructuralGraphKKT:
                     outputs=[self.translation_system],
                     device=self.device,
                 )
+            if self.has_free_translation:
                 wp.launch(
                     correct_free_translation,
                     self.graph_body_count,
@@ -7908,8 +8622,13 @@ class StructuralGraphKKT:
                         self.island_contact_state,
                         self.island_step_scale,
                         self.translation_system,
+                        self.body_correction,
+                        apply_translation,
+                        track_pending,
+                        stop_at_roundoff,
+                        self.graph_body_ids,
                     ],
-                    outputs=[self.body_correction],
+                    outputs=[body_q, self.line_search_pending],
                     device=self.device,
                 )
 
@@ -7918,42 +8637,47 @@ class StructuralGraphKKT:
             # Resolve only this three-dimensional mode; internal joint errors
             # and internal contact separations are invariant under the shift.
             self.island_step_scale.fill_(1.0)
-            self.line_search_pending.fill_(1)
+            self.body_correction.zero_()
+            track_pending = self.device.is_cpu or (self.device.is_capturing and wp.is_conditional_graph_supported())
+            stop_at_roundoff = self.device.is_cpu or self.enable_captured_contact_shortcuts
+            if track_pending:
+                self.line_search_pending.fill_(1)
 
             def translate(*, refresh=True):
-                self.body_correction.zero_()
                 if refresh:
-                    refresh_contact_objective()
-                balance_translation()
-                self.line_search_pending.zero_()
-                wp.launch(
-                    _apply_translation_correction,
-                    self.graph_body_count,
-                    inputs=[
-                        self.graph_body_ids,
-                        self.graph_body_island,
-                        self.island_contact_state,
-                        self.body_correction,
-                    ],
-                    outputs=[body_q, self.line_search_pending],
-                    device=self.device,
+                    refresh_contact_objective(translation=True)
+                # Eligibility depends on fixed incidence, so check it once.
+                # Reproducible roundoff stopping still checks every iterate.
+                check_pending = track_pending and (stop_at_roundoff or not refresh)
+                if check_pending:
+                    self.line_search_pending.zero_()
+                balance_translation(
+                    apply_translation=True,
+                    track_pending=check_pending,
+                    stop_at_roundoff=stop_at_roundoff,
+                    restricted_ready=contacts is not None and contacts.rigid_contact_max > 0,
                 )
 
-            # Friction active sets can require several Newton updates around
-            # breakaway. Stop at float32 position roundoff on CPU and
-            # deterministic captured CUDA. Other CUDA modes keep the fixed
-            # schedule without readback or changed contact rounding.
-            for iteration in range(1 if contacts is None else 16):
-                # The caller supplied contacts at the starting pose. Only
-                # subsequent translation trials need another evaluation.
-                if self.device.is_cpu or (
-                    self.enable_captured_contact_shortcuts
-                    and self.device.is_capturing
-                    and wp.is_conditional_graph_supported()
-                ):
-                    wp.capture_if(self.line_search_pending, translate, refresh=iteration > 0)
-                else:
-                    translate(refresh=iteration > 0)
+            # Default CUDA skips repeated evaluations only if every island
+            # is blocked: no pose was changed and incidence is fixed here.
+            # Eligible islands retain all sixteen evaluations. Only reproducible
+            # modes may additionally stop at float32 position roundoff.
+            evaluations = 1 if contacts is None else 16
+            if track_pending and not stop_at_roundoff:
+                translate(refresh=False)
+
+                def finish_translation():
+                    for _ in range(1, evaluations):
+                        translate()
+
+                if evaluations > 1:
+                    wp.capture_if(self.line_search_pending, finish_translation)
+            else:
+                for iteration in range(evaluations):
+                    if track_pending:
+                        wp.capture_if(self.line_search_pending, translate, refresh=iteration > 0)
+                    else:
+                        translate(refresh=iteration > 0)
             return
 
         linearize()
@@ -8064,6 +8788,87 @@ class StructuralGraphKKT:
             device=self.device,
         )
         balance_translation()
+        # Restore the six collective modes suppressed by the rod solve metric.
+        # Only unanchored, independently supported islands are eligible. The
+        # existing directional search evaluates the enriched correction.
+        # Project f-B*delta with the original body metric: rod rows annihilate
+        # infinitesimal collective rigid motion. Do not omit projected joint
+        # terms for ordinary world-frame duals or anchored islands.
+        if self.has_free_rigid_modes:
+
+            def enrich_rigid_modes():
+                self.rigid_mode_center.zero_()
+                self.rigid_mode_matrix.zero_()
+                self.rigid_mode_rhs.zero_()
+                wp.launch(
+                    accumulate_free_rigid_center,
+                    self.graph_body_count,
+                    inputs=[
+                        self.graph_body_ids,
+                        self.graph_body_island,
+                        self.island_translation_free,
+                        self.rigid_mode_candidate,
+                        self.island_contact_state,
+                        self.translation_system,
+                        body_q,
+                        body_com,
+                        body_mass,
+                    ],
+                    outputs=[self.rigid_mode_center],
+                    device=self.device,
+                )
+                wp.launch(
+                    accumulate_free_rigid_system,
+                    self.graph_body_count,
+                    inputs=[
+                        self.graph_body_ids,
+                        self.graph_body_island,
+                        self.rigid_mode_center,
+                        self.island_step_scale,
+                        self.body_correction,
+                        dt,
+                        body_q,
+                        body_inertia_q,
+                        body_com,
+                        body_mass,
+                        body_inertia,
+                        contact_hessian_ll,
+                        contact_hessian_al,
+                        contact_hessian_aa,
+                        contact_forces,
+                        contact_torques,
+                        dynamic_contact_hessian,
+                    ],
+                    outputs=[self.rigid_mode_matrix, self.rigid_mode_rhs],
+                    device=self.device,
+                )
+                wp.launch(
+                    solve_free_rigid_system,
+                    self.island_count,
+                    inputs=[self.rigid_mode_center, self.rigid_mode_matrix, self.rigid_mode_rhs],
+                    outputs=[self.rigid_mode_shift],
+                    device=self.device,
+                )
+                wp.launch(
+                    enrich_free_rigid_correction,
+                    self.graph_body_count,
+                    inputs=[
+                        self.graph_body_ids,
+                        self.graph_body_island,
+                        self.rigid_mode_center,
+                        self.rigid_mode_shift,
+                        self.island_step_scale,
+                        body_q,
+                        body_com,
+                    ],
+                    outputs=[self.body_correction],
+                    device=self.device,
+                )
+
+            if self.device.is_cpu or (self.device.is_capturing and wp.is_conditional_graph_supported()):
+                wp.capture_if(self.translation_active, enrich_rigid_modes)
+            else:
+                enrich_rigid_modes()
         if contacts is not None and refresh_contacts is not None:
             wp.copy(self.line_search_pose, body_q)
 
@@ -8075,10 +8880,14 @@ class StructuralGraphKKT:
                 _begin_directional_search,
                 self.island_count,
                 inputs=[self.island_contact_state, self.line_search_slope],
-                outputs=[self.line_search_enabled, self.island_step_scale],
+                outputs=[
+                    self.line_search_enabled,
+                    self.island_step_scale,
+                    self.line_search_initial_slope,
+                    self.line_search_pending,
+                ],
                 device=self.device,
             )
-            self.line_search_pending.fill_(1)
 
             def apply_trial(trial):
                 wp.launch(
@@ -8092,17 +8901,17 @@ class StructuralGraphKKT:
                         body_com,
                         self.line_search_pose,
                     ],
-                    outputs=[body_q],
+                    outputs=[body_q, self.line_search_pending],
                     device=self.device,
                 )
                 directional_derivative()
-                self.line_search_pending.zero_()
                 wp.launch(
                     _update_directional_search,
                     self.island_count,
                     inputs=[
                         self.line_search_enabled,
                         self.line_search_slope,
+                        self.line_search_initial_slope,
                         trial == 4,
                     ],
                     outputs=[self.island_step_scale, self.line_search_pending],
@@ -8110,11 +8919,7 @@ class StructuralGraphKKT:
                 )
 
             for trial in range(5):
-                if self.device.is_cpu or (
-                    self.enable_captured_contact_shortcuts
-                    and self.device.is_capturing
-                    and wp.is_conditional_graph_supported()
-                ):
+                if self.device.is_cpu or (self.device.is_capturing and wp.is_conditional_graph_supported()):
                     # Captured CUDA conditionals read the predicate on device.
                     # Eager CUDA retains its fixed schedule without readback.
                     wp.capture_if(self.line_search_pending, apply_trial, trial=trial)
@@ -8131,7 +8936,7 @@ class StructuralGraphKKT:
                     body_com,
                     self.line_search_pose,
                 ],
-                outputs=[body_q],
+                outputs=[body_q, self.line_search_pending],
                 device=self.device,
             )
             return
@@ -8153,38 +8958,19 @@ class StructuralGraphKKT:
 
 
 @wp.kernel
-def _apply_translation_correction(
-    body_ids: wp.array[int],
-    body_island: wp.array[int],
-    island_state: wp.array[int],
-    correction: wp.array[wp.spatial_vector],
-    body_q: wp.array[wp.transform],
-    pending: wp.array[int],
-):
-    slot = wp.tid()
-    if island_state[body_island[slot]] < -1:
-        return
-    body = body_ids[slot]
-    pose = body_q[body]
-    position = wp.transform_get_translation(pose)
-    translated = position + wp.spatial_top(correction[slot])
-    body_q[body] = wp.transform(translated, wp.transform_get_rotation(pose))
-    for axis in range(3):
-        # Two float32 rounding errors, independent of authored material scales.
-        roundoff = 2.384185791015625e-7 * wp.max(wp.abs(position[axis]), wp.abs(translated[axis]))
-        if wp.abs(translated[axis] - position[axis]) > roundoff:
-            wp.atomic_max(pending, 0, 1)
-
-
-@wp.kernel
 def _begin_directional_search(
     contact_state: wp.array[int],
     merit: wp.array[wp.float64],
     enabled: wp.array[bool],
     scale: wp.array[float],
+    initial_slope: wp.array[wp.float64],
+    pending: wp.array[int],
 ):
     island = wp.tid()
     slope = merit[island]
+    initial_slope[island] = slope
+    if island == 0:
+        pending[0] = 1
     good = contact_state[island] >= -1 and wp.isfinite(slope) and slope < wp.float64(0.0)
     enabled[island] = good
     if not good:
@@ -8195,6 +8981,7 @@ def _begin_directional_search(
 def _update_directional_search(
     enabled: wp.array[bool],
     merit: wp.array[wp.float64],
+    initial_slope: wp.array[wp.float64],
     last_trial: bool,
     scale: wp.array[float],
     pending: wp.array[int],
@@ -8202,9 +8989,18 @@ def _update_directional_search(
     island = wp.tid()
     slope = merit[island]
     if enabled[island] and (not wp.isfinite(slope) or slope > wp.float64(0.0)):
-        scale[island] = 0.0 if last_trial else 0.5 * scale[island]
+        # Interpolate the directional residual, whose value at zero is negative.
+        # Safeguarding guarantees contraction even for nonquadratic forces.
+        # A proposed step is always re-evaluated; interpolation is not acceptance.
+        fraction = wp.float64(0.5)
+        if wp.isfinite(slope):
+            slope0 = initial_slope[island]
+            fraction = wp.clamp(slope0 / (slope0 - slope), wp.float64(0.1), wp.float64(0.9))
+        scale[island] = 0.0 if last_trial else float(fraction) * scale[island]
         if not last_trial:
             wp.atomic_max(pending, 0, 1)
+    # Keep previously acceptable islands enabled: another island's shortened
+    # trial can change a shared contact. Recheck all coupled endpoints together.
 
 
 @wp.kernel
@@ -8216,8 +9012,11 @@ def _apply_trial_correction(
     body_com: wp.array[wp.vec3],
     original: wp.array[wp.transform],
     body_q: wp.array[wp.transform],
+    pending: wp.array[int],
 ):
     slot = wp.tid()
+    if slot == 0:
+        pending[0] = 0
     body = body_ids[slot]
     alpha = scale[body_island[slot]]
     body_q[body] = original[body]

@@ -290,6 +290,50 @@ def _contact_world_selected(
 
 
 @wp.func
+def _rigid_diagonal_majorizer_step(h_ll: wp.mat33, h_aa: wp.mat33, h_al: wp.mat33, rhs_lin: wp.vec3, rhs_ang: wp.vec3):
+    """Return a scale-invariant diagonal majorization step for a finite system.
+
+    With S = sqrt(diag(H)), B = S diag(abs(S^-1 H S^-1) 1) S satisfies
+    B - H >= 0 for the symmetric matrix used by LDLT. This is an optimization
+    metric only; it introduces no physical compliance or force modification.
+    """
+    matrix = wp.spatial_matrixd(0.0)
+    for row in range(3):
+        for column in range(3):
+            # Match LDLT's lower-triangle convention, including roundoff.
+            matrix[row, column] = wp.float64(h_ll[wp.max(row, column), wp.min(row, column)])
+            matrix[row + 3, column + 3] = wp.float64(h_aa[wp.max(row, column), wp.min(row, column)])
+            cross = wp.float64(h_al[row, column])
+            matrix[row + 3, column] = cross
+            matrix[column, row + 3] = cross
+    rhs = wp.spatial_vectord(
+        wp.float64(rhs_lin[0]),
+        wp.float64(rhs_lin[1]),
+        wp.float64(rhs_lin[2]),
+        wp.float64(rhs_ang[0]),
+        wp.float64(rhs_ang[1]),
+        wp.float64(rhs_ang[2]),
+    )
+    scale = wp.spatial_vectord(0.0)
+    for row in range(6):
+        if not wp.isfinite(rhs[row]) or not wp.isfinite(matrix[row, row]) or matrix[row, row] <= wp.float64(0.0):
+            return wp.vec3(0.0), wp.vec3(0.0), False
+        scale[row] = wp.sqrt(matrix[row, row])
+        for column in range(6):
+            if not wp.isfinite(matrix[row, column]):
+                return wp.vec3(0.0), wp.vec3(0.0), False
+    step = wp.spatial_vector()
+    for row in range(6):
+        row_sum = wp.float64(0.0)
+        for column in range(6):
+            row_sum += wp.abs(matrix[row, column] / (scale[row] * scale[column]))
+        step[row] = float(rhs[row] / (matrix[row, row] * row_sum))
+        if not wp.isfinite(step[row]):
+            return wp.vec3(0.0), wp.vec3(0.0), False
+    return wp.spatial_top(step), wp.spatial_bottom(step), True
+
+
+@wp.func
 def ldlt6_solve(h_ll: wp.mat33, h_aa: wp.mat33, h_al: wp.mat33, rhs_lin: wp.vec3, rhs_ang: wp.vec3):
     """Solve the 6x6 SPD block system via direct LDL^T factorization.
 
@@ -372,6 +416,21 @@ def ldlt6_solve(h_ll: wp.mat33, h_aa: wp.mat33, h_al: wp.mat33, rhs_lin: wp.vec3
     x2 = z2 - L32 * x3 - L42 * x4 - L52 * x5 - L62 * x6
     x1 = z1 - L21 * x2 - L31 * x3 - L41 * x4 - L51 * x5 - L61 * x6
 
+    positive_pivots = A11 > 0.0 and D2 > 0.0 and D3 > 0.0 and D4 > 0.0 and D5 > 0.0 and D6 > 0.0
+    finite_step = (
+        wp.isfinite(x1)
+        and wp.isfinite(x2)
+        and wp.isfinite(x3)
+        and wp.isfinite(x4)
+        and wp.isfinite(x5)
+        and wp.isfinite(x6)
+    )
+    if not positive_pivots or not finite_step:
+        # Rank-dominant FP32 accumulation may lose the weak positive modes.
+        # Do not propagate a broken factorization into the physical pose.
+        linear, angular, valid = _rigid_diagonal_majorizer_step(h_ll, h_aa, h_al, rhs_lin, rhs_ang)
+        if valid:
+            return linear, angular
     return wp.vec3(x1, x2, x3), wp.vec3(x4, x5, x6)
 
 
