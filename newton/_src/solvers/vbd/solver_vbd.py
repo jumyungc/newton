@@ -455,6 +455,8 @@ class SolverVBD(SolverBase, CouplingInterface):
                 preserves the baseline local solver exactly. Positive values require
                 ``rigid_compliant_alm=True``, may not exceed ``iterations``, and currently
                 support only rigid-only models integrated directly by ``SolverVBD``.
+                An active global backend also enables numerical recovery for failed local
+                factorizations; the default local-only path keeps the baseline arithmetic.
                 Corrections start after the first local sweep and are distributed over the
                 local budget, regardless of whether a contact buffer is supplied. Joint duals
                 are updated after the paired local/global correction. With contact, a
@@ -466,8 +468,8 @@ class SolverVBD(SolverBase, CouplingInterface):
                 guarantee nonlinear convergence at a fixed iteration budget. Strongly nonlinear
                 graphs may need multiple global corrections; extra local sweeps alone can converge
                 slowly. If every iteration includes a correction, contact mode places the last
-                correction before the last local sweep to preserve the configured local budget; without a contact
-                buffer, one final local sweep is appended to reconcile the corrected pose.
+                correction before the last local sweep to preserve the configured local budget;
+                without a contact buffer, one final local sweep reconciles the corrected pose.
             rigid_avbd_alpha: C0 stabilization strength (``C_stab = C - alpha * C0``). Range: [0, 1].
                 Controls both joints and body-body contacts when neither class-specific
                 override (``rigid_avbd_joint_alpha`` / ``rigid_avbd_contact_alpha``) is set.
@@ -2551,48 +2553,33 @@ class SolverVBD(SolverBase, CouplingInterface):
         backend = self._structural_graph_kkt
         if backend is not None:
             backend.refresh_translation_freedom(self.model.joint_enabled)
-        if (
-            not self._rigid_joint_global_iteration_indices
-            or backend is None
-            or (contacts is not None and self._has_joint_mimics)
-        ):
-            # Keep the main G=0 hot path unchanged.
-            for iter_num in range(self.iterations):
-                rigid_due = self.collision_pipeline is not None and self._rigid_collision_is_due(iter_num)
-                soft_due = self.particle_enable_self_contact and self._self_contact_is_due(iter_num)
-                self._mid_step_detection(
-                    state_in, state_out, contacts, dt, rigid_due=rigid_due, soft_due=soft_due, preserve_history=True
-                )
-                self._solve_rigid_body_iteration(state_in, state_out, control, contacts, dt)
-                self._solve_particle_iteration(state_in, state_out, contacts, dt)
-        else:
-            for iter_num in range(self.iterations):
-                rigid_due = self.collision_pipeline is not None and self._rigid_collision_is_due(iter_num)
-                soft_due = self.particle_enable_self_contact and self._self_contact_is_due(iter_num)
-                self._mid_step_detection(
-                    state_in, state_out, contacts, dt, rigid_due=rigid_due, soft_due=soft_due, preserve_history=True
-                )
-                global_iteration = iter_num in self._rigid_joint_global_iteration_indices
-                if global_iteration and iter_num == self.iterations - 1 and contacts is not None:
-                    # Preserve the existing G == iterations contact budget,
-                    # including I1/G1: the last local sweep reconciles contact.
-                    self._solve_structural_graph_kkt(state_in, control, contacts, dt)
-                    global_iteration = False
-                self._solve_rigid_body_iteration(
-                    state_in,
-                    state_out,
-                    control,
-                    contacts,
-                    dt,
-                    defer_joint_dual=global_iteration,
-                )
-                if global_iteration:
-                    self._solve_structural_graph_kkt(state_in, control, contacts, dt)
-                    self._update_rigid_joint_duals(state_in, control, dt)
-                self._solve_particle_iteration(state_in, state_out, contacts, dt)
+        use_global = (
+            backend is not None
+            and bool(self._rigid_joint_global_iteration_indices)
+            and not (contacts is not None and self._has_joint_mimics)
+        )
+        for iter_num in range(self.iterations):
+            rigid_due = self.collision_pipeline is not None and self._rigid_collision_is_due(iter_num)
+            soft_due = self.particle_enable_self_contact and self._self_contact_is_due(iter_num)
+            self._mid_step_detection(
+                state_in, state_out, contacts, dt, rigid_due=rigid_due, soft_due=soft_due, preserve_history=True
+            )
+            global_iteration = use_global and iter_num in self._rigid_joint_global_iteration_indices
+            if global_iteration and iter_num == self.iterations - 1 and contacts is not None:
+                # Keep a final local reconciliation at the configured budget,
+                # including I1/G1 and G == iterations.
+                self._solve_structural_graph_kkt(state_in, control, contacts, dt)
+                global_iteration = False
+            self._solve_rigid_body_iteration(
+                state_in, state_out, control, contacts, dt, defer_joint_dual=global_iteration
+            )
+            if global_iteration:
+                self._solve_structural_graph_kkt(state_in, control, contacts, dt)
+                self._update_rigid_joint_duals(state_in, control, dt)
+            self._solve_particle_iteration(state_in, state_out, contacts, dt)
 
-            if self.rigid_joint_global_iterations == self.iterations and contacts is None:
-                self._solve_rigid_body_iteration(state_in, state_out, control, contacts, dt)
+        if use_global and self.rigid_joint_global_iterations == self.iterations and contacts is None:
+            self._solve_rigid_body_iteration(state_in, state_out, control, contacts, dt)
 
         if backend is not None and backend.has_free_translation and not self._has_joint_mimics:
             if backend.has_switchable_translation and self.device.is_capturing and wp.is_conditional_graph_supported():
@@ -4351,6 +4338,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                     self.body_hessian_ll,
                     self.body_hessian_al,
                     self.body_hessian_aa,
+                    self._structural_graph_kkt is not None,
                 ],
                 outputs=[
                     state_in.body_q,

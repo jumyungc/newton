@@ -334,10 +334,18 @@ def _rigid_diagonal_majorizer_step(h_ll: wp.mat33, h_aa: wp.mat33, h_al: wp.mat3
 
 
 @wp.func
-def ldlt6_solve(h_ll: wp.mat33, h_aa: wp.mat33, h_al: wp.mat33, rhs_lin: wp.vec3, rhs_ang: wp.vec3):
+def ldlt6_solve(
+    h_ll: wp.mat33,
+    h_aa: wp.mat33,
+    h_al: wp.mat33,
+    rhs_lin: wp.vec3,
+    rhs_ang: wp.vec3,
+    enable_recovery: bool = False,
+):
     """Solve the 6x6 SPD block system via direct LDL^T factorization.
 
-    Returns (x_lin, x_ang).
+    Returns (x_lin, x_ang). Numerical recovery is reserved for the optional
+    global path; disabled, the factorization is identical to the local baseline.
     """
     A11 = h_ll[0, 0]
     A21 = h_ll[1, 0]
@@ -416,21 +424,23 @@ def ldlt6_solve(h_ll: wp.mat33, h_aa: wp.mat33, h_al: wp.mat33, rhs_lin: wp.vec3
     x2 = z2 - L32 * x3 - L42 * x4 - L52 * x5 - L62 * x6
     x1 = z1 - L21 * x2 - L31 * x3 - L41 * x4 - L51 * x5 - L61 * x6
 
-    positive_pivots = A11 > 0.0 and D2 > 0.0 and D3 > 0.0 and D4 > 0.0 and D5 > 0.0 and D6 > 0.0
-    finite_step = (
-        wp.isfinite(x1)
-        and wp.isfinite(x2)
-        and wp.isfinite(x3)
-        and wp.isfinite(x4)
-        and wp.isfinite(x5)
-        and wp.isfinite(x6)
-    )
-    if not positive_pivots or not finite_step:
-        # Rank-dominant FP32 accumulation may lose the weak positive modes.
-        # Do not propagate a broken factorization into the physical pose.
-        linear, angular, valid = _rigid_diagonal_majorizer_step(h_ll, h_aa, h_al, rhs_lin, rhs_ang)
-        if valid:
-            return linear, angular
+    if enable_recovery:
+        # Only the opt-in global path uses this guard. Keep the main local
+        # factorization, including its failure behavior, unchanged otherwise.
+        positive_pivots = A11 > 0.0 and D2 > 0.0 and D3 > 0.0 and D4 > 0.0 and D5 > 0.0 and D6 > 0.0
+        finite_step = (
+            wp.isfinite(x1)
+            and wp.isfinite(x2)
+            and wp.isfinite(x3)
+            and wp.isfinite(x4)
+            and wp.isfinite(x5)
+            and wp.isfinite(x6)
+        )
+        if not positive_pivots or not finite_step:
+            # Rank-dominant FP32 assembly may lose weak positive modes.
+            linear, angular, valid = _rigid_diagonal_majorizer_step(h_ll, h_aa, h_al, rhs_lin, rhs_ang)
+            if valid:
+                return linear, angular
     return wp.vec3(x1, x2, x3), wp.vec3(x4, x5, x6)
 
 
@@ -5833,6 +5843,7 @@ def solve_rigid_body(
     external_hessian_ll: wp.array[wp.mat33],
     external_hessian_al: wp.array[wp.mat33],
     external_hessian_aa: wp.array[wp.mat33],
+    enable_recovery: bool,
     # Output
     body_q_new: wp.array[wp.transform],
 ):
@@ -5867,6 +5878,7 @@ def solve_rigid_body(
         external_hessian_ll: Preaccumulated rigid-contact linear block.
         external_hessian_al: Preaccumulated rigid-contact angular-linear block.
         external_hessian_aa: Preaccumulated rigid-contact angular block.
+        enable_recovery: Enable the global backend's numerical factorization guard.
         body_q: Current body transforms (input).
         body_q_new: Updated body transforms (output) for the current solve sweep.
 
@@ -6019,7 +6031,7 @@ def solve_rigid_body(
     h_aa[2, 2] = h_aa[2, 2] + epsA
 
     # Solve 6x6 system via direct LDL^T
-    x_inc, w_world = ldlt6_solve(h_ll, h_aa, h_al, f_force, f_torque)
+    x_inc, w_world = ldlt6_solve(h_ll, h_aa, h_al, f_force, f_torque, enable_recovery)
 
     # Update pose from increments
     # Convert angular increment to quaternion
