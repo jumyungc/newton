@@ -1,0 +1,15 @@
+{
+  "max_sum_error_n": 0.0,
+  "final_tree_force_n": 0.1878850907087326,
+  "final_loop_force_n": 0.3045955300331116,
+  "final_body_force_n": 0.3011111617088318,
+  "closed_cable_max_sum_error_n": 0.0,
+  "closed_cable_final_mean_reaction_n": 0.914320707321167,
+  "closed_cable_final_max_reaction_n": 1.0223051309585571,
+  "closed_cable_final_loop_reaction_n": 0.9863185882568359,
+  "closed_cable_final_loaded_body_reaction_n": 0.987360417842865,
+  "closed_cable_final_mean_tension_n": 0.9143206924200058,
+  "closed_cable_final_max_tension_n": 1.0223051309585571,
+  "closed_cable_mean_reaction_tension_error_n": 1.4901161193847656e-08,
+  "closed_cable_applied_pull_n": 2.0
+}

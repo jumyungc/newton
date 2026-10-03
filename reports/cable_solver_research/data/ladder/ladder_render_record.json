@@ -1,0 +1,29 @@
+{
+  "claim": "qualitative Track-B trajectory comparisons; frozen routing objective overlays (not canonical R); descriptive timings only; Provisional",
+  "generated_utc": "20260706T034547Z",
+  "ladder_manifest_sha256": "d0bd513cfc87ea8407a251a404494a81caf01d4456d558feeeb319b30afdf16d",
+  "owner_line_start": "OWNER: Team Fable (claimed 2026-07-06T02:53:29Z \u2014 round 5, invention: GPU-resident global step (Warp assembly + captured forest-CR) + stiffness-ladder truth, complementing CCDSN; prior Codex-Remote lock cleared by explicit maintainer authorization 2026-07-06: their round work was complete and report-pushed 2026-07-05T13:00Z but the release line was never written)",
+  "scenes": {
+    "n1024_s1e+07_b2500": {
+      "duration_s": 5.01,
+      "frames_decoded": 301,
+      "poster": "n1024_s1e+07_b2500_poster.png",
+      "poster_sha256": "820784c37d52a092f41a3c25a9dde28b4466718d05dc8f7f36b1046c6bfcd129",
+      "video": "n1024_s1e+07_b2500_2x2.mp4",
+      "video_sha256": "624c6fbe53a6d33d86d03bd224bdb07964825b6d33b685362a0f3336cf494fd1"
+    },
+    "n1024_s1e+07_b5": {
+      "duration_s": 5.01,
+      "frames_decoded": 301,
+      "poster": "n1024_s1e+07_b5_poster.png",
+      "poster_sha256": "6c654269a3581107a0074fd5273f80f488953194eeac9e38708abcb3433e964b",
+      "video": "n1024_s1e+07_b5_2x2.mp4",
+      "video_sha256": "c574dd2a979d1cc1883b98a7dcbc412980f49b87afb7080a0c1c86a642fe0fc3"
+    }
+  },
+  "schema": "fable-ladder-render/v1",
+  "sources": {
+    "fable_ladder_render.py": "41ff42af15c33b125679375fa1f38d00e95e0154f1ae4e55115b1c2b9bb3e27e"
+  },
+  "stretch_colormap_max_mm": 3.0
+}

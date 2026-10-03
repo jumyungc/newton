@@ -1,0 +1,98 @@
+{
+  "frames": 61,
+  "generated_utc": "20260709T073550Z",
+  "hostname": "jumyungc-spock",
+  "owner_line_start": "OWNER: Team Fable (claimed 2026-07-09T07:19:27Z \u2014 round 7: ETC-VBD invention \u2014 N1 energy-certified corrections (fixes measured cadence instability), N2 saturation-triggered cadence, N3 space-time coarse; experiment-driven; prior-art gap web-checked)",
+  "pid": 2312037,
+  "results": {
+    "n1024_s1e5_b2500": {
+      "mgg_r32_c1_f30": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 600,
+        "corrections_attempted": 600,
+        "energy_rejects": 0,
+        "energy_shrinks": 0,
+        "final_max_bend_rad": 0.022028833627700806,
+        "final_max_stretch_m": 0.0013072551228106022,
+        "guard_trips": 0,
+        "last_diag": {
+          "alpha": 1.0000000000023348,
+          "alpha_star": 1.0000000000023348,
+          "delta_max_m": 1.5928367878244866e-05,
+          "delta_max_rad": 1.3355490053638235e-05,
+          "merit_after": 37.78924104894086,
+          "merit_before": 37.790253423774615
+        },
+        "max_bend_rad": 0.022028833627700806,
+        "max_stretch_m": 0.0013072551228106022,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 19.633118994534016,
+        "trigger_fires": 0,
+        "wall_s": 16.56178092956543
+      }
+    },
+    "n1024_s1e6_b2500": {
+      "mgg_r32_c1_f30": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 600,
+        "corrections_attempted": 600,
+        "energy_rejects": 0,
+        "energy_shrinks": 0,
+        "final_max_bend_rad": 0.01326716598123312,
+        "final_max_stretch_m": 0.0001348431978840381,
+        "guard_trips": 0,
+        "last_diag": {
+          "alpha": 1.0000000000047982,
+          "alpha_star": 1.0000000000047982,
+          "delta_max_m": 1.692561196957003e-05,
+          "delta_max_rad": 8.368522671931028e-06,
+          "merit_after": 6.944105123543356,
+          "merit_before": 6.945271079388794
+        },
+        "max_bend_rad": 0.01326716598123312,
+        "max_stretch_m": 0.0001348431978840381,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 19.636080600321293,
+        "trigger_fires": 0,
+        "wall_s": 14.480258226394653
+      }
+    },
+    "n1024_s1e7_b2500": {
+      "mgg_r32_c1_f30": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 599,
+        "corrections_attempted": 600,
+        "energy_rejects": 0,
+        "energy_shrinks": 0,
+        "final_max_bend_rad": 0.19173099100589752,
+        "final_max_stretch_m": 0.0005840107332915068,
+        "guard_trips": 0,
+        "last_diag": {
+          "alpha": 1.000000000055489,
+          "alpha_star": 1.000000000055489,
+          "delta_max_m": 0.0004946649784345709,
+          "delta_max_rad": 0.0005300629550014179,
+          "merit_after": 986.8854075371607,
+          "merit_before": 987.0194530621599
+        },
+        "max_bend_rad": 0.19173099100589752,
+        "max_stretch_m": 0.0005840107332915068,
+        "n_substeps": 600,
+        "reject_worse_merit": 1,
+        "substep_ms_p50": 19.79106478393078,
+        "trigger_fires": 0,
+        "wall_s": 14.542527437210083
+      }
+    }
+  },
+  "schema": "fable-mg-vbd-ladder/v1",
+  "semantics": "mg_rR_cK = requested-VBD2 smoother + certificate-gated coarse-companion BGN correction every K substeps at coarsening R; lra = known-art long-range attachment clamp witness; Track-B; descriptive timings",
+  "sources": {
+    "codex_bgn_global.py": "e20f2bbd65a5058b06c1c569405a9bc6333b950e02fc5d9bc0b79168b1190d93",
+    "fable_fast_step.py": "27ac986b6d82cabc3424905733c297b5653a2342099d2dde51504d1674041d8b",
+    "fable_ladder.py": "745327eed04050e7117c9c302924c71dd9c64fcbe92a3fe1286dfa0e3a86b4ca",
+    "fable_mg.py": "bebe0a5edc0d5cbba209f4925d29ef002d4aaf5d005a241b6e20b0678fbd0ad4"
+  }
+}
