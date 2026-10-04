@@ -1187,6 +1187,7 @@ def _tree_float64_oracle_metrics(
 
 def _linearize_bucket(model, solver, bucket, body_q, dt):
     control = model.control()
+    backend = solver._structural_graph_kkt
     wp.launch(
         linearize_joint_path_rows,
         bucket.size,
@@ -1223,6 +1224,7 @@ def _linearize_bucket(model, solver, bucket, body_q, dt):
             model.joint_limit_ke,
             model.joint_limit_kd,
             solver.joint_rest_angle,
+            solver.joint_angle_prev,
             solver.joint_drive_limit_support,
             solver.joint_drive_lambda,
             solver.joint_limit_lambda,
@@ -1232,6 +1234,11 @@ def _linearize_bucket(model, solver, bucket, body_q, dt):
             model.body_q,
             model.body_com,
             dt,
+            False,
+            backend.body_slot_by_id,
+            backend.graph_body_island,
+            backend.body_correction,
+            backend.line_search_slope,
         ],
         outputs=[
             bucket.jacobian_parent,

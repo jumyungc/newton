@@ -63,6 +63,7 @@ from .rigid_vbd_kernels import (
     _resolve_active_drive_row,
     _rod_bend_twist_delta,
     _transported_twist_angle_jacobian_from_measure,
+    _unwrap_hinge_angle,
     build_joint_projectors,
     compute_kappa_and_jacobian,
     compute_kappa_dot,
@@ -1139,6 +1140,7 @@ def linearize_joint_path_rows(
     joint_limit_ke: wp.array[float],
     joint_limit_kd: wp.array[float],
     joint_rest_angle: wp.array[float],
+    joint_angle_prev: wp.array[float],
     joint_drive_limit_support: wp.array[float],
     joint_drive_lambda: wp.array[float],
     joint_limit_lambda: wp.array[float],
@@ -1643,6 +1645,8 @@ def linearize_joint_path_rows(
                 target_index = target_q_base + lin_count + free_angular_axis
                 axis_local = wp.normalize(joint_axis[dof])
                 coordinate = wp.dot(kappa, axis_local) + joint_rest_angle[dof]
+                if jt == JointType.REVOLUTE or (jt == JointType.D6 and ang_count == 1):
+                    coordinate = _unwrap_hinge_angle(coordinate, joint_angle_prev[dof])
                 target_position = joint_target_q[target_index]
                 target_velocity = joint_target_qd[dof]
                 drive_k = joint_target_ke[dof]
@@ -8378,6 +8382,7 @@ class StructuralGraphKKT:
         joint_C0_lin,
         joint_C0_ang,
         joint_rest_angle,
+        joint_angle_prev,
         joint_sigma_start,
         joint_C_fric,
         stab_alpha,
@@ -8493,6 +8498,7 @@ class StructuralGraphKKT:
                             joint_limit_ke,
                             joint_limit_kd,
                             joint_rest_angle,
+                            joint_angle_prev,
                             joint_drive_limit_support,
                             joint_drive_lambda,
                             joint_limit_lambda,
