@@ -3909,8 +3909,9 @@ class SolverVBD(SolverBase, CouplingInterface):
         dt: float,
         *,
         translation_only: bool = False,
+        forces_only: bool = False,
     ) -> None:
-        """Relinearize contact at the pose consumed by the global correction."""
+        """Refresh contact terms, optionally only the directional-search forces."""
         backend = self._structural_graph_kkt
         rigid_vbd_kkt = self._rigid_vbd_kkt
         if backend is None or rigid_vbd_kkt is None:
@@ -3957,6 +3958,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                 backend.graph_body_island,
                 int(backend.use_fused_contact_classification),
                 translation_only,
+                forces_only,
                 self.body_inertia_q,
                 self.model.body_mass,
                 backend.island_translation_free,
@@ -4119,8 +4121,8 @@ class SolverVBD(SolverBase, CouplingInterface):
             body_contact_buffer_size=self.body_body_contact_buffer_pre_alloc,
             body_contact_counts=self.body_body_contact_counts,
             body_contact_indices=self.body_body_contact_indices,
-            refresh_contacts=lambda translation=False: self._refresh_structural_contact_objective(
-                state_in, contacts, dt, translation_only=translation
+            refresh_contacts=lambda translation=False, forces=False: self._refresh_structural_contact_objective(
+                state_in, contacts, dt, translation_only=translation, forces_only=forces
             ),
             translation_only=translation_only,
         )

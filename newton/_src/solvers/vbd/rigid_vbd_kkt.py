@@ -402,6 +402,18 @@ def _scale_spatial_matrix(
 
 
 @wp.kernel
+def clear_structural_contact_forces(
+    body_ids: wp.array[wp.int32],
+    body_forces: wp.array[wp.vec3],
+    body_torques: wp.array[wp.vec3],
+):
+    """Clear only the contact scratch consumed by the directional search."""
+    body = body_ids[wp.tid()]
+    body_forces[body] = wp.vec3(0.0)
+    body_torques[body] = wp.vec3(0.0)
+
+
+@wp.kernel
 def clear_structural_contact_objective(
     body_ids: wp.array[wp.int32],
     body_forces: wp.array[wp.vec3],
@@ -487,6 +499,7 @@ def accumulate_structural_body_body_contacts(
     graph_body_island: wp.array[wp.int32],
     classify_islands: int,
     translation_only: bool,
+    forces_only: bool,
     body_inertia_q: wp.array[wp.transform],
     body_mass: wp.array[float],
     island_translation_free: wp.array[int],
@@ -704,6 +717,10 @@ def accumulate_structural_body_body_contacts(
         return
 
     wp.atomic_add(body_forces, body, force_acc)
+    if forces_only:
+        # The line search reads force/torque, never these trial Hessians.
+        wp.atomic_add(body_torques, body, torque_acc)
+        return
     wp.atomic_add(body_hessian_ll, body, h_ll_acc)
     if not translation_only:
         wp.atomic_add(body_torques, body, torque_acc)
@@ -8526,10 +8543,20 @@ class StructuralGraphKKT:
                             block_dim=self.spatial_block_dim,
                         )
 
-        def refresh_contact_objective(*, translation=False):
+        def refresh_contact_objective(*, translation=False, forces_only=False):
             if translation:
                 self.translation_system.zero_()
                 refresh_contacts(True)
+                return
+            if forces_only:
+                wp.launch(
+                    clear_structural_contact_forces,
+                    self.graph_body_count,
+                    inputs=[self.graph_body_ids],
+                    outputs=[contact_forces, contact_torques],
+                    device=self.device,
+                )
+                refresh_contacts(False, True)
                 return
             wp.launch(
                 clear_structural_contact_objective,
@@ -8549,7 +8576,7 @@ class StructuralGraphKKT:
 
         def directional_derivative(*, refresh=True):
             if refresh:
-                refresh_contact_objective()
+                refresh_contact_objective(forces_only=True)
             self.line_search_slope.zero_()
             wp.launch(
                 accumulate_body_directional_derivative,
