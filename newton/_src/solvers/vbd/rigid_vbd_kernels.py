@@ -1017,6 +1017,46 @@ def _average_contact_material(
 
 
 @wp.func
+def _rigid_contact_material(
+    contact_index: int,
+    shape0: int,
+    shape1: int,
+    shape_material_ke: wp.array[float],
+    shape_material_kd: wp.array[float],
+    shape_material_mu: wp.array[float],
+    rigid_contact_stiffness: wp.array[float],
+    rigid_contact_damping: wp.array[float],
+    rigid_contact_friction: wp.array[float],
+):
+    """Resolve shape materials and optional positive per-contact overrides.
+
+    Hydroelastic quadrature supplies force-preserving stiffness and a friction
+    scale. Zero entries mean unset, including ordinary contacts in mixed buffers.
+    """
+    ke, kd, mu = _average_contact_material(
+        shape_material_ke[shape0],
+        shape_material_kd[shape0],
+        shape_material_mu[shape0],
+        shape_material_ke[shape1],
+        shape_material_kd[shape1],
+        shape_material_mu[shape1],
+    )
+    if rigid_contact_stiffness:
+        contact_ke = rigid_contact_stiffness[contact_index]
+        if contact_ke > 0.0:
+            ke = contact_ke
+    if rigid_contact_damping:
+        contact_kd = rigid_contact_damping[contact_index]
+        if contact_kd > 0.0:
+            kd = contact_kd
+    if rigid_contact_friction:
+        friction_scale = rigid_contact_friction[contact_index]
+        if friction_scale > 0.0:
+            mu = mu * friction_scale
+    return ke, kd, mu
+
+
+@wp.func
 def _project_coulomb_tangent(tangent: wp.vec3, tangent_length: float, cone_limit: float):
     """Project a tangent vector onto the Coulomb friction disk."""
     if cone_limit <= 0.0:
@@ -4591,6 +4631,9 @@ def init_body_body_contact_materials(
     shape_material_ke: wp.array[float],
     shape_material_kd: wp.array[float],
     shape_material_mu: wp.array[float],
+    rigid_contact_stiffness: wp.array[float],
+    rigid_contact_damping: wp.array[float],
+    rigid_contact_friction: wp.array[float],
     k_start: float,
     # Outputs
     contact_penalty_k: wp.array[float],
@@ -4600,7 +4643,7 @@ def init_body_body_contact_materials(
 ):
     """Cold-start body-body contact penalties and cache material properties.
 
-    Averages both shapes' material. Legacy penalty is seeded at
+    Resolves both shapes' material and per-contact overrides. Legacy penalty is seeded at
     ``min(k_start, avg_ke)`` when ramping (k_start >= 0) or at ``avg_ke`` when
     fixed-k (k_start < 0). Compliant-ALM contact keeps contact material
     stiffness as physical ``k``. Rho has a single owner: the per-step setup
@@ -4615,13 +4658,16 @@ def init_body_body_contact_materials(
     if shape_id_0 < 0 or shape_id_1 < 0:
         return
 
-    avg_ke, avg_kd, avg_mu = _average_contact_material(
-        shape_material_ke[shape_id_0],
-        shape_material_kd[shape_id_0],
-        shape_material_mu[shape_id_0],
-        shape_material_ke[shape_id_1],
-        shape_material_kd[shape_id_1],
-        shape_material_mu[shape_id_1],
+    avg_ke, avg_kd, avg_mu = _rigid_contact_material(
+        i,
+        shape_id_0,
+        shape_id_1,
+        shape_material_ke,
+        shape_material_kd,
+        shape_material_mu,
+        rigid_contact_stiffness,
+        rigid_contact_damping,
+        rigid_contact_friction,
     )
 
     contact_material_kd[i] = avg_kd
@@ -4643,6 +4689,9 @@ def init_body_body_contacts_alm(
     shape_material_ke: wp.array[float],
     shape_material_kd: wp.array[float],
     shape_material_mu: wp.array[float],
+    rigid_contact_stiffness: wp.array[float],
+    rigid_contact_damping: wp.array[float],
+    rigid_contact_friction: wp.array[float],
     legacy_hard_contacts: int,
     contact_compliant_alm: int,
     restore_compliant_tangent_warmstart: int,
@@ -4683,13 +4732,16 @@ def init_body_body_contacts_alm(
     if s0 < 0 or s1 < 0:
         return
 
-    avg_ke, avg_kd, avg_mu = _average_contact_material(
-        shape_material_ke[s0],
-        shape_material_kd[s0],
-        shape_material_mu[s0],
-        shape_material_ke[s1],
-        shape_material_kd[s1],
-        shape_material_mu[s1],
+    avg_ke, avg_kd, avg_mu = _rigid_contact_material(
+        i,
+        s0,
+        s1,
+        shape_material_ke,
+        shape_material_kd,
+        shape_material_mu,
+        rigid_contact_stiffness,
+        rigid_contact_damping,
+        rigid_contact_friction,
     )
     contact_material_ke[i] = avg_ke
     contact_material_kd[i] = avg_kd

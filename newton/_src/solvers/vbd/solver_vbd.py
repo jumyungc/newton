@@ -176,6 +176,17 @@ class SolverVBD(SolverBase, CouplingInterface):
       ``rigid_compliant_alm`` is deprecated because the default will change to
       ``True``.
 
+    Rigid contact materials:
+        Positive per-contact stiffness and damping from :class:`~newton.Contacts`
+        override the mixed shape values; positive per-contact friction values
+        scale the mixed friction coefficient. Zero or absent entries retain the
+        shape material. This includes hydroelastic quadrature stiffness and
+        contact-reduction friction scales from :class:`~newton.CollisionPipeline`.
+        Use ``rigid_compliant_alm=True`` to retain the finite hydroelastic
+        compliance. Pressure patches and their coefficients are refreshed by
+        collision detection, not by every VBD iteration. Shape damping remains
+        per contact when the pipeline does not supply a damping override.
+
     Joint limitations:
         - Supported joint types: BALL, FIXED, FREE, REVOLUTE, PRISMATIC, D6, ROD.
           DISTANCE joints are not supported.
@@ -3147,6 +3158,9 @@ class SolverVBD(SolverBase, CouplingInterface):
                             model.shape_material_ke,
                             model.shape_material_kd,
                             model.shape_material_mu,
+                            contacts.rigid_contact_stiffness,
+                            contacts.rigid_contact_damping,
+                            contacts.rigid_contact_friction,
                             self.rigid_contact_hard,
                             self.rigid_compliant_alm,
                             restore_compliant_tangent_warmstart,
@@ -3178,6 +3192,9 @@ class SolverVBD(SolverBase, CouplingInterface):
                             model.shape_material_ke,
                             model.shape_material_kd,
                             model.shape_material_mu,
+                            contacts.rigid_contact_stiffness,
+                            contacts.rigid_contact_damping,
+                            contacts.rigid_contact_friction,
                             self.rigid_contact_k_start_value,
                         ],
                         outputs=[

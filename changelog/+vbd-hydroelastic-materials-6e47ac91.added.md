@@ -1,0 +1,1 @@
+Add per-contact stiffness, damping, and friction-scale support to `SolverVBD`, including hydroelastic contact materials. Use `rigid_compliant_alm=True` to retain finite hydroelastic compliance. Contacts with absent or zero overrides retain the existing mixed shape materials.
