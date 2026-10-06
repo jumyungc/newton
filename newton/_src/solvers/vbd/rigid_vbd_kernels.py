@@ -1031,7 +1031,7 @@ def _rigid_contact_material(
 ):
     """Resolve shape materials and optional positive per-contact overrides.
 
-    Hydroelastic quadrature supplies force-preserving stiffness and a friction
+    Hydroelastic quadrature supplies per-contact stiffness and a friction
     scale. Zero entries mean unset, including ordinary contacts in mixed buffers.
     """
     ke, kd, mu = _average_contact_material(
@@ -5302,6 +5302,8 @@ def create_accumulate_body_body_contacts_per_body():
         num_contacts = body_contact_counts[body_id]
         if num_contacts > body_contact_buffer_pre_alloc:
             num_contacts = body_contact_buffer_pre_alloc
+        if thread_id_within_body >= num_contacts:
+            return
 
         contact_count = rigid_contact_count[0]
 

@@ -9,6 +9,7 @@
 # Supports different scene configurations: pen or cube.
 #
 # Command: python -m newton.examples panda_hydro --scene pen --world-count 1
+#          python -m newton.examples panda_hydro --scene cube --kh 1e11
 #
 ###########################################################################
 
@@ -58,6 +59,8 @@ def broadcast_ik_solution_kernel(
 
 class Example:
     def __init__(self, viewer, args):
+        if not np.isfinite(args.kh) or args.kh <= 0.0:
+            raise ValueError("kh must be finite and positive [N/m^3]")
         self.scene = SceneType(args.scene)
         self.test_mode = args.test
         self.deterministic = args.deterministic
@@ -76,7 +79,7 @@ class Example:
         sdf_narrow_band_range = (-0.01, 0.01)
 
         shape_cfg = newton.ModelBuilder.ShapeConfig(
-            kh=1e11,
+            kh=args.kh,
             gap=0.01,
             mu_torsional=0.0,
             mu_rolling=0.0,
@@ -577,6 +580,12 @@ class Example:
                 "it instruments every atomic scatter in the solver and costs ~7x step time, "
                 "while contact ordering is what varies between runs."
             ),
+        )
+        parser.add_argument(
+            "--kh",
+            type=float,
+            default=1e11,
+            help="Hydroelastic pressure stiffness [N/m^3]; must be finite and positive.",
         )
         parser.add_argument(
             "--scene",

@@ -182,6 +182,9 @@ class SolverVBD(SolverBase, CouplingInterface):
         scale the mixed friction coefficient. Zero or absent entries retain the
         shape material. This includes hydroelastic quadrature stiffness and
         contact-reduction friction scales from :class:`~newton.CollisionPipeline`.
+        Set hydroelastic pressure stiffness through
+        :attr:`newton.ModelBuilder.ShapeConfig.kh` [N/m^3], not a solver parameter;
+        both shapes must provide hydroelastic SDFs.
         Use ``rigid_compliant_alm=True`` to retain the finite hydroelastic
         compliance. Pressure patches and their coefficients are refreshed by
         collision detection, not by every VBD iteration. Shape damping remains

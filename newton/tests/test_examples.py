@@ -1490,6 +1490,18 @@ add_contact_example_test(
 add_contact_example_test(
     name="contacts.example_nut_bolt_hydro",
     devices=cuda_test_devices,
+    test_options={"num-frames": 120, "world-count": 1, "solver": "vbd", "kh": "3e8", "kd": "0"},
+    use_viewer=True,
+    test_suffix="vbd",
+    expect_output_regexes=[
+        (_NUT_BOLT_DOWNLOAD_START_OUTPUT_RE, "stdout"),
+        (_NUT_BOLT_DOWNLOAD_DONE_OUTPUT_RE, "stdout"),
+    ],
+    allow_output_regexes=[(_ISAACGYM_ASSET_DOWNLOAD_OUTPUT_RE, "stdout")],
+)
+add_contact_example_test(
+    name="contacts.example_nut_bolt_hydro",
+    devices=cuda_test_devices,
     test_options={"num-frames": 120, "world-count": 1, "solver": "kamino"},
     use_viewer=True,
     test_suffix="kamino",

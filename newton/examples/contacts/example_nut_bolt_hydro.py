@@ -8,11 +8,15 @@
 #
 # Command: python -m newton.examples nut_bolt_hydro
 #          python -m newton.examples nut_bolt_hydro --solver kamino
+#          python -m newton.examples nut_bolt_hydro --kh 1e11
+#          python -m newton.examples nut_bolt_hydro --solver vbd --kh 3e8 --kd 0
+#          python -m newton.examples nut_bolt_hydro --solver vbd --kh 3e8 --kd 0 --vbd-iterations 4
 #
 ###########################################################################
 
 import argparse
 import tempfile
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -39,12 +43,9 @@ MESH_SDF_CACHE_DIR = Path(tempfile.gettempdir()) / "newton_sdf_cache"
 SHAPE_CFG = newton.ModelBuilder.ShapeConfig(
     margin=0.0,
     mu=0.01,
-    # Hydroelastic supplies the per-contact stiffness for the nut/bolt pair, so
-    # ``ke``/``kd`` reach only the non-hydroelastic contacts. At the 1e10 ``kh``
-    # default the thread contacts resolve over a ~95 ms solref time constant --
-    # roughly 45 substeps -- and the nut sits visibly cocked under MuJoCo. XPBD
-    # projects positions and is insensitive to this either way.
-    kh=1e11,  # Hydroelastic contact stiffness
+    # Hydroelastic supplies the per-contact stiffness for the nut/bolt pair.
+    # VBD retains shape damping when the pipeline supplies no damping override.
+    kh=1e11,  # Pressure per penetration depth [N/m^3]
     ke=1e7,
     kd=1e4,
     gap=0.0,
@@ -151,11 +152,18 @@ def load_mesh_with_sdf(
 class Example:
     def __init__(self, viewer, args):
         newton.use_coord_layout_targets = True
+        if not np.isfinite(args.kh) or args.kh <= 0.0:
+            raise ValueError("kh must be finite and positive [N/m^3]")
+        if not np.isfinite(args.kd) or args.kd < 0.0:
+            raise ValueError("kd must be finite and nonnegative")
+        if args.vbd_iterations < 1:
+            raise ValueError("vbd_iterations must be positive")
+        self.shape_cfg = replace(SHAPE_CFG, kh=args.kh, kd=args.kd)
         self.fps = 120
         self.frame_dt = 1.0 / self.fps
         self.sim_time = 0.0
         self.sim_substeps = 4
-        self.collide_every = 1 if args.solver == "xpbd" else 2  # re-collide every K substeps
+        self.collide_every = 1 if args.solver in ("xpbd", "vbd") else 2  # re-collide every K substeps
         self.sim_dt = self.frame_dt / self.sim_substeps
 
         self.world_count = args.world_count
@@ -209,6 +217,8 @@ class Example:
             label="ground_plane",
         )
         main_scene.replicate(world_builder, world_count=self.world_count)
+        if self.solver_type == "vbd":
+            main_scene.color()
 
         self.model = main_scene.finalize()
 
@@ -259,6 +269,16 @@ class Example:
                 iterations=15,
                 ls_iterations=100,
                 impratio=1.0,
+                deterministic=wp.DeterministicMode.RUN_TO_RUN
+                if self.deterministic_solver
+                else wp.DeterministicMode.NOT_GUARANTEED,
+            )
+        elif self.solver_type == "vbd":
+            self.solver = newton.solvers.SolverVBD(
+                self.model,
+                iterations=args.vbd_iterations,
+                rigid_compliant_alm=True,
+                rigid_body_contact_buffer_size=self.contacts_per_world,
                 deterministic=wp.DeterministicMode.RUN_TO_RUN
                 if self.deterministic_solver
                 else wp.DeterministicMode.NOT_GUARANTEED,
@@ -327,7 +347,7 @@ class Example:
                     world_builder,
                     bolt_mesh,
                     bolt_xform,
-                    SHAPE_CFG,
+                    self.shape_cfg,
                     key=f"bolt_{i}_{j}",
                     center_vec=bolt_center,
                     scale=self.scene_scale,
@@ -342,7 +362,7 @@ class Example:
                     world_builder,
                     nut_mesh,
                     nut_xform,
-                    SHAPE_CFG,
+                    self.shape_cfg,
                     key=f"nut_{i}_{j}",
                     center_vec=nut_center,
                     scale=self.scene_scale,
@@ -508,9 +528,29 @@ class Example:
         parser.add_argument(
             "--solver",
             type=str,
-            choices=["xpbd", "mujoco", "kamino"],
+            choices=["xpbd", "mujoco", "kamino", "vbd"],
             default="mujoco",
-            help="Solver to use: 'xpbd', 'mujoco', or 'kamino'.",
+            help="Solver to use. For the VBD demonstration use --kh 3e8 --kd 0.",
+        )
+        parser.add_argument(
+            "--kh",
+            type=float,
+            default=SHAPE_CFG.kh,
+            help="Hydroelastic pressure stiffness [N/m^3]; must be finite and positive.",
+        )
+        parser.add_argument(
+            "--kd",
+            type=float,
+            default=SHAPE_CFG.kd,
+            help="Shape contact damping; must be finite and nonnegative. "
+            "VBD applies this per contact when the pipeline supplies no override. "
+            "Material values are not equivalent across solvers.",
+        )
+        parser.add_argument(
+            "--vbd-iterations",
+            type=int,
+            default=10,
+            help="Local sweeps per VBD substep; must be positive. Lower values trade convergence for speed.",
         )
         parser.add_argument(
             "--num-per-world",
