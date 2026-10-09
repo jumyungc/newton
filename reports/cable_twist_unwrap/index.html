@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cable Incremental Twist Unwrapping (Not Supported)</title>
+  <style>
+:root {
+  color-scheme: light;
+  --ink: #17202a;
+  --muted: #5f6f82;
+  --line: #d9e0e8;
+  --panel: #f7f9fb;
+  --accent: #1f6f8b;
+  --good: #146c43;
+  --warn: #9a5b00;
+  --max: 1280px;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #ffffff;
+  color: var(--ink);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+header { border-bottom: 1px solid var(--line); background: #fbfcfd; }
+main, .header-inner, footer { width: min(var(--max), calc(100vw - 32px)); margin: 0 auto; }
+.header-inner { padding: 36px 0 28px; }
+h1 { margin: 0 0 10px; font-size: clamp(2rem, 4vw, 3.35rem); line-height: 1.05; letter-spacing: 0; }
+.subtitle { max-width: 850px; margin: 0; color: var(--muted); font-size: 1.05rem; }
+.metric-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
+.metric { border: 1px solid var(--line); border-radius: 8px; background: #ffffff; padding: 14px 16px; }
+.metric .label { color: var(--muted); font-size: 0.82rem; font-weight: 650; text-transform: uppercase; }
+.metric .value { display: block; margin-top: 4px; font-size: 1.25rem; font-weight: 760; }
+main { padding: 28px 0 48px; }
+section { margin: 0 0 34px; }
+h2 { margin: 0 0 10px; font-size: 1.45rem; line-height: 1.2; letter-spacing: 0; }
+h3 { margin: 0 0 10px; font-size: 1rem; line-height: 1.25; }
+p { margin: 0 0 12px; }
+a { color: var(--accent); }
+code {
+  padding: 0.08em 0.25em;
+  border-radius: 4px;
+  background: #edf2f7;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+}
+pre { margin: 12px 0 0; padding: 14px 16px; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+pre code { padding: 0; background: transparent; }
+.two-col { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr); gap: 22px; align-items: start; }
+.plot-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 18px; }
+.plot-grid-single { grid-template-columns: minmax(0, 1fr); }
+.plot-block { margin-top: 18px; }
+.plot-block:first-child { margin-top: 0; }
+.breadcrumb { margin: 0 0 14px; font-size: 0.92rem; font-weight: 650; }
+.breadcrumb a { color: var(--accent); text-decoration: none; }
+.breadcrumb a:hover { text-decoration: underline; }
+.video-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; max-width: 1120px; margin: 18px auto 0; }
+.video-grid-single { grid-template-columns: minmax(0, 1fr); max-width: 1280px; }
+.video-main { max-width: 820px; margin: 14px auto 18px; }
+figure { margin: 0; border: 1px solid var(--line); border-radius: 8px; background: #ffffff; overflow: hidden; }
+figure img, video { display: block; width: 100%; height: auto; }
+video { background: #111827; }
+figcaption { padding: 10px 12px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.92rem; }
+.takeaways, .card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+.takeaway, .card { border: 1px solid var(--line); border-radius: 8px; padding: 14px; background: #ffffff; }
+.card { display: block; color: inherit; text-decoration: none; }
+.takeaway strong, .card strong { display: block; margin-bottom: 6px; }
+.check-list { margin: 0; padding-left: 1.15rem; }
+.check-list li { margin: 0.35rem 0; }
+.note { border-left: 4px solid var(--accent); background: var(--panel); padding: 12px 14px; }
+table { width: 100%; border-collapse: collapse; border: 1px solid var(--line); background: white; }
+th, td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+th { background: var(--panel); color: var(--muted); font-size: 0.86rem; text-transform: uppercase; }
+footer { padding: 0 0 42px; color: var(--muted); font-size: 0.9rem; }
+@media (max-width: 820px) {
+  .metric-row, .takeaways, .two-col, .plot-grid, .video-grid, .card-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <nav class="breadcrumb"><a href="../cable_bend_twist_verification/">&larr; Cable Bend/Twist Verification</a></nav>
+      <h1>Cable Incremental Twist Unwrapping (Not Supported)</h1>
+      <p class="subtitle">Archived prototype evidence for future live multi-turn driven twist tracking; not part of the landing implementation.</p>
+      <div class="metric-row">
+        <div class="metric"><span class="label">Status</span><span class="value">not supported</span></div>
+<div class="metric"><span class="label">Archived short release</span><span class="value">4.000 turns</span></div>
+<div class="metric"><span class="label">Archived long release</span><span class="value">8.000 turns</span></div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="two-col">
+      <div>
+        <h2>Deferred Target</h2>
+        <p>This page intentionally stays in the report as archived design evidence. It documents the live incremental twist-unwrapping idea: raw quaternion twist is branch-limited, so a driven endpoint can appear to lose integer turns unless the solver tracks a path-continuous twist state. That live state is not supported in the active code branch. The current implemented path for prescribed high-turn material winding is rest_twist_total / joint_cable_rest_strain_offset.</p>
+        <p class="note">The active geometric bend/twist reports validate prescribed material winding and transported-frame twist. This archived page records the separate future problem of live endpoint-driven winding through repeated quaternion branches.</p>
+      </div>
+      <div>
+        <h2>Key Metrics</h2>
+        <table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody><tr><td>Status</td><td>not supported</td></tr>
+<tr><td>Archived short release</td><td>4.000 turns</td></tr>
+<tr><td>Archived long release</td><td>8.000 turns</td></tr>
+<tr><td>Active high-turn path</td><td>rest_twist_total</td></tr></tbody></table>
+      </div>
+    </section>
+
+    <section>
+      <h2>Simulation Setup</h2>
+      <table><thead><tr><th>Setting</th><th>Value</th></tr></thead><tbody><tr><td>Status</td><td>not supported / archived report page</td></tr>
+<tr><td>Current active high-turn path</td><td>rest_twist_total and joint_cable_rest_strain_offset</td></tr>
+<tr><td>Deferred future state</td><td>joint_cable_twist_last_principal and joint_cable_twist_unwrapped</td></tr>
+<tr><td>Report media</td><td>archived MP4 release comparisons and PNG plots; no active video is regenerated</td></tr></tbody></table>
+    </section>
+
+    <section>
+      <h2>Video Checks</h2>
+      <p>No current video is regenerated for this deferred report. The archived videos below keep the prototype visual evidence visible while the active solver omits live incremental unwrapping state.</p>
+      <div class="video-grid">
+        <figure>
+          <video controls preload="metadata" muted playsinline>
+            <source src="assets/cable_twist_unwrap_release_comparison.mp4?v=1780203363-259880" type="video/mp4">
+          </video>
+          <figcaption>Archived short release prototype: the stored-turn path unwinds while the branch-limited path cannot retain integer winding.</figcaption>
+        </figure>
+
+        <figure>
+          <video controls preload="metadata" muted playsinline>
+            <source src="assets/cable_twist_unwrap_long_release_comparison.mp4?v=1780204599-646673" type="video/mp4">
+          </video>
+          <figcaption>Archived long release prototype: the same deferred unwrapped-state behavior on a longer cable.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+
+    <section>
+      <h2>Archived Evidence</h2>
+      <div class="card-grid">
+
+        <div class="card">
+          <h3>Passes When</h3>
+          <ul class="check-list"><li>Read these videos and plots as archived prototype evidence, not current active solver validation.</li><li>The future feature should reproduce the continuous stored-turn curves with active tests.</li><li>Until then, high-turn prescribed material twist should use rest_twist_total.</li></ul>
+        </div>
+
+        <div class="card">
+          <h3>Watch For</h3>
+          <ul class="check-list"><li>Do not cite this page as proof that current active SolverVBD has live unwrapping.</li><li>Do not run the old twist_unwrap or twist_release examples; they are deferred.</li></ul>
+        </div>
+
+        <div class="card">
+          <h3>Validated Behavior</h3>
+          <ul class="check-list"><li>why endpoint-quaternion principal twist is insufficient for live multi-turn drives</li><li>what the deferred solver-owned incremental state should preserve</li><li>that this is separate from rest_twist_total prescribed material winding</li></ul>
+        </div>
+
+      </div>
+    </section>
+
+
+
+    <section>
+      <h2>Plot Checks</h2>
+
+        <div class="plot-block">
+          <h3>Archived Principal-Branch Diagnostics</h3>
+          <p>These prototype plots compare raw principal quaternion twist against the deferred path-continuous state for short and long driven cables.</p>
+          <div class="plot-grid">
+
+        <figure>
+          <img src="assets/twist_unwrap.png?v=1779950550-101755" alt="Cable Incremental Twist Unwrapping (Not Supported) plot twist_unwrap.png">
+          <figcaption>Archived live endpoint twist prototype: raw principal quaternion twist wraps, while the deferred unwrapped-state prototype tracked continuous material twist.</figcaption>
+        </figure>
+
+        <figure>
+          <img src="assets/twist_unwrap_chain.png?v=1780199067-224908" alt="Cable Incremental Twist Unwrapping (Not Supported) plot twist_unwrap_chain.png">
+          <figcaption>Archived long-chain prototype: raw principal endpoint twist stays branch-limited, while the deferred unwrapped-state prototype followed twist-up and unwind.</figcaption>
+        </figure>
+
+          </div>
+        </div>
+
+
+        <div class="plot-block">
+          <h3>Archived Release Diagnostics</h3>
+          <p>These prototype plots show why stored integer winding matters when a wound cable is released. They are retained as future acceptance targets.</p>
+          <div class="plot-grid">
+
+        <figure>
+          <img src="assets/twist_release.png?v=1780204517-177687" alt="Cable Incremental Twist Unwrapping (Not Supported) plot twist_release.png">
+          <figcaption>Archived short release prototype: branch-limited twist forgets integer winding, while the deferred unwrapped-state prototype retained stored winding.</figcaption>
+        </figure>
+
+        <figure>
+          <img src="assets/twist_release_long.png?v=1780204518-195832" alt="Cable Incremental Twist Unwrapping (Not Supported) plot twist_release_long.png">
+          <figcaption>Archived long-cable release prototype: the same stored-winding comparison on a longer cable.</figcaption>
+        </figure>
+
+          </div>
+        </div>
+
+    </section>
+
+
+    <section>
+      <h2>Reproduce</h2>
+      <pre><code>deferred: no active command until live incremental twist unwrapping is reintroduced</code></pre>
+    </section>
+  </main>
+
+  <footer>
+    Report payload: this page, Newton-rendered MP4 video(s), and selected PNG plots in <code>assets/</code>.
+    Parent hub: <a href="../cable_bend_twist_verification/">Cable Bend/Twist Verification</a>.
+  </footer>
+</body>
+</html>

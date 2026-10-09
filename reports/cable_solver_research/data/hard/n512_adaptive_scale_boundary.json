@@ -1,0 +1,520 @@
+{
+  "adaptation": {
+    "budgets": [
+      2,
+      5,
+      12
+    ],
+    "escalation_trigger": 4e-05,
+    "escalation_trigger_ratio": 0.8,
+    "rule": "K2 then continue the same predictor/restored implicit solve to K5/K12 when original nonlinear stationarity >= 0.8*5e-5 or another frozen certificate gate fails"
+  },
+  "claim_boundary": "N512 no-contact hard/inextensible residual-adaptive scale trajectory; diagnostic timing; no contact, N1024, production, novelty, or universal-winner claim",
+  "device": "cuda:0",
+  "frozen_parity_artifact": "bench/_workspace/codex_hard_kkt_parity/run_20260705T122437Z_1928744/result.json",
+  "frozen_parity_artifact_sha256": "febfce298a81e358accc318a142b85ca1608c92fa39d836147cea32433b878ff",
+  "generated_utc": "2026-07-05T12:39:56Z",
+  "hostname": "jumyungc-spock",
+  "n1024_admission_gate": false,
+  "n1024_executed": false,
+  "n512": {
+    "context_note": "finite rows have different authored-compliance semantics",
+    "finite_context": [
+      {
+        "duration_s": 3.216666666666667,
+        "gap_3d_m": {
+          "final_joint_rms": 0.027785618221028197,
+          "final_max": 0.04459812864661217,
+          "trajectory_max": 0.04459812864661217,
+          "trajectory_rms_of_joint_rms": 0.016360760424460923
+        },
+        "limitation": "round-4 NPZ stores positions/gaps, not orientation or energy",
+        "method": "vbd_2",
+        "npz_sha256": "51efef1482d11cf85c52cc743eae866fe854058f604ed05b1fa800d7662aa43a",
+        "semantics": "authored finite penalty requested VBD",
+        "source_bound": true,
+        "substep_ms_p50_descriptive": 0.6098514422774315
+      },
+      {
+        "duration_s": 3.216666666666667,
+        "gap_3d_m": {
+          "final_joint_rms": 0.019287346696256497,
+          "final_max": 0.04411018639802933,
+          "trajectory_max": 0.04411018639802933,
+          "trajectory_rms_of_joint_rms": 0.012794962936196023
+        },
+        "limitation": "round-4 NPZ stores positions/gaps, not orientation or energy",
+        "method": "vbd_10",
+        "npz_sha256": "ba1054bdef1e06f8e478d318f06ab69bd340ed947827b7e3849363cfabfb9628",
+        "semantics": "authored finite penalty requested VBD",
+        "source_bound": true,
+        "substep_ms_p50_descriptive": 2.41007748991251
+      },
+      {
+        "duration_s": 3.216666666666667,
+        "gap_3d_m": {
+          "final_joint_rms": 0.019291434282738197,
+          "final_max": 0.04414277896285057,
+          "trajectory_max": 0.04414277896285057,
+          "trajectory_rms_of_joint_rms": 0.012786087473984159
+        },
+        "limitation": "round-4 NPZ stores positions/gaps, not orientation or energy",
+        "method": "vbd_80",
+        "npz_sha256": "a341c1b0c4f2692eea7f58faa024489566e454773533844fa3bd80250d66c2d9",
+        "semantics": "authored finite penalty requested VBD",
+        "source_bound": true,
+        "substep_ms_p50_descriptive": 18.12231633812189
+      },
+      {
+        "duration_s": 3.216666666666667,
+        "gap_3d_m": {
+          "final_joint_rms": 0.019444650185150264,
+          "final_max": 0.04461030289530754,
+          "trajectory_max": 0.04461030289530754,
+          "trajectory_rms_of_joint_rms": 0.012787666225300387
+        },
+        "limitation": "round-4 NPZ stores positions/gaps, not orientation or energy",
+        "method": "global_bgn",
+        "npz_sha256": "234c670eec3779ec0d5d3410b0c24beb4029af25fa26db58d601a55e740c8b01",
+        "semantics": "same authored finite compliance; compact global Track-B path",
+        "source_bound": true,
+        "substep_ms_p50_descriptive": 160.60351580381393
+      }
+    ],
+    "full_gate": false,
+    "phase1_600_steps": {
+      "gates": {
+        "complete": true,
+        "finite_state": true,
+        "hard_feasibility": true,
+        "hard_stationarity": true,
+        "linear_original_kkt": true,
+        "one_dt": true
+      },
+      "pass": true,
+      "summary": {
+        "axial_abs_m": {
+          "final_joint_rms": 1.040097630788032e-07,
+          "final_max": 9.536736171519448e-07,
+          "trajectory_max": 9.536752903531543e-07,
+          "trajectory_rms_of_joint_rms": 6.632019397669846e-08
+        },
+        "bend_rest_angle_rad": {
+          "final_joint_rms": 0.02567506198853697,
+          "final_max": 0.5301557187953675,
+          "trajectory_max": 0.5301557187953675,
+          "trajectory_rms_of_joint_rms": 0.01572408242139518
+        },
+        "completed_render_frames": 60,
+        "completed_substeps": 600,
+        "duration_s": 1.0,
+        "energy_work": {
+          "change_minus_gravity_work_J": -515.2614500889192,
+          "final": {
+            "elastic_bend_J": 0.8421392523671888,
+            "elastic_stretch_J": 5.2651691952470243e-08,
+            "kinetic_angular_J": 0.0017925481545234944,
+            "kinetic_linear_J": 511.12339798529825,
+            "mechanical_total_J": 125.34902091605797,
+            "potential_gravity_J": -386.6183089224137
+          },
+          "gravity_work_J": 513.6143899636955,
+          "initial": {
+            "elastic_bend_J": 0.0,
+            "elastic_stretch_J": 2.407412430484045e-31,
+            "kinetic_angular_J": 0.0,
+            "kinetic_linear_J": 0.0,
+            "mechanical_total_J": 126.99608104128166,
+            "potential_gravity_J": 126.99608104128166
+          },
+          "mechanical_energy_change_J": -1.647060125223689,
+          "note": "negative balance includes authored damping and implicit-integration loss; this is a diagnostic, not a conservation claim"
+        },
+        "failure": null,
+        "gap_3d_m": {
+          "final_joint_rms": 1.4355248459246315e-07,
+          "final_max": 9.553366459668392e-07,
+          "trajectory_max": 9.78315363429911e-07,
+          "trajectory_rms_of_joint_rms": 7.907059490830799e-08
+        },
+        "hard_kkt_worst": {
+          "caller_state_unchanged_all": true,
+          "constraint_max_m": 3.552713678800501e-15,
+          "internal_time_substeps_max": 0,
+          "linear_original_kkt_residual": 4.2042735711706254e-14,
+          "physical_advances_max": 1,
+          "physical_advances_min": 1,
+          "predictor_evaluations_max": 1,
+          "predictor_evaluations_min": 1,
+          "stationarity_relative": 3.9963617087357406e-05,
+          "translation_restoration_max_m": 6.654703162624463e-05
+        },
+        "method": "hard_equality_kkt_residual_adaptive_k2_k5_k12",
+        "pass": true,
+        "quaternion_norm_max_error": 4.206126025252388e-08,
+        "requested_render_frames": 60,
+        "requested_substeps": 600,
+        "residual_adaptation": {
+          "budget_counts": {
+            "k12": 0,
+            "k2": 519,
+            "k5": 81
+          },
+          "budget_rates": {
+            "k12": 0.0,
+            "k2": 0.865,
+            "k5": 0.135
+          },
+          "escalation_rate_to_k12": 0.0,
+          "escalation_rate_to_k5_or_more": 0.135,
+          "escalation_trigger": 4e-05,
+          "escalation_trigger_ratio": 0.8,
+          "inclusive_timing_all": {
+            "count": 600,
+            "max_ms": 315.833516,
+            "p50_ms": 116.27774199999999,
+            "p95_ms": 215.27242329999996,
+            "total_ms": 77625.26531
+          },
+          "inclusive_timing_by_budget": {
+            "k12": {
+              "count": 0,
+              "max_ms": 0.0,
+              "p50_ms": 0.0,
+              "p95_ms": 0.0,
+              "total_ms": 0.0
+            },
+            "k2": {
+              "count": 519,
+              "max_ms": 198.93415399999998,
+              "p50_ms": 115.772617,
+              "p95_ms": 118.6815472,
+              "total_ms": 60037.142729
+            },
+            "k5": {
+              "count": 81,
+              "max_ms": 315.833516,
+              "p50_ms": 213.862541,
+              "p95_ms": 310.87147799999997,
+              "total_ms": 17588.122581
+            }
+          },
+          "iteration_budgets": [
+            2,
+            5,
+            12
+          ],
+          "setup_timing": {
+            "count": 600,
+            "max_ms": 0.28076,
+            "p50_ms": 0.17099549999999997,
+            "p95_ms": 0.18606344999999996,
+            "total_ms": 103.84816
+          },
+          "solve_timing": {
+            "count": 600,
+            "max_ms": 315.66450599999996,
+            "p50_ms": 116.10766699999999,
+            "p95_ms": 215.09906229999999,
+            "total_ms": 77521.41715
+          },
+          "stationarity_gate": 5e-05
+        },
+        "semantics": "Track B hard/inextensible; K2 then same-solve K5/K12 residual continuation",
+        "state_finite_all_steps": true,
+        "timing_descriptive": {
+          "setup_ms_total": 103.84816000000001,
+          "solve_ms_total": 77521.41715,
+          "stage_ms_p50": 116.27774199999999,
+          "stage_ms_p95": 215.27242329999996,
+          "stage_ms_total": 77625.26530999999
+        },
+        "transverse_m": {
+          "final_joint_rms": 9.894081572819478e-08,
+          "final_max": 3.128233086660267e-07,
+          "trajectory_max": 3.884981283958243e-07,
+          "trajectory_rms_of_joint_rms": 4.305567152010094e-08
+        }
+      }
+    },
+    "phase2_to_frame193": {
+      "gates": {
+        "complete": false,
+        "finite_state": true,
+        "hard_feasibility": true,
+        "hard_stationarity": false,
+        "linear_original_kkt": true,
+        "one_dt": true
+      },
+      "pass": false,
+      "summary": {
+        "axial_abs_m": {
+          "final_joint_rms": 3.771361727991509e-07,
+          "final_max": 1.6376576430390065e-06,
+          "trajectory_max": 1.813124268132652e-06,
+          "trajectory_rms_of_joint_rms": 2.052266722175051e-07
+        },
+        "bend_rest_angle_rad": {
+          "final_joint_rms": 0.05287006864636284,
+          "final_max": 1.1228089781921624,
+          "trajectory_max": 1.1228089781921624,
+          "trajectory_rms_of_joint_rms": 0.03796154451869579
+        },
+        "completed_render_frames": 60,
+        "completed_substeps": 604,
+        "duration_s": 1.0066666666666668,
+        "energy_work": {
+          "change_minus_gravity_work_J": -780.6033018076093,
+          "final": {
+            "elastic_bend_J": 3.546274296095457,
+            "elastic_stretch_J": 4.924063634239103e-07,
+            "kinetic_angular_J": 0.07126771468516038,
+            "kinetic_linear_J": 1258.0282246115307,
+            "mechanical_total_J": 110.084601900356,
+            "potential_gravity_J": -1151.5611652143616
+          },
+          "gravity_work_J": 765.3388827919074,
+          "initial": {
+            "elastic_bend_J": 0.8421392523671888,
+            "elastic_stretch_J": 5.2651691952470243e-08,
+            "kinetic_angular_J": 0.0017925481545234944,
+            "kinetic_linear_J": 511.12339798529825,
+            "mechanical_total_J": 125.34902091605797,
+            "potential_gravity_J": -386.6183089224137
+          },
+          "mechanical_energy_change_J": -15.26441901570196,
+          "note": "negative balance includes authored damping and implicit-integration loss; this is a diagnostic, not a conservation claim"
+        },
+        "failure": {
+          "adaptive_checkpoints": [
+            {
+              "budget": 2,
+              "constraint_max_m": 8.881784197001252e-16,
+              "escalation_trigger": 4e-05,
+              "finite": true,
+              "linear_original_kkt_residual": 1.5144072044914747e-14,
+              "next_budget": 5,
+              "stationarity_relative": 0.0001846921582049348
+            },
+            {
+              "budget": 5,
+              "constraint_max_m": 8.881784197001252e-16,
+              "escalation_trigger": 4e-05,
+              "finite": true,
+              "linear_original_kkt_residual": 1.3437198546186066e-14,
+              "next_budget": 12,
+              "stationarity_relative": 9.360793434751915e-05
+            },
+            {
+              "budget": 12,
+              "constraint_max_m": 1.7763568394002505e-15,
+              "escalation_trigger": 4e-05,
+              "finite": true,
+              "linear_original_kkt_residual": 1.1192460713639791e-14,
+              "next_budget": null,
+              "stationarity_relative": 5.600517523373341e-05
+            }
+          ],
+          "budget_used": 12,
+          "certificate": {
+            "constraint": {
+              "max_m": 1.7763568394002505e-15,
+              "mean_m": 1.128122070843608e-17,
+              "rms_m": 1.1502840717392369e-16
+            },
+            "finite": true,
+            "linear_original_kkt": {
+              "backend": "symmetrically scaled sparse hard KKT -> FP64 splu",
+              "constraint_rows": 1533,
+              "constraint_scale_max": 165.489572430396,
+              "constraint_scale_min": 85.5205880262733,
+              "elapsed_ms_descriptive": 6.431527,
+              "matrix_shape": [
+                4599,
+                4599
+              ],
+              "nnz": 38674,
+              "original_feasibility_inf": 1.5957790533541311e-18,
+              "original_feasibility_relative": 1.5957790533541311e-18,
+              "original_kkt_residual": 1.1192460713639791e-14,
+              "original_stationarity_inf": 1.3922196728799463e-13,
+              "original_stationarity_relative": 1.1192460713639791e-14,
+              "pivot_ratio_scaled": 0.27731712913867446,
+              "primal_dofs": 3066,
+              "primal_scale_max": 0.4190305545521682,
+              "primal_scale_min": 0.005742924664977947
+            },
+            "multiplier_max_N": 406.9175970242164,
+            "newton_correction_rotation_max_rad": 3.030100197290719e-06,
+            "newton_correction_translation_max_m": 7.749723561551926e-08,
+            "stationarity_inf": 0.0006966431130597736,
+            "stationarity_relative": 5.600517523373341e-05
+          },
+          "method_pass": false,
+          "metrics": {
+            "axial_abs_m": {
+              "max": 1.6376576430390065e-06,
+              "rms": 3.771361727991509e-07
+            },
+            "axial_abs_over_segment": {
+              "max": 4.094144107597516e-05,
+              "rms": 9.428404319978773e-06
+            },
+            "bend_rest_angle_rad": {
+              "max": 1.1228089781921624,
+              "rms": 0.05287006864636284
+            },
+            "gap_3d_m": {
+              "max": 1.7609099268950088e-06,
+              "rms": 4.1625169673022535e-07
+            },
+            "gap_3d_over_segment": {
+              "max": 4.402274817237522e-05,
+              "rms": 1.0406292418255635e-05
+            },
+            "joint_count": 511,
+            "quaternion_norm_max_error": 2.9735021112031745e-08,
+            "state_finite": true,
+            "transverse_m": {
+              "max": 1.7313026861458098e-06,
+              "rms": 1.7616407748800687e-07
+            },
+            "transverse_over_segment": {
+              "max": 4.3282567153645245e-05,
+              "rms": 4.404101937200172e-06
+            },
+            "worst_bend_joint": 0,
+            "worst_gap_joint": 494
+          },
+          "substep": 605,
+          "time_s": 1.0083333333333333
+        },
+        "gap_3d_m": {
+          "final_joint_rms": 4.1625169673022535e-07,
+          "final_max": 1.7609099268950088e-06,
+          "trajectory_max": 1.907132103292852e-06,
+          "trajectory_rms_of_joint_rms": 3.040736468961021e-07
+        },
+        "hard_kkt_worst": {
+          "caller_state_unchanged_all": true,
+          "constraint_max_m": 3.552713678800501e-15,
+          "internal_time_substeps_max": 0,
+          "linear_original_kkt_residual": 4.906204301059434e-14,
+          "physical_advances_max": 1,
+          "physical_advances_min": 1,
+          "predictor_evaluations_max": 1,
+          "predictor_evaluations_min": 1,
+          "stationarity_relative": 5.600517523373341e-05,
+          "translation_restoration_max_m": 0.0019332915595095456
+        },
+        "method": "hard_equality_kkt_residual_adaptive_k2_k5_k12",
+        "pass": false,
+        "quaternion_norm_max_error": 4.1901457414894594e-08,
+        "requested_render_frames": 133,
+        "requested_substeps": 1330,
+        "residual_adaptation": {
+          "budget_counts": {
+            "k12": 4,
+            "k2": 163,
+            "k5": 438
+          },
+          "budget_rates": {
+            "k12": 0.006611570247933884,
+            "k2": 0.2694214876033058,
+            "k5": 0.7239669421487603
+          },
+          "escalation_rate_to_k12": 0.006611570247933884,
+          "escalation_rate_to_k5_or_more": 0.7305785123966942,
+          "escalation_trigger": 4e-05,
+          "escalation_trigger_ratio": 0.8,
+          "inclusive_timing_all": {
+            "count": 605,
+            "max_ms": 542.0167339999999,
+            "p50_ms": 254.190577,
+            "p95_ms": 274.40104539999993,
+            "total_ms": 134754.416191
+          },
+          "inclusive_timing_by_budget": {
+            "k12": {
+              "count": 4,
+              "max_ms": 542.0167339999999,
+              "p50_ms": 541.7481165,
+              "p95_ms": 542.0023399999999,
+              "total_ms": 2166.2050600000002
+            },
+            "k2": {
+              "count": 163,
+              "max_ms": 177.41118,
+              "p50_ms": 118.47489599999999,
+              "p95_ms": 120.0977822,
+              "total_ms": 19378.370636
+            },
+            "k5": {
+              "count": 438,
+              "max_ms": 428.33726799999994,
+              "p50_ms": 254.8162165,
+              "p95_ms": 288.5915963999999,
+              "total_ms": 113209.840495
+            }
+          },
+          "iteration_budgets": [
+            2,
+            5,
+            12
+          ],
+          "setup_timing": {
+            "count": 605,
+            "max_ms": 0.296541,
+            "p50_ms": 0.17618299999999998,
+            "p95_ms": 0.1901856,
+            "total_ms": 107.72205199999999
+          },
+          "solve_timing": {
+            "count": 605,
+            "max_ms": 541.839089,
+            "p50_ms": 254.015304,
+            "p95_ms": 274.2233903999999,
+            "total_ms": 134646.694139
+          },
+          "stationarity_gate": 5e-05
+        },
+        "semantics": "Track B hard/inextensible; K2 then same-solve K5/K12 residual continuation",
+        "state_finite_all_steps": true,
+        "timing_descriptive": {
+          "setup_ms_total": 107.72205199999999,
+          "solve_ms_total": 134646.69413900003,
+          "stage_ms_p50": 254.190577,
+          "stage_ms_p95": 274.40104539999993,
+          "stage_ms_total": 134754.41619099997
+        },
+        "transverse_m": {
+          "final_joint_rms": 1.7616407748800687e-07,
+          "final_max": 1.7313026861458098e-06,
+          "trajectory_max": 1.8758571505710208e-06,
+          "trajectory_rms_of_joint_rms": 2.2437200303786587e-07
+        }
+      }
+    }
+  },
+  "owner_line_end": "OWNER: Team Codex-Remote \u2014 2026-07-05T11:40Z \u2014 coupled long-chain/contact solver invention round",
+  "owner_line_start": "OWNER: Team Codex-Remote \u2014 2026-07-05T11:40Z \u2014 coupled long-chain/contact solver invention round",
+  "pid": 1940700,
+  "platform": "Linux-5.15.0-113-generic-x86_64-with-glibc2.35",
+  "schema": "codex-hard-kkt-residual-adaptive-n512/v1",
+  "snapshot_file": {
+    "bytes": 1206143,
+    "path": "bench/_workspace/codex_hard_kkt_adaptive_n512/run_20260705T123956Z_1940700/n512_adaptive_render_states.npz",
+    "sha256": "4081fe1536571b225881c6d6d373ba0cbd5b461115a02d92ee58d2bd53dc7bb3"
+  },
+  "sources": {
+    "codex_hard_kkt_adaptive_n512.py": "cbac9b4130cbc67fad04d43d3a6513d367c93e2006a2e8b7875934526ec2c61c",
+    "codex_hard_kkt_bgn.py": "0e6d848c483ce146b558efcb1d3078db88347a70dca6798c50b58e1f8afae604",
+    "codex_hard_kkt_parity.py": "40c4dbf9c17982dc728f1d94a31d4ab1d6889930aa6a7f10cb159850e9da47a4"
+  },
+  "thresholds_unchanged": {
+    "hard_feasibility_m": 0.0001,
+    "hard_stationarity": 5e-05,
+    "linear_original_kkt": 1e-10,
+    "quaternion_norm_max_error": 2e-05
+  }
+}

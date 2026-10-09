@@ -1,0 +1,185 @@
+{
+  "frames": 61,
+  "generated_utc": "20260709T073258Z",
+  "hostname": "jumyungc-spock",
+  "owner_line_start": "OWNER: Team Fable (claimed 2026-07-09T07:19:27Z \u2014 round 7: ETC-VBD invention \u2014 N1 energy-certified corrections (fixes measured cadence instability), N2 saturation-triggered cadence, N3 space-time coarse; experiment-driven; prior-art gap web-checked)",
+  "pid": 2311762,
+  "results": {
+    "n1024_s1e5_b2500": {
+      "etc_r32_c1_f30": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 600,
+        "corrections_attempted": 600,
+        "energy_rejects": 0,
+        "energy_shrinks": 0,
+        "final_max_bend_rad": 0.022028833627700806,
+        "final_max_stretch_m": 0.0013072551228106022,
+        "guard_trips": 0,
+        "last_diag": {
+          "alpha": 1.0000000000023348,
+          "alpha_star": 1.0000000000023348,
+          "dE": -0.6133947568724807,
+          "delta_max_m": 1.5928367878244866e-05,
+          "delta_max_rad": 1.3355490053638235e-05,
+          "e_before": 256.83035571898654,
+          "merit_after": 37.78924104894086,
+          "merit_before": 37.790253423774615
+        },
+        "max_bend_rad": 0.022028833627700806,
+        "max_stretch_m": 0.0013072551228106022,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 25.217861868441105,
+        "trigger_fires": 0,
+        "wall_s": 17.768099069595337
+      },
+      "etc_r32_c1_f8": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 600,
+        "corrections_attempted": 600,
+        "energy_rejects": 0,
+        "energy_shrinks": 0,
+        "final_max_bend_rad": 0.022027315571904182,
+        "final_max_stretch_m": 0.0013073572190478444,
+        "guard_trips": 0,
+        "last_diag": {
+          "alpha": 1.0000000000023381,
+          "alpha_star": 1.0000000000023381,
+          "dE": -0.6165495155069038,
+          "delta_max_m": 1.5596534284430115e-05,
+          "delta_max_rad": 1.3588455667774483e-05,
+          "e_before": 256.835418996145,
+          "merit_after": 37.78944813917632,
+          "merit_before": 37.790454624912265
+        },
+        "max_bend_rad": 0.022027315571904182,
+        "max_stretch_m": 0.0013073572190478444,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 25.27575008571148,
+        "trigger_fires": 0,
+        "wall_s": 20.335167169570923
+      }
+    },
+    "n1024_s1e6_b2500": {
+      "etc_r32_c1_f30": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 600,
+        "corrections_attempted": 600,
+        "energy_rejects": 0,
+        "energy_shrinks": 0,
+        "final_max_bend_rad": 0.01326716598123312,
+        "final_max_stretch_m": 0.0001348431978840381,
+        "guard_trips": 0,
+        "last_diag": {
+          "alpha": 1.0000000000047982,
+          "alpha_star": 1.0000000000047982,
+          "dE": -0.6445934591885134,
+          "delta_max_m": 1.692561196957003e-05,
+          "delta_max_rad": 8.368522671931028e-06,
+          "e_before": 248.87615076795282,
+          "merit_after": 6.944105123543356,
+          "merit_before": 6.945271079388794
+        },
+        "max_bend_rad": 0.01326716598123312,
+        "max_stretch_m": 0.0001348431978840381,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 25.371184572577477,
+        "trigger_fires": 0,
+        "wall_s": 17.86416482925415
+      },
+      "etc_r32_c1_f8": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 600,
+        "corrections_attempted": 600,
+        "energy_rejects": 0,
+        "energy_shrinks": 0,
+        "final_max_bend_rad": 0.013252836652100086,
+        "final_max_stretch_m": 0.00013502661022357643,
+        "guard_trips": 0,
+        "last_diag": {
+          "alpha": 1.000000000004802,
+          "alpha_star": 1.000000000004802,
+          "dE": -0.6455901688535732,
+          "delta_max_m": 1.644254882202405e-05,
+          "delta_max_rad": 8.62195315766352e-06,
+          "e_before": 248.8770764394185,
+          "merit_after": 6.935498171359352,
+          "merit_before": 6.936691135262451
+        },
+        "max_bend_rad": 0.013252836652100086,
+        "max_stretch_m": 0.00013502661022357643,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 25.237780064344406,
+        "trigger_fires": 0,
+        "wall_s": 18.304101943969727
+      }
+    },
+    "n1024_s1e7_b2500": {
+      "etc_r32_c1_f30": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 595,
+        "corrections_attempted": 600,
+        "energy_rejects": 7,
+        "energy_shrinks": 0,
+        "final_max_bend_rad": 0.12470056861639023,
+        "final_max_stretch_m": 0.0003665046824607998,
+        "guard_trips": 0,
+        "last_diag": {
+          "alpha": 1.0000000000387959,
+          "alpha_star": 1.0000000000387959,
+          "dE": -0.6965771926624029,
+          "delta_max_m": 0.0005548530233221384,
+          "delta_max_rad": 0.0005370993465767144,
+          "e_before": 713.5451558445525,
+          "merit_after": 461.0279638315071,
+          "merit_before": 461.1771696793232
+        },
+        "max_bend_rad": 0.12470056861639023,
+        "max_stretch_m": 0.0003665046824607998,
+        "n_substeps": 600,
+        "reject_worse_merit": 5,
+        "substep_ms_p50": 25.479331612586975,
+        "trigger_fires": 0,
+        "wall_s": 18.307838916778564
+      },
+      "etc_r32_c1_f8": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 595,
+        "corrections_attempted": 600,
+        "energy_rejects": 7,
+        "energy_shrinks": 0,
+        "final_max_bend_rad": 0.1227145716547966,
+        "final_max_stretch_m": 0.00038960500387474895,
+        "guard_trips": 0,
+        "last_diag": {
+          "alpha": 1.0000000000335427,
+          "alpha_star": 1.0000000000335427,
+          "dE": -0.7666315188071167,
+          "delta_max_m": 0.0005227463749777784,
+          "delta_max_rad": 0.00048636246259950173,
+          "e_before": 709.5514078726511,
+          "merit_after": 457.38239186690595,
+          "merit_before": 457.58628823159097
+        },
+        "max_bend_rad": 0.1227145716547966,
+        "max_stretch_m": 0.00038960500387474895,
+        "n_substeps": 600,
+        "reject_worse_merit": 5,
+        "substep_ms_p50": 25.628107599914074,
+        "trigger_fires": 0,
+        "wall_s": 18.70884418487549
+      }
+    }
+  },
+  "schema": "fable-mg-vbd-ladder/v1",
+  "semantics": "mg_rR_cK = requested-VBD2 smoother + certificate-gated coarse-companion BGN correction every K substeps at coarsening R; lra = known-art long-range attachment clamp witness; Track-B; descriptive timings",
+  "sources": {
+    "codex_bgn_global.py": "e20f2bbd65a5058b06c1c569405a9bc6333b950e02fc5d9bc0b79168b1190d93",
+    "fable_fast_step.py": "27ac986b6d82cabc3424905733c297b5653a2342099d2dde51504d1674041d8b",
+    "fable_ladder.py": "745327eed04050e7117c9c302924c71dd9c64fcbe92a3fe1286dfa0e3a86b4ca",
+    "fable_mg.py": "bebe0a5edc0d5cbba209f4925d29ef002d4aaf5d005a241b6e20b0678fbd0ad4"
+  }
+}

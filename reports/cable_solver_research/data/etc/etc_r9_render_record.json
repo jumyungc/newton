@@ -1,0 +1,85 @@
+{
+  "claim": "qualitative Track-B trajectory comparisons; frozen routing objective overlays (not canonical R); descriptive timings only; Provisional",
+  "coverage_manifest_sha256": "ed2d45f0520dc49c859cd0dcd47b4547eada4588e35c48b83a3502340799eff8",
+  "generated_utc": "20260709T094712Z",
+  "owner_line_start": "OWNER: Team Fable (claimed 2026-07-09T09:07:05Z \u2014 round 9: ETC-spectral applied to the full chain registry at 301f vs r4 baselines (hash-verified identical starts), 4-panel films, perf+stretch+bend tables on report; branched/loop scenes routed to GLOBAL per portfolio (r4 films stand); honest N/A rows; single push)",
+  "scenes": {
+    "horiz_cantilever_stretch": {
+      "duration_s": 5.01,
+      "frames_decoded": 301,
+      "poster": "horiz_cantilever_stretch_poster.png",
+      "poster_sha256": "82cd6c6b3849ed4108a5942ca49e589e0b9a2e04312dc2c28178bb670393ade6",
+      "video": "horiz_cantilever_stretch_2x2.mp4",
+      "video_sha256": "b1322821d0d14c26b1b3f089dfd47e98012517a5a0e8373e058288d9559af847"
+    },
+    "horiz_cantilever_stretch_bend": {
+      "duration_s": 5.01,
+      "frames_decoded": 301,
+      "poster": "horiz_cantilever_stretch_bend_poster.png",
+      "poster_sha256": "c01829adc9f72049b556af32646d20ae537d205f8e68a5e88b652f4ec7adc8b8",
+      "video": "horiz_cantilever_stretch_bend_2x2.mp4",
+      "video_sha256": "ce923a52d8a0b1159ba8f91a98f82fbe7f5b171a8aee052ea158d906afe2c549"
+    },
+    "horiz_pinned_both": {
+      "duration_s": 5.01,
+      "frames_decoded": 301,
+      "poster": "horiz_pinned_both_poster.png",
+      "poster_sha256": "16754d602584554868425c2c3df544c89a7a501d05a33b627ac6a6fda72537db",
+      "video": "horiz_pinned_both_2x2.mp4",
+      "video_sha256": "863f013ec0d8e04aee1f163609e090da644ec99fcc9ebdb923a13d5c8f9613e7"
+    },
+    "long_cantilever_1024_superbend500": {
+      "duration_s": 5.01,
+      "frames_decoded": 301,
+      "poster": "long_cantilever_1024_superbend500_poster.png",
+      "poster_sha256": "4dfd0f57d718d82ba298734eff1acc3cf31ff311d9127ca21bc31a844d8e5256",
+      "video": "long_cantilever_1024_superbend500_2x2.mp4",
+      "video_sha256": "afa3708a28b91c7cc42b224e5bcc9117e5b67ed489863be4a0df65b557bd9a90"
+    },
+    "long_cantilever_2048_superbend500": {
+      "duration_s": 5.01,
+      "frames_decoded": 301,
+      "poster": "long_cantilever_2048_superbend500_poster.png",
+      "poster_sha256": "a567f48f8c428bda5ca9b635341a14542f8b6472b772fc0a0a6e4e522af34ef0",
+      "video": "long_cantilever_2048_superbend500_2x2.mp4",
+      "video_sha256": "d8f1010dd378a32226b06de18d44e0b2162a15ef54c000a16c84f654386ddcc8"
+    },
+    "long_cantilever_4096_superbend500": {
+      "duration_s": 5.01,
+      "frames_decoded": 301,
+      "poster": "long_cantilever_4096_superbend500_poster.png",
+      "poster_sha256": "70f6b879b4573a2e078fe5cac5fc7d21f08205d6e725a7066c871b50e0d36fd6",
+      "video": "long_cantilever_4096_superbend500_2x2.mp4",
+      "video_sha256": "960fd8ccfcaf03e447289863b7d419745ce86a4da7831f732fbfb8c39c01448e"
+    },
+    "long_cantilever_512_bend": {
+      "duration_s": 5.01,
+      "frames_decoded": 301,
+      "poster": "long_cantilever_512_bend_poster.png",
+      "poster_sha256": "8c3c0372d9d4cbe7ade45c44b24fe4c5579012d4211f6e8749d2c961618938fb",
+      "video": "long_cantilever_512_bend_2x2.mp4",
+      "video_sha256": "ee7319d9bd60ded15d53f05c1d043d0f4944734adf037a76c5f8e10173842fc7"
+    },
+    "long_vertical_1024_stiffbend": {
+      "duration_s": 5.01,
+      "frames_decoded": 301,
+      "poster": "long_vertical_1024_stiffbend_poster.png",
+      "poster_sha256": "31e4d41be3b19c76a30d239078e3f735b26f350d7f849241def5d468f2940f0d",
+      "video": "long_vertical_1024_stiffbend_2x2.mp4",
+      "video_sha256": "a43478d5142fb621c65cccfd3b1f69601b92727c6cc0cebb66a6241431b19c23"
+    },
+    "vertical_hanging": {
+      "duration_s": 5.01,
+      "frames_decoded": 301,
+      "poster": "vertical_hanging_poster.png",
+      "poster_sha256": "11ac6188fa6c4aab218b22d800aeb7d3cdb509df79cb6fcefa256f0cabd2e0b2",
+      "video": "vertical_hanging_2x2.mp4",
+      "video_sha256": "5e9a299beedce6da729442806506ad3ca9f6e4a9a6b86ffa761f8dd1469b5d8d"
+    }
+  },
+  "schema": "fable-etc-render/v1",
+  "sources": {
+    "fable_etc_render.py": "f4f8f611fe22ab48a4415ee82d49e50394fa365f7d282a91a08753924780706c"
+  },
+  "stretch_colormap_max_mm": 3.0
+}

@@ -1,0 +1,75 @@
+{
+  "frames": 301,
+  "generated_utc": "20260709T073723Z",
+  "hostname": "jumyungc-spock",
+  "owner_line_start": "OWNER: Team Fable (claimed 2026-07-09T07:19:27Z \u2014 round 7: ETC-VBD invention \u2014 N1 energy-certified corrections (fixes measured cadence instability), N2 saturation-triggered cadence, N3 space-time coarse; experiment-driven; prior-art gap web-checked)",
+  "pid": 2312221,
+  "results": {
+    "n1024_s1e5_b2500": {
+      "etc_r32_c1_f30": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 3000,
+        "corrections_attempted": 3000,
+        "energy_rejects": 0,
+        "energy_shrinks": 0,
+        "final_max_bend_rad": 0.09900730103254318,
+        "final_max_stretch_m": 0.003108163131400943,
+        "guard_trips": 0,
+        "last_diag": {
+          "alpha": 1.0000000000021128,
+          "alpha_star": 1.0000000000021128,
+          "dE": -0.43925443081843696,
+          "delta_max_m": 3.3993640957502166e-05,
+          "delta_max_rad": 2.2362608857507532e-06,
+          "e_before": -4378.522215256785,
+          "merit_after": 284.3773024628015,
+          "merit_before": 284.3813676319467
+        },
+        "max_bend_rad": 0.09900730103254318,
+        "max_stretch_m": 0.0036873489152640104,
+        "n_substeps": 3000,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 25.214344263076782,
+        "trigger_fires": 0,
+        "wall_s": 85.51637625694275
+      }
+    },
+    "n1024_s1e7_b2500": {
+      "etc_r32_c1_f30": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 2970,
+        "corrections_attempted": 3000,
+        "energy_rejects": 86,
+        "energy_shrinks": 34,
+        "final_max_bend_rad": 0.8597878813743591,
+        "final_max_stretch_m": 0.004978492856025696,
+        "guard_trips": 0,
+        "last_diag": {
+          "alpha": 1.0000000000187033,
+          "alpha_star": 1.0000000000187033,
+          "dE": -70.16259237000486,
+          "delta_max_m": 0.0050520676139541865,
+          "delta_max_rad": 0.003914235386133432,
+          "e_before": 120261.40572634862,
+          "merit_after": 118627.09708413314,
+          "merit_before": 118679.54593563621
+        },
+        "max_bend_rad": 1.0173051357269287,
+        "max_stretch_m": 0.00871354155242443,
+        "n_substeps": 3000,
+        "reject_worse_merit": 30,
+        "substep_ms_p50": 25.433956645429134,
+        "trigger_fires": 0,
+        "wall_s": 85.49880790710449
+      }
+    }
+  },
+  "schema": "fable-mg-vbd-ladder/v1",
+  "semantics": "mg_rR_cK = requested-VBD2 smoother + certificate-gated coarse-companion BGN correction every K substeps at coarsening R; lra = known-art long-range attachment clamp witness; Track-B; descriptive timings",
+  "sources": {
+    "codex_bgn_global.py": "e20f2bbd65a5058b06c1c569405a9bc6333b950e02fc5d9bc0b79168b1190d93",
+    "fable_fast_step.py": "27ac986b6d82cabc3424905733c297b5653a2342099d2dde51504d1674041d8b",
+    "fable_ladder.py": "745327eed04050e7117c9c302924c71dd9c64fcbe92a3fe1286dfa0e3a86b4ca",
+    "fable_mg.py": "bebe0a5edc0d5cbba209f4925d29ef002d4aaf5d005a241b6e20b0678fbd0ad4"
+  }
+}

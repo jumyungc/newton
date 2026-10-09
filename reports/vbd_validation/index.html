@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VBD Development Validation</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #17202a;
+        --muted: #607086;
+        --line: #d8e0e8;
+        --panel: #f6f8fb;
+        --panel-strong: #edf3f8;
+        --accent: #1f6f8b;
+        --accent-2: #6f8f2f;
+        --warn: #9a5a1e;
+        --max: 1180px;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        background: #ffffff;
+        color: var(--ink);
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        line-height: 1.5;
+      }
+
+      a {
+        color: var(--accent);
+      }
+
+      code {
+        padding: 0.08rem 0.28rem;
+        border: 1px solid #dce6ef;
+        border-radius: 4px;
+        background: #eef3f7;
+        font-size: 0.93em;
+      }
+
+      header {
+        border-bottom: 1px solid var(--line);
+        background: #fbfcfd;
+      }
+
+      main,
+      .header-inner {
+        width: min(var(--max), calc(100vw - 32px));
+        margin: 0 auto;
+      }
+
+      .header-inner {
+        padding: 38px 0 30px;
+      }
+
+      .eyebrow {
+        margin: 0 0 10px;
+        color: var(--accent);
+        font-size: 0.82rem;
+        font-weight: 750;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1,
+      h2,
+      h3 {
+        margin: 0;
+        line-height: 1.12;
+        letter-spacing: 0;
+      }
+
+      h1 {
+        max-width: 880px;
+        font-size: clamp(2.2rem, 4vw, 3.7rem);
+      }
+
+      h2 {
+        margin-bottom: 14px;
+        font-size: 1.65rem;
+      }
+
+      h3 {
+        font-size: 1.18rem;
+      }
+
+      p {
+        margin: 0;
+      }
+
+      .subtitle {
+        max-width: 940px;
+        margin-top: 14px;
+        color: var(--muted);
+        font-size: 1.08rem;
+      }
+
+      .summary {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 24px;
+      }
+
+      .summary-card,
+      .track,
+      .note,
+      .example-table {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #ffffff;
+      }
+
+      .summary-card {
+        padding: 14px 16px;
+      }
+
+      .summary-card .label {
+        display: block;
+        color: var(--muted);
+        font-size: 0.78rem;
+        font-weight: 750;
+        text-transform: uppercase;
+      }
+
+      .summary-card .value {
+        display: block;
+        margin-top: 5px;
+        font-size: 1.17rem;
+        font-weight: 760;
+      }
+
+      main {
+        padding: 34px 0 48px;
+      }
+
+      section {
+        margin-bottom: 42px;
+      }
+
+      .track-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 20px;
+      }
+
+      .track {
+        overflow: hidden;
+      }
+
+      .track img,
+      .track video {
+        display: block;
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        object-fit: cover;
+        border-bottom: 1px solid var(--line);
+        background: var(--panel);
+      }
+
+      .track img {
+        object-fit: contain;
+      }
+
+      .track-body {
+        display: flex;
+        min-height: 330px;
+        flex-direction: column;
+        gap: 14px;
+        padding: 18px;
+      }
+
+      .tag-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .tag {
+        display: inline-flex;
+        align-items: center;
+        min-height: 26px;
+        padding: 4px 8px;
+        border-radius: 6px;
+        background: var(--panel-strong);
+        color: #334155;
+        font-size: 0.82rem;
+        font-weight: 650;
+      }
+
+      .track p,
+      .note {
+        color: var(--muted);
+      }
+
+      .metric-list {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .metric {
+        padding: 10px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+      }
+
+      .metric strong {
+        display: block;
+        font-size: 1.08rem;
+      }
+
+      .metric span {
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: auto;
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        min-height: 36px;
+        padding: 7px 12px;
+        border: 1px solid var(--accent);
+        border-radius: 6px;
+        background: #e7f2f7;
+        color: var(--accent);
+        font-weight: 700;
+        text-decoration: none;
+      }
+
+      .button.secondary {
+        border-color: var(--line);
+        background: #ffffff;
+        color: #334155;
+      }
+
+      .note {
+        padding: 16px 18px;
+        background: var(--panel);
+      }
+
+      .example-table {
+        overflow: hidden;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      th,
+      td {
+        padding: 11px 12px;
+        border-bottom: 1px solid var(--line);
+        text-align: left;
+        vertical-align: top;
+      }
+
+      th {
+        background: var(--panel);
+        color: var(--ink);
+      }
+
+      tr:last-child td {
+        border-bottom: 0;
+      }
+
+      @media (max-width: 880px) {
+        .summary,
+        .track-grid,
+        .metric-list {
+          grid-template-columns: 1fr;
+        }
+
+        .track-body {
+          min-height: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="header-inner">
+        <p class="eyebrow">Newton VBD</p>
+        <h1>VBD development validation</h1>
+        <p class="subtitle">
+          This page gathers VBD validation tracks for articulated-body parent-joint reactions, closed-loop per-joint
+          reactions, cable stretch tension, and per-DOF joint friction. Each track links to its detailed page,
+          generated plots, rendered videos, and runnable examples.
+        </p>
+        <div class="summary" aria-label="summary">
+          <div class="summary-card">
+            <span class="label">Feature areas</span>
+            <span class="value">4 tracks</span>
+          </div>
+          <div class="summary-card">
+            <span class="label">Sensor readouts</span>
+            <span class="value">reaction + tension</span>
+          </div>
+          <div class="summary-card">
+            <span class="label">Runnable examples</span>
+            <span class="value">8 standalone scenes</span>
+          </div>
+          <div class="summary-card">
+            <span class="label">Diagnostics</span>
+            <span class="value">budget + pulley + friction</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section>
+        <h2>Validation Tracks</h2>
+        <div class="track-grid">
+          <article class="track">
+            <video controls muted loop playsinline preload="metadata" aria-label="Single pendulum joint reaction video">
+              <source src="../vbd_tension_reaction/assets/single_pendulum_newton.mp4" type="video/mp4">
+            </video>
+            <div class="track-body">
+              <div class="tag-row">
+                <span class="tag">State.body_parent_f</span>
+                <span class="tag">world-frame wrench</span>
+                <span class="tag">COM reference</span>
+                <span class="tag">hard + soft modes</span>
+              </div>
+              <h3>Joint Reaction Force/Torque</h3>
+              <p>
+                Validates VBD parent-joint reaction reporting for articulated rigid bodies. The pendulum cases compare
+                the reported wrench against force balance, using <code>R = ma - mg</code> for the linear component and
+                the corresponding torque about the child body COM. The video side plots show force residuals in N
+                separately from torque residuals in N m, and the detailed page includes a separate soft-mode check.
+              </p>
+              <div class="metric-list">
+                <div class="metric">
+                  <strong>0.003 N RMS</strong>
+                  <span>single pendulum hard-mode force residual</span>
+                </div>
+                <div class="metric">
+                  <strong>0.121 N RMS</strong>
+                  <span>double pendulum hard-mode force residual</span>
+                </div>
+              </div>
+              <div class="actions">
+                <a class="button" href="../vbd_tension_reaction/index.html">Open reaction page</a>
+                <a class="button secondary" href="../vbd_tension_reaction/assets/budget_sweeps.png">Budget sweep</a>
+              </div>
+            </div>
+          </article>
+
+          <article class="track">
+            <video controls muted loop playsinline preload="metadata" aria-label="Closed four-bar per-joint reaction video">
+              <source src="../vbd_joint_reaction/assets/vbd_joint_reaction_four_bar.mp4" type="video/mp4">
+            </video>
+            <div class="track-body">
+              <div class="tag-row">
+                <span class="tag">state.vbd.joint_reaction_f</span>
+                <span class="tag">joint-indexed</span>
+                <span class="tag">closed loop</span>
+                <span class="tag">COM reference</span>
+              </div>
+              <h3>Per-Joint Reaction Readout</h3>
+              <p>
+                Validates the VBD-only joint-indexed reaction readout on a closed four-bar linkage. The green right
+                link has both an orange-green internal joint and a gray-green closure joint, so its green-link
+                net joint load is the body-level sum while <code>state.vbd.joint_reaction_f</code>
+                keeps the two joint loads separated. The detailed page also includes a standalone closed cable loop
+                pulled apart at two highlighted cable segments.
+              </p>
+              <div class="metric-list">
+                <div class="metric">
+                  <strong>1.49e-08 N</strong>
+                  <span>closed-cable reaction/tension difference</span>
+                </div>
+                <div class="metric">
+                  <strong>four-bar + cable loop</strong>
+                  <span>joint-indexed closed-loop loads separated</span>
+                </div>
+              </div>
+              <div class="actions">
+                <a class="button" href="../vbd_joint_reaction/index.html">Open per-joint page</a>
+                <a class="button secondary" href="../vbd_joint_reaction/assets/fourbar_joint_reactions.png">
+                  Reaction plot
+                </a>
+                <a class="button secondary" href="../vbd_joint_reaction/assets/closed_cable_joint_reactions.png">
+                  Cable plot
+                </a>
+                <a class="button secondary" href="../vbd_joint_reaction/assets/vbd_joint_reaction_closed_cable.mp4">
+                  Cable video
+                </a>
+              </div>
+            </div>
+          </article>
+
+          <article class="track">
+            <video controls muted loop playsinline preload="metadata" aria-label="Cable tension pulley video">
+              <source src="../vbd_cable_tension/assets/cable_tension_pulley_newton.mp4" type="video/mp4">
+            </video>
+            <div class="track-body">
+              <div class="tag-row">
+                <span class="tag">state.vbd.cable_tension</span>
+                <span class="tag">joint-indexed</span>
+                <span class="tag">stretch magnitude</span>
+              </div>
+              <h3>Cable Tension</h3>
+              <p>
+                Validates cable stretch-tension access from simple equilibrium loads to pulley contact diagnostics.
+                The hanging cases check <code>T = mg</code> and <code>T = mg + F_applied</code>; the pulley cases
+                expose segment-wise tension gradients and a two-pulley capstan-style diagnostic under frictional contact.
+              </p>
+              <div class="metric-list">
+                <div class="metric">
+                  <strong>&le;0.18% error</strong>
+                  <span>hanging-load checks</span>
+                </div>
+                <div class="metric">
+                  <strong>pulley diagnostics</strong>
+                  <span>single + two-pulley scenes</span>
+                </div>
+              </div>
+              <div class="actions">
+                <a class="button" href="../vbd_cable_tension/index.html">Open cable page</a>
+                <a class="button secondary" href="../vbd_cable_tension/assets/single_pulley_tension_gradient.png">
+                  Pulley plot
+                </a>
+                <a class="button secondary" href="../vbd_cable_tension/assets/capstan_simulated_pulley_system.png">
+                  Capstan plot
+                </a>
+              </div>
+            </div>
+          </article>
+
+          <article class="track">
+            <video controls muted loop playsinline preload="metadata" aria-label="Joint friction pendulum video">
+              <source src="../vbd_joint_friction/assets/joint_friction_pendulums.mp4" type="video/mp4">
+            </video>
+            <div class="track-body">
+              <div class="tag-row">
+                <span class="tag">Model.joint_friction</span>
+                <span class="tag">revolute</span>
+                <span class="tag">prismatic</span>
+                <span class="tag">Coulomb tanh law</span>
+              </div>
+              <h3>Joint Friction</h3>
+              <p>
+                Validates per-DOF VBD joint friction for coast-down, static stick, sliding under applied drive, and
+                kinetic-energy dissipation. The report compares revolute and prismatic velocities against the
+                constant-friction analytic expectation away from the regularized zero-velocity transition.
+              </p>
+              <div class="metric-list">
+                <div class="metric">
+                  <strong>0.001 rad/s</strong>
+                  <span>revolute coast-down max error</span>
+                </div>
+                <div class="metric">
+                  <strong>95.8% drop</strong>
+                  <span>kinetic energy dissipated</span>
+                </div>
+              </div>
+              <div class="actions">
+                <a class="button" href="../vbd_joint_friction/index.html">Open friction page</a>
+                <a class="button secondary" href="../vbd_joint_friction/assets/joint_friction_validation.png">
+                  Validation plot
+                </a>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2>Standalone Examples</h2>
+        <div class="example-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Readout</th>
+                <th>Example</th>
+                <th>Run Command</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>Model.joint_friction</code></td>
+                <td>Per-DOF revolute joint friction with RK4 pendulum reference</td>
+                <td><code>uv run -m newton.examples basic_joint_friction</code></td>
+              </tr>
+              <tr>
+                <td><code>State.body_parent_f</code></td>
+                <td>Single pendulum reaction force and torque</td>
+                <td><code>uv run -m newton.examples vbd_joint_reaction_pendulum</code></td>
+              </tr>
+              <tr>
+                <td><code>State.body_parent_f</code></td>
+                <td>Double pendulum parent-joint reaction balance</td>
+                <td><code>uv run -m newton.examples vbd_joint_reaction_double_pendulum</code></td>
+              </tr>
+              <tr>
+                <td><code>state.vbd.joint_reaction_f</code></td>
+                <td>Closed four-bar with separated tree and loop joint reactions</td>
+                <td><code>uv run -m newton.examples vbd_joint_reaction_four_bar</code></td>
+              </tr>
+              <tr>
+                <td><code>state.vbd.joint_reaction_f</code> + <code>state.vbd.cable_tension</code></td>
+                <td>Standalone closed cable loop with equal/opposite pull loads and tension/reaction readouts</td>
+                <td><code>uv run -m newton.examples vbd_joint_reaction_closed_cable</code></td>
+              </tr>
+              <tr>
+                <td><code>state.vbd.cable_tension</code></td>
+                <td>Hanging cable load with optional applied force</td>
+                <td><code>uv run -m newton.examples cable_tension_hanging</code></td>
+              </tr>
+              <tr>
+                <td><code>state.vbd.cable_tension</code></td>
+                <td>Wrapped cable around a frictional pulley</td>
+                <td><code>uv run -m newton.examples cable_tension_pulley</code></td>
+              </tr>
+              <tr>
+                <td><code>state.vbd.cable_tension</code></td>
+                <td>Two-pulley capstan-style cable tension diagnostic</td>
+                <td><code>uv run -m newton.examples cable_tension_capstan</code></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+    </main>
+  </body>
+</html>

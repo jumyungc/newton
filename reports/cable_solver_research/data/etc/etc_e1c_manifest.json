@@ -1,0 +1,116 @@
+{
+  "frames": 61,
+  "generated_utc": "20260709T073025Z",
+  "hostname": "jumyungc-spock",
+  "owner_line_start": "OWNER: Team Fable (claimed 2026-07-09T07:19:27Z \u2014 round 7: ETC-VBD invention \u2014 N1 energy-certified corrections (fixes measured cadence instability), N2 saturation-triggered cadence, N3 space-time coarse; experiment-driven; prior-art gap web-checked)",
+  "pid": 2311430,
+  "results": {
+    "n1024_s1e5_b2500": {
+      "etc_r32_c10_dist": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 60,
+        "corrections_attempted": 60,
+        "energy_rejects": 0,
+        "energy_shrinks": 0,
+        "final_max_bend_rad": 1.0116857290267944,
+        "final_max_stretch_m": 0.16982980072498322,
+        "guard_trips": 0,
+        "last_diag": {},
+        "max_bend_rad": 1.151371955871582,
+        "max_stretch_m": 0.269354909658432,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 3.5716919228434563,
+        "trigger_fires": 0,
+        "wall_s": 5.9483301639556885
+      },
+      "etc_r32_c5_dist": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 120,
+        "corrections_attempted": 120,
+        "energy_rejects": 0,
+        "energy_shrinks": 0,
+        "final_max_bend_rad": 3.1393752098083496,
+        "final_max_stretch_m": 20.44591522216797,
+        "guard_trips": 0,
+        "last_diag": {},
+        "max_bend_rad": 3.1398215293884277,
+        "max_stretch_m": 23.538318634033203,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 3.5972706973552704,
+        "trigger_fires": 0,
+        "wall_s": 9.551866292953491
+      }
+    },
+    "n1024_s1e6_b2500": {
+      "etc_r32_c10_dist": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 60,
+        "corrections_attempted": 60,
+        "energy_rejects": 0,
+        "energy_shrinks": 0,
+        "final_max_bend_rad": 3.14131760597229,
+        "final_max_stretch_m": 227142320128.0,
+        "guard_trips": 0,
+        "last_diag": {},
+        "max_bend_rad": 3.141578435897827,
+        "max_stretch_m": 227142320128.0,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 3.6189649254083633,
+        "trigger_fires": 0,
+        "wall_s": 6.0547637939453125
+      },
+      "etc_r32_c5_dist": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 120,
+        "corrections_attempted": 120,
+        "energy_rejects": 0,
+        "energy_shrinks": 0,
+        "final_max_bend_rad": 3.1396665573120117,
+        "final_max_stretch_m": 85178252787712.0,
+        "guard_trips": 0,
+        "last_diag": {},
+        "max_bend_rad": 3.1415748596191406,
+        "max_stretch_m": 85178252787712.0,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 3.6709029227495193,
+        "trigger_fires": 0,
+        "wall_s": 7.366840124130249
+      }
+    },
+    "n1024_s1e7_b2500": {
+      "etc_r32_c10_dist": {
+        "error": "FloatingPointError('etc_r32_c10_dist: non-finite final state')"
+      },
+      "etc_r32_c5_dist": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 120,
+        "corrections_attempted": 120,
+        "energy_rejects": 0,
+        "energy_shrinks": 0,
+        "final_max_bend_rad": 2.039611577987671,
+        "final_max_stretch_m": 1.6200142783088576e+25,
+        "guard_trips": 0,
+        "last_diag": {},
+        "max_bend_rad": 3.1414690017700195,
+        "max_stretch_m": 1.6200142783088576e+25,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 4.058084450662136,
+        "trigger_fires": 0,
+        "wall_s": 8.111083030700684
+      }
+    }
+  },
+  "schema": "fable-mg-vbd-ladder/v1",
+  "semantics": "mg_rR_cK = requested-VBD2 smoother + certificate-gated coarse-companion BGN correction every K substeps at coarsening R; lra = known-art long-range attachment clamp witness; Track-B; descriptive timings",
+  "sources": {
+    "codex_bgn_global.py": "e20f2bbd65a5058b06c1c569405a9bc6333b950e02fc5d9bc0b79168b1190d93",
+    "fable_fast_step.py": "27ac986b6d82cabc3424905733c297b5653a2342099d2dde51504d1674041d8b",
+    "fable_ladder.py": "745327eed04050e7117c9c302924c71dd9c64fcbe92a3fe1286dfa0e3a86b4ca",
+    "fable_mg.py": "fcc39f80babb5a9c69a3578887b8d19049dbd6bd8165970741164504f36228f1"
+  }
+}
