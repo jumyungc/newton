@@ -23,7 +23,6 @@ from newton._src.solvers.vbd.rigid_vbd_kkt import (
     _FUSED_TREE_MIN_LEVELS,
     _PAIRED_COARSE_MIN_CLOSURES,
     _corrected_pose,
-    _cr_persistent_max_rows,
     _fused_tree_levels_supported,
     _inverse_spatial_robust,
     add_joint_stress_majorizer,
@@ -3280,9 +3279,7 @@ def _structural_kkt_path_solve_has_small_residual(test, device):
 def _structural_kkt_persistent_cr_matches_level_schedule(test, device):
     """Preserve the exact CR correction while collapsing short-path launches."""
 
-    active_threshold = _cr_persistent_max_rows(device)
-    expected_threshold = 160 if device.is_cuda and device.arch == 120 else _CR_PERSISTENT_MAX_ROWS
-    test.assertEqual(active_threshold, expected_threshold)
+    active_threshold = _CR_PERSISTENT_MAX_ROWS
 
     def simulate(use_persistent_cr):
         # Exercise the largest topology routed through the persistent kernel.
@@ -3329,7 +3326,7 @@ def _structural_kkt_persistent_cr_matches_level_schedule(test, device):
     test.assertFalse(larger_bucket.use_persistent_cr)
 
     cpu = wp.get_device("cpu")
-    cpu_model, _, _ = _build_chain(cpu, segments=_cr_persistent_max_rows(cpu) + 1, stiffness=1.0e9)
+    cpu_model, _, _ = _build_chain(cpu, segments=_CR_PERSISTENT_MAX_ROWS + 1, stiffness=1.0e9)
     cpu_solver = newton.solvers.SolverVBD(
         cpu_model,
         iterations=1,
@@ -3341,7 +3338,7 @@ def _structural_kkt_persistent_cr_matches_level_schedule(test, device):
 
 def _structural_kkt_cr_tail_preserves_factors(test, device):
     """Check dispatch, independent batch values, and fresh captured CR factors."""
-    for count, batches in ((1, 1), (160, 2), (161, 1), (257, 3), (511, 1), (1024, 1)):
+    for count, batches in ((1, 1), (128, 2), (129, 2), (160, 2), (161, 1), (257, 3), (511, 1), (1024, 1)):
         with test.subTest(rows=count, batches=batches):
             paths = [
                 rigid_vbd_kkt._Path(
@@ -3354,7 +3351,7 @@ def _structural_kkt_cr_tail_preserves_factors(test, device):
             # Only algebra is exercised here; no body endpoint binding is needed.
             bucket = rigid_vbd_kkt._PathBucket(paths, device)
             baseline = rigid_vbd_kkt._PathBucket(paths, device)
-            expected = device.is_cuda and device.arch == 120 and count > _cr_persistent_max_rows(device)
+            expected = device.is_cuda and count > _CR_PERSISTENT_MAX_ROWS
             test.assertEqual(bucket.use_fused_cr_tail, expected)
             if expected:
                 test.assertLessEqual(
@@ -3430,8 +3427,6 @@ def _structural_kkt_cr_tail_preserves_factors(test, device):
 
 def _structural_kkt_cr_tail_preserves_captured_trajectory(test, device):
     """Preserve poses and velocities with fresh operators at G1 and G2."""
-    if device.arch != 120:
-        test.skipTest("Fused CR tail is enabled only on the measured SM120 architecture")
     model, _, _ = _build_chain(device, segments=258, stiffness=1.0e9)
     for global_iterations in (1, 2):
         results = []

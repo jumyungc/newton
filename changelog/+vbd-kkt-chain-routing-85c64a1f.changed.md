@@ -1,0 +1,1 @@
+Select SolverVBD's opt-in global joint chain kernels by problem size on CUDA, using a bounded fused cyclic-reduction tail for long chains without GPU-architecture-specific routing. The solve equations and public settings are unchanged.

@@ -127,19 +127,8 @@ _CR_SERIAL_TERMINAL_SIZE = 4
 _CR_PERSISTENT_MAX_ROWS = 128
 """Conservative path limit for the synchronized single-block CUDA solve."""
 
-_CR_PERSISTENT_SM120_MAX_ROWS = 160
-"""Measured SM120 path limit for the synchronized single-block CUDA solve."""
-
 _CR_TAIL_MAX_ROWS = 64
-"""Largest measured SM120 strided tail fused after wide path reduction."""
-
-
-def _cr_persistent_max_rows(device: wp.context.Device) -> int:
-    """Return the measured persistent-CR limit for one CUDA architecture."""
-
-    if device.is_cuda and device.arch == 120:
-        return _CR_PERSISTENT_SM120_MAX_ROWS
-    return _CR_PERSISTENT_MAX_ROWS
+"""Maximum active row count fused after parallel path reduction."""
 
 
 _PAIRED_OPEN_CHAIN_MIN_BODIES = 64
@@ -4512,7 +4501,12 @@ def _path_bucket_diagnostics(paths: list[_Path], device) -> _BucketDiagnostics:
         + _array_payload_bytes(size, wp.spatial_vector)
         + _array_payload_bytes(size, wp.vec2i)
     )
-    route = "path_persistent_cr" if device.is_cuda and row_count <= _CR_PERSISTENT_MAX_ROWS else "path_level_cr"
+    if device.is_cuda and row_count <= _CR_PERSISTENT_MAX_ROWS:
+        route = "path_persistent_cr"
+    elif device.is_cuda:
+        route = "path_fused_tail_cr"
+    else:
+        route = "path_level_cr"
     return _BucketDiagnostics(
         kind="path",
         batch_count=batch_count,
@@ -6410,8 +6404,8 @@ class _PathBucket:
         self.batch_count = len(paths)
         self.size = self.batch_count * self.row_count
         self.body_size = self.batch_count * self.body_count
-        self.use_persistent_cr = device.is_cuda and self.row_count <= _cr_persistent_max_rows(device)
-        self.use_fused_cr_tail = device.is_cuda and device.arch == 120 and not self.use_persistent_cr
+        self.use_persistent_cr = device.is_cuda and self.row_count <= _CR_PERSISTENT_MAX_ROWS
+        self.use_fused_cr_tail = device.is_cuda and not self.use_persistent_cr
 
         joint_ids: list[int] = []
         body_ids: list[int] = []
