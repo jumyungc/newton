@@ -31,6 +31,8 @@ class ContactConstants:
 
     anchor0_prev: wp.vec3
     anchor1_prev: wp.vec3
+    surface_displacement: wp.vec3
+    previous_penetration: float
     compliance: float
     damping_fraction: float
 
@@ -595,9 +597,12 @@ def prepare_constraint_contact_blocks(
     contact_shape1: wp.array[wp.int32],
     contact_point0: wp.array[wp.vec3],
     contact_point1: wp.array[wp.vec3],
+    contact_surface_velocity: wp.array[wp.vec3],
     contact_offset0: wp.array[wp.vec3],
     contact_offset1: wp.array[wp.vec3],
     contact_normal: wp.array[wp.vec3],
+    contact_margin0: wp.array[float],
+    contact_margin1: wp.array[float],
     shape_body: wp.array[wp.int32],
     body_q: wp.array[wp.transform],
     body_com: wp.array[wp.vec3],
@@ -719,8 +724,19 @@ def prepare_constraint_contact_blocks(
             compliance = 1.0 / effective_stiffness
             damping_fraction = damping_rate / effective_stiffness
 
+    # Damping uses step-start poses, not C0: collision refreshes may rebase
+    # the ALM contact frame at a predicted or intermediate iterate.
+    point0_prev = wp.transform_point(prev_pose0, contact_point0[contact])
+    point1_prev = wp.transform_point(prev_pose1, contact_point1[contact])
+    constants.previous_penetration = -contact_surface_separation(
+        point0_prev, point1_prev, contact_normal[contact], contact_margin0[contact], contact_margin1[contact]
+    )
     constants.anchor0_prev = anchor0_prev
     constants.anchor1_prev = anchor1_prev
+    # Match the collision pipeline's relative surface-velocity convention.
+    constants.surface_displacement = (
+        dt * contact_surface_velocity[contact] if contact_surface_velocity else wp.vec3(0.0)
+    )
     constants.compliance = compliance if not use_finite_material or effective_stiffness > 0.0 else -1.0
     constants.damping_fraction = damping_fraction
     contact_constants[contact] = constants
@@ -741,7 +757,6 @@ def _solve_constraint_contact_group(
     contact_margin0: wp.array[float],
     contact_margin1: wp.array[float],
     contact_material_mu: wp.array[float],
-    contact_C0: wp.array[wp.vec3],
     contact_tangent0: wp.array[wp.vec3],
     contact_tangent1: wp.array[wp.vec3],
     response0_normal: wp.array[wp.spatial_vector],
@@ -784,14 +799,11 @@ def _solve_constraint_contact_group(
         old_lambda = contact_lambda[contact]
         old_normal = wp.max(wp.dot(old_lambda, n), 0.0)
         old_tangent = old_lambda - n * wp.dot(old_lambda, n)
-        C0 = contact_C0[contact]
-        C0_n = wp.dot(C0, n)
-
         constants = contact_constants[contact]
         compliance = constants.compliance
         damping_fraction = constants.damping_fraction
 
-        normal_residual = penetration - damping_fraction * C0_n - compliance * old_normal
+        normal_residual = penetration - damping_fraction * constants.previous_penetration - compliance * old_normal
         response0_n = response0_normal[contact]
         response1_n = response1_normal[contact]
         x0_n = wp.spatial_top(response0_n)
@@ -821,7 +833,7 @@ def _solve_constraint_contact_group(
         )
         anchor0_prev = constants.anchor0_prev
         anchor1_prev = constants.anchor1_prev
-        relative_motion = (anchor1 - anchor1_prev) - (anchor0 - anchor0_prev)
+        relative_motion = (anchor1 - anchor1_prev) - (anchor0 - anchor0_prev) + constants.surface_displacement
 
         slip = relative_motion - n * wp.dot(n, relative_motion)
         tangent_drive = -slip
@@ -931,7 +943,6 @@ def solve_constraint_contact_color(
     contact_margin0: wp.array[float],
     contact_margin1: wp.array[float],
     contact_material_mu: wp.array[float],
-    contact_C0: wp.array[wp.vec3],
     contact_tangent0: wp.array[wp.vec3],
     contact_tangent1: wp.array[wp.vec3],
     response0_normal: wp.array[wp.spatial_vector],
@@ -967,7 +978,6 @@ def solve_constraint_contact_color(
             contact_margin0,
             contact_margin1,
             contact_material_mu,
-            contact_C0,
             contact_tangent0,
             contact_tangent1,
             response0_normal,
@@ -1007,7 +1017,6 @@ def solve_constraint_contact_colors_fused(
     contact_margin0: wp.array[float],
     contact_margin1: wp.array[float],
     contact_material_mu: wp.array[float],
-    contact_C0: wp.array[wp.vec3],
     contact_tangent0: wp.array[wp.vec3],
     contact_tangent1: wp.array[wp.vec3],
     response0_normal: wp.array[wp.spatial_vector],
@@ -1061,7 +1070,6 @@ def solve_constraint_contact_colors_fused(
                 contact_margin0,
                 contact_margin1,
                 contact_material_mu,
-                contact_C0,
                 contact_tangent0,
                 contact_tangent1,
                 response0_normal,
@@ -1099,7 +1107,6 @@ def solve_constraint_contacts_serial(
     contact_margin0: wp.array[float],
     contact_margin1: wp.array[float],
     contact_material_mu: wp.array[float],
-    contact_C0: wp.array[wp.vec3],
     contact_tangent0: wp.array[wp.vec3],
     contact_tangent1: wp.array[wp.vec3],
     response0_normal: wp.array[wp.spatial_vector],
@@ -1135,7 +1142,6 @@ def solve_constraint_contacts_serial(
                 contact_margin0,
                 contact_margin1,
                 contact_material_mu,
-                contact_C0,
                 contact_tangent0,
                 contact_tangent1,
                 response0_normal,
@@ -1370,7 +1376,6 @@ class RigidPairContact:
         contact_material_ke: wp.array,
         contact_material_kd: wp.array,
         contact_material_mu: wp.array,
-        contact_C0: wp.array,
         contact_lambda: wp.array,
         legacy_hard_contacts: int,
         contact_compliant_alm: bool,
@@ -1396,9 +1401,12 @@ class RigidPairContact:
                 contacts.rigid_contact_shape1,
                 contacts.rigid_contact_point0,
                 contacts.rigid_contact_point1,
+                contacts.rigid_contact_surface_velocity,
                 contacts.rigid_contact_offset0,
                 contacts.rigid_contact_offset1,
                 contacts.rigid_contact_normal,
+                contacts.rigid_contact_margin0,
+                contacts.rigid_contact_margin1,
                 model.shape_body,
                 body_q,
                 model.body_com,
@@ -1435,7 +1443,6 @@ class RigidPairContact:
             contacts.rigid_contact_margin0,
             contacts.rigid_contact_margin1,
             contact_material_mu,
-            contact_C0,
             self.tangent0,
             self.tangent1,
             self.response0_normal,
