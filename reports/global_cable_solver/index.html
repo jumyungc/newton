@@ -1,0 +1,1030 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Global Cable Solver — Internal</title>
+  <style>
+    :root{--ink:#17202a;--muted:#5c6b7b;--line:#d9e0e8;--panel:#f7f9fb;--accent:#1f6f8b;--ok:#2c7a4b;--warn:#a86b1a;--bad:#a52a2a;--max:1320px}
+    *{box-sizing:border-box}
+    body{margin:0;color:var(--ink);background:#fff;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.5}
+    header{border-bottom:1px solid var(--line);background:#fbfcfd}
+    main,.inner,footer{width:min(var(--max),calc(100vw - 32px));margin:0 auto}
+    .inner{padding:28px 0 20px}
+    main{padding:24px 0 48px}
+    footer{padding:0 0 40px;color:var(--muted);font-size:.85rem}
+    h1{margin:0 0 8px;font-size:clamp(1.6rem,3vw,2.2rem);line-height:1.1}
+    h2{margin:0 0 10px;font-size:1.15rem}
+    h3{margin:0 0 6px;font-size:.95rem}
+    p{margin:0 0 10px}
+    a{color:var(--accent)}
+    code{background:#edf2f7;padding:.06em .25em;border-radius:4px;font-size:.85em}
+    section{margin:0 0 30px;padding:18px 18px 14px;border:1px solid var(--line);border-radius:10px;background:#fff}
+    .subtitle{max-width:920px;color:var(--muted);font-size:.95rem}
+    .status{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:14px}
+    .box{border:1px solid var(--line);border-radius:7px;padding:9px 11px;background:#fff}
+    .box .label{display:block;color:var(--muted);font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+    .box .value{display:block;margin-top:3px;font-weight:650;font-size:.95rem}
+    .note{border-left:3px solid var(--accent);background:var(--panel);padding:9px 12px;font-size:.92rem}
+    .scene-head{display:flex;align-items:baseline;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:8px}
+    .scene-head h2{margin:0}
+    .scene-head .meta{color:var(--muted);font-size:.85rem}
+    .video-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin:8px 0 14px}
+    figure{margin:0}
+    figcaption{margin:0 0 4px;color:var(--muted);font-size:.78rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    video{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:6px;background:#000}
+    .table-wrap{overflow-x:auto;margin-top:8px}
+    table{width:100%;border-collapse:collapse;border:1px solid var(--line);background:#fff;font-size:.85rem}
+    th,td{padding:5px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+    th{background:var(--panel);color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;font-weight:700;white-space:nowrap}
+    td.num{text-align:right;font-variant-numeric:tabular-nums}
+    tr.ref td{background:#f5faf7}
+    tr.candidate td{background:#fbf8ef}
+    .pill{display:inline-block;padding:1px 7px;border-radius:999px;font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+    .pill.ok{background:#e6f3eb;color:var(--ok)}
+    .pill.warn{background:#fbf3df;color:var(--warn)}
+    .pill.bad{background:#f5e2e0;color:var(--bad)}
+    .placeholder{padding:18px;border:1px dashed var(--line);border-radius:8px;color:var(--muted);background:var(--panel);font-size:.9rem;text-align:center}
+    section.group-header{margin:24px 0 6px;padding:8px 14px;border:none;background:linear-gradient(90deg,#eef4f7,#fff);border-left:4px solid var(--accent);border-radius:0;box-shadow:none}
+    details.extras-toggle{margin-top:12px;border-top:1px dashed var(--line);padding-top:8px}
+    details.extras-toggle>summary{cursor:pointer;color:var(--muted);font-size:.85rem;font-weight:600;padding:4px 0;user-select:none}
+    details.extras-toggle>summary:hover{color:var(--accent)}
+    details.extras-toggle[open]>summary{color:var(--ink);margin-bottom:6px}
+    .video-grid.headline{grid-template-columns:repeat(auto-fill,minmax(360px,1fr))}
+    .video-grid.extras{grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}
+    @media(max-width:860px){.status{grid-template-columns:repeat(2,minmax(0,1fr))};.video-grid.headline{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+  <header>
+    <div class="inner">
+      <p style="margin:0 0 4px;color:var(--muted);font-size:.85rem;">Internal · not linked from index</p>
+      <h1>Global Cable Solver — Research Log</h1>
+      <p class="subtitle">Searching for a cable solver that beats both VBD (locality) and Newton (cost) — fastest possible while staying physically grounded. Each scene shows the Newton-tight reference, the VBD iteration sweep, and our candidate methods as they come online.</p>
+      <div class="status">
+        <div class="box"><span class="label">Phase</span><span class="value">Video gap-fill complete on new variants</span></div>
+        <div class="box"><span class="label">Cells filled</span><span class="value">172 / 742</span></div>
+        <div class="box"><span class="label">Current candidate</span><span class="value">Headline videos for Thomas-bend / VBD+Thomas / soft contact filled in</span></div>
+        <div class="box"><span class="label">Last update</span><span class="value">2026-06-20 02:12Z</span></div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>Headline — Method R v2 + XPBD bend</h2>
+      <div class="note">
+      <strong>One solver, four quadrants</strong>: stiff bend / soft bend × with-contact / without-contact.
+      Same algorithm, same hyper-parameters — only the scene's <code>bend_ke</code> changes.
+      Source: <code>bench/global_cable/method_a_warp.py</code> → <code>substep_r(apply_bend=True)</code>.
+      </div>
+      <p><strong>Method R v2</strong> composes three positional-XPBD pieces (NOTES §47):</p>
+      <ul>
+        <li><strong>Distance</strong> — direction-aware block-tridiag Thomas (from Method N v1): one global O(N) sweep per cable. Locked rotation; child position only.</li>
+        <li><strong>Angular impulse</strong> — every distance multiplier λ also drives a body-frame torque proportional to <code>r × n</code>; trace-isotropic Schur term <code>‖r‖² · trace(I⁻¹)/3</code> is added to the scalar tridiag diagonal so the global solve stays scalar.</li>
+        <li><strong>Bend</strong> — per-pair XPBD projection of <code>C = axis_angle(q_p⁻¹·q_c·q_rest⁻¹)</code>, in <em>parent body frame</em> then rotated to world via <code>R_p</code>. Critical: missing this rotate-out broke piles where parents have mixed orientations.</li>
+      </ul>
+      <p><strong>(bend × contact) matrix on 28 800-body XL pile + 256-segment chain</strong> (Method R @10 on piles, @20 on chain):</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th></th><th>Stiff bend (bend_ke = 5.0)</th><th>Soft bend (bend_ke = 0.05)</th><th>Pure rope (bend_ke = 0)</th></tr></thead>
+        <tbody>
+          <tr><td><strong>With contact</strong><br>(XL pile, 28 800 bodies)</td><td>bend 4.7°, stretch 0.7 %, step 69 ms</td><td>bend 25°, stretch 0.21 %, step 69 ms</td><td>bend ≈ 180° (rope-like fold), step 69 ms</td></tr>
+          <tr><td><strong>No contact</strong><br>(256-seg cantilever)</td><td>bend 15°, stretch 0.12 %, step 8.8 ms</td><td colspan="2">Set <code>bend_ke = 0</code> via scene; same algorithm, same step cost — cable hangs as rope.</td></tr>
+        </tbody>
+      </table></div>
+      <p><strong>Cost</strong>: Method R per iter ≈ 4.4× VBD per iter on chains, but K=20 is enough to match VBD@400 quality on the 1024-segment chain (Method R wall-clock ≈ <em>5× faster</em> than VBD@400 at the same residual; ≈ comparable wall-clock to VBD@88). On piles, K=10 is enough — stretch halves K=10→20 then saturates at ~1.5e-3 by K=40 (NOTES §47.4).</p>
+      <p><strong>Scoreboard</strong>: Method R v2 is the new pile bestest <em>and</em> the chain articulation winner. Method N v1 is retained as the pure-distance variant (locked rotation; faster on stiff-bend piles where articulation is unwanted). Method A @3 remains the chains-only block-tridiag GN reference. All VBD@K rows kept as honest baselines.</p>
+      <p><strong>Method S — the new bestest (NEW, 2026-06-17)</strong>: Method R + translation-only <strong>SOR (successive over-relaxation)</strong> between outer iters. Snapshot → distance + bend → SOR-blend with <code>ω = 1.5</code> → contact projection. <strong>Zero step-time cost</strong> (kernel is one transform load + write per body).</p>
+      <p><strong>Universal omega = 1.5</strong>: wins on all 5 XL pile bend variants (stiff → rope), all 3 long-chain cantilevers (256/512/1024 seg), and the short chains. Tested ω = 1.9 first and found it regressed on very-soft bend (+20 % stretch on bend_ke = 0.005); ω = 1.5 wins everywhere. No per-scene tuning, no method dispatch.</p>
+      <p><strong>(bend × contact) matrix for canonical Method S ω = 1.5 K = 10</strong> (XL pile, 28 800 bodies):</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>bend_ke</th><th>Method R K=10 stretch</th><th>Method S ω=1.5 stretch</th><th>improvement</th><th>step time</th></tr></thead>
+        <tbody>
+          <tr><td>5.0 (stiff)</td><td>7.00e-3</td><td><strong>3.54e-3</strong></td><td><strong>-49 %</strong></td><td>69.8 ms (identical)</td></tr>
+          <tr><td>0.5 (medium)</td><td>3.63e-3</td><td><strong>2.72e-3</strong></td><td><strong>-25 %</strong></td><td>69.8 ms</td></tr>
+          <tr><td>0.05 (soft)</td><td>2.10e-3</td><td><strong>1.43e-3</strong></td><td><strong>-32 %</strong></td><td>69.9 ms</td></tr>
+          <tr><td>0.005 (very soft)</td><td>4.48e-3</td><td><strong>3.00e-3</strong></td><td><strong>-33 %</strong></td><td>69.7 ms</td></tr>
+          <tr><td>0 (rope)</td><td>9.49e-3</td><td><strong>6.67e-3</strong></td><td><strong>-30 %</strong></td><td>69.5 ms</td></tr>
+        </tbody>
+      </table></div>
+      <p><strong>Long-chain Pareto for Method S ω=1.5 K=20</strong>: stretch 3.9× tighter on long_256, 2.0× tighter on long_512, 3.2× tighter on long_1024 vs Method R K=20, with drift also halved on each.</p>
+      <p><strong>K-curve (long_256, ω=1.5)</strong>: stretch halves per K-doubling — K=5 → 4.54e-3, K=10 → 2.18e-3, K=20 → 1.14e-3, K=40 → 6.06e-4. <strong>Method S K=5 matches Method R K=20 quality at 3.8× faster wall-clock</strong> (3.93 ms vs 14.88 ms). Speed-tier deployment ships at K=5.</p>
+      <p><em>Critical ordering insight</em>: SOR must be applied BEFORE the contact projection — putting it after caused 3.5× higher bend and 4× higher vmax (contact-corrected positions get extrapolated back into penetration). The reorder lets contacts have the last word per iter, killing the oscillation. SOR-before-contacts is the canonical form.</p>
+      <p><em>Universal omega search</em>: ω = 1.5 was found by sweeping ω ∈ {1.0, 1.1, …, 1.9, 1.95, 1.99} on a short chain (max gain at ω → 2), then validating on the XL bend sweep where ω = 1.9 broke down at very-soft bend. ω = 1.5 is the universal sweet spot — captures most of the gain on stiff cases and avoids over-correction on soft cases.</p>
+
+      <h2 style="margin-top:24px">Thomas-bend extension (NEW, 2026-06-18) — fixes bend saturation on long stiff cables</h2>
+      <p>Earlier (NOTES §49.16) we documented that <strong>Method S's per-pair XPBD bend saturates around 5° on long stiff-bend cables</strong> regardless of K or bend_ke — caused by the locality limit of per-pair projection.</p>
+      <p>The fix: a <strong>second block-tridiagonal Thomas solve for bend</strong>, alongside the stretch Thomas. Bend has the same chain coupling structure as stretch, so the same Thomas trick applies. Implementation: ~200 lines (assembly + apply kernels; reuses existing vec3 Thomas solver via the isotropic-trace inertia simplification).</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>method</th><th>K</th><th>step ms</th><th>stretch</th><th>bend_max</th></tr></thead>
+        <tbody>
+          <tr><td>Method S (per-pair XPBD bend)</td><td>10</td><td>28</td><td>2.87e-3</td><td>7.37°</td></tr>
+          <tr><td>Method S (per-pair XPBD bend)</td><td>20</td><td>56</td><td>2.12e-3</td><td>5.43°</td></tr>
+          <tr><td><strong>Method S + Thomas-bend</strong></td><td>10</td><td>56</td><td>2.82e-3</td><td><strong>2.78°</strong></td></tr>
+          <tr><td><strong>Method S + Thomas-bend</strong></td><td>20</td><td>113</td><td>2.05e-3</td><td><strong>1.99°</strong></td></tr>
+        </tbody>
+      </table></div>
+      <p><strong>Iso-wall-clock comparison (both 56 ms)</strong>: Method S K=20 baseline → 5.43° vs Method S + Thomas-bend K=10 → 2.78°. <strong>2× tighter bend at the same wall-clock</strong>. The bend saturation that was structural to per-pair XPBD is solved by upgrading bend to a global Thomas. Stretch and drift unchanged — clean drop-in for rigid-cable applications.</p>
+      <p><strong>Full 14-scene sweep at K=10 ω=1.5 (Method S + Thomas-bend)</strong>: universally stable, no divergences. Wins clearly on scenes where bend_ke > 0: cable_pile_xl bend 0.016 vs 0.050 rad (<strong>3.2× tighter</strong>), cable_pile_scaled bend 2.3× tighter + stretch 60% tighter, chain stretch_bend bend 5× tighter. Roughly tied or slight loss on bend_ke=0 scenes (Thomas-bend has overhead but no benefit there). Step time 30-90% higher than baseline Method S. The clear best architecture for <strong>rigid-cable applications</strong>.</p>
+
+      <h2 style="margin-top:24px">VBD + Thomas pre-pass (XPBD vs VBD architectural asymmetry)</h2>
+      <p>Tested whether the Thomas locality fix can be retrofitted onto Newton's existing VBD. Added <code>cable_thomas_solver</code> opt-in to <code>SolverVBD</code>: per outer iter, run Method S's Thomas (stretch + optionally bend) BEFORE VBD's Gauss-Seidel sweep.</p>
+      <p>Result on long_cantilever_512 K=10:</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>method</th><th>step ms</th><th>stretch</th><th>drift</th><th>verdict</th></tr></thead>
+        <tbody>
+          <tr><td>VBD baseline</td><td>3.3</td><td>6.0e-2</td><td>+3.9</td><td>locality-limited</td></tr>
+          <tr><td>VBD + Thomas (stretch)</td><td>17.5</td><td><strong>0.73</strong></td><td><strong>+5647</strong></td><td>DIVERGED</td></tr>
+          <tr><td>VBD + Thomas + SOR</td><td>NaN</td><td><strong>28.9</strong></td><td><strong>+1.95M</strong></td><td>CATASTROPHIC</td></tr>
+        </tbody>
+      </table></div>
+      <p><strong>The naive pre-pass approach FAILS</strong>: Thomas projects positions to satisfy distance, then VBD's GS sweep includes the same stretch energy and tries to enforce again — the two solvers double-apply the constraint and energy explodes.</p>
+      <p>This empirically confirms the architectural asymmetry: <strong>XPBD's modular constraint kernels make Thomas drop in cleanly (Method S + Thomas-bend ships); VBD's unified-energy block solve needs kernel-level surgery to host an external solver</strong>. Proper VBD + Thomas integration would require modifying <code>_solve_rigid_body_iteration</code> to subtract Thomas-handled constraint terms from the per-body block — 3-5 days of careful work, not pursued here.</p>
+      <p><strong>Conclusion</strong>: for cable simulation with locality-limited solver, the right architecture is <code>SolverCable</code> as a first-class XPBD-family solver (Method S + Thomas-bend), NOT "add Thomas to VBD."</p>
+      <p><strong>Update 2026-06-19/20</strong>: revised verdict. VBD+Thomas CAN be made to work with 3 ingredients: (1) <strong>inertia-target rewrite</strong> after Thomas (the bridge), (2) <strong>PBD contact projection</strong> in pre-pass for contact-feasibility, (3) <strong>Thomas-bend</strong> for rotation stability. Stable on 12 of 14 scenes — chains + piles with non-trivial bend. Drift matches Method S. Stretch 2-5× worse. Fails on rope-like piles (very-soft / zero bend). Niche option for VBD-features + guaranteed-stiff cables; Method S remains the universal default.</p>
+
+      <h2 style="margin-top:24px">VBD + SOR — tested as a potential fallback, NOT universal</h2>
+      <p>Ported the Method S SOR trick to Newton's existing <code>SolverVBD</code> as a 1-line addition to its outer iter loop (kernel <code>_sor_blend_body_q</code> in <code>rigid_vbd_kernels.py</code>, conditional on <code>solver.sor_omega</code>). Initially looked promising on short tests; full 13-scene sweep revealed serious stability problems:</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Scene type</th><th>VBD+SOR ω=1.5 K=10 behavior</th></tr></thead>
+        <tbody>
+          <tr><td>Pile, stiff bend (bend_ke ≥ 0.05)</td><td><strong>Stable</strong>. Drift -0.3 to -0.7 (better than Method S's -91 %), but stretch 5-10× worse than Method S.</td></tr>
+          <tr><td>Pile, very-soft / zero bend</td><td><strong>Catastrophic divergence</strong>. Stretch 100+, drift +169 000 to +214 000.</td></tr>
+          <tr><td>Free chains (all 7 scenes)</td><td><strong>Diverges</strong> over 60 frames. Drift +21 to +112.</td></tr>
+        </tbody>
+      </table></div>
+      <p>VBD+SOR is stable in only 5 of 13 scenes (piles with non-trivial bend). The SOR overshoot requires either stiff bend or strong contact dissipation to be absorbed; free chains have neither, and zero-bend piles fail too. <strong>VBD+SOR is NOT a universal fallback</strong>. Method S remains the only universally stable solver in our toolkit.</p>
+      <p>Implication for the "energy-conservation" use case: the genuine VBD energy advantage only holds at ω=1.0 (no SOR). With ω=1.5, VBD picks up the same dissipative coupling Method S uses anyway.</p>
+      <p><strong>Engineering insights</strong> (NOTES §47): (1) The angular impulse <em>and</em> Schur correction must both be present — adding only the impulse without the diagonal correction destabilises the Thomas solve. (2) The bend kernel's frame transform is non-optional; it works on chains by accident (parents share orientation) and silently explodes on piles. (3) <code>relax = 1.0</code> for the bend constraint is correct; lower values under-correct, higher values overshoot into zig-zag.</p>
+    </section>
+    <section>
+      <h2>Method axes (judged per scene)</h2>
+      <div class="note">A method passes only if it clears <strong>all three</strong> — speed, residual/energy correctness, and visual physical plausibility. Any zig-zag, over-damping, pin drift, contact buzz, or energy gain disqualifies it regardless of residual.</div>
+    </section>
+
+    <section class="group-header">
+      <h2 style="margin:0;color:var(--accent);font-size:1.05rem;text-transform:uppercase;letter-spacing:.06em;">Pile — bend sweep on 28 800 bodies</h2>
+    </section>
+
+
+    <section id="scene-cable-pile-xl">
+      <div class="scene-head">
+        <h2>1. Cable pile XL — STIFF bend (bend_ke = 5.0, ×1.0)</h2>
+        <div class="meta">12 layers × 12 lanes × 200 segments = 28 800 bodies; bend_ke=5.0 (1.0×); production scaling stress test.</div>
+      </div>
+      <div class="video-grid headline">
+<figure><figcaption>Method S + Thomas-bend ω=1.5 K=10 (14-scene sweep)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl__method_s_tb_w1p5_K10.mp4"></video></figure>
+<figure><figcaption>Method S @10 ω=1.5 (XL pile — canonical)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl__method_s_w1p5_xl_universal.mp4"></video></figure>
+<figure><figcaption>VBD + Thomas + bend hybrid (NEW, 2026-06-19)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl__vbd_thomas_bend_hybrid.mp4"></video></figure>
+<figure><figcaption>Method S @10 ω=1.9 (XL, STIFF bend)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl__method_s_v2_w1p9_xl_stiff.mp4"></video></figure>
+<figure><figcaption>Method R v2 + XPBD bend @10 (XL, STIFF bend ×1.0)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl__method_r_warp_10_bend_cable_pile_xl_stiff.mp4"></video></figure>
+<figure><figcaption>Method R v2 + XPBD bend @20 (XL, STIFF bend ×1.0)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl__method_r_warp_20_bend_cable_pile_xl_stiff.mp4"></video></figure>
+<figure><figcaption>Method N v1 @10 (direction-aware XPBD)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl__method_n_dir_warp_10_fric.mp4"></video></figure>
+</div>
+      
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Min z (m)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+        </tr></thead>
+        <tbody><tr class="candidate"><td>Method S + Thomas-bend ω=1.5 K=10 (14-scene sweep)</td><td>Method S + Thomas-bend across all 14 scenes. Wins clearly where bend_ke &gt; 0: XL stiff pile bend 3.2× tighter (0.016 vs 0.050 rad), cable_pile_scaled bend 2.3× tighter + stretch 60% tighter, horiz stretch+bend cantilever bend 5× tighter. Slight loss or tied on bend_ke=0 scenes (Thomas-bend overhead with no benefit). Step time 30-90% higher than Method S baseline. Universally stable (NOT diverging on any scene, unlike VBD+SOR).</td><td class="num">96.35</td><td class="num">3.150e-03</td><td class="num">0</td><td class="num">-90.0%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method S @10 ω=1.5 (XL pile — canonical)</td><td>Method S ω=1.5 K=10 — the canonical Method S config. Wins on 4 of 5 XL bend variants (medium / soft / very-soft / rope), 25-33 % tighter stretch than Method R K=10. Only loses to ω=1.9 on stiff bend (where ω=1.5 still gives 49 % tighter stretch). Universal omega — no per-scene tuning needed. Step time identical to Method R. SOR-before-contacts ordering kills the pile oscillation.</td><td class="num">69.78</td><td class="num">3.545e-03</td><td class="num">0</td><td class="num">-90.9%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD + Thomas + bend hybrid (NEW, 2026-06-19)</td><td>NEW architectural finding: VBD can host Thomas via 3 ingredients (1) inertia-target rewrite with Thomas-corrected positions, (2) PBD contact projection in pre-pass for contact-feasibility, (3) Thomas-bend for rotation stability. Works on 12 of 14 scenes (chains + piles with bend_ke ≥ 0.05). Diverges on rope-like piles (very-soft / zero bend). Drift matches Method S when stable; stretch is 2-5× worse. Step time 1.5-1.7× Method S. Use for: VBD-features (Dahl friction, penalty contacts) + guaranteed-stiff cables. Method S remains better for pure stretch quality.</td><td class="num">116.32</td><td class="num">6.475e-03</td><td class="num">0</td><td class="num">-91.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD@120</td><td>iter=120</td><td class="num">205.41</td><td class="num">3.728e-03</td><td class="num">0</td><td class="num">-90.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method S @10 ω=1.9 (XL, STIFF bend)</td><td>Method S at ω=1.9 (near the SOR stability limit ω=2). On XL stiff pile: 68 % tighter stretch than Method R K=10 (2.25e-3 vs 7.0e-3), 43 % lower bend (0.047 vs 0.082 rad), lower vmax (4.30 vs 4.82), identical step time. Strictly dominates Method R K=20 on BOTH speed (69.8ms vs 96.2ms) AND quality (2.25e-3 vs 2.71e-3 stretch).</td><td class="num">69.76</td><td class="num">2.246e-03</td><td class="num">0</td><td class="num">-90.6%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method R v2 + XPBD bend @10 (XL, STIFF bend ×1.0)</td><td>Method R v2 + bend on 28 800-body XL pile with default bend_ke = 5.0. Cables should stay close to straight — bend constraint enforces rest pose. Paper-grade: SAME algorithm as the soft-bend variants.</td><td class="num">69.39</td><td class="num">6.996e-03</td><td class="num">0</td><td class="num">-90.8%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method R v2 + XPBD bend @20 (XL, STIFF bend ×1.0)</td><td>Method R v2 + bend @ K=20 outer iters on XL pile. 2.6× tighter stretch (2.7e-3 vs 7.0e-3 at K=10) at 1.4× step time (96 ms). Drift stays at −91 % (XPBD dissipation is K-invariant). Confirms iter-convergence: stretch halves per K-doubling.</td><td class="num">96.18</td><td class="num">2.706e-03</td><td class="num">0</td><td class="num">-91.1%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method N v1 @10 (direction-aware XPBD)</td><td>Block-tridiag positional Thomas, direction-aware constraint, no GN · BEST PILE: stretch 2.12e-5, drift −0.85 %</td><td class="num">68.77</td><td class="num">1.229e-04</td><td class="num">0</td><td class="num">-79.7%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr></tbody>
+      </table></div>
+      
+      <details class="extras-toggle">
+        <summary>Other / legacy methods (19)</summary>
+        <div class="video-grid extras">
+<figure><figcaption>Method S @10 ω=1.5 (XL, STIFF bend) — Method R + SOR</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl__method_s_v2_w1p5_xl_stiff.mp4"></video></figure>
+<figure><figcaption>VBD + SOR ω=1.5 K=10 (full sweep — NOT universal)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl__vbd_sor_w1p5_K10.mp4"></video></figure>
+<figure><figcaption>method_s_sc_a1p0</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl__method_s_sc_a1p0.mp4"></video></figure>
+<figure><figcaption>method_s_w1p2_xl_stiff</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl__method_s_w1p2_xl_stiff.mp4"></video></figure>
+<figure><figcaption>method_s_w1p5_xl_stiff</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl__method_s_w1p5_xl_stiff.mp4"></video></figure>
+</div>
+        
+        <div class="table-wrap"><table>
+          <thead><tr>
+            <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Min z (m)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+          </tr></thead>
+          <tbody><tr class="candidate"><td>Method S @10 ω=1.5 (XL, STIFF bend) — Method R + SOR</td><td>Method S = Method R + translation-only SOR between outer iters. ω=1.5 over-relaxes the distance+bend step before contact projection. SOR-before-contacts ordering is critical — SOR-after-contacts caused bend/vmax oscillation. Result vs Method R K=10 on XL stiff pile: 34 % tighter stretch (4.59e-3 vs 7.00e-3), identical bend/drift, lower vmax, same step time. Zero-cost gain.</td><td class="num">69.76</td><td class="num">4.592e-03</td><td class="num">0</td><td class="num">-90.8%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD + SOR ω=1.5 @10 (XL, STIFF bend)</td><td>Method S trick generalized to VBD: outer-iter SOR blend in newton.solvers.SolverVBD. Step 56.8 ms (faster than Method R 69 ms), stretch 3.75e-2 (5× worse than Method R K=10), drift -25 % (much better than Method R&#x27;s -91 % — VBD&#x27;s energy property survives SOR). SOR helps VBD but doesn&#x27;t fix locality (VBD&#x27;s Gauss-Seidel is O(N) sweeps for O(N) chain; Method R Thomas is O(1) sweep for O(N) chain).</td><td class="num">56.78</td><td class="num">3.746e-02</td><td class="num">0</td><td class="num">-25.4%</td><td><span class="pill warn">ok</span></td><td>—</td></tr>
+<tr><td>VBD + SOR ω=1.5 K=10 (full sweep — NOT universal)</td><td>Full 13-scene sweep result. STABLE in 5 of 13 scenes (piles with bend_ke ≥ 0.05). DIVERGES on free chains (no contact dissipation, drift +21 to +112) and on very-soft / zero-bend piles (no bend dissipation, stretch 100+). VBD+SOR is NOT a universal fallback — only safe for piles with non-trivial bend. Method S remains the only universally stable solver.</td><td class="num">56.85</td><td class="num">4.099e-02</td><td class="num">0</td><td class="num">-32.6%</td><td><span class="pill warn">ok</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_0_120f</td><td>?</td><td class="num">69.80</td><td class="num">4.293e-03</td><td class="num">0</td><td class="num">-90.8%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_1p0_120f</td><td>?</td><td class="num">70.99</td><td class="num">1.741e-03</td><td class="num">0</td><td class="num">-90.6%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_baseline_60f</td><td>?</td><td class="num">69.68</td><td class="num">3.156e-03</td><td class="num">0</td><td class="num">-88.4%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_sc_0.0</td><td>?</td><td class="num">70.95</td><td class="num">2.342e-03</td><td class="num">0</td><td class="num">-88.2%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_sc_0.5</td><td>?</td><td class="num">70.89</td><td class="num">1.761e-03</td><td class="num">0</td><td class="num">-87.8%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_sc_1.0</td><td>?</td><td class="num">70.90</td><td class="num">6.439e-04</td><td class="num">0</td><td class="num">-87.9%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_sc_1e-1</td><td>?</td><td class="num">70.89</td><td class="num">1.329e-03</td><td class="num">0</td><td class="num">-88.0%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_sc_1e-3</td><td>?</td><td class="num">71.01</td><td class="num">2.733e-03</td><td class="num">0</td><td class="num">-88.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_sc_1e-5</td><td>?</td><td class="num">70.92</td><td class="num">3.566e-03</td><td class="num">0</td><td class="num">-88.3%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_sc_1e-7</td><td>?</td><td class="num">70.92</td><td class="num">2.782e-03</td><td class="num">0</td><td class="num">-88.3%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_sc_1e-9</td><td>?</td><td class="num">70.87</td><td class="num">3.877e-03</td><td class="num">0</td><td class="num">-88.3%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_sc_5.0</td><td>?</td><td class="num">70.86</td><td class="num">2.438e-03</td><td class="num">0</td><td class="num">-87.8%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_sc_a1p0</td><td>?</td><td class="num">71.02</td><td class="num">1.587e-03</td><td class="num">0</td><td class="num">-90.4%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_w1p2_xl_stiff</td><td>?</td><td class="num">69.77</td><td class="num">4.979e-03</td><td class="num">0</td><td class="num">-90.7%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_w1p5_xl_stiff</td><td>?</td><td class="num">69.72</td><td class="num">4.837e-03</td><td class="num">0</td><td class="num">-80.0%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>vbd_xl_v2</td><td>?</td><td class="num">56.26</td><td class="num">3.184e-02</td><td class="num">0</td><td class="num">-36.7%</td><td><span class="pill warn">ok</span></td><td>—</td></tr></tbody>
+        </table></div>
+      </details>
+    </section>
+
+
+    <section id="scene-cable-pile-xl-sb01">
+      <div class="scene-head">
+        <h2>2. Cable pile XL — medium bend (bend_ke = 0.5, ×0.1)</h2>
+        <div class="meta">12 layers × 12 lanes × 200 segments = 28 800 bodies; bend_ke=0.5 (0.1×); tests global solver under soft-bend regime — cables want to pile more loosely, and the joint Hessian becomes less diagonal-dominant.</div>
+      </div>
+      <div class="video-grid headline">
+<figure><figcaption>Method S @10 ω=1.5 (XL pile — canonical)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl_softbend_0p1__method_s_w1p5_xl_universal.mp4"></video></figure>
+<figure><figcaption>Method R v2 + XPBD bend @10 (XL, medium bend ×0.1)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl_softbend_0p1__method_r_warp_10_bend_cable_pile_xl_softbend_0p1.mp4"></video></figure>
+<figure><figcaption>Method N v1 @10 (direction-aware XPBD)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl_softbend_0p1__method_n_dir_warp_10_fric.mp4"></video></figure>
+</div>
+      
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Min z (m)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+        </tr></thead>
+        <tbody><tr class="candidate"><td>Method S + Thomas-bend ω=1.5 K=10 (14-scene sweep)</td><td>Method S + Thomas-bend across all 14 scenes. Wins clearly where bend_ke &gt; 0: XL stiff pile bend 3.2× tighter (0.016 vs 0.050 rad), cable_pile_scaled bend 2.3× tighter + stretch 60% tighter, horiz stretch+bend cantilever bend 5× tighter. Slight loss or tied on bend_ke=0 scenes (Thomas-bend overhead with no benefit). Step time 30-90% higher than Method S baseline. Universally stable (NOT diverging on any scene, unlike VBD+SOR).</td><td class="num">96.48</td><td class="num">3.859e-03</td><td class="num">0</td><td class="num">-90.9%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method S @10 ω=1.5 (XL pile — canonical)</td><td>Method S ω=1.5 K=10 — the canonical Method S config. Wins on 4 of 5 XL bend variants (medium / soft / very-soft / rope), 25-33 % tighter stretch than Method R K=10. Only loses to ω=1.9 on stiff bend (where ω=1.5 still gives 49 % tighter stretch). Universal omega — no per-scene tuning needed. Step time identical to Method R. SOR-before-contacts ordering kills the pile oscillation.</td><td class="num">69.79</td><td class="num">2.718e-03</td><td class="num">0</td><td class="num">-91.3%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD@120</td><td>iter=120</td><td class="num">205.92</td><td class="num">4.450e-03</td><td class="num">0</td><td class="num">-90.7%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method R v2 + XPBD bend @10 (XL, medium bend ×0.1)</td><td>Method R v2 + bend on XL pile with bend_ke = 0.5 (medium-stiff). Some visible articulation but cables resist folding.</td><td class="num">69.40</td><td class="num">3.626e-03</td><td class="num">0</td><td class="num">-91.3%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method N v1 @10 (direction-aware XPBD)</td><td>Block-tridiag positional Thomas, direction-aware constraint, no GN · BEST PILE: stretch 2.12e-5, drift −0.85 %</td><td class="num">68.78</td><td class="num">1.226e-04</td><td class="num">0</td><td class="num">-79.7%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr></tbody>
+      </table></div>
+      
+      <details class="extras-toggle">
+        <summary>Other / legacy methods (4)</summary>
+        <div class="video-grid extras">
+<figure><figcaption>VBD + SOR ω=1.5 K=10 (full sweep — NOT universal)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl_softbend_0p1__vbd_sor_w1p5_K10.mp4"></video></figure>
+<figure><figcaption>Method S @10 ω=1.9 (XL pile, bend sweep)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl_softbend_0p1__method_s_w1p9_xl.mp4"></video></figure>
+<figure><figcaption>method_s_sc_a1p0</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl_softbend_0p1__method_s_sc_a1p0.mp4"></video></figure>
+</div>
+        
+        <div class="table-wrap"><table>
+          <thead><tr>
+            <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Min z (m)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+          </tr></thead>
+          <tbody><tr><td>VBD + SOR ω=1.5 K=10 (full sweep — NOT universal)</td><td>Full 13-scene sweep result. STABLE in 5 of 13 scenes (piles with bend_ke ≥ 0.05). DIVERGES on free chains (no contact dissipation, drift +21 to +112) and on very-soft / zero-bend piles (no bend dissipation, stretch 100+). VBD+SOR is NOT a universal fallback — only safe for piles with non-trivial bend. Method S remains the only universally stable solver.</td><td class="num">56.84</td><td class="num">1.912e-02</td><td class="num">0</td><td class="num">-66.8%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD + Thomas + bend hybrid (NEW, 2026-06-19)</td><td>NEW architectural finding: VBD can host Thomas via 3 ingredients (1) inertia-target rewrite with Thomas-corrected positions, (2) PBD contact projection in pre-pass for contact-feasibility, (3) Thomas-bend for rotation stability. Works on 12 of 14 scenes (chains + piles with bend_ke ≥ 0.05). Diverges on rope-like piles (very-soft / zero bend). Drift matches Method S when stable; stretch is 2-5× worse. Step time 1.5-1.7× Method S. Use for: VBD-features (Dahl friction, penalty contacts) + guaranteed-stiff cables. Method S remains better for pure stretch quality.</td><td class="num">115.96</td><td class="num">3.115e-03</td><td class="num">0</td><td class="num">-94.8%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method S @10 ω=1.9 (XL pile, bend sweep)</td><td>Method S ω=1.9 K=10 across XL bend sweep. Strict win on stiff (-0p1, -0p01): stretch 10-34% tighter, bend lower, drift unchanged. Regression on very-soft (-0p001): stretch +20% worse vs Method R — ω=1.9 too aggressive when bend coupling is weak. ω=1.5 is the universal pick instead.</td><td class="num">69.79</td><td class="num">2.866e-03</td><td class="num">0</td><td class="num">-91.0%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_sc_a1p0</td><td>?</td><td class="num">71.04</td><td class="num">1.935e-03</td><td class="num">0</td><td class="num">-90.6%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr></tbody>
+        </table></div>
+      </details>
+    </section>
+
+
+    <section id="scene-cable-pile-xl-sb001">
+      <div class="scene-head">
+        <h2>3. Cable pile XL — soft bend (bend_ke = 0.05, ×0.01)</h2>
+        <div class="meta">12 layers × 12 lanes × 200 segments = 28 800 bodies; bend_ke=0.05 (0.01×); near-floppy bend — stresses non-stretch DOFs and contact tangents.</div>
+      </div>
+      <div class="video-grid headline">
+<figure><figcaption>Method S @10 ω=1.5 (XL pile — canonical)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl_softbend_0p01__method_s_w1p5_xl_universal.mp4"></video></figure>
+<figure><figcaption>Method R v2 + XPBD bend @10 (XL softbend pile)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl_softbend_0p01__method_r_warp_10_bend_softbend_xl.mp4"></video></figure>
+<figure><figcaption>Method N v1 @10 (direction-aware XPBD)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl_softbend_0p01__method_n_dir_warp_10_fric.mp4"></video></figure>
+</div>
+      
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Min z (m)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+        </tr></thead>
+        <tbody><tr class="candidate"><td>Method S + Thomas-bend ω=1.5 K=10 (14-scene sweep)</td><td>Method S + Thomas-bend across all 14 scenes. Wins clearly where bend_ke &gt; 0: XL stiff pile bend 3.2× tighter (0.016 vs 0.050 rad), cable_pile_scaled bend 2.3× tighter + stretch 60% tighter, horiz stretch+bend cantilever bend 5× tighter. Slight loss or tied on bend_ke=0 scenes (Thomas-bend overhead with no benefit). Step time 30-90% higher than Method S baseline. Universally stable (NOT diverging on any scene, unlike VBD+SOR).</td><td class="num">96.52</td><td class="num">2.124e-03</td><td class="num">0</td><td class="num">-92.6%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method S @10 ω=1.5 (XL pile — canonical)</td><td>Method S ω=1.5 K=10 — the canonical Method S config. Wins on 4 of 5 XL bend variants (medium / soft / very-soft / rope), 25-33 % tighter stretch than Method R K=10. Only loses to ω=1.9 on stiff bend (where ω=1.5 still gives 49 % tighter stretch). Universal omega — no per-scene tuning needed. Step time identical to Method R. SOR-before-contacts ordering kills the pile oscillation.</td><td class="num">69.86</td><td class="num">1.428e-03</td><td class="num">0</td><td class="num">-92.6%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD@120</td><td>iter=120</td><td class="num">207.03</td><td class="num">3.766e-03</td><td class="num">0</td><td class="num">-92.1%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method R v2 + XPBD bend @10 (XL softbend pile)</td><td>Method R v2 + bend on 28 800-body XL pile with soft bend (0.01× default). Cables visibly bend and rotate — answers the user&#x27;s question &#x27;why don&#x27;t cables bend in the video&#x27;.</td><td class="num">69.51</td><td class="num">2.099e-03</td><td class="num">0</td><td class="num">-92.9%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method N v1 @10 (direction-aware XPBD)</td><td>Block-tridiag positional Thomas, direction-aware constraint, no GN · BEST PILE: stretch 2.12e-5, drift −0.85 %</td><td class="num">68.77</td><td class="num">1.189e-04</td><td class="num">0</td><td class="num">-79.7%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr></tbody>
+      </table></div>
+      
+      <details class="extras-toggle">
+        <summary>Other / legacy methods (5)</summary>
+        <div class="video-grid extras">
+<figure><figcaption>VBD + SOR ω=1.5 K=10 (full sweep — NOT universal)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl_softbend_0p01__vbd_sor_w1p5_K10.mp4"></video></figure>
+<figure><figcaption>Method S @10 ω=1.9 (XL pile, bend sweep)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl_softbend_0p01__method_s_w1p9_xl.mp4"></video></figure>
+<figure><figcaption>method_s_sc_a1p0</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl_softbend_0p01__method_s_sc_a1p0.mp4"></video></figure>
+</div>
+        
+        <div class="table-wrap"><table>
+          <thead><tr>
+            <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Min z (m)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+          </tr></thead>
+          <tbody><tr><td>VBD + SOR ω=1.5 K=10 (full sweep — NOT universal)</td><td>Full 13-scene sweep result. STABLE in 5 of 13 scenes (piles with bend_ke ≥ 0.05). DIVERGES on free chains (no contact dissipation, drift +21 to +112) and on very-soft / zero-bend piles (no bend dissipation, stretch 100+). VBD+SOR is NOT a universal fallback — only safe for piles with non-trivial bend. Method S remains the only universally stable solver.</td><td class="num">56.90</td><td class="num">5.364e-02</td><td class="num">-8.278e-02</td><td class="num">-53.9%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD + Thomas + bend hybrid (NEW, 2026-06-19)</td><td>NEW architectural finding: VBD can host Thomas via 3 ingredients (1) inertia-target rewrite with Thomas-corrected positions, (2) PBD contact projection in pre-pass for contact-feasibility, (3) Thomas-bend for rotation stability. Works on 12 of 14 scenes (chains + piles with bend_ke ≥ 0.05). Diverges on rope-like piles (very-soft / zero bend). Drift matches Method S when stable; stretch is 2-5× worse. Step time 1.5-1.7× Method S. Use for: VBD-features (Dahl friction, penalty contacts) + guaranteed-stiff cables. Method S remains better for pure stretch quality.</td><td class="num">110.73</td><td class="num">2.863e-03</td><td class="num">0</td><td class="num">-94.6%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method S @10 ω=1.9 (XL pile, bend sweep)</td><td>Method S ω=1.9 K=10 across XL bend sweep. Strict win on stiff (-0p1, -0p01): stretch 10-34% tighter, bend lower, drift unchanged. Regression on very-soft (-0p001): stretch +20% worse vs Method R — ω=1.9 too aggressive when bend coupling is weak. ω=1.5 is the universal pick instead.</td><td class="num">69.86</td><td class="num">1.892e-03</td><td class="num">0</td><td class="num">-92.6%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_r_warp_10_bend_pile</td><td>?</td><td class="num">69.14</td><td class="num">4.621e-02</td><td class="num">-1.741e-02</td><td class="num">+1447.6%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_sc_a1p0</td><td>?</td><td class="num">71.09</td><td class="num">1.852e-03</td><td class="num">0</td><td class="num">-92.1%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr></tbody>
+        </table></div>
+      </details>
+    </section>
+
+
+    <section id="scene-cable-pile-xl-sb0001">
+      <div class="scene-head">
+        <h2>4. Cable pile XL — very soft bend (bend_ke = 0.005, ×0.001)</h2>
+        <div class="meta">12 layers × 12 lanes × 200 segments = 28 800 bodies; bend_ke=0.005 (0.001×); very floppy bend — cables should visibly droop and bend under self-weight + contacts. Requires Method R v2 + bend (Method N v1 locks rotation, won&#x27;t show visible bending).</div>
+      </div>
+      <div class="video-grid headline">
+<figure><figcaption>Method S @10 ω=1.5 (XL pile — canonical)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl_softbend_0p001__method_s_w1p5_xl_universal.mp4"></video></figure>
+<figure><figcaption>Method R v2 + XPBD bend @10 (XL, very soft bend ×0.001)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl_softbend_0p001__method_r_warp_10_bend_cable_pile_xl_softbend_0p001.mp4"></video></figure>
+</div>
+      
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Min z (m)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+        </tr></thead>
+        <tbody><tr class="candidate"><td>Method S + Thomas-bend ω=1.5 K=10 (14-scene sweep)</td><td>Method S + Thomas-bend across all 14 scenes. Wins clearly where bend_ke &gt; 0: XL stiff pile bend 3.2× tighter (0.016 vs 0.050 rad), cable_pile_scaled bend 2.3× tighter + stretch 60% tighter, horiz stretch+bend cantilever bend 5× tighter. Slight loss or tied on bend_ke=0 scenes (Thomas-bend overhead with no benefit). Step time 30-90% higher than Method S baseline. Universally stable (NOT diverging on any scene, unlike VBD+SOR).</td><td class="num">96.44</td><td class="num">3.390e-03</td><td class="num">0</td><td class="num">-85.3%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method S @10 ω=1.5 (XL pile — canonical)</td><td>Method S ω=1.5 K=10 — the canonical Method S config. Wins on 4 of 5 XL bend variants (medium / soft / very-soft / rope), 25-33 % tighter stretch than Method R K=10. Only loses to ω=1.9 on stiff bend (where ω=1.5 still gives 49 % tighter stretch). Universal omega — no per-scene tuning needed. Step time identical to Method R. SOR-before-contacts ordering kills the pile oscillation.</td><td class="num">69.74</td><td class="num">3.001e-03</td><td class="num">0</td><td class="num">-85.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD@120</td><td>iter=120</td><td class="num">—</td><td class="num">7.915e+00</td><td class="num">-7.142e-01</td><td class="num">+271732.7%</td><td><span class="pill bad">blew up</span></td><td>non-finite or runaway state at frame 19 (speed=6603.8)</td></tr>
+<tr class="candidate"><td>Method R v2 + XPBD bend @10 (XL, very soft bend ×0.001)</td><td>Method R v2 + bend on XL pile with bend_ke = 0.005 (very floppy). Cables bend ~121° — half-fold under gravity + contacts.</td><td class="num">69.36</td><td class="num">4.482e-03</td><td class="num">0</td><td class="num">-80.3%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr></tbody>
+      </table></div>
+      
+      <details class="extras-toggle">
+        <summary>Other / legacy methods (4)</summary>
+        <div class="video-grid extras">
+<figure><figcaption>VBD + SOR ω=1.5 K=10 (full sweep — NOT universal)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl_softbend_0p001__vbd_sor_w1p5_K10.mp4"></video></figure>
+<figure><figcaption>Method S @10 ω=1.9 (XL pile, bend sweep)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl_softbend_0p001__method_s_w1p9_xl.mp4"></video></figure>
+<figure><figcaption>method_s_sc_a1p0</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl_softbend_0p001__method_s_sc_a1p0.mp4"></video></figure>
+</div>
+        
+        <div class="table-wrap"><table>
+          <thead><tr>
+            <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Min z (m)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+          </tr></thead>
+          <tbody><tr><td>VBD + SOR ω=1.5 K=10 (full sweep — NOT universal)</td><td>Full 13-scene sweep result. STABLE in 5 of 13 scenes (piles with bend_ke ≥ 0.05). DIVERGES on free chains (no contact dissipation, drift +21 to +112) and on very-soft / zero-bend piles (no bend dissipation, stretch 100+). VBD+SOR is NOT a universal fallback — only safe for piles with non-trivial bend. Method S remains the only universally stable solver.</td><td class="num">—</td><td class="num">1.324e+02</td><td class="num">-1.053e+02</td><td class="num">+21435833.7%</td><td><span class="pill bad">blew up</span></td><td>non-finite or runaway state at frame 19 (speed=53330.8)</td></tr>
+<tr><td>VBD + Thomas + bend hybrid (NEW, 2026-06-19)</td><td>NEW architectural finding: VBD can host Thomas via 3 ingredients (1) inertia-target rewrite with Thomas-corrected positions, (2) PBD contact projection in pre-pass for contact-feasibility, (3) Thomas-bend for rotation stability. Works on 12 of 14 scenes (chains + piles with bend_ke ≥ 0.05). Diverges on rope-like piles (very-soft / zero bend). Drift matches Method S when stable; stretch is 2-5× worse. Step time 1.5-1.7× Method S. Use for: VBD-features (Dahl friction, penalty contacts) + guaranteed-stiff cables. Method S remains better for pure stretch quality.</td><td class="num">108.62</td><td class="num">3.385e-02</td><td class="num">-1.086e-02</td><td class="num">+886.0%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method S @10 ω=1.9 (XL pile, bend sweep)</td><td>Method S ω=1.9 K=10 across XL bend sweep. Strict win on stiff (-0p1, -0p01): stretch 10-34% tighter, bend lower, drift unchanged. Regression on very-soft (-0p001): stretch +20% worse vs Method R — ω=1.9 too aggressive when bend coupling is weak. ω=1.5 is the universal pick instead.</td><td class="num">69.78</td><td class="num">5.371e-03</td><td class="num">0</td><td class="num">-86.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_sc_a1p0</td><td>?</td><td class="num">71.00</td><td class="num">5.104e-03</td><td class="num">0</td><td class="num">-85.2%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr></tbody>
+        </table></div>
+      </details>
+    </section>
+
+
+    <section id="scene-cable-pile-xl-zero">
+      <div class="scene-head">
+        <h2>5. Cable pile XL — pure rope (bend_ke = 0)</h2>
+        <div class="meta">12 layers × 12 lanes × 200 segments = 28 800 bodies; bend_ke=0 — pure ropes, no bend resistance. Method N v1 still locks rotation so individual rigid bodies don&#x27;t rotate, but the cable centerline can bend freely via positional constraints.</div>
+      </div>
+      <div class="video-grid headline">
+<figure><figcaption>Method S @10 ω=1.5 (XL pile — canonical)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl_zerobend__method_s_w1p5_xl_universal.mp4"></video></figure>
+<figure><figcaption>Method R v2 + XPBD bend @10 (XL, pure rope ×0)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl_zerobend__method_r_warp_10_bend_cable_pile_xl_zerobend.mp4"></video></figure>
+</div>
+      
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Min z (m)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+        </tr></thead>
+        <tbody><tr class="candidate"><td>Method S + Thomas-bend ω=1.5 K=10 (14-scene sweep)</td><td>Method S + Thomas-bend across all 14 scenes. Wins clearly where bend_ke &gt; 0: XL stiff pile bend 3.2× tighter (0.016 vs 0.050 rad), cable_pile_scaled bend 2.3× tighter + stretch 60% tighter, horiz stretch+bend cantilever bend 5× tighter. Slight loss or tied on bend_ke=0 scenes (Thomas-bend overhead with no benefit). Step time 30-90% higher than Method S baseline. Universally stable (NOT diverging on any scene, unlike VBD+SOR).</td><td class="num">96.29</td><td class="num">6.214e-03</td><td class="num">0</td><td class="num">-51.6%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method S @10 ω=1.5 (XL pile — canonical)</td><td>Method S ω=1.5 K=10 — the canonical Method S config. Wins on 4 of 5 XL bend variants (medium / soft / very-soft / rope), 25-33 % tighter stretch than Method R K=10. Only loses to ω=1.9 on stiff bend (where ω=1.5 still gives 49 % tighter stretch). Universal omega — no per-scene tuning needed. Step time identical to Method R. SOR-before-contacts ordering kills the pile oscillation.</td><td class="num">69.50</td><td class="num">6.666e-03</td><td class="num">0</td><td class="num">-50.4%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD@120</td><td>iter=120</td><td class="num">—</td><td class="num">2.943e+06</td><td class="num">-1.294e+05</td><td class="num">+2707811175339884.0%</td><td><span class="pill bad">blew up</span></td><td>non-finite or runaway state at frame 20 (speed=325410317.4)</td></tr>
+<tr class="candidate"><td>Method R v2 + XPBD bend @10 (XL, pure rope ×0)</td><td>Method R v2 + bend on XL pile with bend_ke = 0 (no bend resistance). Cables fold ≈ 180° — rope-like behavior. SAME algorithm as the stiff case.</td><td class="num">69.12</td><td class="num">9.492e-03</td><td class="num">-7.518e-04</td><td class="num">-50.9%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr></tbody>
+      </table></div>
+      
+      <details class="extras-toggle">
+        <summary>Other / legacy methods (4)</summary>
+        <div class="video-grid extras">
+<figure><figcaption>VBD + SOR ω=1.5 K=10 (full sweep — NOT universal)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl_zerobend__vbd_sor_w1p5_K10.mp4"></video></figure>
+<figure><figcaption>Method S @10 ω=1.9 (XL pile, bend sweep)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl_zerobend__method_s_w1p9_xl.mp4"></video></figure>
+<figure><figcaption>method_s_sc_a1p0</figcaption><video controls preload="metadata" muted src="assets/cable_pile_xl_zerobend__method_s_sc_a1p0.mp4"></video></figure>
+</div>
+        
+        <div class="table-wrap"><table>
+          <thead><tr>
+            <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Min z (m)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+          </tr></thead>
+          <tbody><tr><td>VBD + SOR ω=1.5 K=10 (full sweep — NOT universal)</td><td>Full 13-scene sweep result. STABLE in 5 of 13 scenes (piles with bend_ke ≥ 0.05). DIVERGES on free chains (no contact dissipation, drift +21 to +112) and on very-soft / zero-bend piles (no bend dissipation, stretch 100+). VBD+SOR is NOT a universal fallback — only safe for piles with non-trivial bend. Method S remains the only universally stable solver.</td><td class="num">—</td><td class="num">3.368e+02</td><td class="num">-8.534e+01</td><td class="num">+16931806.2%</td><td><span class="pill bad">blew up</span></td><td>non-finite or runaway state at frame 23 (speed=20271.4)</td></tr>
+<tr><td>VBD + Thomas + bend hybrid (NEW, 2026-06-19)</td><td>NEW architectural finding: VBD can host Thomas via 3 ingredients (1) inertia-target rewrite with Thomas-corrected positions, (2) PBD contact projection in pre-pass for contact-feasibility, (3) Thomas-bend for rotation stability. Works on 12 of 14 scenes (chains + piles with bend_ke ≥ 0.05). Diverges on rope-like piles (very-soft / zero bend). Drift matches Method S when stable; stretch is 2-5× worse. Step time 1.5-1.7× Method S. Use for: VBD-features (Dahl friction, penalty contacts) + guaranteed-stiff cables. Method S remains better for pure stretch quality.</td><td class="num">108.71</td><td class="num">3.842e-02</td><td class="num">-2.147e-02</td><td class="num">+1693.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method S @10 ω=1.9 (XL pile, bend sweep)</td><td>Method S ω=1.9 K=10 across XL bend sweep. Strict win on stiff (-0p1, -0p01): stretch 10-34% tighter, bend lower, drift unchanged. Regression on very-soft (-0p001): stretch +20% worse vs Method R — ω=1.9 too aggressive when bend coupling is weak. ω=1.5 is the universal pick instead.</td><td class="num">69.51</td><td class="num">8.551e-03</td><td class="num">0</td><td class="num">-49.4%</td><td><span class="pill warn">ok</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_sc_a1p0</td><td>?</td><td class="num">70.73</td><td class="num">7.007e-03</td><td class="num">0</td><td class="num">-70.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr></tbody>
+        </table></div>
+      </details>
+    </section>
+
+
+    <section class="group-header">
+      <h2 style="margin:0;color:var(--accent);font-size:1.05rem;text-transform:uppercase;letter-spacing:.06em;">Pile — smaller scaling reference</h2>
+    </section>
+
+
+    <section id="scene-cable-pile">
+      <div class="scene-head">
+        <h2>6. Cable pile — 7 680 bodies (smaller, for iter sweep)</h2>
+        <div class="meta">8 layers × 8 lanes × 120 segments = 7680 bodies; ground + self contacts.</div>
+      </div>
+      <div class="video-grid headline">
+<figure><figcaption>Method S @10 ω=1.5 (canonical, 1080p video)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_scaled__method_s_w1p5_K10.mp4"></video></figure>
+<figure><figcaption>Method N v1 @10 (direction-aware XPBD)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_scaled__method_n_dir_warp_10_fric.mp4"></video></figure>
+<figure><figcaption>Method C @3, 10 substeps + friction</figcaption><video controls preload="metadata" muted src="assets/cable_pile_scaled__method_c_warp_3_fric.mp4"></video></figure>
+<figure><figcaption>VBD@120</figcaption><video controls preload="metadata" muted src="assets/cable_pile_scaled__vbd_120.mp4"></video></figure>
+</div>
+      
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Min z (m)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+        </tr></thead>
+        <tbody><tr class="candidate"><td>Method S + Thomas-bend ω=1.5 K=10 (14-scene sweep)</td><td>Method S + Thomas-bend across all 14 scenes. Wins clearly where bend_ke &gt; 0: XL stiff pile bend 3.2× tighter (0.016 vs 0.050 rad), cable_pile_scaled bend 2.3× tighter + stretch 60% tighter, horiz stretch+bend cantilever bend 5× tighter. Slight loss or tied on bend_ke=0 scenes (Thomas-bend overhead with no benefit). Step time 30-90% higher than Method S baseline. Universally stable (NOT diverging on any scene, unlike VBD+SOR).</td><td class="num">30.18</td><td class="num">8.940e-04</td><td class="num">0</td><td class="num">-90.1%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method S @10 ω=1.5 (canonical, 1080p video)</td><td>Canonical Method S K=10 ω=1.5 — rendered at 1920×1080 Full HD. Universal config (no per-scene tuning). On the chain scenes here: see scene-specific stretch / drift; step time within a few ms.</td><td class="num">16.96</td><td class="num">2.280e-03</td><td class="num">0</td><td class="num">-90.8%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method R v2 + XPBD bend @10 (pile)</td><td>Full 6-DOF Method R: distance + bend + contacts + friction. On 7680-body pile @180 frames: stretch 3.2e-3, bend_max=0.055 rad (cables visibly rotate), step 16.6ms (only 8% slower than Method N v1).</td><td class="num">16.59</td><td class="num">3.189e-03</td><td class="num">0</td><td class="num">-91.1%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method N v1 @10 (direction-aware XPBD)</td><td>Block-tridiag positional Thomas, direction-aware constraint, no GN · BEST PILE: stretch 2.12e-5, drift −0.85 %</td><td class="num">15.44</td><td class="num">9.668e-05</td><td class="num">0</td><td class="num">-82.8%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method C @3, 10 substeps + friction</td><td>Quality tier · μ=0.5 · 2.6ms/step · stretch 8.3e-5 · default shipping config</td><td class="num">12.86</td><td class="num">1.406e-03</td><td class="num">0</td><td class="num">-80.3%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD@120</td><td>iter=120</td><td class="num">98.16</td><td class="num">1.303e-03</td><td class="num">0</td><td class="num">-90.7%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr></tbody>
+      </table></div>
+      
+      <details class="extras-toggle">
+        <summary>Other / legacy methods (13)</summary>
+        <div class="video-grid extras">
+<figure><figcaption>VBD + SOR ω=1.5 K=10 (full sweep — NOT universal)</figcaption><video controls preload="metadata" muted src="assets/cable_pile_scaled__vbd_sor_w1p5_K10.mp4"></video></figure>
+<figure><figcaption>Method O @3 (Warp/GPU) — unified</figcaption><video controls preload="metadata" muted src="assets/cable_pile_scaled__method_o_warp_K3.mp4"></video></figure>
+<figure><figcaption>Method C @10, 10 substeps + friction</figcaption><video controls preload="metadata" muted src="assets/cable_pile_scaled__method_c_warp_10_fric.mp4"></video></figure>
+<figure><figcaption>VBD@5</figcaption><video controls preload="metadata" muted src="assets/cable_pile_scaled__vbd_5.mp4"></video></figure>
+<figure><figcaption>VBD@40</figcaption><video controls preload="metadata" muted src="assets/cable_pile_scaled__vbd_40.mp4"></video></figure>
+<figure><figcaption>method_n_dir_warp_3_fric</figcaption><video controls preload="metadata" muted src="assets/cable_pile_scaled__method_n_dir_warp_3_fric.mp4"></video></figure>
+<figure><figcaption>method_s_sc_a1p0</figcaption><video controls preload="metadata" muted src="assets/cable_pile_scaled__method_s_sc_a1p0.mp4"></video></figure>
+</div>
+        
+        <div class="table-wrap"><table>
+          <thead><tr>
+            <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Min z (m)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+          </tr></thead>
+          <tbody><tr><td>VBD + SOR ω=1.5 K=10 (full sweep — NOT universal)</td><td>Full 13-scene sweep result. STABLE in 5 of 13 scenes (piles with bend_ke ≥ 0.05). DIVERGES on free chains (no contact dissipation, drift +21 to +112) and on very-soft / zero-bend piles (no bend dissipation, stretch 100+). VBD+SOR is NOT a universal fallback — only safe for piles with non-trivial bend. Method S remains the only universally stable solver.</td><td class="num">12.92</td><td class="num">1.716e-02</td><td class="num">0</td><td class="num">-46.4%</td><td><span class="pill warn">ok</span></td><td>—</td></tr>
+<tr><td>VBD + Thomas + bend hybrid (NEW, 2026-06-19)</td><td>NEW architectural finding: VBD can host Thomas via 3 ingredients (1) inertia-target rewrite with Thomas-corrected positions, (2) PBD contact projection in pre-pass for contact-feasibility, (3) Thomas-bend for rotation stability. Works on 12 of 14 scenes (chains + piles with bend_ke ≥ 0.05). Diverges on rope-like piles (very-soft / zero bend). Drift matches Method S when stable; stretch is 2-5× worse. Step time 1.5-1.7× Method S. Use for: VBD-features (Dahl friction, penalty contacts) + guaranteed-stiff cables. Method S remains better for pure stretch quality.</td><td class="num">68.84</td><td class="num">3.247e-03</td><td class="num">0</td><td class="num">-92.0%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method O @3 (Warp/GPU) — unified</td><td>GN + XPBD Thomas + velocity-level contact · ONE algorithm, all 5 scenes, chains ~Method A quality, pile +45 % drift</td><td class="num">28.61</td><td class="num">6.470e-02</td><td class="num">-2.424e-02</td><td class="num">+5059.1%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method O @10 (Warp/GPU) — unified</td><td>Same composition, K=10</td><td class="num">81.67</td><td class="num">6.658e-02</td><td class="num">-2.937e-02</td><td class="num">+5206.1%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method C @3, 5 substeps + friction</td><td>Speed tier · μ=0.5 · 1.3ms/step · stretch 3.9e-4</td><td class="num">6.44</td><td class="num">3.706e-03</td><td class="num">0</td><td class="num">-83.3%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method C @10, 10 substeps + friction</td><td>High-accuracy tier · μ=0.5 · 6.2ms/step · stretch 2.3e-5</td><td class="num">32.05</td><td class="num">6.876e-04</td><td class="num">0</td><td class="num">-81.2%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD@5</td><td>iter=5</td><td class="num">8.73</td><td class="num">3.845e-02</td><td class="num">0</td><td class="num">+19.6%</td><td><span class="pill warn">ok</span></td><td>—</td></tr>
+<tr><td>VBD@40</td><td>iter=40</td><td class="num">35.69</td><td class="num">3.156e-03</td><td class="num">0</td><td class="num">-88.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_n_dir_warp_3_fric</td><td>?</td><td class="num">8.01</td><td class="num">3.619e-04</td><td class="num">0</td><td class="num">-83.4%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_r_warp_10_bend_pile_v5</td><td>?</td><td class="num">16.52</td><td class="num">1.863e-03</td><td class="num">0</td><td class="num">-88.8%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_r_warp_20_bend_pile_iters</td><td>?</td><td class="num">28.56</td><td class="num">1.811e-03</td><td class="num">0</td><td class="num">-91.4%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_r_warp_40_bend_pile_iters</td><td>?</td><td class="num">51.37</td><td class="num">1.546e-03</td><td class="num">0</td><td class="num">-91.2%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_sc_a1p0</td><td>?</td><td class="num">26.15</td><td class="num">2.110e-03</td><td class="num">0</td><td class="num">-90.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr></tbody>
+        </table></div>
+      </details>
+    </section>
+
+
+    <section class="group-header">
+      <h2 style="margin:0;color:var(--accent);font-size:1.05rem;text-transform:uppercase;letter-spacing:.06em;">Chain — bend / no-bend on short cable</h2>
+    </section>
+
+
+    <section id="scene-horiz-stretch-bend">
+      <div class="scene-head">
+        <h2>7. Horizontal cantilever — stiff bend (bend_ke = 5.0, no contact)</h2>
+        <div class="meta">Cantilever with bend resists bending; should curl into a smoother arc.</div>
+      </div>
+      <div class="video-grid headline">
+<figure><figcaption>Method S @10 ω=1.5 (canonical, 1080p video)</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch_bend__method_s_w1p5_K10.mp4"></video></figure>
+<figure><figcaption>Method R v2 + XPBD bend @20 (chain, stiff bend, no contact)</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch_bend__method_r_warp_20_bend_paper.mp4"></video></figure>
+<figure><figcaption>Method A @3 (Warp/GPU)</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch_bend__method_a_warp_3.mp4"></video></figure>
+<figure><figcaption>VBD@120</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch_bend__vbd_120.mp4"></video></figure>
+</div>
+      
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Max bend (rad)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+        </tr></thead>
+        <tbody><tr class="candidate"><td>Method S + Thomas-bend ω=1.5 K=10 (14-scene sweep)</td><td>Method S + Thomas-bend across all 14 scenes. Wins clearly where bend_ke &gt; 0: XL stiff pile bend 3.2× tighter (0.016 vs 0.050 rad), cable_pile_scaled bend 2.3× tighter + stretch 60% tighter, horiz stretch+bend cantilever bend 5× tighter. Slight loss or tied on bend_ke=0 scenes (Thomas-bend overhead with no benefit). Step time 30-90% higher than Method S baseline. Universally stable (NOT diverging on any scene, unlike VBD+SOR).</td><td class="num">18.83</td><td class="num">1.877e-03</td><td class="num">4.482e-02</td><td class="num">-83.4%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method S @10 ω=1.5 (canonical, 1080p video)</td><td>Canonical Method S K=10 ω=1.5 — rendered at 1920×1080 Full HD. Universal config (no per-scene tuning). On the chain scenes here: see scene-specific stretch / drift; step time within a few ms.</td><td class="num">9.53</td><td class="num">1.337e-03</td><td class="num">2.147e-01</td><td class="num">-117.3%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method R v2 + XPBD bend @20 (chain, stiff bend, no contact)</td><td>Method R v2 + bend on horiz_cantilever_stretch_bend (256-segment, bend_ke=5.0, no contact). Chain stays mostly straight (bend ≈ 0.27 rad), stretch 0.12%. Confirms method handles both extremes of (with/without contact) × (with/without stiff bend).</td><td class="num">8.83</td><td class="num">1.160e-03</td><td class="num">2.655e-01</td><td class="num">-111.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method A @3 (Warp/GPU)</td><td>Block-tridiag GN, iter=3 · CUDA · GN converges at 3 iters on 128-seg chain</td><td class="num">8.33</td><td class="num">1.260e-02</td><td class="num">9.378e-01</td><td class="num">+139.8%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD@120</td><td>iter=120</td><td class="num">43.36</td><td class="num">1.105e-02</td><td class="num">8.614e-01</td><td class="num">+51.4%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr></tbody>
+      </table></div>
+      
+      <details class="extras-toggle">
+        <summary>Other / legacy methods (33)</summary>
+        <div class="video-grid extras">
+<figure><figcaption>Reference (Method A @40)</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch_bend__method_a_ref.mp4"></video></figure>
+<figure><figcaption>Method A @5 (Warp/GPU)</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch_bend__method_a_warp_5.mp4"></video></figure>
+<figure><figcaption>Method R v2 @20 (chain with bend_ke metric)</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch_bend__method_r_warp_20_relax100_bend.mp4"></video></figure>
+<figure><figcaption>VBD + SOR ω=1.5 K=10 (full sweep — NOT universal)</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch_bend__vbd_sor_w1p5_K10.mp4"></video></figure>
+<figure><figcaption>Method O @3 (Warp/GPU) — unified</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch_bend__method_o_warp_K3.mp4"></video></figure>
+<figure><figcaption>Method O @10 (Warp/GPU) — unified</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch_bend__method_o_warp_K10.mp4"></video></figure>
+<figure><figcaption>Method C @3 (Warp/GPU, frictionless)</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch_bend__method_c_warp_3.mp4"></video></figure>
+<figure><figcaption>Method C @3 (CPU)</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch_bend__method_c_3.mp4"></video></figure>
+<figure><figcaption>Method A @5 (CPU)</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch_bend__method_a_5.mp4"></video></figure>
+<figure><figcaption>VBD@5</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch_bend__vbd_5.mp4"></video></figure>
+<figure><figcaption>VBD@10</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch_bend__vbd_10.mp4"></video></figure>
+<figure><figcaption>VBD@40</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch_bend__vbd_40.mp4"></video></figure>
+<figure><figcaption>VBD-tight (legacy)</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch_bend__vbd_ref.mp4"></video></figure>
+<figure><figcaption>method_s_sc_a1p0</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch_bend__method_s_sc_a1p0.mp4"></video></figure>
+</div>
+        
+        <div class="table-wrap"><table>
+          <thead><tr>
+            <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Max bend (rad)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+          </tr></thead>
+          <tbody><tr class="ref"><td>Reference (Method A @40)</td><td>Block-tridiag GN, iter=40 · CPU NumPy</td><td class="num">663.65</td><td class="num">1.260e-02</td><td class="num">9.377e-01</td><td class="num">+139.9%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method A @5 (Warp/GPU)</td><td>Block-tridiag GN, iter=5 · CUDA · (legacy, identical to @3)</td><td class="num">13.80</td><td class="num">1.260e-02</td><td class="num">9.378e-01</td><td class="num">+139.8%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method R v2 @20 (chain with bend_ke metric)</td><td>Method R v2 sweep on chains with bend_ke &gt; 0 set in scene. Note: solver doesn&#x27;t apply bend constraint; bend_ke only affects the `pe_elastic_bend` metric. Stretch numbers are real; drift comparison vs bend_ke=0 is metric-only.</td><td class="num">7.85</td><td class="num">1.860e-03</td><td class="num">2.802e+00</td><td class="num">-9.2%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method R v2 + XPBD bend @20 (chain)</td><td>Method R v2 with XPBD bend kernel `xpbd_apply_bend` (trace-isotropic Schur, parent-body-frame → world transform). Bend constraint now properly enforced on chains.</td><td class="num">8.66</td><td class="num">1.160e-03</td><td class="num">2.655e-01</td><td class="num">-111.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD + SOR ω=1.5 K=10 (full sweep — NOT universal)</td><td>Full 13-scene sweep result. STABLE in 5 of 13 scenes (piles with bend_ke ≥ 0.05). DIVERGES on free chains (no contact dissipation, drift +21 to +112) and on very-soft / zero-bend piles (no bend dissipation, stretch 100+). VBD+SOR is NOT a universal fallback — only safe for piles with non-trivial bend. Method S remains the only universally stable solver.</td><td class="num">3.99</td><td class="num">1.282e-01</td><td class="num">1.577e+00</td><td class="num">+11177.2%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD + Thomas + bend hybrid (NEW, 2026-06-19)</td><td>NEW architectural finding: VBD can host Thomas via 3 ingredients (1) inertia-target rewrite with Thomas-corrected positions, (2) PBD contact projection in pre-pass for contact-feasibility, (3) Thomas-bend for rotation stability. Works on 12 of 14 scenes (chains + piles with bend_ke ≥ 0.05). Diverges on rope-like piles (very-soft / zero bend). Drift matches Method S when stable; stretch is 2-5× worse. Step time 1.5-1.7× Method S. Use for: VBD-features (Dahl friction, penalty contacts) + guaranteed-stiff cables. Method S remains better for pure stretch quality.</td><td class="num">41.09</td><td class="num">3.426e-03</td><td class="num">1.893e-01</td><td class="num">-53.4%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method O @3 (Warp/GPU) — unified</td><td>GN + XPBD Thomas + velocity-level contact · ONE algorithm, all 5 scenes, chains ~Method A quality, pile +45 % drift</td><td class="num">11.06</td><td class="num">1.373e-02</td><td class="num">9.136e-01</td><td class="num">+100.2%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method O @10 (Warp/GPU) — unified</td><td>Same composition, K=10</td><td class="num">33.11</td><td class="num">1.373e-02</td><td class="num">9.136e-01</td><td class="num">+100.2%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method C @3 (Warp/GPU, frictionless)</td><td>Method A warm-start + PBD distance + PBD non-penetration · CUDA</td><td class="num">11.18</td><td class="num">1.924e-02</td><td class="num">8.269e-01</td><td class="num">+75.2%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method C @3 (CPU)</td><td>Method A warm-start + PBD projection · NumPy</td><td class="num">679.93</td><td class="num">2.120e-03</td><td class="num">5.321e-01</td><td class="num">+77.8%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method A @5 (CPU)</td><td>Block-tridiag GN, iter=5 · NumPy</td><td class="num">668.46</td><td class="num">1.260e-02</td><td class="num">9.377e-01</td><td class="num">+139.9%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD@5</td><td>iter=5</td><td class="num">1.95</td><td class="num">8.996e-02</td><td class="num">1.377e+00</td><td class="num">+2663.0%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD@10</td><td>iter=10</td><td class="num">3.76</td><td class="num">5.988e-02</td><td class="num">1.291e+00</td><td class="num">+1515.6%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD@40</td><td>iter=40</td><td class="num">14.58</td><td class="num">2.428e-02</td><td class="num">1.081e+00</td><td class="num">+295.7%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD-tight (legacy)</td><td>iter=200, 4× substeps (unstable)</td><td class="num">296.03</td><td class="num">6.540e-03</td><td class="num">5.980e-01</td><td class="num">+110.7%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_n_dir_warp_10_no_bend_solver</td><td>?</td><td class="num">3.91</td><td class="num">2.331e-07</td><td class="num">0</td><td class="num">-0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_r_warp_20_bend_v3</td><td>?</td><td class="num">8.57</td><td class="num">8.456e-02</td><td class="num">3.089e+00</td><td class="num">+10956.8%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_r_warp_20_bend_v4</td><td>?</td><td class="num">8.64</td><td class="num">1.161e-03</td><td class="num">2.656e-01</td><td class="num">-111.6%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_sc_a1p0</td><td>?</td><td class="num">14.15</td><td class="num">1.337e-03</td><td class="num">2.147e-01</td><td class="num">-117.3%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_t_test</td><td>?</td><td class="num">26.90</td><td class="num">2.693e-03</td><td class="num">1.137e-01</td><td class="num">-23.9%</td><td><span class="pill warn">ok</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_N10_horiz_cantilever_stretch_bend</td><td>?</td><td class="num">9.96</td><td class="num">4.160e-02</td><td class="num">0</td><td class="num">+1455.4%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_N3_horiz_cantilever_stretch_bend</td><td>?</td><td class="num">2.72</td><td class="num">2.331e-07</td><td class="num">0</td><td class="num">-0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_N5_horiz_cantilever_stretch_bend</td><td>?</td><td class="num">5.48</td><td class="num">4.160e-02</td><td class="num">0</td><td class="num">+1455.3%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Nv2_10_horiz_cantilever_stretch_bend</td><td>?</td><td class="num">9.41</td><td class="num">2.331e-07</td><td class="num">0</td><td class="num">-0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Nv2_5_horiz_cantilever_stretch_bend</td><td>?</td><td class="num">5.09</td><td class="num">2.331e-07</td><td class="num">0</td><td class="num">-0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Nv2b_10_horiz_cantilever_stretch_bend</td><td>?</td><td class="num">9.65</td><td class="num">2.331e-07</td><td class="num">0</td><td class="num">-0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Nv2b_5_horiz_cantilever_stretch_bend</td><td>?</td><td class="num">5.05</td><td class="num">2.331e-07</td><td class="num">0</td><td class="num">-0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Nv2c_10_horiz_cantilever_stretch_bend</td><td>?</td><td class="num">9.61</td><td class="num">2.331e-07</td><td class="num">0</td><td class="num">-0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Nv2c_5_horiz_cantilever_stretch_bend</td><td>?</td><td class="num">4.94</td><td class="num">2.331e-07</td><td class="num">0</td><td class="num">-0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_O10_horiz_cantilever_stretch_bend</td><td>?</td><td class="num">33.53</td><td class="num">1.373e-02</td><td class="num">9.136e-01</td><td class="num">+100.2%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_O3_horiz_cantilever_stretch_bend</td><td>?</td><td class="num">11.27</td><td class="num">1.373e-02</td><td class="num">9.136e-01</td><td class="num">+100.2%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Q10_horiz_cantilever_stretch_bend</td><td>?</td><td class="num">33.11</td><td class="num">4.511e-07</td><td class="num">1.400e-03</td><td class="num">-2.4%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Q3_horiz_cantilever_stretch_bend</td><td>?</td><td class="num">10.15</td><td class="num">4.649e-07</td><td class="num">1.274e-03</td><td class="num">-1.8%</td><td><span class="pill ok">clean</span></td><td>—</td></tr></tbody>
+        </table></div>
+      </details>
+    </section>
+
+
+    <section id="scene-horiz-stretch">
+      <div class="scene-head">
+        <h2>8. Horizontal cantilever — no bend (bend_ke = 0, no contact)</h2>
+        <div class="meta">Cantilever swings under gravity; pinned at x=0.</div>
+      </div>
+      <div class="video-grid headline">
+<figure><figcaption>Method S @10 ω=1.5 (canonical, 1080p video)</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch__method_s_w1p5_K10.mp4"></video></figure>
+<figure><figcaption>Method A @3 (Warp/GPU)</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch__method_a_warp_3.mp4"></video></figure>
+<figure><figcaption>VBD@120</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch__vbd_120.mp4"></video></figure>
+</div>
+      
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Max speed (m/s)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+        </tr></thead>
+        <tbody><tr class="candidate"><td>Method S @10 ω=1.5 (canonical, 1080p video)</td><td>Canonical Method S K=10 ω=1.5 — rendered at 1920×1080 Full HD. Universal config (no per-scene tuning). On the chain scenes here: see scene-specific stretch / drift; step time within a few ms.</td><td class="num">9.47</td><td class="num">7.454e-04</td><td class="num">1.794e+01</td><td class="num">-106.6%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method A @3 (Warp/GPU)</td><td>Block-tridiag GN, iter=3 · CUDA · GN converges at 3 iters on 128-seg chain</td><td class="num">8.27</td><td class="num">1.247e-02</td><td class="num">2.935e+01</td><td class="num">+136.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD@120</td><td>iter=120</td><td class="num">31.73</td><td class="num">1.096e-02</td><td class="num">1.516e+01</td><td class="num">+42.2%</td><td><span class="pill warn">ok</span></td><td>—</td></tr></tbody>
+      </table></div>
+      
+      <details class="extras-toggle">
+        <summary>Other / legacy methods (63)</summary>
+        <div class="video-grid extras">
+<figure><figcaption>Reference (Method A @40)</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch__method_a_ref.mp4"></video></figure>
+<figure><figcaption>Method A @5 (Warp/GPU)</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch__method_a_warp_5.mp4"></video></figure>
+<figure><figcaption>VBD + SOR ω=1.5 K=10 (full sweep — NOT universal)</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch__vbd_sor_w1p5_K10.mp4"></video></figure>
+<figure><figcaption>Method O @3 (Warp/GPU) — unified</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch__method_o_warp_K3.mp4"></video></figure>
+<figure><figcaption>Method O @10 (Warp/GPU) — unified</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch__method_o_warp_K10.mp4"></video></figure>
+<figure><figcaption>Method C @3 (Warp/GPU, frictionless)</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch__method_c_warp_3.mp4"></video></figure>
+<figure><figcaption>Method C @3 (CPU)</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch__method_c_3.mp4"></video></figure>
+<figure><figcaption>Method A @5 (CPU)</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch__method_a_5.mp4"></video></figure>
+<figure><figcaption>VBD@5</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch__vbd_5.mp4"></video></figure>
+<figure><figcaption>VBD@10</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch__vbd_10.mp4"></video></figure>
+<figure><figcaption>VBD@40</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch__vbd_40.mp4"></video></figure>
+<figure><figcaption>VBD-tight (legacy)</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch__vbd_ref.mp4"></video></figure>
+<figure><figcaption>method_s_sc_a1p0</figcaption><video controls preload="metadata" muted src="assets/horiz_cantilever_stretch__method_s_sc_a1p0.mp4"></video></figure>
+</div>
+        
+        <div class="table-wrap"><table>
+          <thead><tr>
+            <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Max speed (m/s)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+          </tr></thead>
+          <tbody><tr class="ref"><td>Reference (Method A @40)</td><td>Block-tridiag GN, iter=40 · CPU NumPy</td><td class="num">521.79</td><td class="num">1.248e-02</td><td class="num">2.929e+01</td><td class="num">+136.7%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method A @5 (Warp/GPU)</td><td>Block-tridiag GN, iter=5 · CUDA · (legacy, identical to @3)</td><td class="num">13.69</td><td class="num">1.247e-02</td><td class="num">2.933e+01</td><td class="num">+136.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method R v2 @20 (chain with bend_ke metric)</td><td>Method R v2 sweep on chains with bend_ke &gt; 0 set in scene. Note: solver doesn&#x27;t apply bend constraint; bend_ke only affects the `pe_elastic_bend` metric. Stretch numbers are real; drift comparison vs bend_ke=0 is metric-only.</td><td class="num">7.83</td><td class="num">1.860e-03</td><td class="num">1.877e+01</td><td class="num">-103.9%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD + SOR ω=1.5 K=10 (full sweep — NOT universal)</td><td>Full 13-scene sweep result. STABLE in 5 of 13 scenes (piles with bend_ke ≥ 0.05). DIVERGES on free chains (no contact dissipation, drift +21 to +112) and on very-soft / zero-bend piles (no bend dissipation, stretch 100+). VBD+SOR is NOT a universal fallback — only safe for piles with non-trivial bend. Method S remains the only universally stable solver.</td><td class="num">2.98</td><td class="num">1.277e-01</td><td class="num">1.943e+01</td><td class="num">+11041.9%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method S + Thomas-bend ω=1.5 K=10 (14-scene sweep)</td><td>Method S + Thomas-bend across all 14 scenes. Wins clearly where bend_ke &gt; 0: XL stiff pile bend 3.2× tighter (0.016 vs 0.050 rad), cable_pile_scaled bend 2.3× tighter + stretch 60% tighter, horiz stretch+bend cantilever bend 5× tighter. Slight loss or tied on bend_ke=0 scenes (Thomas-bend overhead with no benefit). Step time 30-90% higher than Method S baseline. Universally stable (NOT diverging on any scene, unlike VBD+SOR).</td><td class="num">18.25</td><td class="num">1.686e-03</td><td class="num">6.029e+00</td><td class="num">-88.2%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD + Thomas + bend hybrid (NEW, 2026-06-19)</td><td>NEW architectural finding: VBD can host Thomas via 3 ingredients (1) inertia-target rewrite with Thomas-corrected positions, (2) PBD contact projection in pre-pass for contact-feasibility, (3) Thomas-bend for rotation stability. Works on 12 of 14 scenes (chains + piles with bend_ke ≥ 0.05). Diverges on rope-like piles (very-soft / zero bend). Drift matches Method S when stable; stretch is 2-5× worse. Step time 1.5-1.7× Method S. Use for: VBD-features (Dahl friction, penalty contacts) + guaranteed-stiff cables. Method S remains better for pure stretch quality.</td><td class="num">40.13</td><td class="num">3.143e-03</td><td class="num">2.266e+01</td><td class="num">-19.1%</td><td><span class="pill warn">ok</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method O @3 (Warp/GPU) — unified</td><td>GN + XPBD Thomas + velocity-level contact · ONE algorithm, all 5 scenes, chains ~Method A quality, pile +45 % drift</td><td class="num">11.21</td><td class="num">1.860e-02</td><td class="num">3.129e+01</td><td class="num">+98.0%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method O @10 (Warp/GPU) — unified</td><td>Same composition, K=10</td><td class="num">34.50</td><td class="num">1.859e-02</td><td class="num">3.129e+01</td><td class="num">+98.0%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method C @3 (Warp/GPU, frictionless)</td><td>Method A warm-start + PBD distance + PBD non-penetration · CUDA</td><td class="num">11.11</td><td class="num">2.248e-02</td><td class="num">2.541e+01</td><td class="num">+75.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method C @3 (CPU)</td><td>Method A warm-start + PBD projection · NumPy</td><td class="num">589.31</td><td class="num">2.147e-03</td><td class="num">2.475e+01</td><td class="num">+85.3%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method A @5 (CPU)</td><td>Block-tridiag GN, iter=5 · NumPy</td><td class="num">524.95</td><td class="num">1.248e-02</td><td class="num">2.929e+01</td><td class="num">+136.7%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD@5</td><td>iter=5</td><td class="num">1.45</td><td class="num">8.995e-02</td><td class="num">1.001e+01</td><td class="num">+2650.9%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD@10</td><td>iter=10</td><td class="num">2.79</td><td class="num">5.982e-02</td><td class="num">1.025e+01</td><td class="num">+1500.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD@40</td><td>iter=40</td><td class="num">10.72</td><td class="num">2.417e-02</td><td class="num">1.228e+01</td><td class="num">+283.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD-tight (legacy)</td><td>iter=200, 4× substeps (unstable)</td><td class="num">215.33</td><td class="num">5.716e-03</td><td class="num">1.812e+01</td><td class="num">+56.2%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_sc_a1p0</td><td>?</td><td class="num">13.91</td><td class="num">7.454e-04</td><td class="num">1.794e+01</td><td class="num">-106.6%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_N10_horiz_cantilever_stretch</td><td>?</td><td class="num">10.44</td><td class="num">4.160e-02</td><td class="num">6.156e+00</td><td class="num">+1455.4%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_N3_horiz_cantilever_stretch</td><td>?</td><td class="num">2.70</td><td class="num">2.331e-07</td><td class="num">0</td><td class="num">+0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_N5_horiz_cantilever_stretch</td><td>?</td><td class="num">5.35</td><td class="num">4.160e-02</td><td class="num">6.156e+00</td><td class="num">+1455.3%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Nv2_10_horiz_cantilever_stretch</td><td>?</td><td class="num">9.47</td><td class="num">2.331e-07</td><td class="num">0</td><td class="num">+0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Nv2_5_horiz_cantilever_stretch</td><td>?</td><td class="num">5.21</td><td class="num">2.331e-07</td><td class="num">0</td><td class="num">+0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Nv2b_10_horiz_cantilever_stretch</td><td>?</td><td class="num">9.37</td><td class="num">2.331e-07</td><td class="num">0</td><td class="num">+0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Nv2b_5_horiz_cantilever_stretch</td><td>?</td><td class="num">5.20</td><td class="num">2.331e-07</td><td class="num">0</td><td class="num">+0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Nv2c_10_horiz_cantilever_stretch</td><td>?</td><td class="num">9.49</td><td class="num">2.331e-07</td><td class="num">0</td><td class="num">+0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Nv2c_5_horiz_cantilever_stretch</td><td>?</td><td class="num">5.05</td><td class="num">2.331e-07</td><td class="num">0</td><td class="num">+0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_O10_horiz_cantilever_stretch</td><td>?</td><td class="num">32.74</td><td class="num">1.859e-02</td><td class="num">3.129e+01</td><td class="num">+98.0%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_O3_horiz_cantilever_stretch</td><td>?</td><td class="num">10.54</td><td class="num">1.860e-02</td><td class="num">3.129e+01</td><td class="num">+98.0%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Q10_horiz_cantilever_stretch</td><td>?</td><td class="num">32.97</td><td class="num">3.182e-07</td><td class="num">9.471e-01</td><td class="num">-8.9%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Q3_horiz_cantilever_stretch</td><td>?</td><td class="num">10.14</td><td class="num">4.482e-07</td><td class="num">8.878e-01</td><td class="num">-5.1%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_f3_chain</td><td>?</td><td class="num">8.88</td><td class="num">1.247e-02</td><td class="num">2.935e+01</td><td class="num">+136.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_g3_chain</td><td>?</td><td class="num">12.10</td><td class="num">1.780e-02</td><td class="num">2.351e+01</td><td class="num">+53.7%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_h3_chain</td><td>?</td><td class="num">—</td><td class="num">2.494e+01</td><td class="num">8.287e+03</td><td class="num">+46706051.8%</td><td><span class="pill bad">blew up</span></td><td>non-finite or runaway state at frame 15 (speed=8287.5)</td></tr>
+<tr class="candidate"><td>tmp_h_b0_horiz_cantilever_stretch_10</td><td>?</td><td class="num">—</td><td class="num">4.008e+01</td><td class="num">1.289e+04</td><td class="num">+267032644.2%</td><td><span class="pill bad">blew up</span></td><td>non-finite or runaway state at frame 16 (speed=12891.2)</td></tr>
+<tr class="candidate"><td>tmp_h_b0_horiz_cantilever_stretch_3</td><td>?</td><td class="num">—</td><td class="num">1.043e+01</td><td class="num">1.875e+04</td><td class="num">+325777076.0%</td><td><span class="pill bad">blew up</span></td><td>non-finite or runaway state at frame 16 (speed=18750.5)</td></tr>
+<tr class="candidate"><td>tmp_h_horiz_cantilever_stretch_10</td><td>?</td><td class="num">40.05</td><td class="num">7.120e-03</td><td class="num">2.425e+01</td><td class="num">+91.8%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_h_horiz_cantilever_stretch_3</td><td>?</td><td class="num">12.39</td><td class="num">1.738e-02</td><td class="num">2.354e+01</td><td class="num">+54.3%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_i3_chain</td><td>?</td><td class="num">9.05</td><td class="num">1.247e-02</td><td class="num">2.933e+01</td><td class="num">+136.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_j5_chain</td><td>?</td><td class="num">33.98</td><td class="num">2.062e-02</td><td class="num">2.530e+01</td><td class="num">+77.8%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_k3_chain</td><td>?</td><td class="num">8.92</td><td class="num">1.247e-02</td><td class="num">2.935e+01</td><td class="num">+136.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_k5_chain_a0</td><td>?</td><td class="num">15.93</td><td class="num">1.247e-02</td><td class="num">2.933e+01</td><td class="num">+136.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_l3_chain</td><td>?</td><td class="num">9.58</td><td class="num">1.247e-02</td><td class="num">2.935e+01</td><td class="num">+136.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_l3_chain_u</td><td>?</td><td class="num">9.53</td><td class="num">1.247e-02</td><td class="num">2.935e+01</td><td class="num">+136.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_l3c</td><td>?</td><td class="num">9.37</td><td class="num">1.247e-02</td><td class="num">2.935e+01</td><td class="num">+136.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_ma_5</td><td>?</td><td class="num">13.69</td><td class="num">1.247e-02</td><td class="num">2.933e+01</td><td class="num">+136.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_n5_chain</td><td>?</td><td class="num">4.04</td><td class="num">2.331e-07</td><td class="num">0</td><td class="num">+0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_nsoft</td><td>?</td><td class="num">7.80</td><td class="num">9.447e-05</td><td class="num">2.728e-01</td><td class="num">-0.3%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_p3</td><td>?</td><td class="num">—</td><td class="num">1.936e-09</td><td class="num">0</td><td class="num">+0.0%</td><td><span class="pill bad">blew up</span></td><td>RuntimeError: Error launching kernel &amp;#x27;assemble_joint_bend&amp;#x27;, passed 24 arguments but kernel requires 15.</td></tr>
+<tr class="candidate"><td>tmp_p3b</td><td>?</td><td class="num">8.89</td><td class="num">1.247e-02</td><td class="num">2.935e+01</td><td class="num">+136.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_v10gn2</td><td>?</td><td class="num">530.18</td><td class="num">1.248e-02</td><td class="num">2.929e+01</td><td class="num">+136.7%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_v40gn1</td><td>?</td><td class="num">13.44</td><td class="num">2.013e-01</td><td class="num">2.547e+02</td><td class="num">+73683.2%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_v5</td><td>?</td><td class="num">1.45</td><td class="num">8.995e-02</td><td class="num">1.001e+01</td><td class="num">+2650.9%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_v5_revert</td><td>?</td><td class="num">1.45</td><td class="num">8.995e-02</td><td class="num">1.001e+01</td><td class="num">+2650.9%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_v5gn1</td><td>?</td><td class="num">4.25</td><td class="num">2.058e-01</td><td class="num">1.499e+02</td><td class="num">+45705.0%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_v5gn2b</td><td>?</td><td class="num">523.80</td><td class="num">1.248e-02</td><td class="num">2.929e+01</td><td class="num">+136.7%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_v5gn2c</td><td>?</td><td class="num">399.97</td><td class="num">4.940e-04</td><td class="num">1.247e+00</td><td class="num">+2.4%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_v5gn2d</td><td>?</td><td class="num">6.97</td><td class="num">1.771e-01</td><td class="num">1.845e+02</td><td class="num">+45530.6%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_v5gn2e</td><td>?</td><td class="num">6.97</td><td class="num">1.771e-01</td><td class="num">1.845e+02</td><td class="num">+45530.6%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_vgn</td><td>?</td><td class="num">6.97</td><td class="num">1.771e-01</td><td class="num">1.845e+02</td><td class="num">+45530.6%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>vbd5_gnw2</td><td>?</td><td class="num">6.97</td><td class="num">1.771e-01</td><td class="num">1.845e+02</td><td class="num">+45530.6%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>vbd5_gnw3</td><td>?</td><td class="num">523.73</td><td class="num">1.248e-02</td><td class="num">2.929e+01</td><td class="num">+136.7%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>vbd5_gnwarm2</td><td>?</td><td class="num">—</td><td class="num">1.076e+01</td><td class="num">4.286e+04</td><td class="num">+8506917772.9%</td><td><span class="pill bad">blew up</span></td><td>non-finite or runaway state at frame 2 (speed=42862.5)</td></tr>
+<tr class="candidate"><td>vbd_5_base</td><td>?</td><td class="num">1.45</td><td class="num">8.995e-02</td><td class="num">1.001e+01</td><td class="num">+2650.9%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>vbd_5_check</td><td>?</td><td class="num">—</td><td class="num">1.936e-09</td><td class="num">0</td><td class="num">+0.0%</td><td><span class="pill bad">blew up</span></td><td>NameError: name &amp;#x27;init_body_q&amp;#x27; is not defined</td></tr></tbody>
+        </table></div>
+      </details>
+    </section>
+
+
+    <section class="group-header">
+      <h2 style="margin:0;color:var(--accent);font-size:1.05rem;text-transform:uppercase;letter-spacing:.06em;">Chain — short benchmarks</h2>
+    </section>
+
+
+    <section id="scene-pinned-horiz">
+      <div class="scene-head">
+        <h2>9. Horizontal chain — both ends pinned (stiff stretch)</h2>
+        <div class="meta">Catenary sag under gravity with stiff stretch resistance.</div>
+      </div>
+      <div class="video-grid headline">
+<figure><figcaption>Method S @10 ω=1.5 (canonical, 1080p video)</figcaption><video controls preload="metadata" muted src="assets/horiz_pinned_both__method_s_w1p5_K10.mp4"></video></figure>
+<figure><figcaption>Method A @3 (Warp/GPU)</figcaption><video controls preload="metadata" muted src="assets/horiz_pinned_both__method_a_warp_3.mp4"></video></figure>
+<figure><figcaption>VBD@120</figcaption><video controls preload="metadata" muted src="assets/horiz_pinned_both__vbd_120.mp4"></video></figure>
+</div>
+      
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Max speed (m/s)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+        </tr></thead>
+        <tbody><tr class="candidate"><td>Method S @10 ω=1.5 (canonical, 1080p video)</td><td>Canonical Method S K=10 ω=1.5 — rendered at 1920×1080 Full HD. Universal config (no per-scene tuning). On the chain scenes here: see scene-specific stretch / drift; step time within a few ms.</td><td class="num">6.48</td><td class="num">1.030e-03</td><td class="num">2.851e+00</td><td class="num">-17.8%</td><td><span class="pill warn">ok</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method A @3 (Warp/GPU)</td><td>Block-tridiag GN, iter=3 · CUDA · GN converges at 3 iters on 128-seg chain</td><td class="num">8.21</td><td class="num">7.778e-04</td><td class="num">6.204e+00</td><td class="num">-5.7%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr><td>VBD@120</td><td>iter=120</td><td class="num">31.61</td><td class="num">8.763e-03</td><td class="num">4.442e+00</td><td class="num">+29.8%</td><td><span class="pill warn">ok</span></td><td>—</td></tr></tbody>
+      </table></div>
+      
+      <details class="extras-toggle">
+        <summary>Other / legacy methods (30)</summary>
+        <div class="video-grid extras">
+<figure><figcaption>Reference (Method A @40)</figcaption><video controls preload="metadata" muted src="assets/horiz_pinned_both__method_a_ref.mp4"></video></figure>
+<figure><figcaption>Method A @5 (Warp/GPU)</figcaption><video controls preload="metadata" muted src="assets/horiz_pinned_both__method_a_warp_5.mp4"></video></figure>
+<figure><figcaption>VBD + SOR ω=1.5 K=10 (full sweep — NOT universal)</figcaption><video controls preload="metadata" muted src="assets/horiz_pinned_both__vbd_sor_w1p5_K10.mp4"></video></figure>
+<figure><figcaption>Method O @3 (Warp/GPU) — unified</figcaption><video controls preload="metadata" muted src="assets/horiz_pinned_both__method_o_warp_K3.mp4"></video></figure>
+<figure><figcaption>Method O @10 (Warp/GPU) — unified</figcaption><video controls preload="metadata" muted src="assets/horiz_pinned_both__method_o_warp_K10.mp4"></video></figure>
+<figure><figcaption>Method C @3 (Warp/GPU, frictionless)</figcaption><video controls preload="metadata" muted src="assets/horiz_pinned_both__method_c_warp_3.mp4"></video></figure>
+<figure><figcaption>Method C @3 (CPU)</figcaption><video controls preload="metadata" muted src="assets/horiz_pinned_both__method_c_3.mp4"></video></figure>
+<figure><figcaption>Method A @5 (CPU)</figcaption><video controls preload="metadata" muted src="assets/horiz_pinned_both__method_a_5.mp4"></video></figure>
+<figure><figcaption>VBD@5</figcaption><video controls preload="metadata" muted src="assets/horiz_pinned_both__vbd_5.mp4"></video></figure>
+<figure><figcaption>VBD@10</figcaption><video controls preload="metadata" muted src="assets/horiz_pinned_both__vbd_10.mp4"></video></figure>
+<figure><figcaption>VBD@40</figcaption><video controls preload="metadata" muted src="assets/horiz_pinned_both__vbd_40.mp4"></video></figure>
+<figure><figcaption>VBD-tight (legacy)</figcaption><video controls preload="metadata" muted src="assets/horiz_pinned_both__vbd_ref.mp4"></video></figure>
+<figure><figcaption>method_s_sc_a1p0</figcaption><video controls preload="metadata" muted src="assets/horiz_pinned_both__method_s_sc_a1p0.mp4"></video></figure>
+</div>
+        
+        <div class="table-wrap"><table>
+          <thead><tr>
+            <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Max speed (m/s)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+          </tr></thead>
+          <tbody><tr class="ref"><td>Reference (Method A @40)</td><td>Block-tridiag GN, iter=40 · CPU NumPy</td><td class="num">523.21</td><td class="num">7.876e-04</td><td class="num">6.171e+00</td><td class="num">-5.6%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method A @5 (Warp/GPU)</td><td>Block-tridiag GN, iter=5 · CUDA · (legacy, identical to @3)</td><td class="num">13.60</td><td class="num">8.109e-04</td><td class="num">6.203e+00</td><td class="num">-5.7%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method R v2 @20 (chain with bend_ke metric)</td><td>Method R v2 sweep on chains with bend_ke &gt; 0 set in scene. Note: solver doesn&#x27;t apply bend constraint; bend_ke only affects the `pe_elastic_bend` metric. Stretch numbers are real; drift comparison vs bend_ke=0 is metric-only.</td><td class="num">7.87</td><td class="num">1.584e-03</td><td class="num">3.212e+00</td><td class="num">-25.7%</td><td><span class="pill warn">ok</span></td><td>—</td></tr>
+<tr><td>VBD + SOR ω=1.5 K=10 (full sweep — NOT universal)</td><td>Full 13-scene sweep result. STABLE in 5 of 13 scenes (piles with bend_ke ≥ 0.05). DIVERGES on free chains (no contact dissipation, drift +21 to +112) and on very-soft / zero-bend piles (no bend dissipation, stretch 100+). VBD+SOR is NOT a universal fallback — only safe for piles with non-trivial bend. Method S remains the only universally stable solver.</td><td class="num">2.99</td><td class="num">6.660e-02</td><td class="num">6.753e+00</td><td class="num">+3433.1%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method S + Thomas-bend ω=1.5 K=10 (14-scene sweep)</td><td>Method S + Thomas-bend across all 14 scenes. Wins clearly where bend_ke &gt; 0: XL stiff pile bend 3.2× tighter (0.016 vs 0.050 rad), cable_pile_scaled bend 2.3× tighter + stretch 60% tighter, horiz stretch+bend cantilever bend 5× tighter. Slight loss or tied on bend_ke=0 scenes (Thomas-bend overhead with no benefit). Step time 30-90% higher than Method S baseline. Universally stable (NOT diverging on any scene, unlike VBD+SOR).</td><td class="num">17.88</td><td class="num">1.359e-03</td><td class="num">2.695e+00</td><td class="num">-17.9%</td><td><span class="pill warn">ok</span></td><td>—</td></tr>
+<tr><td>VBD + Thomas + bend hybrid (NEW, 2026-06-19)</td><td>NEW architectural finding: VBD can host Thomas via 3 ingredients (1) inertia-target rewrite with Thomas-corrected positions, (2) PBD contact projection in pre-pass for contact-feasibility, (3) Thomas-bend for rotation stability. Works on 12 of 14 scenes (chains + piles with bend_ke ≥ 0.05). Diverges on rope-like piles (very-soft / zero bend). Drift matches Method S when stable; stretch is 2-5× worse. Step time 1.5-1.7× Method S. Use for: VBD-features (Dahl friction, penalty contacts) + guaranteed-stiff cables. Method S remains better for pure stretch quality.</td><td class="num">39.35</td><td class="num">6.629e-03</td><td class="num">5.619e+00</td><td class="num">+0.9%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method O @3 (Warp/GPU) — unified</td><td>GN + XPBD Thomas + velocity-level contact · ONE algorithm, all 5 scenes, chains ~Method A quality, pile +45 % drift</td><td class="num">11.17</td><td class="num">5.846e-03</td><td class="num">9.598e+00</td><td class="num">+1.4%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method O @10 (Warp/GPU) — unified</td><td>Same composition, K=10</td><td class="num">32.81</td><td class="num">5.087e-03</td><td class="num">9.875e+00</td><td class="num">+1.2%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method C @3 (Warp/GPU, frictionless)</td><td>Method A warm-start + PBD distance + PBD non-penetration · CUDA</td><td class="num">11.06</td><td class="num">4.481e-03</td><td class="num">5.059e+00</td><td class="num">+4.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method C @3 (CPU)</td><td>Method A warm-start + PBD projection · NumPy</td><td class="num">568.88</td><td class="num">1.751e-03</td><td class="num">4.858e+00</td><td class="num">+0.8%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method A @5 (CPU)</td><td>Block-tridiag GN, iter=5 · NumPy</td><td class="num">528.54</td><td class="num">7.896e-04</td><td class="num">6.171e+00</td><td class="num">-5.7%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr><td>VBD@5</td><td>iter=5</td><td class="num">1.45</td><td class="num">9.109e-02</td><td class="num">8.808e+00</td><td class="num">+5801.1%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD@10</td><td>iter=10</td><td class="num">2.77</td><td class="num">6.174e-02</td><td class="num">7.409e+00</td><td class="num">+3168.8%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD@40</td><td>iter=40</td><td class="num">10.63</td><td class="num">2.183e-02</td><td class="num">5.530e+00</td><td class="num">+430.8%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD-tight (legacy)</td><td>iter=200, 4× substeps (unstable)</td><td class="num">216.20</td><td class="num">3.504e-03</td><td class="num">3.501e+00</td><td class="num">-27.3%</td><td><span class="pill warn">ok</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_r_warp_20_bend_horiz_pinned_both</td><td>?</td><td class="num">8.27</td><td class="num">1.584e-03</td><td class="num">3.212e+00</td><td class="num">-25.7%</td><td><span class="pill warn">ok</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_sc_a1p0</td><td>?</td><td class="num">13.96</td><td class="num">1.030e-03</td><td class="num">2.851e+00</td><td class="num">-17.8%</td><td><span class="pill warn">ok</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_N10_horiz_pinned_both</td><td>?</td><td class="num">10.05</td><td class="num">1.598e-04</td><td class="num">1.641e-01</td><td class="num">-0.3%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_N3_horiz_pinned_both</td><td>?</td><td class="num">—</td><td class="num">—</td><td class="num">0</td><td class="num">—</td><td><span class="pill bad">blew up</span></td><td>non-finite or runaway state at frame 1 (speed=nan)</td></tr>
+<tr class="candidate"><td>tmp_N5_horiz_pinned_both</td><td>?</td><td class="num">5.72</td><td class="num">2.285e-04</td><td class="num">4.649e-01</td><td class="num">-0.3%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Nv2_10_horiz_pinned_both</td><td>?</td><td class="num">9.32</td><td class="num">2.098e-08</td><td class="num">0</td><td class="num">+0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Nv2_5_horiz_pinned_both</td><td>?</td><td class="num">5.26</td><td class="num">2.098e-08</td><td class="num">8.941e-06</td><td class="num">+0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Nv2b_10_horiz_pinned_both</td><td>?</td><td class="num">9.44</td><td class="num">2.098e-08</td><td class="num">0</td><td class="num">+0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Nv2b_5_horiz_pinned_both</td><td>?</td><td class="num">5.07</td><td class="num">2.098e-08</td><td class="num">8.941e-06</td><td class="num">+0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Nv2c_10_horiz_pinned_both</td><td>?</td><td class="num">11.45</td><td class="num">7.695e-07</td><td class="num">3.576e-05</td><td class="num">-0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Nv2c_5_horiz_pinned_both</td><td>?</td><td class="num">5.07</td><td class="num">7.695e-07</td><td class="num">3.576e-05</td><td class="num">-0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_O10_horiz_pinned_both</td><td>?</td><td class="num">32.62</td><td class="num">5.087e-03</td><td class="num">9.875e+00</td><td class="num">+1.2%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_O3_horiz_pinned_both</td><td>?</td><td class="num">10.59</td><td class="num">5.846e-03</td><td class="num">9.598e+00</td><td class="num">+1.4%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Q10_horiz_pinned_both</td><td>?</td><td class="num">32.74</td><td class="num">6.140e-05</td><td class="num">6.611e-01</td><td class="num">-2.2%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Q3_horiz_pinned_both</td><td>?</td><td class="num">10.14</td><td class="num">6.133e-05</td><td class="num">6.587e-01</td><td class="num">-2.2%</td><td><span class="pill ok">clean</span></td><td>—</td></tr></tbody>
+        </table></div>
+      </details>
+    </section>
+
+
+    <section id="scene-vertical">
+      <div class="scene-head">
+        <h2>10. Vertical hanging chain — top pinned</h2>
+        <div class="meta">Pendulum-like hang under gravity; stretch resists drop.</div>
+      </div>
+      <div class="video-grid headline">
+<figure><figcaption>Method S @10 ω=1.5 (canonical, 1080p video)</figcaption><video controls preload="metadata" muted src="assets/vertical_hanging__method_s_w1p5_K10.mp4"></video></figure>
+<figure><figcaption>Method A @3 (Warp/GPU)</figcaption><video controls preload="metadata" muted src="assets/vertical_hanging__method_a_warp_3.mp4"></video></figure>
+<figure><figcaption>VBD@120</figcaption><video controls preload="metadata" muted src="assets/vertical_hanging__vbd_120.mp4"></video></figure>
+</div>
+      
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Max bend (rad)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+        </tr></thead>
+        <tbody><tr class="candidate"><td>Method S @10 ω=1.5 (canonical, 1080p video)</td><td>Canonical Method S K=10 ω=1.5 — rendered at 1920×1080 Full HD. Universal config (no per-scene tuning). On the chain scenes here: see scene-specific stretch / drift; step time within a few ms.</td><td class="num">6.97</td><td class="num">8.307e-04</td><td class="num">0</td><td class="num">-1.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method A @3 (Warp/GPU)</td><td>Block-tridiag GN, iter=3 · CUDA · GN converges at 3 iters on 128-seg chain</td><td class="num">8.32</td><td class="num">4.395e-03</td><td class="num">0</td><td class="num">+2.8%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr><td>VBD@120</td><td>iter=120</td><td class="num">43.57</td><td class="num">9.873e-03</td><td class="num">0</td><td class="num">+15.2%</td><td><span class="pill warn">ok</span></td><td>—</td></tr></tbody>
+      </table></div>
+      
+      <details class="extras-toggle">
+        <summary>Other / legacy methods (29)</summary>
+        <div class="video-grid extras">
+<figure><figcaption>Reference (Method A @40)</figcaption><video controls preload="metadata" muted src="assets/vertical_hanging__method_a_ref.mp4"></video></figure>
+<figure><figcaption>Method A @5 (Warp/GPU)</figcaption><video controls preload="metadata" muted src="assets/vertical_hanging__method_a_warp_5.mp4"></video></figure>
+<figure><figcaption>VBD + SOR ω=1.5 K=10 (full sweep — NOT universal)</figcaption><video controls preload="metadata" muted src="assets/vertical_hanging__vbd_sor_w1p5_K10.mp4"></video></figure>
+<figure><figcaption>Method O @3 (Warp/GPU) — unified</figcaption><video controls preload="metadata" muted src="assets/vertical_hanging__method_o_warp_K3.mp4"></video></figure>
+<figure><figcaption>Method O @10 (Warp/GPU) — unified</figcaption><video controls preload="metadata" muted src="assets/vertical_hanging__method_o_warp_K10.mp4"></video></figure>
+<figure><figcaption>Method C @3 (Warp/GPU, frictionless)</figcaption><video controls preload="metadata" muted src="assets/vertical_hanging__method_c_warp_3.mp4"></video></figure>
+<figure><figcaption>Method C @3 (CPU)</figcaption><video controls preload="metadata" muted src="assets/vertical_hanging__method_c_3.mp4"></video></figure>
+<figure><figcaption>VBD@5</figcaption><video controls preload="metadata" muted src="assets/vertical_hanging__vbd_5.mp4"></video></figure>
+<figure><figcaption>VBD@10</figcaption><video controls preload="metadata" muted src="assets/vertical_hanging__vbd_10.mp4"></video></figure>
+<figure><figcaption>VBD@40</figcaption><video controls preload="metadata" muted src="assets/vertical_hanging__vbd_40.mp4"></video></figure>
+<figure><figcaption>VBD-tight (legacy)</figcaption><video controls preload="metadata" muted src="assets/vertical_hanging__vbd_ref.mp4"></video></figure>
+<figure><figcaption>method_s_sc_a1p0</figcaption><video controls preload="metadata" muted src="assets/vertical_hanging__method_s_sc_a1p0.mp4"></video></figure>
+</div>
+        
+        <div class="table-wrap"><table>
+          <thead><tr>
+            <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Max bend (rad)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+          </tr></thead>
+          <tbody><tr class="ref"><td>Reference (Method A @40)</td><td>Block-tridiag GN, iter=40 · CPU NumPy</td><td class="num">346.31</td><td class="num">4.391e-03</td><td class="num">0</td><td class="num">+2.8%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method A @5 (Warp/GPU)</td><td>Block-tridiag GN, iter=5 · CUDA · (legacy, identical to @3)</td><td class="num">13.80</td><td class="num">4.394e-03</td><td class="num">0</td><td class="num">+2.8%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method R v2 @20 (chain with bend_ke metric)</td><td>Method R v2 sweep on chains with bend_ke &gt; 0 set in scene. Note: solver doesn&#x27;t apply bend constraint; bend_ke only affects the `pe_elastic_bend` metric. Stretch numbers are real; drift comparison vs bend_ke=0 is metric-only.</td><td class="num">7.78</td><td class="num">1.045e-03</td><td class="num">0</td><td class="num">-1.4%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr><td>VBD + SOR ω=1.5 K=10 (full sweep — NOT universal)</td><td>Full 13-scene sweep result. STABLE in 5 of 13 scenes (piles with bend_ke ≥ 0.05). DIVERGES on free chains (no contact dissipation, drift +21 to +112) and on very-soft / zero-bend piles (no bend dissipation, stretch 100+). VBD+SOR is NOT a universal fallback — only safe for piles with non-trivial bend. Method S remains the only universally stable solver.</td><td class="num">4.00</td><td class="num">1.407e-01</td><td class="num">0</td><td class="num">+5157.6%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method S + Thomas-bend ω=1.5 K=10 (14-scene sweep)</td><td>Method S + Thomas-bend across all 14 scenes. Wins clearly where bend_ke &gt; 0: XL stiff pile bend 3.2× tighter (0.016 vs 0.050 rad), cable_pile_scaled bend 2.3× tighter + stretch 60% tighter, horiz stretch+bend cantilever bend 5× tighter. Slight loss or tied on bend_ke=0 scenes (Thomas-bend overhead with no benefit). Step time 30-90% higher than Method S baseline. Universally stable (NOT diverging on any scene, unlike VBD+SOR).</td><td class="num">18.22</td><td class="num">1.735e-03</td><td class="num">0</td><td class="num">-1.8%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr><td>VBD + Thomas + bend hybrid (NEW, 2026-06-19)</td><td>NEW architectural finding: VBD can host Thomas via 3 ingredients (1) inertia-target rewrite with Thomas-corrected positions, (2) PBD contact projection in pre-pass for contact-feasibility, (3) Thomas-bend for rotation stability. Works on 12 of 14 scenes (chains + piles with bend_ke ≥ 0.05). Diverges on rope-like piles (very-soft / zero bend). Drift matches Method S when stable; stretch is 2-5× worse. Step time 1.5-1.7× Method S. Use for: VBD-features (Dahl friction, penalty contacts) + guaranteed-stiff cables. Method S remains better for pure stretch quality.</td><td class="num">39.83</td><td class="num">5.086e-03</td><td class="num">0</td><td class="num">+0.3%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method O @3 (Warp/GPU) — unified</td><td>GN + XPBD Thomas + velocity-level contact · ONE algorithm, all 5 scenes, chains ~Method A quality, pile +45 % drift</td><td class="num">11.54</td><td class="num">2.384e-07</td><td class="num">2.980e-08</td><td class="num">-0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method O @10 (Warp/GPU) — unified</td><td>Same composition, K=10</td><td class="num">33.06</td><td class="num">2.384e-07</td><td class="num">2.980e-08</td><td class="num">-0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method C @3 (Warp/GPU, frictionless)</td><td>Method A warm-start + PBD distance + PBD non-penetration · CUDA</td><td class="num">11.17</td><td class="num">1.852e-03</td><td class="num">2.980e-08</td><td class="num">-0.3%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method C @3 (CPU)</td><td>Method A warm-start + PBD projection · NumPy</td><td class="num">667.45</td><td class="num">1.331e-03</td><td class="num">0</td><td class="num">-1.2%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr><td>VBD@5</td><td>iter=5</td><td class="num">1.95</td><td class="num">1.080e-01</td><td class="num">0</td><td class="num">+1726.2%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD@10</td><td>iter=10</td><td class="num">3.76</td><td class="num">7.541e-02</td><td class="num">0</td><td class="num">+1095.7%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD@40</td><td>iter=40</td><td class="num">14.61</td><td class="num">2.868e-02</td><td class="num">0</td><td class="num">+185.8%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD-tight (legacy)</td><td>iter=200, 4× substeps (unstable)</td><td class="num">295.91</td><td class="num">5.374e-03</td><td class="num">2.980e-08</td><td class="num">-1.2%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_r_warp_20_bend_vertical_hanging</td><td>?</td><td class="num">8.49</td><td class="num">1.045e-03</td><td class="num">0</td><td class="num">-1.4%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_sc_a1p0</td><td>?</td><td class="num">14.29</td><td class="num">8.307e-04</td><td class="num">0</td><td class="num">-1.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_N10_vertical_hanging</td><td>?</td><td class="num">10.24</td><td class="num">3.497e-09</td><td class="num">0</td><td class="num">+0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_N3_vertical_hanging</td><td>?</td><td class="num">2.81</td><td class="num">2.171e-14</td><td class="num">0</td><td class="num">-0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_N5_vertical_hanging</td><td>?</td><td class="num">5.56</td><td class="num">3.497e-09</td><td class="num">0</td><td class="num">+0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Nv2_10_vertical_hanging</td><td>?</td><td class="num">9.58</td><td class="num">2.171e-14</td><td class="num">0</td><td class="num">-0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Nv2_5_vertical_hanging</td><td>?</td><td class="num">5.10</td><td class="num">2.171e-14</td><td class="num">0</td><td class="num">-0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Nv2b_10_vertical_hanging</td><td>?</td><td class="num">9.29</td><td class="num">2.171e-14</td><td class="num">0</td><td class="num">-0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Nv2b_5_vertical_hanging</td><td>?</td><td class="num">5.02</td><td class="num">2.171e-14</td><td class="num">0</td><td class="num">-0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Nv2c_10_vertical_hanging</td><td>?</td><td class="num">9.66</td><td class="num">4.403e-07</td><td class="num">2.961e+00</td><td class="num">+5903.8%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Nv2c_5_vertical_hanging</td><td>?</td><td class="num">5.17</td><td class="num">4.679e-07</td><td class="num">2.715e+00</td><td class="num">+2402.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_O10_vertical_hanging</td><td>?</td><td class="num">32.91</td><td class="num">2.384e-07</td><td class="num">2.980e-08</td><td class="num">-0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_O3_vertical_hanging</td><td>?</td><td class="num">10.42</td><td class="num">2.384e-07</td><td class="num">2.980e-08</td><td class="num">-0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Q10_vertical_hanging</td><td>?</td><td class="num">33.11</td><td class="num">2.384e-07</td><td class="num">0</td><td class="num">-0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>tmp_Q3_vertical_hanging</td><td>?</td><td class="num">10.26</td><td class="num">2.384e-07</td><td class="num">0</td><td class="num">-0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr></tbody>
+        </table></div>
+      </details>
+    </section>
+
+
+    <section class="group-header">
+      <h2 style="margin:0;color:var(--accent);font-size:1.05rem;text-transform:uppercase;letter-spacing:.06em;">Chain — long cantilever scaling</h2>
+    </section>
+
+
+    <section id="scene-long-256">
+      <div class="scene-head">
+        <h2>11. Long cantilever — 256 segments (10.24 m)</h2>
+        <div class="meta">256-segment cantilever; pinned at x=0; bend_ke=0 (free articulation).</div>
+      </div>
+      <div class="video-grid headline">
+<figure><figcaption>Method S @20 ω=1.5 (256-seg cantilever — canonical)</figcaption><video controls preload="metadata" muted src="assets/long_cantilever_256__method_s_w1p5_long256.mp4"></video></figure>
+<figure><figcaption>Method S @5 ω=1.5 (256-seg cantilever — speed tier)</figcaption><video controls preload="metadata" muted src="assets/long_cantilever_256__method_s_w1p5_K5_long256.mp4"></video></figure>
+<figure><figcaption>Method S @20 ω=1.9 (256-seg cantilever)</figcaption><video controls preload="metadata" muted src="assets/long_cantilever_256__method_s_w1p9_long256.mp4"></video></figure>
+</div>
+      
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Max speed (m/s)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+        </tr></thead>
+        <tbody><tr class="candidate"><td>Method S + Thomas-bend ω=1.5 K=10 (14-scene sweep)</td><td>Method S + Thomas-bend across all 14 scenes. Wins clearly where bend_ke &gt; 0: XL stiff pile bend 3.2× tighter (0.016 vs 0.050 rad), cable_pile_scaled bend 2.3× tighter + stretch 60% tighter, horiz stretch+bend cantilever bend 5× tighter. Slight loss or tied on bend_ke=0 scenes (Thomas-bend overhead with no benefit). Step time 30-90% higher than Method S baseline. Universally stable (NOT diverging on any scene, unlike VBD+SOR).</td><td class="num">18.64</td><td class="num">2.187e-03</td><td class="num">5.439e+00</td><td class="num">-101.0%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method S @20 ω=1.5 (256-seg cantilever — canonical)</td><td>Method S canonical ω=1.5 K=20 on 256-segment cantilever. Stretch 1.14e-3 vs Method R K=20 4.38e-3 — 3.9× tighter at same step time. Slightly less aggressive than ω=1.9 but matches the universal pile config.</td><td class="num">15.53</td><td class="num">1.136e-03</td><td class="num">5.548e+00</td><td class="num">-97.7%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method S @5 ω=1.5 (256-seg cantilever — speed tier)</td><td>Method S K=5 ω=1.5 on long_cantilever_256. Step 3.93 ms, stretch 4.54e-3. Compare Method R K=20: step 14.88 ms, stretch 4.38e-3. SAME residual at 3.8× FASTER wall-clock. Speed-tier deployment.</td><td class="num">3.94</td><td class="num">4.543e-03</td><td class="num">5.285e+00</td><td class="num">-98.6%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method S @20 ω=1.9 (256-seg cantilever)</td><td>Method S on a 256-segment cantilever, ω=1.9 (max-gain config). Stretch 9.5e-4 vs Method R K=20 4.38e-3 — 4.6× tighter at same step time. Slightly tighter than ω=1.5 canonical (1.14e-3).</td><td class="num">15.51</td><td class="num">9.529e-04</td><td class="num">5.461e+00</td><td class="num">-101.3%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method R v2 @20</td><td>Same as @10 with more outer iters; stretch halves with each doubling.</td><td class="num">14.88</td><td class="num">4.379e-03</td><td class="num">1.726e+01</td><td class="num">-273.6%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD@40</td><td>iter=40</td><td class="num">11.26</td><td class="num">2.540e-02</td><td class="num">1.059e+01</td><td class="num">+223.6%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr></tbody>
+      </table></div>
+      
+      <details class="extras-toggle">
+        <summary>Other / legacy methods (9)</summary>
+        <div class="video-grid extras">
+<figure><figcaption>Method N v1 @10 (direction-aware XPBD)</figcaption><video controls preload="metadata" muted src="assets/long_cantilever_256__method_n_dir_warp_10_fric.mp4"></video></figure>
+<figure><figcaption>Method R v2 @10 + friction (chain video)</figcaption><video controls preload="metadata" muted src="assets/long_cantilever_256__method_r_warp_10_relax100_fric.mp4"></video></figure>
+<figure><figcaption>VBD + SOR ω=1.5 K=10 (full sweep — NOT universal)</figcaption><video controls preload="metadata" muted src="assets/long_cantilever_256__vbd_sor_w1p5_K10.mp4"></video></figure>
+<figure><figcaption>method_s_sc_a1p0</figcaption><video controls preload="metadata" muted src="assets/long_cantilever_256__method_s_sc_a1p0.mp4"></video></figure>
+</div>
+        
+        <div class="table-wrap"><table>
+          <thead><tr>
+            <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Max speed (m/s)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+          </tr></thead>
+          <tbody><tr class="candidate"><td>Method N v1 @10 (direction-aware XPBD)</td><td>Block-tridiag positional Thomas, direction-aware constraint, no GN · BEST PILE: stretch 2.12e-5, drift −0.85 %</td><td class="num">7.22</td><td class="num">4.715e-07</td><td class="num">0</td><td class="num">+0.0%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method R v2 @10 — chain articulation</td><td>Method N v1 + angular impulse from λ + angular-aware Schur (`xpbd_assemble_direction_with_angular`). Articulates long chains where Method N v1 locks rotation.</td><td class="num">7.35</td><td class="num">7.688e-03</td><td class="num">1.549e+01</td><td class="num">-262.1%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method R v2 @40</td><td>High-accuracy chain tier; matches VBD@400 quality at ~5× lower step cost.</td><td class="num">29.62</td><td class="num">2.245e-03</td><td class="num">1.916e+01</td><td class="num">-259.1%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method R v2 @10 + friction (chain video)</td><td>Method R v2 with friction enabled (no-op for chains, ready for pile).</td><td class="num">7.36</td><td class="num">7.688e-03</td><td class="num">1.549e+01</td><td class="num">-262.1%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD + SOR ω=1.5 K=10 (full sweep — NOT universal)</td><td>Full 13-scene sweep result. STABLE in 5 of 13 scenes (piles with bend_ke ≥ 0.05). DIVERGES on free chains (no contact dissipation, drift +21 to +112) and on very-soft / zero-bend piles (no bend dissipation, stretch 100+). VBD+SOR is NOT a universal fallback — only safe for piles with non-trivial bend. Method S remains the only universally stable solver.</td><td class="num">3.14</td><td class="num">1.352e-01</td><td class="num">2.130e+01</td><td class="num">+8119.4%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD + Thomas + bend hybrid (NEW, 2026-06-19)</td><td>NEW architectural finding: VBD can host Thomas via 3 ingredients (1) inertia-target rewrite with Thomas-corrected positions, (2) PBD contact projection in pre-pass for contact-feasibility, (3) Thomas-bend for rotation stability. Works on 12 of 14 scenes (chains + piles with bend_ke ≥ 0.05). Diverges on rope-like piles (very-soft / zero bend). Drift matches Method S when stable; stretch is 2-5× worse. Step time 1.5-1.7× Method S. Use for: VBD-features (Dahl friction, penalty contacts) + guaranteed-stiff cables. Method S remains better for pure stretch quality.</td><td class="num">39.58</td><td class="num">2.519e-02</td><td class="num">3.742e+01</td><td class="num">+63.2%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_r_warp_20_bend_long_cantilever_256</td><td>?</td><td class="num">15.07</td><td class="num">4.379e-03</td><td class="num">1.726e+01</td><td class="num">-273.6%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_sc_a1p0</td><td>?</td><td class="num">13.85</td><td class="num">5.397e-03</td><td class="num">1.646e+01</td><td class="num">-275.9%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>vbd_sor_w1p5</td><td>?</td><td class="num">3.16</td><td class="num">1.321e-02</td><td class="num">5.102e+00</td><td class="num">+27.4%</td><td><span class="pill warn">ok</span></td><td>—</td></tr></tbody>
+        </table></div>
+      </details>
+    </section>
+
+
+    <section id="scene-long-512">
+      <div class="scene-head">
+        <h2>12. Long cantilever — 512 segments (20.48 m)</h2>
+        <div class="meta">512-segment cantilever; pinned at x=0; bend_ke=0 (free articulation).</div>
+      </div>
+      <div class="video-grid headline">
+<figure><figcaption>Method S @20 ω=1.5 (512-seg cantilever — canonical)</figcaption><video controls preload="metadata" muted src="assets/long_cantilever_512__method_s_w1p5_long512.mp4"></video></figure>
+<figure><figcaption>Method S @20 ω=1.9 (512-seg cantilever)</figcaption><video controls preload="metadata" muted src="assets/long_cantilever_512__method_s_w1p9_long512.mp4"></video></figure>
+<figure><figcaption>Method R v2 @20</figcaption><video controls preload="metadata" muted src="assets/long_cantilever_512__method_r_warp_20_relax100_chain.mp4"></video></figure>
+<figure><figcaption>Method A @3 (Warp/GPU)</figcaption><video controls preload="metadata" muted src="assets/long_cantilever_512__method_a_warp_3.mp4"></video></figure>
+<figure><figcaption>VBD@120</figcaption><video controls preload="metadata" muted src="assets/long_cantilever_512__vbd_120.mp4"></video></figure>
+</div>
+      
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Max speed (m/s)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+        </tr></thead>
+        <tbody><tr class="candidate"><td>Method S + Thomas-bend ω=1.5 K=10 (14-scene sweep)</td><td>Method S + Thomas-bend across all 14 scenes. Wins clearly where bend_ke &gt; 0: XL stiff pile bend 3.2× tighter (0.016 vs 0.050 rad), cable_pile_scaled bend 2.3× tighter + stretch 60% tighter, horiz stretch+bend cantilever bend 5× tighter. Slight loss or tied on bend_ke=0 scenes (Thomas-bend overhead with no benefit). Step time 30-90% higher than Method S baseline. Universally stable (NOT diverging on any scene, unlike VBD+SOR).</td><td class="num">29.22</td><td class="num">2.924e-03</td><td class="num">5.109e+00</td><td class="num">-113.7%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method S @20 ω=1.5 (512-seg cantilever — canonical)</td><td>Method S canonical ω=1.5 K=20 on 512-segment cantilever. Stretch 2.19e-3 vs Method R K=20 4.32e-3 — 2.0× tighter at same step time.</td><td class="num">29.22</td><td class="num">2.193e-03</td><td class="num">5.009e+00</td><td class="num">-118.9%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method S @20 ω=1.9 (512-seg cantilever)</td><td>Method S on a 512-segment cantilever, ω=1.9. Stretch 1.98e-3 vs Method R K=20 4.32e-3 — 2.2× tighter at same step time.</td><td class="num">29.35</td><td class="num">1.984e-03</td><td class="num">4.996e+00</td><td class="num">-120.1%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method R v2 @20</td><td>Same as @10 with more outer iters; stretch halves with each doubling.</td><td class="num">28.20</td><td class="num">4.318e-03</td><td class="num">1.201e+01</td><td class="num">-342.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method A @3 (Warp/GPU)</td><td>Block-tridiag GN, iter=3 · CUDA · GN converges at 3 iters on 128-seg chain</td><td class="num">30.68</td><td class="num">1.471e-02</td><td class="num">1.564e+01</td><td class="num">+305.6%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD@120</td><td>iter=120</td><td class="num">38.08</td><td class="num">1.315e-02</td><td class="num">1.061e+01</td><td class="num">+36.7%</td><td><span class="pill warn">ok</span></td><td>—</td></tr>
+<tr class="candidate"><td>vbd_400</td><td>?</td><td class="num">126.81</td><td class="num">7.760e-03</td><td class="num">1.025e+01</td><td class="num">-20.6%</td><td><span class="pill warn">ok</span></td><td>—</td></tr></tbody>
+      </table></div>
+      
+      <details class="extras-toggle">
+        <summary>Other / legacy methods (8)</summary>
+        <div class="video-grid extras">
+<figure><figcaption>method_s_sc_a1p0</figcaption><video controls preload="metadata" muted src="assets/long_cantilever_512__method_s_sc_a1p0.mp4"></video></figure>
+</div>
+        
+        <div class="table-wrap"><table>
+          <thead><tr>
+            <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Max speed (m/s)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+          </tr></thead>
+          <tbody><tr class="candidate"><td>Method R v2 @10 — chain articulation</td><td>Method N v1 + angular impulse from λ + angular-aware Schur (`xpbd_assemble_direction_with_angular`). Articulates long chains where Method N v1 locks rotation.</td><td class="num">14.11</td><td class="num">9.296e-03</td><td class="num">1.138e+01</td><td class="num">-344.2%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method R v2 @40</td><td>High-accuracy chain tier; matches VBD@400 quality at ~5× lower step cost.</td><td class="num">56.53</td><td class="num">2.326e-03</td><td class="num">1.158e+01</td><td class="num">-382.9%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD + Thomas + bend hybrid (NEW, 2026-06-19)</td><td>NEW architectural finding: VBD can host Thomas via 3 ingredients (1) inertia-target rewrite with Thomas-corrected positions, (2) PBD contact projection in pre-pass for contact-feasibility, (3) Thomas-bend for rotation stability. Works on 12 of 14 scenes (chains + piles with bend_ke ≥ 0.05). Diverges on rope-like piles (very-soft / zero bend). Drift matches Method S when stable; stretch is 2-5× worse. Step time 1.5-1.7× Method S. Use for: VBD-features (Dahl friction, penalty contacts) + guaranteed-stiff cables. Method S remains better for pure stretch quality.</td><td class="num">40.38</td><td class="num">2.320e-02</td><td class="num">2.405e+01</td><td class="num">+117.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD@5</td><td>iter=5</td><td class="num">1.75</td><td class="num">8.996e-02</td><td class="num">1.000e+01</td><td class="num">+662.2%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD@40</td><td>iter=40</td><td class="num">12.84</td><td class="num">2.541e-02</td><td class="num">1.057e+01</td><td class="num">+121.2%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_r_warp_20_bend_long_cantilever_512</td><td>?</td><td class="num">28.54</td><td class="num">4.318e-03</td><td class="num">1.201e+01</td><td class="num">-342.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_sc_a1p0</td><td>?</td><td class="num">15.53</td><td class="num">5.436e-03</td><td class="num">1.208e+01</td><td class="num">-328.7%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>vbd_1000</td><td>?</td><td class="num">316.88</td><td class="num">6.530e-03</td><td class="num">1.012e+01</td><td class="num">-34.6%</td><td><span class="pill warn">ok</span></td><td>—</td></tr></tbody>
+        </table></div>
+      </details>
+    </section>
+
+
+    <section id="scene-long-1024">
+      <div class="scene-head">
+        <h2>13. Long cantilever — 1024 segments (40.96 m)</h2>
+        <div class="meta">1024-segment cantilever; pinned at x=0; bend_ke=0 (free articulation).</div>
+      </div>
+      <div class="video-grid headline">
+<figure><figcaption>Method S @20 ω=1.5 (1024-seg cantilever — canonical)</figcaption><video controls preload="metadata" muted src="assets/long_cantilever_1024__method_s_w1p5_long1024.mp4"></video></figure>
+<figure><figcaption>Method S @20 ω=1.9 (1024-seg cantilever)</figcaption><video controls preload="metadata" muted src="assets/long_cantilever_1024__method_s_w1p9_long1024.mp4"></video></figure>
+<figure><figcaption>Method R v2 @20</figcaption><video controls preload="metadata" muted src="assets/long_cantilever_1024__method_r_warp_20_relax100_chain.mp4"></video></figure>
+</div>
+      
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Max speed (m/s)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+        </tr></thead>
+        <tbody><tr class="candidate"><td>Method S + Thomas-bend ω=1.5 K=10 (14-scene sweep)</td><td>Method S + Thomas-bend across all 14 scenes. Wins clearly where bend_ke &gt; 0: XL stiff pile bend 3.2× tighter (0.016 vs 0.050 rad), cable_pile_scaled bend 2.3× tighter + stretch 60% tighter, horiz stretch+bend cantilever bend 5× tighter. Slight loss or tied on bend_ke=0 scenes (Thomas-bend overhead with no benefit). Step time 30-90% higher than Method S baseline. Universally stable (NOT diverging on any scene, unlike VBD+SOR).</td><td class="num">56.21</td><td class="num">2.924e-03</td><td class="num">5.109e+00</td><td class="num">-118.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method S @20 ω=1.5 (1024-seg cantilever — canonical)</td><td>Method S canonical ω=1.5 K=20 on 1024-segment cantilever. Stretch 2.19e-3 vs Method R K=20 7.00e-3 — 3.2× tighter at same step time. Drift -1.21 vs Method R -4.53.</td><td class="num">56.31</td><td class="num">2.193e-03</td><td class="num">5.009e+00</td><td class="num">-121.0%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method S @20 ω=1.9 (1024-seg cantilever)</td><td>Method S on a 1024-segment cantilever, ω=1.9. Stretch 1.98e-3 vs Method R K=20 7.00e-3 — 3.5× tighter at same step time.</td><td class="num">56.33</td><td class="num">1.984e-03</td><td class="num">4.996e+00</td><td class="num">-121.6%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method R v2 @20</td><td>Same as @10 with more outer iters; stretch halves with each doubling.</td><td class="num">55.30</td><td class="num">7.003e-03</td><td class="num">1.013e+01</td><td class="num">-453.1%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method A @3 (Warp/GPU)</td><td>Block-tridiag GN, iter=3 · CUDA · GN converges at 3 iters on 128-seg chain</td><td class="num">60.40</td><td class="num">1.471e-02</td><td class="num">1.564e+01</td><td class="num">+336.4%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD@120</td><td>iter=120</td><td class="num">38.58</td><td class="num">1.310e-02</td><td class="num">1.068e+01</td><td class="num">+18.5%</td><td><span class="pill warn">ok</span></td><td>—</td></tr></tbody>
+      </table></div>
+      
+      <details class="extras-toggle">
+        <summary>Other / legacy methods (11)</summary>
+        <div class="video-grid extras">
+<figure><figcaption>VBD + SOR ω=1.5 K=10 (full sweep — NOT universal)</figcaption><video controls preload="metadata" muted src="assets/long_cantilever_1024__vbd_sor_w1p5_K10.mp4"></video></figure>
+<figure><figcaption>method_s_sc_a1p0</figcaption><video controls preload="metadata" muted src="assets/long_cantilever_1024__method_s_sc_a1p0.mp4"></video></figure>
+</div>
+        
+        <div class="table-wrap"><table>
+          <thead><tr>
+            <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Max speed (m/s)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+          </tr></thead>
+          <tbody><tr class="candidate"><td>Method A @5 (Warp/GPU)</td><td>Block-tridiag GN, iter=5 · CUDA · (legacy, identical to @3)</td><td class="num">100.62</td><td class="num">1.471e-02</td><td class="num">1.564e+01</td><td class="num">+336.4%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method R v2 @10 — chain articulation</td><td>Method N v1 + angular impulse from λ + angular-aware Schur (`xpbd_assemble_direction_with_angular`). Articulates long chains where Method N v1 locks rotation.</td><td class="num">27.66</td><td class="num">9.892e-03</td><td class="num">1.043e+01</td><td class="num">-418.3%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method R v2 @40</td><td>High-accuracy chain tier; matches VBD@400 quality at ~5× lower step cost.</td><td class="num">110.52</td><td class="num">4.759e-03</td><td class="num">1.002e+01</td><td class="num">-474.1%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD + SOR ω=1.5 K=10 (full sweep — NOT universal)</td><td>Full 13-scene sweep result. STABLE in 5 of 13 scenes (piles with bend_ke ≥ 0.05). DIVERGES on free chains (no contact dissipation, drift +21 to +112) and on very-soft / zero-bend piles (no bend dissipation, stretch 100+). VBD+SOR is NOT a universal fallback — only safe for piles with non-trivial bend. Method S remains the only universally stable solver.</td><td class="num">3.59</td><td class="num">1.354e-01</td><td class="num">2.151e+01</td><td class="num">+2124.2%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD + Thomas + bend hybrid (NEW, 2026-06-19)</td><td>NEW architectural finding: VBD can host Thomas via 3 ingredients (1) inertia-target rewrite with Thomas-corrected positions, (2) PBD contact projection in pre-pass for contact-feasibility, (3) Thomas-bend for rotation stability. Works on 12 of 14 scenes (chains + piles with bend_ke ≥ 0.05). Diverges on rope-like piles (very-soft / zero bend). Drift matches Method S when stable; stretch is 2-5× worse. Step time 1.5-1.7× Method S. Use for: VBD-features (Dahl friction, penalty contacts) + guaranteed-stiff cables. Method S remains better for pure stretch quality.</td><td class="num">59.34</td><td class="num">2.433e-02</td><td class="num">2.107e+01</td><td class="num">+92.6%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD@40</td><td>iter=40</td><td class="num">12.99</td><td class="num">2.541e-02</td><td class="num">1.056e+01</td><td class="num">+59.9%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_a_warp_1</td><td>?</td><td class="num">20.17</td><td class="num">1.471e-02</td><td class="num">1.567e+01</td><td class="num">+337.5%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_a_warp_10</td><td>?</td><td class="num">201.16</td><td class="num">1.471e-02</td><td class="num">1.564e+01</td><td class="num">+336.4%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_r_warp_20_bend_long_cantilever_1024</td><td>?</td><td class="num">55.77</td><td class="num">7.003e-03</td><td class="num">1.013e+01</td><td class="num">-453.1%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_sc_a1p0</td><td>?</td><td class="num">28.95</td><td class="num">8.079e-03</td><td class="num">1.015e+01</td><td class="num">-442.6%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>vbd_400</td><td>?</td><td class="num">128.53</td><td class="num">7.770e-03</td><td class="num">1.025e+01</td><td class="num">-10.9%</td><td><span class="pill warn">ok</span></td><td>—</td></tr></tbody>
+        </table></div>
+      </details>
+    </section>
+
+
+    <section class="group-header">
+      <h2 style="margin:0;color:var(--accent);font-size:1.05rem;text-transform:uppercase;letter-spacing:.06em;">Chain — Thomas-bend validation (NEW)</h2>
+    </section>
+
+
+    <section id="scene-long-1024-bend">
+      <div class="scene-head">
+        <h2>14. Long cantilever — 1024 segments + STIFF bend (Thomas-bend)</h2>
+        <div class="meta">1024-segment cantilever; pinned at x=0; bend_ke=5.0.</div>
+      </div>
+      <div class="video-grid headline">
+<figure><figcaption>Method S + Thomas-bend K=20 (1024 stiff bend)</figcaption><video controls preload="metadata" muted src="assets/long_cantilever_1024_bend__method_s_thomasbend_K20_long1024.mp4"></video></figure>
+</div>
+      
+      <div class="table-wrap"><table>
+        <thead><tr>
+          <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Max bend (rad)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+        </tr></thead>
+        <tbody><tr class="candidate"><td>Method S + Thomas-bend K=20 (1024 stiff bend)</td><td>NEW (2026-06-18): Method S with block-tridiagonal Thomas for bend (not just stretch). On the 1024-body stiff-bend cantilever: step 113 ms, stretch 2.05e-3, bend_max 1.99° — vs Method S baseline K=20 (56 ms, bend 5.43°). At same wall-clock, Thomas-bend gives 2× tighter bend. Solves the bend saturation issue documented in NOTES §49.16 (bend was stuck at ~5° regardless of K) by globally propagating bend via the same Thomas trick used for stretch. Exploits isotropic-trace inertia (scalar*I_3 Schur). For rigid-cable / robotic harness applications, this is the right architecture.</td><td class="num">112.55</td><td class="num">2.047e-03</td><td class="num">3.476e-02</td><td class="num">-119.7%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method S + Thomas-bend ω=1.5 K=10 (14-scene sweep)</td><td>Method S + Thomas-bend across all 14 scenes. Wins clearly where bend_ke &gt; 0: XL stiff pile bend 3.2× tighter (0.016 vs 0.050 rad), cable_pile_scaled bend 2.3× tighter + stretch 60% tighter, horiz stretch+bend cantilever bend 5× tighter. Slight loss or tied on bend_ke=0 scenes (Thomas-bend overhead with no benefit). Step time 30-90% higher than Method S baseline. Universally stable (NOT diverging on any scene, unlike VBD+SOR).</td><td class="num">56.33</td><td class="num">2.825e-03</td><td class="num">4.855e-02</td><td class="num">-118.1%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr class="candidate"><td>Method S @10 ω=1.5 (canonical, 1080p video)</td><td>Canonical Method S K=10 ω=1.5 — rendered at 1920×1080 Full HD. Universal config (no per-scene tuning). On the chain scenes here: see scene-specific stretch / drift; step time within a few ms.</td><td class="num">28.41</td><td class="num">2.867e-03</td><td class="num">1.286e-01</td><td class="num">-118.2%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr>
+<tr><td>VBD@40</td><td>iter=40</td><td class="num">14.63</td><td class="num">2.546e-02</td><td class="num">1.144e+00</td><td class="num">+60.8%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr></tbody>
+      </table></div>
+      
+      <details class="extras-toggle">
+        <summary>Other / legacy methods (2)</summary>
+        <div class="video-grid extras">
+<figure><figcaption>VBD + Thomas + bend hybrid (NEW, 2026-06-19)</figcaption><video controls preload="metadata" muted src="assets/long_cantilever_1024_bend__vbd_thomas_bend_hybrid.mp4"></video></figure>
+<figure><figcaption>method_s_sc_a1p0</figcaption><video controls preload="metadata" muted src="assets/long_cantilever_1024_bend__method_s_sc_a1p0.mp4"></video></figure>
+</div>
+        
+        <div class="table-wrap"><table>
+          <thead><tr>
+            <th>Method</th><th>Config</th><th class="num">Time / step (ms)</th><th class="num">Max stretch</th><th class="num">Max bend (rad)</th><th class="num">Energy drift</th><th>Visual</th><th>Status</th>
+          </tr></thead>
+          <tbody><tr><td>VBD + Thomas + bend hybrid (NEW, 2026-06-19)</td><td>NEW architectural finding: VBD can host Thomas via 3 ingredients (1) inertia-target rewrite with Thomas-corrected positions, (2) PBD contact projection in pre-pass for contact-feasibility, (3) Thomas-bend for rotation stability. Works on 12 of 14 scenes (chains + piles with bend_ke ≥ 0.05). Diverges on rope-like piles (very-soft / zero bend). Drift matches Method S when stable; stretch is 2-5× worse. Step time 1.5-1.7× Method S. Use for: VBD-features (Dahl friction, penalty contacts) + guaranteed-stiff cables. Method S remains better for pure stretch quality.</td><td class="num">59.79</td><td class="num">9.883e-03</td><td class="num">1.578e-01</td><td class="num">+2.7%</td><td><span class="pill ok">clean</span></td><td>—</td></tr>
+<tr class="candidate"><td>method_s_sc_a1p0</td><td>?</td><td class="num">29.16</td><td class="num">8.123e-03</td><td class="num">2.262e-01</td><td class="num">-441.2%</td><td><span class="pill warn">energy lossy</span></td><td>—</td></tr></tbody>
+        </table></div>
+      </details>
+    </section>
+
+    <section>
+      <h2>Aggregate ranking</h2>
+      <div class="placeholder">Built once all five scenes have results across the same method set.</div>
+    </section>
+  </main>
+  <footer>
+    <p>Internal research log · <code>jumyungc/newton</code> · gh-pages branch · noindex.</p>
+  </footer>
+</body>
+</html>

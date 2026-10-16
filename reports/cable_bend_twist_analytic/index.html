@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cable Bend/Twist Analytic Validation</title>
+  <style>
+:root {
+  color-scheme: light;
+  --ink: #17202a;
+  --muted: #5f6f82;
+  --line: #d9e0e8;
+  --panel: #f7f9fb;
+  --accent: #1f6f8b;
+  --good: #146c43;
+  --warn: #9a5b00;
+  --max: 1280px;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #ffffff;
+  color: var(--ink);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+header { border-bottom: 1px solid var(--line); background: #fbfcfd; }
+main, .header-inner, footer { width: min(var(--max), calc(100vw - 32px)); margin: 0 auto; }
+.header-inner { padding: 36px 0 28px; }
+h1 { margin: 0 0 10px; font-size: clamp(2rem, 4vw, 3.35rem); line-height: 1.05; letter-spacing: 0; }
+.subtitle { max-width: 850px; margin: 0; color: var(--muted); font-size: 1.05rem; }
+.metric-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
+.metric { border: 1px solid var(--line); border-radius: 8px; background: #ffffff; padding: 14px 16px; }
+.metric .label { color: var(--muted); font-size: 0.82rem; font-weight: 650; text-transform: uppercase; }
+.metric .value { display: block; margin-top: 4px; font-size: 1.25rem; font-weight: 760; }
+main { padding: 28px 0 48px; }
+section { margin: 0 0 34px; }
+h2 { margin: 0 0 10px; font-size: 1.45rem; line-height: 1.2; letter-spacing: 0; }
+h3 { margin: 0 0 10px; font-size: 1rem; line-height: 1.25; }
+p { margin: 0 0 12px; }
+a { color: var(--accent); }
+code {
+  padding: 0.08em 0.25em;
+  border-radius: 4px;
+  background: #edf2f7;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+}
+pre { margin: 12px 0 0; padding: 14px 16px; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+pre code { padding: 0; background: transparent; }
+.two-col { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr); gap: 22px; align-items: start; }
+.plot-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 18px; }
+.plot-grid-single { grid-template-columns: minmax(0, 1fr); }
+.plot-block { margin-top: 18px; }
+.plot-block:first-child { margin-top: 0; }
+.breadcrumb { margin: 0 0 14px; font-size: 0.92rem; font-weight: 650; }
+.breadcrumb a { color: var(--accent); text-decoration: none; }
+.breadcrumb a:hover { text-decoration: underline; }
+.video-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; max-width: 1120px; margin: 18px auto 0; }
+.video-grid-single { grid-template-columns: minmax(0, 1fr); max-width: 1280px; }
+.video-main { max-width: 820px; margin: 14px auto 18px; }
+figure { margin: 0; border: 1px solid var(--line); border-radius: 8px; background: #ffffff; overflow: hidden; }
+figure img, video { display: block; width: 100%; height: auto; }
+video { background: #111827; }
+figcaption { padding: 10px 12px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.92rem; }
+.takeaways, .card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+.takeaway, .card { border: 1px solid var(--line); border-radius: 8px; padding: 14px; background: #ffffff; }
+.card { display: block; color: inherit; text-decoration: none; }
+.takeaway strong, .card strong { display: block; margin-bottom: 6px; }
+.check-list { margin: 0; padding-left: 1.15rem; }
+.check-list li { margin: 0.35rem 0; }
+.note { border-left: 4px solid var(--accent); background: var(--panel); padding: 12px 14px; }
+table { width: 100%; border-collapse: collapse; border: 1px solid var(--line); background: white; }
+th, td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+th { background: var(--panel); color: var(--muted); font-size: 0.86rem; text-transform: uppercase; }
+footer { padding: 0 0 42px; color: var(--muted); font-size: 0.9rem; }
+@media (max-width: 820px) {
+  .metric-row, .takeaways, .two-col, .plot-grid, .video-grid, .card-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <nav class="breadcrumb"><a href="../cable_bend_twist_verification/">&larr; Cable Bend/Twist Verification</a></nav>
+      <h1>Cable Bend/Twist Analytic Validation</h1>
+      <p class="subtitle">Exact discrete bend arcs and pure twist profiles checked against analytic targets.</p>
+      <div class="metric-row">
+        <div class="metric"><span class="label">Bend angle RMS</span><span class="value">0.0015 deg max</span></div>
+<div class="metric"><span class="label">Bend shape RMS</span><span class="value">0.00062% L max</span></div>
+<div class="metric"><span class="label">Twist linear RMS</span><span class="value">0.0037 deg max</span></div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="two-col">
+      <div>
+        <h2>Verification Target</h2>
+        <p>This test isolates the bend/twist split in the simplest setting with exact answers. Root and tip bodies prescribe either a constant-curvature bend arc or a pure tangent-axis twist; VBD solves the interior bodies and must put the deformation into the matching subspace only.</p>
+        <p class="note">This is the baseline accuracy gate for the split. Later reports add loads, history, routed geometry, and ring instabilities.</p>
+      </div>
+      <div>
+        <h2>Key Metrics</h2>
+        <table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody><tr><td>Bend angle RMS</td><td>0.0015 deg max</td></tr>
+<tr><td>Bend shape RMS</td><td>0.00062% L max</td></tr>
+<tr><td>Twist linear RMS</td><td>0.0037 deg max</td></tr>
+<tr><td>Twist transverse</td><td>0.00009% L max</td></tr></tbody></table>
+      </div>
+    </section>
+
+    <section>
+      <h2>Simulation Setup</h2>
+      <table><thead><tr><th>Setting</th><th>Value</th></tr></thead><tbody><tr><td>Solver fps</td><td>60 Hz</td></tr>
+<tr><td>Solver timestep</td><td>1/600 s (10 substeps per frame)</td></tr>
+<tr><td>VBD iterations</td><td>20 per substep</td></tr>
+<tr><td>Segments / radius</td><td>14 segments, h = 0.10 m, r = 0.010 m</td></tr>
+<tr><td>Stretch stiffness</td><td>1.0e6 N/m</td></tr>
+<tr><td>Bend rows</td><td>bend = 400 N m, twist = 1000 N m</td></tr>
+<tr><td>Twist rows</td><td>bend = 2000 N m, twist = 120 N m</td></tr>
+<tr><td>Damping</td><td>absolute VBD coefficients: bend kd = bend stiffness, twist kd = twist stiffness</td></tr>
+<tr><td>Targets</td><td>30, 60, 90 deg; visual twist stress = 150 deg</td></tr>
+<tr><td>Report video</td><td>30 fps render, 390 solver frames, stride 2</td></tr></tbody></table>
+    </section>
+
+    <section>
+      <h2>Video Checks</h2>
+      <p>The videos are visual checks for the two exact boundary-value solutions. Bend focus compares the VBD centerline to the exact discrete arc. Twist inspection compares simulated material-frame phase to exact linear phase in a deliberately high 150-degree pure-twist case.</p>
+
+
+      <div class="video-grid">
+
+        <figure>
+          <video controls preload="metadata" muted playsinline>
+            <source src="assets/cable_bend_twist_analytic_bend_focus.mp4?v=1781956699-291599" type="video/mp4">
+          </video>
+          <figcaption>Bend sweep at settle. Blue is the VBD centerline, green is the exact arc, and both overlays are offset above the white tube for visibility.</figcaption>
+        </figure>
+
+        <figure>
+          <video controls preload="metadata" muted playsinline>
+            <source src="assets/cable_bend_twist_analytic_twist_inspection.mp4?v=1781956699-492335" type="video/mp4">
+          </video>
+          <figcaption>150-degree pure twist from three views. Orange is the VBD material-frame phase; cyan is the exact linear-twist phase drawn at a larger radius.</figcaption>
+        </figure>
+
+      </div>
+
+
+    </section>
+
+
+    <section>
+      <h2>Acceptance Criteria</h2>
+      <div class="card-grid">
+
+        <div class="card">
+          <h3>Passes When</h3>
+          <ul class="check-list"><li>Blue/green bend overlays coincide for the 30-, 60-, and 90-degree rows</li><li>Orange/cyan twist ticks stay aligned in the 150-degree visual stress case</li><li>The twist centerline remains straight while the material frame rotates</li></ul>
+        </div>
+
+        <div class="card">
+          <h3>Watch For</h3>
+          <ul class="check-list"><li>Visible gaps open between the blue and green bend overlays</li><li>Orange twist ticks roll ahead of or behind the cyan reference</li><li>The twist row bows, shifts sideways, or loses straightness</li></ul>
+        </div>
+
+        <div class="card">
+          <h3>Validated Behavior</h3>
+          <ul class="check-list"><li>Constant-curvature bend reaches the exact discrete arc</li><li>Pure twist stays straight and follows the exact linear twist profile</li><li>Bend and twist stay isolated in full SolverVBD stepping</li></ul>
+        </div>
+
+      </div>
+    </section>
+
+
+
+    <section>
+      <h2>Plot Checks</h2>
+
+        <div class="plot-block">
+          <h3>Exact Bend Arc</h3>
+          <p>The left panel overlays the 30-, 60-, and 90-degree exact arcs with the settled VBD centerlines. The time plots report the maximum joint-angle and centerline RMS errors during the ramp and hold.</p>
+          <div class="plot-grid">
+
+        <figure>
+          <img src="assets/analytic_bend_focus.png?v=1782215538-164567" alt="Cable Bend/Twist Analytic Validation plot analytic_bend_focus.png">
+          <figcaption>Bend centerline, angle error, and RMS history against exact discrete arcs.</figcaption>
+        </figure>
+
+          </div>
+        </div>
+
+
+        <div class="plot-block">
+          <h3>Pure Twist Distribution</h3>
+          <p>The left panel overlays the 30-, 60-, and 90-degree exact linear-twist profiles with the VBD material-frame phase. The time plots report twist linearity error and bend leakage during pure twist.</p>
+          <div class="plot-grid">
+
+        <figure>
+          <img src="assets/analytic_twist_focus.png?v=1782215538-194215" alt="Cable Bend/Twist Analytic Validation plot analytic_twist_focus.png">
+          <figcaption>Twist profile, linearity error, and transverse leakage for pure torsion.</figcaption>
+        </figure>
+
+          </div>
+        </div>
+
+    </section>
+
+
+    <section>
+      <h2>Reproduce</h2>
+      <pre><code>uv run --extra examples python -m newton.examples cable_bend_twist_analytic --test --viewer null</code></pre>
+    </section>
+  </main>
+
+  <footer>
+    Report payload: this page, Newton-rendered MP4 video(s), and selected PNG plots in <code>assets/</code>.
+    Parent hub: <a href="../cable_bend_twist_verification/">Cable Bend/Twist Verification</a>.
+  </footer>
+</body>
+</html>

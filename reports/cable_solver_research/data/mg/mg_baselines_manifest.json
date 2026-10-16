@@ -1,0 +1,329 @@
+{
+  "frames": 61,
+  "generated_utc": "20260708T123057Z",
+  "hostname": "jumyungc-spock",
+  "owner_line_start": "OWNER: Team Fable (claimed 2026-07-08T12:17:53Z \u2014 round 6, full invention: certified two-level multigrid-VBD (coarse companion cable + SO3-aware prolongation), LRA level-0, frozen-tangent chord-BGN; all falsified on the stiffness ladder this round; target: law-tracking accuracy at near-VBD cost)",
+  "pid": 2234578,
+  "results": {
+    "n1024_s1e5_b2500": {
+      "global_fast": {
+        "fallback_substeps": 0,
+        "final_max_bend_rad": 0.0364554189145565,
+        "final_max_stretch_m": 0.001787632005289197,
+        "max_bend_rad": 0.0364554189145565,
+        "max_stretch_m": 0.001787632005289197,
+        "n_substeps": 600,
+        "substep_ms_p50": 111.0063660889864,
+        "wall_s": 70.37440657615662
+      },
+      "lra": {
+        "final_max_bend_rad": 0.05505123734474182,
+        "final_max_stretch_m": 0.0028116393368691206,
+        "max_bend_rad": 0.05505123734474182,
+        "max_stretch_m": 0.0028116393368691206,
+        "n_substeps": 600,
+        "substep_ms_p50": 1.104157418012619,
+        "wall_s": 2.757138967514038
+      },
+      "mg_r32_c1": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 600,
+        "corrections_attempted": 600,
+        "final_max_bend_rad": 0.03891158103942871,
+        "final_max_stretch_m": 0.0032312562689185143,
+        "last_diag": {
+          "alpha": 0.002297792192381093,
+          "alpha_star": 0.002297792192381093,
+          "delta_max_m": 0.0019042869904549544,
+          "delta_max_rad": 0.11584253426498876,
+          "merit_after": 119.1749494824856,
+          "merit_before": 119.17705441090659
+        },
+        "max_bend_rad": 0.03891158103942871,
+        "max_stretch_m": 0.0032312562689185143,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 54.58596348762512,
+        "wall_s": 35.13021445274353
+      },
+      "mg_r32_c5": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 120,
+        "corrections_attempted": 120,
+        "final_max_bend_rad": 0.9886466860771179,
+        "final_max_stretch_m": 0.18885168433189392,
+        "last_diag": {
+          "alpha": 0.0018862153844388775,
+          "alpha_star": 0.0018862153844388775,
+          "delta_max_m": 2.627803395786048,
+          "delta_max_rad": 363.96591601775134,
+          "merit_after": 561885.7310980072,
+          "merit_before": 562292.539618775
+        },
+        "max_bend_rad": 1.1912482976913452,
+        "max_stretch_m": 0.244508758187294,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 0.7035108283162117,
+        "wall_s": 9.3355131149292
+      },
+      "mg_r64_c1": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 600,
+        "corrections_attempted": 600,
+        "final_max_bend_rad": 0.038836292922496796,
+        "final_max_stretch_m": 0.003244483843445778,
+        "last_diag": {
+          "alpha": 0.0008744792540569992,
+          "alpha_star": 0.0008744792540569992,
+          "delta_max_m": 0.004482819606313185,
+          "delta_max_rad": 0.2499290099047314,
+          "merit_after": 120.59781563651867,
+          "merit_before": 120.5995495840504
+        },
+        "max_bend_rad": 0.038836292922496796,
+        "max_stretch_m": 0.003244483843445778,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 54.12221606820822,
+        "wall_s": 34.99222683906555
+      },
+      "vbd_2": {
+        "fallback_substeps": 0,
+        "final_max_bend_rad": 0.08643797785043716,
+        "final_max_stretch_m": 0.006285854149609804,
+        "max_bend_rad": 0.08643797785043716,
+        "max_stretch_m": 0.006285854149609804,
+        "n_substeps": 600,
+        "substep_ms_p50": 0.5992325022816658,
+        "wall_s": 5.874896049499512
+      },
+      "vbd_80": {
+        "fallback_substeps": 0,
+        "final_max_bend_rad": 0.03682788833975792,
+        "final_max_stretch_m": 0.0020288624800741673,
+        "max_bend_rad": 0.03682788833975792,
+        "max_stretch_m": 0.0020288624800741673,
+        "n_substeps": 600,
+        "substep_ms_p50": 17.737423069775105,
+        "wall_s": 14.006822347640991
+      }
+    },
+    "n1024_s1e6_b2500": {
+      "global_fast": {
+        "fallback_substeps": 0,
+        "final_max_bend_rad": 0.03466743230819702,
+        "final_max_stretch_m": 0.00017847520939540118,
+        "max_bend_rad": 0.03466743230819702,
+        "max_stretch_m": 0.00017847520939540118,
+        "n_substeps": 600,
+        "substep_ms_p50": 115.79211242496967,
+        "wall_s": 74.01040005683899
+      },
+      "lra": {
+        "final_max_bend_rad": 0.14676181972026825,
+        "final_max_stretch_m": 0.003395350184291601,
+        "max_bend_rad": 0.14676181972026825,
+        "max_stretch_m": 0.003395350184291601,
+        "n_substeps": 600,
+        "substep_ms_p50": 1.0876227170228958,
+        "wall_s": 2.7368862628936768
+      },
+      "mg_r32_c1": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 600,
+        "corrections_attempted": 600,
+        "final_max_bend_rad": 0.09547687321901321,
+        "final_max_stretch_m": 0.00210202788002789,
+        "last_diag": {
+          "alpha": 0.0011146664697398948,
+          "alpha_star": 0.0011146664697398948,
+          "delta_max_m": 0.02091604323650705,
+          "delta_max_rad": 0.5638537126237143,
+          "merit_after": 643.0223175175307,
+          "merit_before": 643.0454762134569
+        },
+        "max_bend_rad": 0.09547687321901321,
+        "max_stretch_m": 0.00210202788002789,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 54.55753393471241,
+        "wall_s": 35.08788990974426
+      },
+      "mg_r32_c5": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 120,
+        "corrections_attempted": 120,
+        "final_max_bend_rad": 0.10608986765146255,
+        "final_max_stretch_m": 0.0016491235001012683,
+        "last_diag": {
+          "alpha": 0.008302588616103852,
+          "alpha_star": 0.008302588616103852,
+          "delta_max_m": 0.015317044340427894,
+          "delta_max_rad": 0.07432858400615223,
+          "merit_after": 546.062252333572,
+          "merit_before": 546.1404954068331
+        },
+        "max_bend_rad": 0.10608986765146255,
+        "max_stretch_m": 0.0016491235001012683,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 0.7010269910097122,
+        "wall_s": 9.403541326522827
+      },
+      "mg_r64_c1": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 600,
+        "corrections_attempted": 600,
+        "final_max_bend_rad": 0.10388651490211487,
+        "final_max_stretch_m": 0.002417707582935691,
+        "last_diag": {
+          "alpha": 0.0003671225983463148,
+          "alpha_star": 0.0003671225983463148,
+          "delta_max_m": 0.03123605282937187,
+          "delta_max_rad": 1.1321810237607053,
+          "merit_after": 765.0827210722458,
+          "merit_before": 765.1042964338936
+        },
+        "max_bend_rad": 0.10388651490211487,
+        "max_stretch_m": 0.002417707582935691,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 53.939410485327244,
+        "wall_s": 34.702765226364136
+      },
+      "vbd_2": {
+        "fallback_substeps": 0,
+        "final_max_bend_rad": 0.2373780459165573,
+        "final_max_stretch_m": 0.0058524589985609055,
+        "max_bend_rad": 0.2373780459165573,
+        "max_stretch_m": 0.0058524589985609055,
+        "n_substeps": 600,
+        "substep_ms_p50": 0.5941307172179222,
+        "wall_s": 3.5708518028259277
+      },
+      "vbd_80": {
+        "fallback_substeps": 0,
+        "final_max_bend_rad": 0.048540905117988586,
+        "final_max_stretch_m": 0.0010998904472216964,
+        "max_bend_rad": 0.048540905117988586,
+        "max_stretch_m": 0.0010998904472216964,
+        "n_substeps": 600,
+        "substep_ms_p50": 17.702332697808743,
+        "wall_s": 13.873555898666382
+      }
+    },
+    "n1024_s1e7_b2500": {
+      "global_fast": {
+        "fallback_substeps": 0,
+        "final_max_bend_rad": 0.03420240059494972,
+        "final_max_stretch_m": 1.7211934391525574e-05,
+        "max_bend_rad": 0.03420240059494972,
+        "max_stretch_m": 1.7211934391525574e-05,
+        "n_substeps": 600,
+        "substep_ms_p50": 115.84577895700932,
+        "wall_s": 74.47803521156311
+      },
+      "lra": {
+        "final_max_bend_rad": 0.36321723461151123,
+        "final_max_stretch_m": 0.003451874479651451,
+        "max_bend_rad": 0.36321723461151123,
+        "max_stretch_m": 0.003451874479651451,
+        "n_substeps": 600,
+        "substep_ms_p50": 1.0845959186553955,
+        "wall_s": 2.743048906326294
+      },
+      "mg_r32_c1": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 600,
+        "corrections_attempted": 600,
+        "final_max_bend_rad": 0.17330995202064514,
+        "final_max_stretch_m": 0.000598879239987582,
+        "last_diag": {
+          "alpha": 0.0013225860065653218,
+          "alpha_star": 0.0013225860065653218,
+          "delta_max_m": 0.010096572954032126,
+          "delta_max_rad": 0.1592048292553638,
+          "merit_after": 987.1040553461426,
+          "merit_before": 987.1306089684421
+        },
+        "max_bend_rad": 0.17330995202064514,
+        "max_stretch_m": 0.000598879239987582,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 54.78224251419306,
+        "wall_s": 35.41851782798767
+      },
+      "mg_r32_c5": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 120,
+        "corrections_attempted": 120,
+        "final_max_bend_rad": 0.3416972756385803,
+        "final_max_stretch_m": 0.0015969718806445599,
+        "last_diag": {
+          "alpha": 0.0011247785957883782,
+          "alpha_star": 0.0011247785957883782,
+          "delta_max_m": 0.08857530274209494,
+          "delta_max_rad": 0.6510621333260487,
+          "merit_after": 2503.3315967369763,
+          "merit_before": 2503.934677519219
+        },
+        "max_bend_rad": 0.3416972756385803,
+        "max_stretch_m": 0.0015969718806445599,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 0.6997222080826759,
+        "wall_s": 9.238514184951782
+      },
+      "mg_r64_c1": {
+        "coarse_frame_failures": 0,
+        "corrections_accepted": 600,
+        "corrections_attempted": 600,
+        "final_max_bend_rad": 0.16341836750507355,
+        "final_max_stretch_m": 0.000642527942545712,
+        "last_diag": {
+          "alpha": 0.0009105663035274532,
+          "alpha_star": 0.0009105663035274532,
+          "delta_max_m": 0.02365174486662264,
+          "delta_max_rad": 0.16832877923628894,
+          "merit_after": 1059.0802563692105,
+          "merit_before": 1059.1263579148556
+        },
+        "max_bend_rad": 0.16341836750507355,
+        "max_stretch_m": 0.000642527942545712,
+        "n_substeps": 600,
+        "reject_worse_merit": 0,
+        "substep_ms_p50": 54.08387817442417,
+        "wall_s": 34.79156470298767
+      },
+      "vbd_2": {
+        "fallback_substeps": 0,
+        "final_max_bend_rad": 0.5604642629623413,
+        "final_max_stretch_m": 0.005815961863845587,
+        "max_bend_rad": 0.5604642629623413,
+        "max_stretch_m": 0.005815961863845587,
+        "n_substeps": 600,
+        "substep_ms_p50": 0.5967756733298302,
+        "wall_s": 3.5793707370758057
+      },
+      "vbd_80": {
+        "fallback_substeps": 0,
+        "final_max_bend_rad": 0.118021160364151,
+        "final_max_stretch_m": 0.0010258326074108481,
+        "max_bend_rad": 0.118021160364151,
+        "max_stretch_m": 0.0010258326074108481,
+        "n_substeps": 600,
+        "substep_ms_p50": 17.743181437253952,
+        "wall_s": 13.888156175613403
+      }
+    }
+  },
+  "schema": "fable-mg-vbd-ladder/v1",
+  "semantics": "mg_rR_cK = requested-VBD2 smoother + certificate-gated coarse-companion BGN correction every K substeps at coarsening R; lra = known-art long-range attachment clamp witness; Track-B; descriptive timings",
+  "sources": {
+    "codex_bgn_global.py": "e20f2bbd65a5058b06c1c569405a9bc6333b950e02fc5d9bc0b79168b1190d93",
+    "fable_fast_step.py": "27ac986b6d82cabc3424905733c297b5653a2342099d2dde51504d1674041d8b",
+    "fable_ladder.py": "745327eed04050e7117c9c302924c71dd9c64fcbe92a3fe1286dfa0e3a86b4ca",
+    "fable_mg.py": "fa869cefe78187f0af0847eb36029379b53cdcfc7b66840fa7a88db2d47b256a"
+  }
+}
