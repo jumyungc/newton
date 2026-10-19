@@ -181,6 +181,34 @@ def _build_chain(
     return model, np.asarray(bodies, dtype=np.int32), np.asarray(joints, dtype=np.int32)
 
 
+def _build_chains(device, segment_counts, *, stiffness=1.0e7):
+    """Build pinned chains of different lengths in one model."""
+    builder = newton.ModelBuilder()
+    for index, segments in enumerate(segment_counts):
+        rod = newton.Rod.create_straight(
+            start=wp.vec3(0.0, 0.1 * index, 1.0),
+            direction=wp.vec3(1.0, 0.0, 0.0),
+            length=segments * 0.03,
+            segment_count=segments,
+            radius=0.01,
+        )
+        bodies, _ = builder.add_rod(
+            rod=rod,
+            cfg=builder.default_shape_cfg.copy(),
+            stretch_stiffness=stiffness,
+            stretch_damping=0.0,
+            bend_stiffness=1.0e4,
+            bend_damping=1.0e3,
+            wrap_in_articulation=True,
+            body_frame_origin="com",
+        )
+        _pin_body(builder, int(bodies[0]))
+    builder.color(balance_colors=False)
+    model = builder.finalize(device=device)
+    model.set_gravity((0.0, 0.0, -9.81))
+    return model
+
+
 def _build_y_tree(device, *, segments_per_branch=6, stiffness=1.0e9):
     builder = newton.ModelBuilder()
     positions = [wp.vec3(0.0, 0.0, 1.0)]
@@ -213,6 +241,41 @@ def _build_y_tree(device, *, segments_per_branch=6, stiffness=1.0e9):
     model = builder.finalize(device=device)
     model.set_gravity((0.0, 0.0, -9.81))
     return model, np.asarray(bodies, dtype=np.int32), np.asarray(joints, dtype=np.int32)
+
+
+def _build_y_trees(device, branch_segments, *, stiffness=1.0e7):
+    """Build pinned Y trees whose three branches have the given segment counts."""
+    builder = newton.ModelBuilder()
+    directions = (
+        wp.vec3(1.0, 0.0, 0.0),
+        wp.vec3(-0.5, 0.8660254, 0.0),
+        wp.vec3(-0.5, -0.8660254, 0.0),
+    )
+    for index, segments in enumerate(branch_segments):
+        positions = [wp.vec3(0.0, 1.0 * index, 1.0)]
+        edges = []
+        for direction, count in zip(directions, segments, strict=True):
+            previous = 0
+            for segment in range(1, count + 1):
+                positions.append(positions[0] + direction * (0.03 * segment))
+                edges.append((previous, len(positions) - 1))
+                previous = len(positions) - 1
+        bodies, _ = builder.add_rod_graph(
+            node_positions=positions,
+            edges=edges,
+            radius=0.01,
+            cfg=builder.default_shape_cfg.copy(),
+            stretch_stiffness=stiffness,
+            bend_stiffness=1.0e4,
+            bend_damping=1.0e3,
+            wrap_in_articulation=True,
+            body_frame_origin="com",
+        )
+        _pin_body(builder, int(bodies[segments[0] - 1]))
+    builder.color(balance_colors=False)
+    model = builder.finalize(device=device)
+    model.set_gravity((0.0, 0.0, -9.81))
+    return model
 
 
 def _build_spurred_tree(device, *, arm_segments=8, stiffness=1.0e9):
@@ -901,7 +964,7 @@ def _path_float64_oracle_metrics(device, stiffness, *, segments=16):
     bucket.solve_rows = capture_and_solve_rows
     _simulate(model, solver, 1, 1.0 / 600.0)
 
-    row_count = bucket.row_count
+    row_count = bucket.size
     matrix = np.zeros((6 * row_count, 6 * row_count), dtype=np.float64)
     for row in range(row_count):
         row_slice = slice(6 * row, 6 * row + 6)
@@ -2603,6 +2666,8 @@ def _structural_kkt_estimates_allocation_payloads_exactly(test, device):
     """Match path, tree, and batched closure estimates to intercepted allocations."""
     cases = (
         ("path", lambda: _build_chain(device, segments=8)[0]),
+        ("path_ragged", lambda: _build_chains(device, (3, 9, 140))),
+        ("tree_ragged", lambda: _build_y_trees(device, ((12, 12, 12), (16, 9, 14)))),
         ("tree", lambda: _build_y_tree(device, segments_per_branch=3)[0]),
         (
             "closed_tree",
@@ -2635,7 +2700,7 @@ def _structural_kkt_estimates_allocation_payloads_exactly(test, device):
             )
             diagnostics = backend._bucket_diagnostics
             test.assertEqual(len(diagnostics), 1)
-            expected_kind = "closed_tree" if kind.startswith("closed_tree") else kind
+            expected_kind = "closed_tree" if kind.startswith("closed_tree") else kind.removesuffix("_ragged")
             test.assertEqual(diagnostics[0].kind, expected_kind)
             test.assertIsNone(diagnostics[0].fallback_reason)
             if kind.startswith("closed_tree"):
@@ -3236,7 +3301,7 @@ def _structural_kkt_path_solve_has_small_residual(test, device):
     test.assertIsNotNone(backend)
     test.assertEqual(len(backend.path_buckets), 1)
     bucket = backend.path_buckets[0]
-    test.assertTrue(bucket.use_persistent_cr)
+    test.assertEqual(len(bucket.cr_schedule.persistent), 1)
     # The production CR factorization deliberately overwrites its four row
     # buffers in place. Capture the assembled operator in test-owned storage
     # immediately before factorization so the residual checks the original
@@ -3263,11 +3328,11 @@ def _structural_kkt_path_solve_has_small_residual(test, device):
     rhs = assembled_rhs.numpy().astype(np.float64)
     solution = bucket.solution[0].numpy().astype(np.float64)
     residual = np.empty_like(rhs)
-    for row in range(bucket.row_count):
+    for row in range(bucket.size):
         value = diagonal[row] @ solution[row] - rhs[row]
         if row > 0:
             value += lower[row] @ solution[row - 1]
-        if row + 1 < bucket.row_count:
+        if row + 1 < bucket.size:
             value += upper[row] @ solution[row + 1]
         residual[row] = value
     relative_residual = float(np.linalg.norm(residual) / max(np.linalg.norm(rhs), 1.0e-30))
@@ -3292,9 +3357,9 @@ def _structural_kkt_persistent_cr_matches_level_schedule(test, device):
             deterministic=wp.DeterministicMode.RUN_TO_RUN,
         )
         bucket = solver._structural_graph_kkt.path_buckets[0]
-        test.assertEqual(bucket.row_count, active_threshold)
-        test.assertTrue(bucket.use_persistent_cr)
-        bucket.use_persistent_cr = use_persistent_cr
+        test.assertEqual(bucket.size, active_threshold)
+        test.assertEqual(len(bucket.cr_schedule.persistent), 1)
+        bucket.plan_cr(fused=use_persistent_cr)
         state_in = model.state()
         state_out = model.state()
         control = model.control()
@@ -3322,8 +3387,9 @@ def _structural_kkt_persistent_cr_matches_level_schedule(test, device):
         rigid_joint_global_iterations=1,
     )
     larger_bucket = larger_solver._structural_graph_kkt.path_buckets[0]
-    test.assertEqual(larger_bucket.row_count, active_threshold + 1)
-    test.assertFalse(larger_bucket.use_persistent_cr)
+    test.assertEqual(larger_bucket.size, active_threshold + 1)
+    test.assertEqual(len(larger_bucket.cr_schedule.persistent), 0)
+    test.assertEqual(len(larger_bucket.cr_schedule.tails), 1)
 
     cpu = wp.get_device("cpu")
     cpu_model, _, _ = _build_chain(cpu, segments=_CR_PERSISTENT_MAX_ROWS + 1, stiffness=1.0e9)
@@ -3333,7 +3399,7 @@ def _structural_kkt_persistent_cr_matches_level_schedule(test, device):
         rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
     )
-    test.assertFalse(cpu_solver._structural_graph_kkt.path_buckets[0].use_persistent_cr)
+    test.assertEqual(len(cpu_solver._structural_graph_kkt.path_buckets[0].cr_schedule.persistent), 0)
 
 
 def _structural_kkt_cr_tail_preserves_factors(test, device):
@@ -3352,14 +3418,10 @@ def _structural_kkt_cr_tail_preserves_factors(test, device):
             bucket = rigid_vbd_kkt._PathBucket(paths, device)
             baseline = rigid_vbd_kkt._PathBucket(paths, device)
             expected = device.is_cuda and count > _CR_PERSISTENT_MAX_ROWS
-            test.assertEqual(bucket.use_fused_cr_tail, expected)
-            if expected:
-                test.assertLessEqual(
-                    (count + bucket.cr_tail_stride - 1) // bucket.cr_tail_stride,
-                    rigid_vbd_kkt._CR_TAIL_MAX_ROWS,
-                )
-            baseline.use_persistent_cr = False
-            baseline.use_fused_cr_tail = False
+            test.assertEqual(len(bucket.cr_schedule.tails), batches if expected else 0)
+            for _, rows, stride in bucket.cr_schedule.tails:
+                test.assertLessEqual((rows + stride - 1) // stride, rigid_vbd_kkt._CR_TAIL_MAX_ROWS)
+            baseline.plan_cr(fused=False)
             buffers = [
                 bucket.lower[0],
                 bucket.diagonal[0],
@@ -3425,6 +3487,126 @@ def _structural_kkt_cr_tail_preserves_factors(test, device):
                 )
 
 
+def _structural_kkt_ragged_path_bucket_matches_standalone_paths(test, device):
+    """Batch paths of different lengths without changing any path's CR arithmetic."""
+    model = _build_chains(device, (3, 9, 140))
+    solver = newton.solvers.SolverVBD(
+        model,
+        iterations=1,
+        rigid_compliant_alm=True,
+        rigid_joint_global_iterations=1,
+    )
+    test.assertEqual(len(solver._structural_graph_kkt.path_buckets), 1)
+    test.assertEqual(solver._structural_graph_kkt.path_buckets[0].row_counts, [2, 8, 139])
+    state = _simulate(model, solver, 2, 1.0 / 600.0)
+    test.assertTrue(np.isfinite(state.body_q.numpy()).all())
+
+    counts = (1, 4, 5, 128, 129, 161, 257, 2)
+    paths = []
+    for index, count in enumerate(counts):
+        first = sum(counts[:index])
+        paths.append(
+            rigid_vbd_kkt._Path(
+                joints=list(range(first, first + count)),
+                bodies=list(range(first + index, first + index + count + 1)),
+                body_rows=[[] for _ in range(count + 1)],
+            )
+        )
+    rng = np.random.default_rng(19)
+    systems = []
+    for count in counts:
+        factors = rng.normal(size=(count - 1, 6, 6)) * 0.2
+        edge = factors @ factors.swapaxes(-1, -2)
+        diagonal = np.broadcast_to(np.diag(np.arange(1.0, 7.0)), (count, 6, 6)).copy()
+        lower, upper = np.zeros_like(diagonal), np.zeros_like(diagonal)
+        diagonal[:-1] += edge
+        diagonal[1:] += edge
+        lower[1:] = -edge
+        upper[:-1] = -edge
+        rhs = rng.normal(size=(count, 6))
+        systems.append([value.astype(np.float32) for value in (lower, diagonal, upper, rhs)])
+
+    def solve(bucket, parts, fused):
+        bucket.plan_cr(fused=fused)
+        buffers = [bucket.lower[0], bucket.diagonal[0], bucket.upper[0], bucket.rhs[0]]
+        for target, value in zip(buffers, parts, strict=True):
+            wp.copy(target, wp.array(value, dtype=target.dtype, device=device))
+        bucket.solve_rows()
+        return [buffer.numpy() for buffer in buffers]
+
+    ragged = rigid_vbd_kkt._PathBucket(paths, device)
+    merged = [np.concatenate([parts[index] for parts in systems]) for index in range(4)]
+    starts = np.cumsum([0, *counts])
+    for fused in (True, False) if device.is_cuda else (False,):
+        with test.subTest(fused=fused):
+            result = solve(ragged, merged, fused)
+            for index, (path, parts) in enumerate(zip(paths, systems, strict=True)):
+                expected = solve(rigid_vbd_kkt._PathBucket([path], device), parts, fused)
+                rows = slice(starts[index], starts[index + 1])
+                for actual, reference in zip(result, expected, strict=True):
+                    np.testing.assert_array_equal(actual[rows], reference)
+
+
+def _structural_kkt_ragged_tree_bucket_matches_separate_buckets(test, device):
+    """Merge contracted trees of different topologies without changing any tree's solve."""
+
+    def simulate(split):
+        model = _build_y_trees(device, ((12, 12, 12), (16, 9, 14)))
+        solver = newton.solvers.SolverVBD(
+            model,
+            iterations=4,
+            rigid_compliant_alm=True,
+            rigid_joint_global_iterations=1,
+            deterministic=wp.DeterministicMode.RUN_TO_RUN,
+        )
+        backend = solver._structural_graph_kkt
+        test.assertEqual(len(backend.tree_buckets), 1)
+        test.assertEqual(backend.tree_buckets[0].batch_count, 2)
+        test.assertTrue(backend.tree_buckets[0].use_tree_contraction)
+        if split:
+            body_inv_mass = np.asarray(model.body_inv_mass.numpy(), dtype=float)
+            paths = rigid_vbd_kkt._build_paths(model, body_inv_mass, ignore_free_completion_joints=True)
+            trees = rigid_vbd_kkt._build_trees(
+                model,
+                {frozenset(path.joints) for path in paths},
+                body_inv_mass,
+                ignore_free_completion_joints=True,
+            )
+            for symbolics in (None, rigid_vbd_kkt._tree_bucket_symbolics(trees[0])):
+                with test.assertRaisesRegex(ValueError, "per-tree symbolics"):
+                    rigid_vbd_kkt._tree_bucket_layout(trees, symbolics)
+            body_slot = {int(body): slot for slot, body in enumerate(backend.graph_body_ids.numpy())}
+            separate = [
+                rigid_vbd_kkt._TreeBucket(tree, body_slot, device)
+                for tree in sorted(trees, key=rigid_vbd_kkt._component_order_key)
+            ]
+            test.assertEqual(len(separate), 2)
+            test.assertTrue(all(bucket.use_tree_contraction for bucket in separate))
+            backend.tree_buckets = separate
+            backend.buckets = [*backend.path_buckets, *separate, *backend.closed_tree_buckets]
+        state_in, state_out, control = model.state(), model.state(), model.control()
+        dt = 1.0 / 600.0
+        solver.step(state_in, state_out, control, None, dt)
+        state_in, state_out = state_out, state_in
+        if device.is_cuda:
+            with wp.ScopedCapture(device) as capture:
+                solver.step(state_in, state_out, control, None, dt)
+                solver.step(state_out, state_in, control, None, dt)
+            for _ in range(3):
+                wp.capture_launch(capture.graph)
+        else:
+            for _ in range(3):
+                solver.step(state_in, state_out, control, None, dt)
+                solver.step(state_out, state_in, control, None, dt)
+        return state_in.body_q.numpy(), state_in.body_qd.numpy()
+
+    merged_q, merged_qd = simulate(False)
+    separate_q, separate_qd = simulate(True)
+    test.assertTrue(np.isfinite(merged_q).all())
+    np.testing.assert_array_equal(merged_q, separate_q)
+    np.testing.assert_array_equal(merged_qd, separate_qd)
+
+
 def _structural_kkt_cr_tail_preserves_captured_trajectory(test, device):
     """Preserve poses and velocities with fresh operators at G1 and G2."""
     model, _, _ = _build_chain(device, segments=258, stiffness=1.0e9)
@@ -3439,9 +3621,9 @@ def _structural_kkt_cr_tail_preserves_captured_trajectory(test, device):
                 deterministic=wp.DeterministicMode.RUN_TO_RUN,
             )
             bucket = solver._structural_graph_kkt.path_buckets[0]
-            test.assertEqual(bucket.row_count, 257)
-            test.assertTrue(bucket.use_fused_cr_tail)
-            bucket.use_fused_cr_tail = use_tail
+            test.assertEqual(bucket.size, 257)
+            test.assertEqual(len(bucket.cr_schedule.tails), 1)
+            bucket.plan_cr(fused=use_tail)
             source, target, control = model.state(), model.state(), model.control()
             solver.step(source, target, control, None, 1.0 / 600.0)
             with wp.ScopedCapture(device) as capture:
@@ -4642,9 +4824,9 @@ def _structural_kkt_captured_contact_shortcut_preserves_state(test, device):
         slot = int(kwargs.get("translation_only", False))
         refresh = kwargs["refresh_contacts"]
 
-        def counted_refresh():
+        def counted_refresh(*refresh_args, **refresh_kwargs):
             wp.launch(_count_global_contact_refresh, 1, inputs=[slot], outputs=[counts], device=device)
-            refresh()
+            refresh(*refresh_args, **refresh_kwargs)
 
         kwargs["refresh_contacts"] = counted_refresh
         return solve(*args, **kwargs)
@@ -4698,8 +4880,9 @@ def _structural_kkt_captured_contact_shortcut_preserves_state(test, device):
         np.testing.assert_array_equal(actual, expected)
     test.assertLess(refresh_counts[1][0], refresh_counts[0][0])
 
-    # Default atomic reductions must retain fixed scheduling: skipping a
-    # numerically different repeated evaluation changed stiff toy hold motion.
+    # Default atomic reductions may skip a wholly blocked translation group,
+    # but must not stop eligible translation iterates at float32 roundoff.
+    # Other directional and collective-mode conditionals remain valid.
     with test.subTest(deterministic=False):
         model, pipeline, contacts, solver, _, _, _ = _build_grounded_chain(
             device,
@@ -4711,12 +4894,14 @@ def _structural_kkt_captured_contact_shortcut_preserves_state(test, device):
         state_in, state_out, control = model.state(), model.state(), model.control()
         pipeline.collide(state_in, contacts)
         solver.step(state_in, state_out, control, contacts, dt)
+        test.assertFalse(solver._structural_graph_kkt.enable_captured_contact_shortcuts)
         with (
-            mock.patch.object(wp, "capture_if", side_effect=AssertionError("nondeterministic shortcut")),
+            mock.patch.object(wp, "capture_if", wraps=wp.capture_if) as conditional,
             mock.patch.object(wp.array, "numpy", side_effect=AssertionError("host readback")),
             wp.ScopedCapture(device) as capture,
         ):
             solver.step(state_in, state_out, control, contacts, dt)
+        test.assertNotIn("translate", [call.args[1].__name__ for call in conditional.call_args_list])
         wp.capture_launch(capture.graph)
         test.assertTrue(np.isfinite(state_out.body_q.numpy()).all())
 
@@ -4988,6 +5173,18 @@ add_function_test(
     TestVBDRigidKKT,
     "test_structural_kkt_cr_tail_preserves_factors",
     _structural_kkt_cr_tail_preserves_factors,
+    devices=get_test_devices(),
+)
+add_function_test(
+    TestVBDRigidKKT,
+    "test_structural_kkt_ragged_path_bucket_matches_standalone_paths",
+    _structural_kkt_ragged_path_bucket_matches_standalone_paths,
+    devices=get_test_devices(),
+)
+add_function_test(
+    TestVBDRigidKKT,
+    "test_structural_kkt_ragged_tree_bucket_matches_separate_buckets",
+    _structural_kkt_ragged_tree_bucket_matches_separate_buckets,
     devices=get_test_devices(),
 )
 add_function_test(

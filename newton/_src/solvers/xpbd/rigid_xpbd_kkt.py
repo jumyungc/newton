@@ -1256,7 +1256,7 @@ class RigidJointGlobalXPBD:
                 assemble_joint_path_system,
                 bucket.size,
                 inputs=[
-                    bucket.row_count,
+                    bucket.row_bounds,
                     bucket.row_body,
                     backend.body_inverse,
                     backend.body_free,
@@ -1274,8 +1274,6 @@ class RigidJointGlobalXPBD:
                 compute_path_correction,
                 bucket.body_size,
                 inputs=[
-                    bucket.row_count,
-                    bucket.body_count,
                     bucket.body_ids,
                     backend.body_slot_by_id,
                     bucket.body_incident_rows,

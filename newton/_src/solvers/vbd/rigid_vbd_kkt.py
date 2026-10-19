@@ -1731,7 +1731,7 @@ def linearize_joint_path_rows(
 
 @wp.kernel
 def assemble_joint_path_system(
-    row_count: int,
+    row_bounds: wp.array[wp.vec2i],
     row_body: wp.array[wp.vec2i],
     body_inverse: wp.array[wp.spatial_matrix],
     body_free: wp.array[wp.spatial_vector],
@@ -1746,12 +1746,13 @@ def assemble_joint_path_system(
 ):
     """Assemble one block-tridiagonal constraint-space system per path.
 
-    Each row owns one structural joint. Adjacent path rows are coupled through
-    their shared body's inverse surrogate; non-neighbor couplings are absent by
-    construction of an eligible path batch.
+    Each row owns one structural joint and stores its path's ``[start, end)``
+    row range. Adjacent path rows are coupled through their shared body's
+    inverse surrogate; non-neighbor couplings are absent by construction of an
+    eligible path batch.
     """
     row = wp.tid()
-    local = row % row_count
+    bounds = row_bounds[row]
     endpoints = row_body[row]
     parent = endpoints[0]
     child = endpoints[1]
@@ -1768,7 +1769,7 @@ def assemble_joint_path_system(
         rhs_value = rhs_value + jc * body_free[child]
 
     lower_value = wp.spatial_matrix(0.0)
-    if local > 0:
+    if row > bounds[0]:
         previous = row - 1
         previous_endpoints = row_body[previous]
         shared = parent
@@ -1779,7 +1780,7 @@ def assemble_joint_path_system(
         lower_value = current_j * body_inverse[shared] * wp.transpose(previous_j)
 
     upper_value = wp.spatial_matrix(0.0)
-    if local + 1 < row_count:
+    if row + 1 < bounds[1]:
         following = row + 1
         following_endpoints = row_body[following]
         shared = parent
@@ -1797,16 +1798,15 @@ def assemble_joint_path_system(
 
 @wp.kernel
 def invert_cr_eliminated_in_place(
-    stride: int,
-    row_count: int,
-    eliminated_count: int,
+    eliminated_rows: wp.array[wp.vec3i],
     diagonal: wp.array[wp.spatial_matrix],
 ):
-    """Replace eliminated diagonal blocks by their inverses in dead slots."""
-    index = wp.tid()
-    batch = index // eliminated_count
-    local = index - batch * eliminated_count
-    row = batch * row_count + stride + 2 * stride * local
+    """Replace eliminated diagonal blocks by their inverses in dead slots.
+
+    Each entry stores the path's first row, the local row, and the path row count.
+    """
+    entry = eliminated_rows[wp.tid()]
+    row = entry[0] + entry[1]
     diagonal[row] = _inverse_spatial_robust(diagonal[row])
 
 
@@ -1850,20 +1850,15 @@ def _reduce_cr_row(
 @wp.kernel
 def reduce_cr_in_place(
     stride: int,
-    row_count: int,
-    survivor_count: int,
+    survivor_rows: wp.array[wp.vec3i],
     lower: wp.array[wp.spatial_matrix],
     diagonal: wp.array[wp.spatial_matrix],
     upper: wp.array[wp.spatial_matrix],
     rhs: wp.array[wp.spatial_vector],
 ):
     """Reduce retained CR rows without allocating a second hierarchy."""
-    index = wp.tid()
-    batch = index // survivor_count
-    local = index - batch * survivor_count
-    base = batch * row_count
-    local_row = 2 * stride * local
-    _reduce_cr_row(base, local_row, stride, row_count, lower, diagonal, upper, rhs)
+    entry = survivor_rows[wp.tid()]
+    _reduce_cr_row(entry[0], entry[1], stride, entry[2], lower, diagonal, upper, rhs)
 
 
 @wp.func
@@ -1896,16 +1891,18 @@ def _solve_strided_cr_coarse_impl(
 
 @wp.kernel
 def solve_strided_cr_coarse(
-    stride: int,
-    row_count: int,
+    paths: wp.array[wp.vec3i],
     lower: wp.array[wp.spatial_matrix],
     diagonal: wp.array[wp.spatial_matrix],
     upper: wp.array[wp.spatial_matrix],
     rhs: wp.array[wp.spatial_vector],
 ):
-    """Solve the small retained system in place with block Thomas."""
-    base = wp.tid() * row_count
-    _solve_strided_cr_coarse_impl(base, stride, row_count, lower, diagonal, upper, rhs)
+    """Solve each path's small retained system in place with block Thomas.
+
+    Each path entry stores its first row, row count, and terminal stride.
+    """
+    path = paths[wp.tid()]
+    _solve_strided_cr_coarse_impl(path[0], path[2], path[1], lower, diagonal, upper, rhs)
 
 
 @wp.func
@@ -1930,37 +1927,36 @@ def _back_substitute_cr_row(
 @wp.kernel
 def back_substitute_cr_in_place(
     stride: int,
-    row_count: int,
-    eliminated_count: int,
+    eliminated_rows: wp.array[wp.vec3i],
     lower: wp.array[wp.spatial_matrix],
     diagonal: wp.array[wp.spatial_matrix],
     upper: wp.array[wp.spatial_matrix],
     rhs: wp.array[wp.spatial_vector],
 ):
     """Recover eliminated rows into rhs, which now stores the solution."""
-    index = wp.tid()
-    batch = index // eliminated_count
-    local = index - batch * eliminated_count
-    base = batch * row_count
-    local_row = stride + 2 * stride * local
-    _back_substitute_cr_row(base, local_row, stride, row_count, lower, diagonal, upper, rhs)
+    entry = eliminated_rows[wp.tid()]
+    _back_substitute_cr_row(entry[0], entry[1], stride, entry[2], lower, diagonal, upper, rhs)
 
 
 @wp.kernel
 def solve_cr_persistent(
-    row_count: int,
+    paths: wp.array[wp.vec2i],
     terminal_size: int,
     lower: wp.array[wp.spatial_matrix],
     diagonal: wp.array[wp.spatial_matrix],
     upper: wp.array[wp.spatial_matrix],
     rhs: wp.array[wp.spatial_vector],
 ):
-    """Solve one short path per CUDA block without dependent level launches."""
+    """Solve one short path per CUDA block without dependent level launches.
+
+    Each path entry stores its first row and row count.
+    """
     tid = wp.tid()
     block_dim = wp.block_dim()
     lane = tid % block_dim
-    batch = tid // block_dim
-    base = batch * row_count
+    path = paths[tid // block_dim]
+    base = path[0]
+    row_count = path[1]
 
     # Explicit casts make these loop-carried values dynamic in Warp codegen.
     stride = int(1)
@@ -2009,8 +2005,7 @@ def solve_cr_persistent(
 
 @wp.kernel
 def solve_cr_tail_persistent(
-    row_count: int,
-    initial_stride: int,
+    paths: wp.array[wp.vec3i],
     lower: wp.array[wp.spatial_matrix],
     diagonal: wp.array[wp.spatial_matrix],
     upper: wp.array[wp.spatial_matrix],
@@ -2018,13 +2013,17 @@ def solve_cr_tail_persistent(
 ):
     """Finish a strided CR tail in place, preserving factors for outer recovery.
 
-    Keep the short-path kernel separate so its register/launch configuration
-    is unchanged. All lanes of each independent path reach every barrier.
+    Each path entry stores its first row, row count, and tail stride. Keep the
+    short-path kernel separate so its register/launch configuration is
+    unchanged. All lanes of each independent path reach every barrier.
     """
     tid = wp.tid()
     width = wp.block_dim()
     lane = tid % width
-    base = (tid // width) * row_count
+    path = paths[tid // width]
+    base = path[0]
+    row_count = path[1]
+    initial_stride = path[2]
     stride = int(initial_stride)
     active_count = (row_count + stride - 1) // stride
     while active_count > _CR_SERIAL_TERMINAL_SIZE:
@@ -2547,12 +2546,11 @@ def solve_paired_tree_backbone_cr_coarse_lanes(
     not: each iterates over disjoint ``response_rhs`` entries with multipliers
     that do not depend on the column.
 
-    This variant gives each island one block. Every lane recomputes the pair
-    recurrence redundantly from the same inputs -- so every lane derives the
-    identical multipliers, with no broadcast and no reduction -- while the
-    closure columns are strided across lanes. Lane zero owns the shared pair
-    writes. The arithmetic per column is unchanged and its order is unchanged,
-    so the result is bit-identical to the serial kernel.
+    This variant gives each island one block. Lane zero computes each pair
+    inverse and stores it in the existing factor arrays before a block-wide
+    barrier. All lanes then read those factors, with closure columns strided
+    across lanes. The arithmetic per column and its order are unchanged; the
+    factors are computed once rather than redundantly by every lane.
     """
     thread = wp.tid()
     block = wp.block_dim()
@@ -2564,29 +2562,28 @@ def solve_paired_tree_backbone_cr_coarse_lanes(
     for local in range(1, active_count):
         previous = base + (local - 1) * stride
         row = base + local * stride
+        if lane == 0:
+            multiplier0 = lower[row].m00
+            multiplier1 = lower[row].m01
+            if factorize != 0:
+                inverse_previous = _inverse_spatial_pair_body_first(diagonal[previous])
+                diagonal[previous] = inverse_previous
+                multiplier0 = lower[row].m01 * inverse_previous.m10
+                multiplier1 = lower[row].m01 * inverse_previous.m11
+                factor_value = lower[row]
+                factor_value.m00 = multiplier0
+                factor_value.m01 = multiplier1
+                lower[row] = factor_value
+                diagonal_value = diagonal[row]
+                diagonal_value.m00 = diagonal_value.m00 - multiplier1 * upper[previous].m10
+                diagonal[row] = diagonal_value
+            previous_rhs = rhs[previous]
+            row_rhs = rhs[row]
+            row_rhs.v0 = row_rhs.v0 - (multiplier0 * previous_rhs.v0 + multiplier1 * previous_rhs.v1)
+            rhs[row] = row_rhs
+        _synchronize_cr_block()
         multiplier0 = lower[row].m00
         multiplier1 = lower[row].m01
-        inverse_previous = diagonal[previous]
-        factor_value = lower[row]
-        diagonal_value = diagonal[row]
-        if factorize != 0:
-            inverse_previous = _inverse_spatial_pair_body_first(diagonal[previous])
-            multiplier0 = lower[row].m01 * inverse_previous.m10
-            multiplier1 = lower[row].m01 * inverse_previous.m11
-            factor_value.m00 = multiplier0
-            factor_value.m01 = multiplier1
-            diagonal_value.m00 = diagonal_value.m00 - multiplier1 * upper[previous].m10
-        previous_rhs = rhs[previous]
-        row_rhs = rhs[row]
-        row_rhs.v0 = row_rhs.v0 - (multiplier0 * previous_rhs.v0 + multiplier1 * previous_rhs.v1)
-        # Every lane has finished reading this row before lane zero rewrites it.
-        _synchronize_cr_block()
-        if lane == 0:
-            if factorize != 0:
-                diagonal[previous] = inverse_previous
-                lower[row] = factor_value
-                diagonal[row] = diagonal_value
-            rhs[row] = row_rhs
         closure = int(lane)
         while closure < closure_count:
             response_index = row * closure_count + closure
@@ -2598,19 +2595,17 @@ def solve_paired_tree_backbone_cr_coarse_lanes(
             )
             response_rhs[response_index] = response_value
             closure += block
-        # Publish this row before the next iteration reads it as `previous`.
         _synchronize_cr_block()
 
     last = base + (active_count - 1) * stride
-    diagonal_last = diagonal[last]
-    if factorize != 0:
-        diagonal_last = _inverse_spatial_pair_body_first(diagonal[last])
-    last_rhs = _spatial_pair_matrix_vector_multiply(diagonal_last, rhs[last])
-    _synchronize_cr_block()
     if lane == 0:
+        diagonal_last = diagonal[last]
         if factorize != 0:
+            diagonal_last = _inverse_spatial_pair_body_first(diagonal[last])
             diagonal[last] = diagonal_last
-        rhs[last] = last_rhs
+        rhs[last] = _spatial_pair_matrix_vector_multiply(diagonal_last, rhs[last])
+    _synchronize_cr_block()
+    diagonal_last = diagonal[last]
     closure = int(lane)
     while closure < closure_count:
         response_index = last * closure_count + closure
@@ -3298,8 +3293,6 @@ def back_substitute_tree_backbone_cr_in_place(
 
 @wp.kernel
 def compute_path_correction(
-    row_count: int,
-    body_count: int,
     body_ids: wp.array[wp.int32],
     body_slot_by_id: wp.array[wp.int32],
     body_incident_rows: wp.array[wp.vec2i],
@@ -3312,10 +3305,11 @@ def compute_path_correction(
     body_inv_mass: wp.array[float],
     body_correction: wp.array[wp.spatial_vector],
 ):
-    """Map solved path multipliers back to one coherent body correction."""
+    """Map solved path multipliers back to one coherent body correction.
+
+    Incident codes store ``(bucket_row << 1) | side`` for at most two rows.
+    """
     index = wp.tid()
-    batch = index // body_count
-    row_start = batch * row_count
     body = body_ids[index]
     slot = body_slot_by_id[body]
     if body_inv_mass[body] <= 0.0:
@@ -3327,7 +3321,7 @@ def compute_path_correction(
     for incident in range(2):
         code = incident_rows[incident]
         if code >= 0:
-            row = row_start + code // 2
+            row = code // 2
             jacobian = jacobian_parent[row] if code % 2 == 0 else jacobian_child[row]
             reaction = reaction + wp.transpose(jacobian) * multiplier[row]
             active = active + row_active[row]
@@ -3893,7 +3887,8 @@ class _BucketPlan:
     kind: str
     components: list[_Path] | list[_Tree] | list[_ClosedTree]
     diagnostics: _BucketDiagnostics
-    tree_symbolics: _TreeBucketSymbolics | None = None
+    # One schedule, or one per tree (keyed by id) for a merged contraction bucket.
+    tree_symbolics: _TreeBucketSymbolics | dict[int, _TreeBucketSymbolics] | None = None
 
 
 @dataclass(frozen=True)
@@ -4252,16 +4247,22 @@ def _tree_contraction_schedule(tree: _Tree) -> _TreeContraction:
 
 
 def _make_device_batched_tree_contraction(
-    schedule: _TreeContraction,
-    batch_count: int,
-    node_count: int,
+    schedules: list[_TreeContraction],
+    node_counts: list[int],
     device,
 ):
-    """Repeat one normalized contraction schedule with compact edge offsets."""
-    fill_count = schedule.edge_count - node_count
+    """Merge per-tree contraction schedules level by level with compact offsets.
+
+    Trees may differ in topology. Each tree keeps its own node, edge and message
+    order; tree edges are offset by the tree's first node and fill edges by the
+    tree's first fill slot after all tree nodes.
+    """
+    total_node_count = sum(node_counts)
+    node_offsets = np.cumsum([0, *node_counts[:-1]]).tolist()
+    fill_counts = [schedule.edge_count - count for schedule, count in zip(schedules, node_counts, strict=True)]
+    fill_offsets = np.cumsum([0, *fill_counts[:-1]]).tolist()
     result = []
-    for level in schedule.levels:
-        level_size = len(level.nodes)
+    for level_index in range(max(len(schedule.levels) for schedule in schedules)):
         nodes: list[int] = []
         neighbors: list[tuple[int, int]] = []
         edges: list[tuple[int, int]] = []
@@ -4270,21 +4271,26 @@ def _make_device_batched_tree_contraction(
         recipients: list[int] = []
         recipient_offsets = [0]
         message_slots: list[int] = []
+        for schedule, node_count, node_offset, fill_offset in zip(
+            schedules, node_counts, node_offsets, fill_offsets, strict=True
+        ):
+            if level_index >= len(schedule.levels):
+                continue
+            level = schedule.levels[level_index]
+            level_start = len(nodes)
 
-        def global_edge(batch: int, edge: int) -> int:
-            if edge < node_count:
-                return batch * node_count + edge
-            return batch_count * node_count + batch * fill_count + edge - node_count
+            def global_edge(edge: int, node_count=node_count, node_offset=node_offset, fill_offset=fill_offset) -> int:
+                if edge < node_count:
+                    return node_offset + edge
+                return total_node_count + fill_offset + edge - node_count
 
-        for batch in range(batch_count):
-            node_offset = batch * node_count
             nodes.extend(node_offset + node for node in level.nodes)
             neighbors.extend(
                 tuple(node_offset + neighbor if neighbor >= 0 else -1 for neighbor in pair) for pair in level.neighbors
             )
-            edges.extend(tuple(global_edge(batch, edge) if edge >= 0 else -1 for edge in pair) for pair in level.edges)
+            edges.extend(tuple(global_edge(edge) if edge >= 0 else -1 for edge in pair) for pair in level.edges)
             transpose_edges.extend(level.transpose_edges)
-            generated_edges.extend(global_edge(batch, edge) if edge >= 0 else -1 for edge in level.generated_edges)
+            generated_edges.extend(global_edge(edge) if edge >= 0 else -1 for edge in level.generated_edges)
             for recipient_index, recipient in enumerate(level.recipients):
                 recipients.append(node_offset + recipient)
                 begin = level.recipient_offsets[recipient_index]
@@ -4292,7 +4298,7 @@ def _make_device_batched_tree_contraction(
                 for slot in level.message_slots[begin:end]:
                     local_index = slot // 2
                     local = slot - 2 * local_index
-                    message_slots.append(2 * (batch * level_size + local_index) + local)
+                    message_slots.append(2 * (level_start + local_index) + local)
                 recipient_offsets.append(len(message_slots))
         result.append(
             (
@@ -4450,26 +4456,23 @@ def _tree_levels_payload_bytes(levels: list[list[int]], parent_node: list[int], 
     return total
 
 
-def _tree_contraction_payload_bytes(
-    contraction: _TreeContraction,
-    batch_count: int,
-    node_count: int,
-) -> int:
-    """Count one selected batched rake-and-compress device schedule."""
+def _tree_contraction_payload_bytes(schedules: list[_TreeContraction], node_counts: list[int]) -> int:
+    """Count the merged rake-and-compress device schedule of one tree bucket."""
     total = 0
-    for level in contraction.levels:
-        level_size = batch_count * len(level.nodes)
-        recipient_count = batch_count * len(level.recipients)
-        message_count = batch_count * len(level.message_slots)
+    for level_index in range(max(len(schedule.levels) for schedule in schedules)):
+        levels = [schedule.levels[level_index] for schedule in schedules if level_index < len(schedule.levels)]
+        level_size = sum(len(level.nodes) for level in levels)
+        recipient_count = sum(len(level.recipients) for level in levels)
+        message_count = sum(len(level.message_slots) for level in levels)
         total += _array_payload_bytes(level_size, wp.int32)
         total += 3 * _array_payload_bytes(level_size, wp.vec2i)
         total += _array_payload_bytes(level_size, wp.int32)
         total += _array_payload_bytes(recipient_count, wp.int32)
         total += _array_payload_bytes(recipient_count + 1, wp.int32)
         total += _array_payload_bytes(message_count, wp.int32)
-    total += _array_payload_bytes(batch_count, wp.int32)
+    total += _array_payload_bytes(len(schedules), wp.int32)
     total += _array_payload_bytes(
-        batch_count * (contraction.edge_count - node_count),
+        sum(schedule.edge_count - count for schedule, count in zip(schedules, node_counts, strict=True)),
         wp.spatial_matrix,
     )
     return total
@@ -4487,32 +4490,36 @@ def _tree_body_row_count(trees: list[_Tree]) -> int:
 
 
 def _path_bucket_diagnostics(paths: list[_Path], device) -> _BucketDiagnostics:
-    """Plan the exact device payload of one path bucket."""
-    row_count = len(paths[0].joints)
-    body_count = len(paths[0].bodies)
+    """Plan the exact device payload of one path bucket.
+
+    Paths may differ in length; per-island counts report the largest path.
+    """
+    row_counts = [len(path.joints) for path in paths]
     batch_count = len(paths)
-    size = batch_count * row_count
-    body_size = batch_count * body_count
+    size = sum(row_counts)
+    body_size = sum(len(path.bodies) for path in paths)
+    schedule = _path_cr_schedule(row_counts, device.is_cuda)
     estimated_bytes = (
         2 * _array_payload_bytes(size, wp.int32)
         + _array_payload_bytes(body_size, wp.int32)
         + _array_payload_bytes(body_size, wp.vec2i)
         + 5 * _array_payload_bytes(size, wp.spatial_matrix)
         + _array_payload_bytes(size, wp.spatial_vector)
-        + _array_payload_bytes(size, wp.vec2i)
+        + 2 * _array_payload_bytes(size, wp.vec2i)
+        + _path_cr_schedule_bytes(schedule)
     )
-    if device.is_cuda and row_count <= _CR_PERSISTENT_MAX_ROWS:
-        route = "path_persistent_cr"
-    elif device.is_cuda:
+    if schedule.tails:
         route = "path_fused_tail_cr"
+    elif schedule.persistent:
+        route = "path_persistent_cr"
     else:
         route = "path_level_cr"
     return _BucketDiagnostics(
         kind="path",
         batch_count=batch_count,
-        body_count_per_island=body_count,
+        body_count_per_island=max(len(path.bodies) for path in paths),
         body_count_total=body_size,
-        row_count_per_island=row_count,
+        row_count_per_island=max(row_counts),
         row_count_total=size,
         cycle_rank_per_island=0,
         closure_count_per_island=0,
@@ -4524,30 +4531,91 @@ def _path_bucket_diagnostics(paths: list[_Path], device) -> _BucketDiagnostics:
     )
 
 
+def _tree_bucket_layout(
+    trees: list[_Tree],
+    symbolics: _TreeBucketSymbolics | dict[int, _TreeBucketSymbolics] | None,
+):
+    """Return per-tree symbolics and the merged host schedules shared by accounting and construction.
+
+    A bucket is either one normalized topology or, when every tree takes the
+    contraction route, trees of different topologies merged level by level.
+    """
+    uniform = all(_tree_topology_signature(tree) == _tree_topology_signature(trees[0]) for tree in trees[1:])
+    if not uniform and not isinstance(symbolics, dict):
+        raise ValueError("Nonuniform tree buckets require per-tree symbolics")
+    if isinstance(symbolics, dict):
+        tree_symbolics = [symbolics[id(tree)] for tree in trees]
+    else:
+        shared = symbolics if symbolics is not None else _tree_bucket_symbolics(trees[0])
+        tree_symbolics = [shared] * len(trees)
+    if not uniform and not all(
+        candidate.use_tree_contraction and not candidate.use_paired_open_backbone for candidate in tree_symbolics
+    ):
+        raise ValueError("A tree bucket requires one normalized symbolic topology unless every tree is contracted")
+    node_counts = [len(tree.node_body) for tree in trees]
+    node_offsets = np.cumsum([0, *node_counts[:-1]]).tolist()
+    parent_node: list[int] = []
+    for tree, offset in zip(trees, node_offsets, strict=True):
+        parent_node.extend(offset + parent if parent >= 0 else -1 for parent in tree.parent_node)
+
+    def merge(per_tree: list[list[list[int]]]) -> list[list[int]]:
+        depth = max((len(levels) for levels in per_tree), default=0)
+        return [
+            [
+                offset + node
+                for levels, offset in zip(per_tree, node_offsets, strict=True)
+                if index < len(levels)
+                for node in levels[index]
+            ]
+            for index in range(depth)
+        ]
+
+    return (
+        uniform,
+        tree_symbolics,
+        node_counts,
+        node_offsets,
+        parent_node,
+        merge([tree.elimination_levels for tree in trees]),
+        merge([candidate.branch_levels for candidate in tree_symbolics]),
+        [
+            offset + node
+            for candidate, offset in zip(tree_symbolics, node_offsets, strict=True)
+            for node in candidate.backbone
+        ],
+    )
+
+
 def _tree_bucket_diagnostics(
     trees: list[_Tree],
     device,
     *,
-    symbolics: _TreeBucketSymbolics | None = None,
+    symbolics: _TreeBucketSymbolics | dict[int, _TreeBucketSymbolics] | None = None,
     allow_fused_tree_levels: bool = True,
     factor_dtype=wp.float32,
 ) -> _BucketDiagnostics:
-    """Plan the exact device payload of one normalized tree bucket."""
-    tree = trees[0]
-    signature = _tree_topology_signature(tree)
-    if any(_tree_topology_signature(candidate) != signature for candidate in trees[1:]):
-        raise ValueError("A tree bucket requires one normalized symbolic topology")
+    """Plan the exact device payload of one tree bucket.
 
-    if symbolics is None:
-        symbolics = _tree_bucket_symbolics(tree)
+    Contracted trees of different topologies report their largest island in the
+    per-island counts.
+    """
+    (
+        uniform,
+        tree_symbolics,
+        node_counts,
+        _node_offsets,
+        parent_node,
+        levels,
+        branch_levels,
+        backbone,
+    ) = _tree_bucket_layout(trees, symbolics)
+    tree = trees[0]
+    symbolics = tree_symbolics[0]
     batch_count = len(trees)
-    tree_row_count = len(tree.joints)
-    tree_body_count = len(tree.bodies)
-    tree_node_count = len(tree.node_body)
-    row_count = batch_count * tree_row_count
-    body_count = batch_count * tree_body_count
-    node_count = batch_count * tree_node_count
-    backbone_size = batch_count * len(symbolics.backbone)
+    row_count = sum(len(candidate.joints) for candidate in trees)
+    body_count = sum(len(candidate.bodies) for candidate in trees)
+    node_count = sum(node_counts)
+    backbone_size = len(backbone)
 
     matrix_dtype = wp.spatial_matrixd if factor_dtype == wp.float64 else wp.spatial_matrix
     vector_dtype = wp.spatial_vectord if factor_dtype == wp.float64 else wp.spatial_vector
@@ -4569,16 +4637,17 @@ def _tree_bucket_diagnostics(
     estimated_bytes += _array_payload_bytes(node_count, matrix_dtype)
     if factor_dtype == wp.float64:
         estimated_bytes += _array_payload_bytes(node_count, matrix_dtype)
-    estimated_bytes += _tree_levels_payload_bytes(tree.elimination_levels, tree.parent_node, batch_count)
+    estimated_bytes += _tree_levels_payload_bytes(levels, parent_node, 1)
     if (
-        allow_fused_tree_levels
+        uniform
+        and allow_fused_tree_levels
         and not symbolics.use_tree_contraction
         and not symbolics.use_backbone_cr
         and _fused_tree_levels_supported(tree.elimination_levels, device)
     ):
         estimated_bytes += _fused_tree_levels_payload_bytes(tree.elimination_levels, tree.parent_node)
     estimated_bytes += _array_payload_bytes(backbone_size, wp.int32)
-    estimated_bytes += _tree_levels_payload_bytes(symbolics.branch_levels, tree.parent_node, batch_count)
+    estimated_bytes += _tree_levels_payload_bytes(branch_levels, parent_node, 1)
     estimated_bytes += 2 * _array_payload_bytes(backbone_size, matrix_dtype)
     if symbolics.use_paired_open_backbone:
         paired_backbone_count = (len(symbolics.backbone) + 1) // 2
@@ -4587,30 +4656,24 @@ def _tree_bucket_diagnostics(
         estimated_bytes += _array_payload_bytes(paired_backbone_size, _SpatialPairEliminationFactor)
         estimated_bytes += _array_payload_bytes(paired_backbone_size, _SpatialPairVector)
         estimated_bytes += _array_payload_bytes(1, _SpatialPairResponse)
-        if tree_body_count > _PAIRED_OPEN_CHAIN_MIN_BODIES:
+        if len(tree.bodies) > _PAIRED_OPEN_CHAIN_MIN_BODIES:
             estimated_bytes += _array_payload_bytes(paired_backbone_size, _SpatialPairVector)
             estimated_bytes += _array_payload_bytes(1, _SpatialPairResponse)
+    fill_count = 0
     if symbolics.use_tree_contraction:
-        if symbolics.contraction is None:
+        if any(candidate.contraction is None for candidate in tree_symbolics):
             raise RuntimeError("Tree contraction was selected without a symbolic schedule")
-        estimated_bytes += _tree_contraction_payload_bytes(
-            symbolics.contraction,
-            batch_count,
-            tree_node_count,
-        )
+        schedules = [candidate.contraction for candidate in tree_symbolics]
+        estimated_bytes += _tree_contraction_payload_bytes(schedules, node_counts)
+        fill_count = sum(schedule.edge_count - count for schedule, count in zip(schedules, node_counts, strict=True))
     estimated_bytes += _array_payload_bytes(1, wp.spatial_matrix)
 
-    fill_count = (
-        batch_count * (symbolics.contraction.edge_count - tree_node_count)
-        if symbolics.contraction is not None and symbolics.use_tree_contraction
-        else 0
-    )
     return _BucketDiagnostics(
         kind="tree",
         batch_count=batch_count,
-        body_count_per_island=tree_body_count,
+        body_count_per_island=max(len(candidate.bodies) for candidate in trees),
         body_count_total=body_count,
-        row_count_per_island=tree_row_count,
+        row_count_per_island=max(len(candidate.joints) for candidate in trees),
         row_count_total=row_count,
         cycle_rank_per_island=0,
         closure_count_per_island=0,
@@ -4939,24 +5002,16 @@ def _build_paths(
         if not valid:
             continue
 
-        bodies: list[int] = []
-        for joint in ordered:
-            for body in (int(parent[joint]), int(child[joint])):
-                if body >= 0 and body not in bodies:
-                    bodies.append(body)
-        body_rows: list[list[tuple[int, int]]] = []
-        for body in bodies:
-            incident_rows: list[tuple[int, int]] = []
-            for row, joint in enumerate(ordered):
-                if int(parent[joint]) == body:
-                    incident_rows.append((row, 0))
-                if int(child[joint]) == body:
-                    incident_rows.append((row, 1))
-            if len(incident_rows) > 2:
-                valid = False
-                break
-            body_rows.append(incident_rows)
-        if valid:
+        # Preserve first-encounter body order and ascending incident row/side
+        # order without scanning every joint again for each body.
+        rows_by_body: dict[int, list[tuple[int, int]]] = {}
+        for row, joint in enumerate(ordered):
+            for side, body in enumerate((int(parent[joint]), int(child[joint]))):
+                if body >= 0:
+                    rows_by_body.setdefault(body, []).append((row, side))
+        bodies = list(rows_by_body)
+        body_rows = list(rows_by_body.values())
+        if all(len(incident) <= 2 for incident in body_rows):
             paths.append(_Path(ordered, bodies, body_rows))
     return paths
 
@@ -6393,38 +6448,102 @@ def scatter_closed_tree_body_correction(
     body_correction[slot] = correction
 
 
+@dataclass
+class _PathCRSchedule:
+    """Host routes and merged level rows for the paths of one bucket."""
+
+    persistent: list[tuple[int, int]]
+    tails: list[tuple[int, int, int]]
+    coarse: list[tuple[int, int, int]]
+    levels: list[tuple[int, list[tuple[int, int, int]], list[tuple[int, int, int]]]]
+
+
+def _path_cr_schedule(row_counts: list[int], fused: bool) -> _PathCRSchedule:
+    """Route back-to-back path rows and merge equal-stride CR levels.
+
+    With ``fused`` (CUDA), a path of at most ``_CR_PERSISTENT_MAX_ROWS`` rows
+    is solved by one block. Longer paths share one launch per level until at
+    most ``_CR_TAIL_MAX_ROWS`` rows remain, then finish in one block each.
+    Otherwise every path reduces to ``_CR_SERIAL_TERMINAL_SIZE`` rows and
+    finishes with block Thomas. Every path keeps the elimination order of a
+    standalone solve, so batching paths of different lengths is exact. Level
+    entries store the path's first row, the local row, and the path row count.
+    """
+    persistent: list[tuple[int, int]] = []
+    tails: list[tuple[int, int, int]] = []
+    coarse: list[tuple[int, int, int]] = []
+    eliminated: list[list[tuple[int, int, int]]] = []
+    survivors: list[list[tuple[int, int, int]]] = []
+    limit = _CR_TAIL_MAX_ROWS if fused else _CR_SERIAL_TERMINAL_SIZE
+    start = 0
+    for count in row_counts:
+        if fused and count <= _CR_PERSISTENT_MAX_ROWS:
+            persistent.append((start, count))
+        else:
+            stride = 1
+            level = 0
+            while (count + stride - 1) // stride > limit:
+                if level == len(eliminated):
+                    eliminated.append([])
+                    survivors.append([])
+                eliminated[level].extend((start, row, count) for row in range(stride, count, 2 * stride))
+                survivors[level].extend((start, row, count) for row in range(0, count, 2 * stride))
+                stride *= 2
+                level += 1
+            (tails if fused else coarse).append((start, count, stride))
+        start += count
+    levels = [(1 << level, eliminated[level], survivors[level]) for level in range(len(eliminated))]
+    return _PathCRSchedule(persistent, tails, coarse, levels)
+
+
+def _path_cr_schedule_bytes(schedule: _PathCRSchedule) -> int:
+    """Count the device arrays allocated for one path CR schedule."""
+    return (
+        _array_payload_bytes(len(schedule.persistent), wp.vec2i)
+        + _array_payload_bytes(len(schedule.tails), wp.vec3i)
+        + _array_payload_bytes(len(schedule.coarse), wp.vec3i)
+        + sum(
+            _array_payload_bytes(len(eliminated), wp.vec3i) + _array_payload_bytes(len(survivors), wp.vec3i)
+            for _, eliminated, survivors in schedule.levels
+        )
+    )
+
+
 class _PathBucket:
-    """Fixed-size batch of equal-shape joint paths."""
+    """Batch of joint paths of any lengths, stored back to back."""
 
     def __init__(self, paths: list[_Path], device):
         self.device = device
         self.spatial_block_dim = _SPATIAL_GPU_BLOCK_DIM if device.is_cuda else 1
-        self.row_count = len(paths[0].joints)
-        self.body_count = len(paths[0].bodies)
         self.batch_count = len(paths)
-        self.size = self.batch_count * self.row_count
-        self.body_size = self.batch_count * self.body_count
-        self.use_persistent_cr = device.is_cuda and self.row_count <= _CR_PERSISTENT_MAX_ROWS
-        self.use_fused_cr_tail = device.is_cuda and not self.use_persistent_cr
+        self.row_counts = [len(path.joints) for path in paths]
+        self.size = sum(self.row_counts)
+        self.body_size = sum(len(path.bodies) for path in paths)
 
         joint_ids: list[int] = []
         body_ids: list[int] = []
         body_incident_rows: list[tuple[int, int]] = []
+        row_bounds: list[tuple[int, int]] = []
+        start = 0
         for path in paths:
+            end = start + len(path.joints)
             joint_ids.extend(path.joints)
             body_ids.extend(path.bodies)
+            row_bounds.extend([(start, end)] * (end - start))
             for incident in path.body_rows:
-                encoded = [(row << 1) | side for row, side in incident]
+                encoded = [((start + row) << 1) | side for row, side in incident]
                 body_incident_rows.append(
                     (
                         encoded[0] if encoded else -1,
                         encoded[1] if len(encoded) > 1 else -1,
                     )
                 )
+            start = end
 
         self.joint_ids_host = np.asarray(joint_ids, dtype=np.int64)
         self.joint_ids = wp.array(self.joint_ids_host, dtype=wp.int32, device=device)
         self.row_body = None
+        self.row_bounds = wp.array(np.asarray(row_bounds, dtype=np.int32), dtype=wp.vec2i, device=device)
         self.body_ids_host = np.asarray(body_ids, dtype=np.int32)
         self.body_ids = wp.array(self.body_ids_host, dtype=wp.int32, device=device)
         self.body_incident_rows = wp.array(body_incident_rows, dtype=wp.vec2i, device=device)
@@ -6443,24 +6562,7 @@ class _PathBucket:
         self.residual = self.rhs[0]
         self.solution = self.rhs
 
-        self.cr_levels: list[tuple[int, int, int]] = []
-        stride = 1
-        active_count = self.row_count
-        while active_count > _CR_SERIAL_TERMINAL_SIZE:
-            eliminated_count = len(range(stride, self.row_count, 2 * stride))
-            survivor_count = len(range(0, self.row_count, 2 * stride))
-            self.cr_levels.append((stride, eliminated_count, survivor_count))
-            stride *= 2
-            active_count = survivor_count
-        self.terminal_stride = stride
-        self.cr_outer_levels: list[tuple[int, int, int]] = []
-        self.cr_tail_stride = 1
-        if self.use_fused_cr_tail:
-            for level in self.cr_levels:
-                if (self.row_count + self.cr_tail_stride - 1) // self.cr_tail_stride <= _CR_TAIL_MAX_ROWS:
-                    break
-                self.cr_outer_levels.append(level)
-                self.cr_tail_stride *= 2
+        self.plan_cr(fused=device.is_cuda)
 
     def bind_body_endpoints(self, parent: np.ndarray, child: np.ndarray, body_slot: dict[int, int]):
         self.row_body = wp.array(
@@ -6475,67 +6577,86 @@ class _PathBucket:
             device=self.device,
         )
 
+    def plan_cr(self, *, fused: bool):
+        """Allocate the fused CUDA schedule, or the plain level schedule used on CPU."""
+
+        def device_array(values, dtype):
+            if not values:
+                return None
+            return wp.array(np.asarray(values, dtype=np.int32), dtype=dtype, device=self.device)
+
+        self.cr_schedule = _path_cr_schedule(self.row_counts, fused)
+        self.persistent_paths = device_array(self.cr_schedule.persistent, wp.vec2i)
+        self.tail_paths = device_array(self.cr_schedule.tails, wp.vec3i)
+        self.coarse_paths = device_array(self.cr_schedule.coarse, wp.vec3i)
+        self.cr_levels = [
+            (stride, device_array(eliminated, wp.vec3i), device_array(survivors, wp.vec3i))
+            for stride, eliminated, survivors in self.cr_schedule.levels
+        ]
+
     def solve_rows(self):
-        """Solve the block-tridiagonal path in four in-place row buffers."""
-        if self.use_persistent_cr:
+        """Solve every block-tridiagonal path in four in-place row buffers."""
+        buffers = [self.lower[0], self.diagonal[0], self.upper[0], self.rhs[0]]
+        if self.persistent_paths is not None:
             wp.launch(
                 solve_cr_persistent,
-                self.batch_count * self.spatial_block_dim,
-                inputs=[self.row_count, _CR_SERIAL_TERMINAL_SIZE],
-                outputs=[self.lower[0], self.diagonal[0], self.upper[0], self.rhs[0]],
+                self.persistent_paths.shape[0] * self.spatial_block_dim,
+                inputs=[self.persistent_paths, _CR_SERIAL_TERMINAL_SIZE],
+                outputs=buffers,
                 device=self.device,
                 block_dim=self.spatial_block_dim,
             )
-            return
-
-        levels = self.cr_outer_levels if self.use_fused_cr_tail else self.cr_levels
-        for stride, eliminated_count, survivor_count in levels:
+        for stride, eliminated, survivors in self.cr_levels:
             wp.launch(
                 invert_cr_eliminated_in_place,
-                self.batch_count * eliminated_count,
-                inputs=[stride, self.row_count, eliminated_count],
+                eliminated.shape[0],
+                inputs=[eliminated],
                 outputs=[self.diagonal[0]],
                 device=self.device,
                 block_dim=self.spatial_block_dim,
             )
             wp.launch(
                 reduce_cr_in_place,
-                self.batch_count * survivor_count,
-                inputs=[stride, self.row_count, survivor_count],
-                outputs=[self.lower[0], self.diagonal[0], self.upper[0], self.rhs[0]],
+                survivors.shape[0],
+                inputs=[stride, survivors],
+                outputs=buffers,
                 device=self.device,
                 block_dim=self.spatial_block_dim,
             )
-        if self.use_fused_cr_tail:
+        if self.tail_paths is not None:
             wp.launch(
                 solve_cr_tail_persistent,
-                self.batch_count * self.spatial_block_dim,
-                inputs=[self.row_count, self.cr_tail_stride],
-                outputs=[self.lower[0], self.diagonal[0], self.upper[0], self.rhs[0]],
+                self.tail_paths.shape[0] * self.spatial_block_dim,
+                inputs=[self.tail_paths],
+                outputs=buffers,
                 device=self.device,
                 block_dim=self.spatial_block_dim,
             )
-        else:
+        if self.coarse_paths is not None:
             wp.launch(
                 solve_strided_cr_coarse,
-                self.batch_count,
-                inputs=[self.terminal_stride, self.row_count],
-                outputs=[self.lower[0], self.diagonal[0], self.upper[0], self.rhs[0]],
+                self.coarse_paths.shape[0],
+                inputs=[self.coarse_paths],
+                outputs=buffers,
                 device=self.device,
             )
-        for stride, eliminated_count, _ in reversed(levels):
+        for stride, eliminated, _ in reversed(self.cr_levels):
             wp.launch(
                 back_substitute_cr_in_place,
-                self.batch_count * eliminated_count,
-                inputs=[stride, self.row_count, eliminated_count],
-                outputs=[self.lower[0], self.diagonal[0], self.upper[0], self.rhs[0]],
+                eliminated.shape[0],
+                inputs=[stride, eliminated],
+                outputs=buffers,
                 device=self.device,
                 block_dim=self.spatial_block_dim,
             )
 
 
 class _TreeBucket:
-    """A batch of graph-capturable trees with one exact symbolic schedule."""
+    """A batch of graph-capturable trees with exact symbolic schedules.
+
+    Trees share one normalized topology, or every tree takes the contraction
+    route and trees of different topologies are stored back to back.
+    """
 
     def __init__(
         self,
@@ -6543,30 +6664,38 @@ class _TreeBucket:
         body_slot: dict[int, int],
         device,
         *,
-        symbolics: _TreeBucketSymbolics | None = None,
+        symbolics: _TreeBucketSymbolics | dict[int, _TreeBucketSymbolics] | None = None,
         allow_fused_tree_levels: bool = True,
         factor_dtype=wp.float32,
     ):
         if isinstance(trees, _Tree):
             trees = [trees]
         tree = trees[0]
-        signature = _tree_topology_signature(tree)
-        if any(_tree_topology_signature(candidate) != signature for candidate in trees[1:]):
-            raise ValueError("A tree bucket requires one normalized symbolic topology")
-        if symbolics is None:
-            symbolics = _tree_bucket_symbolics(tree)
+        (
+            uniform,
+            tree_symbolics,
+            node_counts,
+            node_offsets,
+            parent_node,
+            levels,
+            branch_levels,
+            backbone_nodes,
+        ) = _tree_bucket_layout(trees, symbolics)
+        symbolics = tree_symbolics[0]
 
         matrix_dtype = wp.spatial_matrixd if factor_dtype == wp.float64 else wp.spatial_matrix
         vector_dtype = wp.spatial_vectord if factor_dtype == wp.float64 else wp.spatial_vector
         self.device = device
         self.spatial_block_dim = _SPATIAL_GPU_BLOCK_DIM if device.is_cuda else 1
         self.batch_count = len(trees)
-        self.tree_row_count = len(tree.joints)
-        self.tree_body_count = len(tree.bodies)
-        self.tree_node_count = len(tree.node_body)
-        self.row_count = self.batch_count * self.tree_row_count
-        self.body_count = self.batch_count * self.tree_body_count
-        self.node_count = self.batch_count * self.tree_node_count
+        # Per-tree sizes exist only for one normalized topology; contracted
+        # trees of different topologies are stored back to back.
+        self.tree_row_count = len(tree.joints) if uniform else None
+        self.tree_body_count = len(tree.bodies) if uniform else None
+        self.tree_node_count = len(tree.node_body) if uniform else None
+        self.row_count = sum(len(candidate.joints) for candidate in trees)
+        self.body_count = sum(len(candidate.bodies) for candidate in trees)
+        self.node_count = sum(node_counts)
         self.size = self.row_count
         self.body_size = self.body_count
 
@@ -6578,18 +6707,16 @@ class _TreeBucket:
         body_row_offsets: list[int] = [0]
         body_rows: list[int] = []
         node_row: list[int] = []
-        parent_node: list[int] = []
         coupling_side: list[int] = []
         roots: list[int] = []
-        for batch, candidate in enumerate(trees):
-            node_offset = batch * self.tree_node_count
-            row_offset = batch * self.tree_row_count
+        row_offset = 0
+        for candidate, node_offset in zip(trees, node_offsets, strict=True):
             joint_ids.extend(candidate.joints)
             body_ids.extend(candidate.bodies)
             node_body.extend(body_slot[body] if body >= 0 else -1 for body in candidate.node_body)
-            body_nodes.extend(node_offset + node for node in range(self.tree_body_count))
+            body_nodes.extend(node_offset + node for node in range(len(candidate.bodies)))
             body_slots.extend(body_slot[body] for body in candidate.bodies)
-            for body_node in range(self.tree_body_count):
+            for body_node in range(len(candidate.bodies)):
                 incident_rows = []
                 for node, row in enumerate(candidate.node_row):
                     if row < 0:
@@ -6599,9 +6726,9 @@ class _TreeBucket:
                 body_rows.extend(incident_rows)
                 body_row_offsets.append(len(body_rows))
             node_row.extend(row_offset + row if row >= 0 else -1 for row in candidate.node_row)
-            parent_node.extend(node_offset + parent if parent >= 0 else -1 for parent in candidate.parent_node)
             coupling_side.extend(candidate.coupling_side)
             roots.append(node_offset + candidate.root)
+            row_offset += len(candidate.joints)
 
         self.root = roots[0]
         self.roots = wp.array(roots, dtype=wp.int32, device=device)
@@ -6647,18 +6774,15 @@ class _TreeBucket:
         self.saved_rhs = self.rhs
         self.solution = self.rhs
 
-        levels = [
-            [batch * self.tree_node_count + node for batch in range(self.batch_count) for node in level]
-            for level in tree.elimination_levels
-        ]
         self.levels = _make_device_tree_levels(levels, parent_node, device)
         # The leaf-rake schedule is a chain of dependent launches, one per
         # level, so a long chain pays O(bodies) launch depth for two-thread
         # grids. Keep the exact per-level path and add a bit-identical
         # single-block replay of the same levels for schedules that fit.
-        self.tree_levels_host = tree.elimination_levels
+        self.tree_levels_host = tree.elimination_levels if uniform else None
         self.use_fused_tree_levels = (
-            allow_fused_tree_levels
+            uniform
+            and allow_fused_tree_levels
             and not symbolics.use_tree_contraction
             and not symbolics.use_backbone_cr
             and _fused_tree_levels_supported(tree.elimination_levels, device)
@@ -6673,28 +6797,14 @@ class _TreeBucket:
                 self.fused_message_offsets,
                 self.fused_message_nodes,
             ) = _make_fused_tree_levels(tree.elimination_levels, tree.parent_node, device)
-        backbone = symbolics.backbone
-        branch_levels = symbolics.branch_levels
-        self.backbone_node_count = len(backbone)
-        self.backbone_nodes = wp.array(
-            [batch * self.tree_node_count + node for batch in range(self.batch_count) for node in backbone],
-            dtype=wp.int32,
-            device=device,
-        )
-        batched_branch_levels = [
-            [batch * self.tree_node_count + node for batch in range(self.batch_count) for node in level]
-            for level in branch_levels
-        ]
-        self.branch_levels = _make_device_tree_levels(batched_branch_levels, parent_node, device)
-        self.backbone_lower = wp.zeros(
-            self.batch_count * self.backbone_node_count,
-            dtype=matrix_dtype,
-            device=device,
-        )
+        self.backbone_node_count = len(symbolics.backbone) if uniform else None
+        self.backbone_nodes = wp.array(backbone_nodes, dtype=wp.int32, device=device)
+        self.branch_levels = _make_device_tree_levels(branch_levels, parent_node, device)
+        self.backbone_lower = wp.zeros(len(backbone_nodes), dtype=matrix_dtype, device=device)
         self.backbone_upper = wp.zeros_like(self.backbone_lower)
         self.backbone_cr_levels: list[tuple[int, int, int]] = []
         stride = 1
-        active_count = self.backbone_node_count
+        active_count = self.backbone_node_count if uniform else 0
         while active_count > _CR_SERIAL_TERMINAL_SIZE:
             eliminated_count = len(range(stride, self.backbone_node_count, 2 * stride))
             survivor_count = len(range(0, self.backbone_node_count, 2 * stride))
@@ -6708,18 +6818,18 @@ class _TreeBucket:
         self.use_tree_contraction = symbolics.use_tree_contraction
         self.use_backbone_cr = symbolics.use_backbone_cr
         if self.use_tree_contraction:
-            if symbolics.contraction is None:
+            if any(candidate.contraction is None for candidate in tree_symbolics):
                 raise RuntimeError("Tree contraction was selected without a symbolic schedule")
-            self.contraction_levels = _make_device_batched_tree_contraction(
-                symbolics.contraction, self.batch_count, self.tree_node_count, device
-            )
+            schedules = [candidate.contraction for candidate in tree_symbolics]
+            self.contraction_levels = _make_device_batched_tree_contraction(schedules, node_counts, device)
             contraction_roots = [
-                batch * self.tree_node_count + symbolics.contraction.root for batch in range(self.batch_count)
+                offset + candidate.contraction.root
+                for candidate, offset in zip(tree_symbolics, node_offsets, strict=True)
             ]
             self.contraction_root = contraction_roots[0]
             self.contraction_roots = wp.array(contraction_roots, dtype=wp.int32, device=device)
             self.contraction_fill_edges = wp.zeros(
-                self.batch_count * (symbolics.contraction.edge_count - self.tree_node_count),
+                sum(schedule.edge_count - count for schedule, count in zip(schedules, node_counts, strict=True)),
                 dtype=wp.spatial_matrix,
                 device=device,
             )
@@ -8002,9 +8112,6 @@ class StructuralGraphKKT:
         parent = np.asarray(model.joint_parent.numpy(), dtype=np.int32)
         child = np.asarray(model.joint_child.numpy(), dtype=np.int32)
 
-        grouped_paths: dict[tuple[int, int], list[_Path]] = defaultdict(list)
-        for path in paths:
-            grouped_paths[(len(path.joints), len(path.bodies))].append(path)
         grouped_trees: dict[tuple, list[_Tree]] = defaultdict(list)
         for tree in trees:
             grouped_trees[_tree_topology_signature(tree)].append(tree)
@@ -8017,9 +8124,10 @@ class StructuralGraphKKT:
         # model identifiers, never by topology kind or an unmeasured quality
         # heuristic. If a repeated-topology batch is too large, retain the
         # largest deterministic prefix that fits and leave the rest to VBD.
+        # Paths of every length share one bucket and one launch per CR level.
         plans: list[_BucketPlan] = []
-        for group in grouped_paths.values():
-            ordered = sorted(group, key=_component_order_key)
+        if paths:
+            ordered = sorted(paths, key=_component_order_key)
             plans.append(_BucketPlan("path", ordered, _path_bucket_diagnostics(ordered, self.device)))
         for group in grouped_trees.values():
             ordered = sorted(group, key=_component_order_key)
@@ -8071,6 +8179,27 @@ class StructuralGraphKKT:
                         tree_symbolics=symbolics,
                     ),
                     symbolics,
+                )
+            )
+        # Contracted trees of every topology share one bucket and one launch per
+        # contraction level; each tree keeps its own elimination schedule.
+        contracted = [
+            plan
+            for plan in plans
+            if plan.kind == "tree"
+            and plan.tree_symbolics.use_tree_contraction
+            and not plan.tree_symbolics.use_paired_open_backbone
+        ]
+        if len(contracted) > 1:
+            symbolics_by_tree = {id(tree): plan.tree_symbolics for plan in contracted for tree in plan.components}
+            ordered = sorted((tree for plan in contracted for tree in plan.components), key=_component_order_key)
+            plans = [plan for plan in plans if all(plan is not merged for merged in contracted)]
+            plans.append(
+                _BucketPlan(
+                    "tree",
+                    ordered,
+                    _tree_bucket_diagnostics(ordered, self.device, symbolics=symbolics_by_tree),
+                    symbolics_by_tree,
                 )
             )
         plans.sort(key=lambda plan: _component_order_key(plan.components[0]))
@@ -8142,12 +8271,11 @@ class StructuralGraphKKT:
 
             fallback_count = len(plan.components) - accepted_count
             if fallback_count > 0:
-                # Every component in a plan has the same normalized shape, so
-                # a prefix of the same size has exactly the same byte count.
-                fallback_diagnostics = _cached_bucket_prefix_diagnostics(
-                    diagnostic_cache,
+                # Path lengths and contracted tree topologies can differ, so
+                # describe the remaining components rather than the whole plan.
+                fallback_diagnostics = _bucket_plan_diagnostics(
                     plan,
-                    fallback_count,
+                    plan.components[accepted_count:],
                     parent,
                     child,
                     self.device,
@@ -8739,7 +8867,7 @@ class StructuralGraphKKT:
                 assemble_joint_path_system,
                 bucket.size,
                 inputs=[
-                    bucket.row_count,
+                    bucket.row_bounds,
                     bucket.row_body,
                     self.body_inverse,
                     self.body_free,
@@ -8762,8 +8890,6 @@ class StructuralGraphKKT:
                 compute_path_correction,
                 bucket.body_size,
                 inputs=[
-                    bucket.row_count,
-                    bucket.body_count,
                     bucket.body_ids,
                     self.body_slot_by_id,
                     bucket.body_incident_rows,

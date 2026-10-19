@@ -1,0 +1,1 @@
+Batch mixed-length structural KKT paths and contracted trees while preserving each component's elimination schedule, reduce accumulation-buffer reset work, and build ordered path incidence without repeated full scans. Keep existing solver options, material laws and iteration budgets unchanged; no migration is required.

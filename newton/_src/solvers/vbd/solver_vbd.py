@@ -1307,17 +1307,18 @@ class SolverVBD(SolverBase, CouplingInterface):
                 self.body_particle_attachment_indices,
             ) = self._compute_body_particle_attachment_adjacency(model)
 
-            # Force accumulation arrays
-            self.body_torques = wp.zeros(model.body_count, dtype=wp.vec3, device=self.device)
-            self.body_forces = wp.zeros(model.body_count, dtype=wp.vec3, device=self.device)
+            # Six force/torque scalars and three 3x3 contact blocks share one reset.
+            n = model.body_count
+            self._rigid_contact_accumulators = wp.zeros(33 * n, dtype=float, device=self.device)
+            scratch = self._rigid_contact_accumulators
+            self.body_forces = scratch[: 3 * n].reshape((n, 3)).view(wp.vec3)
+            self.body_torques = scratch[3 * n : 6 * n].reshape((n, 3)).view(wp.vec3)
+            self.body_hessian_ll = scratch[6 * n : 15 * n].reshape((n, 3, 3)).view(wp.mat33)
+            self.body_hessian_al = scratch[15 * n : 24 * n].reshape((n, 3, 3)).view(wp.mat33)
+            self.body_hessian_aa = scratch[24 * n :].reshape((n, 3, 3)).view(wp.mat33)
 
             # Persistent scratch for joint_f accumulation
             self._body_f_for_integration = wp.zeros(model.body_count, dtype=wp.spatial_vector, device=self.device)
-
-            # Hessian blocks (6x6 block structure: angular-angular, angular-linear, linear-linear)
-            self.body_hessian_aa = wp.zeros(model.body_count, dtype=wp.mat33, device=self.device)
-            self.body_hessian_al = wp.zeros(model.body_count, dtype=wp.mat33, device=self.device)
-            self.body_hessian_ll = wp.zeros(model.body_count, dtype=wp.mat33, device=self.device)
 
             # Per-body contact lists (CSR-like: per-body counts + flat index array).
             # Tight: pre_alloc = 0 when the contact source is absent (no shapes / no particles).
@@ -4433,12 +4434,8 @@ class SolverVBD(SolverBase, CouplingInterface):
                 )
             return
 
-        # Zero out forces and hessians
-        self.body_torques.zero_()
-        self.body_forces.zero_()
-        self.body_hessian_aa.zero_()
-        self.body_hessian_al.zero_()
-        self.body_hessian_ll.zero_()
+        # Zero out forces and hessians in a single memset
+        self._rigid_contact_accumulators.zero_()
 
         body_color_groups = model.body_color_groups
 
