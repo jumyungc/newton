@@ -1736,6 +1736,7 @@ def _structural_kkt_bounds_material_frame_rod_stress(test, device):
             C = wp.array([np.eye(6)], dtype=wp.spatial_matrix, device=device)
             c = wp.array([before_residual], dtype=wp.spatial_vector, device=device)
             matrix = wp.zeros(2, dtype=wp.spatial_matrix, device=device)
+            matrix_scalar = wp.array(ptr=matrix.ptr, shape=(2, 6, 6), dtype=float, device=device)
             inputs = [
                 ids,
                 kind,
@@ -1758,7 +1759,7 @@ def _structural_kkt_bounds_material_frame_rod_stress(test, device):
                         add_joint_stress_majorizer,
                         1,
                         inputs=inputs,
-                        outputs=[matrix],
+                        outputs=[matrix_scalar],
                         device=device,
                     )
                 wp.capture_launch(capture.graph)
@@ -1767,7 +1768,7 @@ def _structural_kkt_bounds_material_frame_rod_stress(test, device):
                     add_joint_stress_majorizer,
                     1,
                     inputs=inputs,
-                    outputs=[matrix],
+                    outputs=[matrix_scalar],
                     device=device,
                 )
             value = matrix.numpy().astype(np.float64)
@@ -1813,7 +1814,7 @@ def _structural_kkt_bounds_material_frame_rod_stress(test, device):
                 add_joint_stress_majorizer,
                 1,
                 inputs=inputs,
-                outputs=[matrix],
+                outputs=[matrix_scalar],
                 device=device,
             )
             np.testing.assert_array_equal(matrix.numpy(), 0.0)
@@ -2695,6 +2696,9 @@ def _structural_kkt_estimates_allocation_payloads_exactly(test, device):
             backend, allocated_bytes = _build_structural_backend_with_intercepted_bytes(build_model())
             test.assertTrue(backend.active)
             test.assertEqual(backend._estimated_bytes, allocated_bytes)
+            test.assertEqual(backend.body_matrix_scalar.ptr, backend.body_matrix.ptr)
+            test.assertEqual(backend.body_matrix_scalar.capacity, backend.body_matrix.capacity)
+            test.assertEqual(backend.body_matrix_scalar.shape, (backend.graph_body_count, 6, 6))
             test.assertTrue(
                 all(bucket._estimated_bytes == bucket._diagnostics.estimated_bytes for bucket in backend.buckets)
             )

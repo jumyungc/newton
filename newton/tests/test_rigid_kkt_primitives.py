@@ -74,6 +74,38 @@ def test_directional_step_guard(test, device):
     np.testing.assert_array_equal(pending.numpy(), [1])
 
 
+@wp.kernel
+def _accumulate_joint_slope_control(
+    parent: wp.array[int],
+    child: wp.array[int],
+    slots: wp.array[int],
+    islands: wp.array[int],
+    jp: wp.array[wp.spatial_matrix],
+    jc: wp.array[wp.spatial_matrix],
+    compliance: wp.array[wp.spatial_matrix],
+    residual: wp.array[wp.spatial_vector],
+    force: wp.array[wp.spatial_vector],
+    diagonal_rows: bool,
+    correction: wp.array[wp.spatial_vector],
+    merit: wp.array[wp.float64],
+):
+    row = wp.tid()
+    kkt._accumulate_joint_slope(
+        parent[row],
+        child[row],
+        slots,
+        islands,
+        jp[row],
+        jc[row],
+        compliance[row],
+        residual[row],
+        force[row],
+        diagonal_rows,
+        correction,
+        merit,
+    )
+
+
 def test_directional_derivative_matches_dense_model(test, device):
     """Use original primal blocks, including body rhs and both joint endpoints."""
     rng = np.random.default_rng(240915)
@@ -90,26 +122,25 @@ def test_directional_derivative_matches_dense_model(test, device):
     enabled = array([True], bool)
     correction = array(delta, wp.spatial_vector)
     merit = wp.zeros(1, dtype=wp.float64, device=device)
+    pose = array(np.tile([0, 0, 0, 0, 0, 0, 1], (2, 1)), wp.transform)
+    # Coincident inertial/current poses isolate the supplied body force. The
+    # current slope kernel evaluates that force from body data, not a saved rhs.
     wp.launch(
         kkt.accumulate_body_directional_derivative,
         2,
-        inputs=[island, enabled, array(rhs, wp.spatial_vector), correction],
-        outputs=[merit],
-        device=device,
-    )
-    wp.launch(
-        kkt.accumulate_joint_directional_derivative,
-        1,
         inputs=[
-            array([0], int),
-            array([0], int),
-            array([1], int),
             array([0, 1], int),
             island,
-            array(jp, wp.spatial_matrix),
-            array(jc, wp.spatial_matrix),
-            array(compliance, wp.spatial_matrix),
-            array(residual, wp.spatial_vector),
+            enabled,
+            pose,
+            pose,
+            array([1, 1], float),
+            array([1, 1], float),
+            array(np.tile(np.eye(3), (2, 1, 1)), wp.mat33),
+            array(np.zeros((2, 3)), wp.vec3),
+            array(rhs[:, :3], wp.vec3),
+            array(rhs[:, 3:], wp.vec3),
+            0.5,
             correction,
         ],
         outputs=[merit],
@@ -117,9 +148,42 @@ def test_directional_derivative_matches_dense_model(test, device):
     )
     d = delta.astype(float)
     jd = jp[0].astype(float) @ d[0] + jc[0].astype(float) @ d[1]
-    inverse = 1.0 / np.diag(compliance[0].astype(float))
-    linear = -np.sum(rhs.astype(float) * d) + (jd * inverse) @ residual[0].astype(float)
-    np.testing.assert_allclose(merit.numpy()[0], linear, rtol=2.0e-14)
+    body_slope = -np.sum(rhs.astype(float) * d)
+    np.testing.assert_allclose(merit.numpy()[0], body_slope, rtol=2.0e-14)
+    for diagonal_rows in (True, False):
+        with test.subTest(diagonal_rows=diagonal_rows):
+            matrix = compliance.copy()
+            if not diagonal_rows:
+                rotation, _ = np.linalg.qr(rng.standard_normal((6, 6)))
+                matrix[0] = rotation @ np.diag(np.geomspace(0.01, 1.0, 6)) @ rotation.T
+            force = np.linalg.solve(matrix[0].astype(float), residual[0]).astype(np.float32)[None]
+            merit.zero_()
+            wp.launch(
+                _accumulate_joint_slope_control,
+                1,
+                inputs=[
+                    array([0], int),
+                    array([1], int),
+                    array([0, 1], int),
+                    island,
+                    array(jp, wp.spatial_matrix),
+                    array(jc, wp.spatial_matrix),
+                    array(matrix, wp.spatial_matrix),
+                    array(residual, wp.spatial_vector),
+                    array(force, wp.spatial_vector),
+                    diagonal_rows,
+                    correction,
+                ],
+                outputs=[merit],
+                device=device,
+            )
+            if diagonal_rows:
+                inverse = 1.0 / np.diag(matrix[0].astype(float))
+                expected = (jd * inverse) @ residual[0].astype(float)
+            else:
+                # General rows consume the actual force, not diag(C)^-1*c.
+                expected = jd @ force[0].astype(float)
+            np.testing.assert_allclose(merit.numpy()[0], expected, rtol=2.0e-14)
 
 
 def test_quadratic_step_guard(test, device):

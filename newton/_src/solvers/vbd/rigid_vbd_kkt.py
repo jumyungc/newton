@@ -925,7 +925,7 @@ def add_joint_stress_majorizer(
     jacobian_child: wp.array[wp.spatial_matrix],
     compliance: wp.array[wp.spatial_matrix],
     residual: wp.array[wp.spatial_vector],
-    body_matrix: wp.array[wp.spatial_matrix],
+    body_matrix: wp.array3d[float],
 ):
     """Bound positional joint stress curvature omitted by Gauss--Newton.
 
@@ -999,10 +999,8 @@ def add_joint_stress_majorizer(
                 slot = body_slot[body]
                 if slot >= 0 and body_inv_mass[body] > 0.0:
                     angular = force_norm * (lp + length) if side == 0 else force_norm * lc
-                    block = wp.spatial_matrix(0.0)
                     for axis in range(3):
-                        block[axis + 3, axis + 3] = angular
-                    wp.atomic_add(body_matrix, slot, block)
+                        wp.atomic_add(body_matrix, slot, axis + 3, axis + 3, angular)
         return
 
     # Ordinary world-frame anchor errors have only rotational self stress.
@@ -1026,8 +1024,9 @@ def add_joint_stress_majorizer(
                 for axis in range(3):
                     positive[axis, axis] = wp.max(eigenvalues[axis], 0.0)
                 positive = eigenvectors * positive * wp.transpose(eigenvectors)
-                block = _set_spatial_block(wp.spatial_matrix(0.0), 1, 1, positive)
-                wp.atomic_add(body_matrix, slot, block)
+                for i in range(3):
+                    for j in range(3):
+                        wp.atomic_add(body_matrix, slot, i + 3, j + 3, positive[i, j])
 
 
 @wp.kernel
@@ -8405,6 +8404,15 @@ class StructuralGraphKKT:
         self.body_correction = wp.zeros(self.graph_body_count, dtype=wp.spatial_vector, device=self.device)
         self.island_step_scale = wp.ones(len(components), dtype=float, device=self.device)
         self.body_matrix = wp.zeros(self.graph_body_count, dtype=wp.spatial_matrix, device=self.device)
+        # Share the allocation so stress assembly emits only nonzero angular
+        # entries, not 36-component atomics (including 27 or 33 zeros). This
+        # also reduces deterministic reduction work without another launch.
+        self.body_matrix_scalar = wp.array(
+            ptr=self.body_matrix.ptr,
+            shape=(self.graph_body_count, 6, 6),
+            dtype=float,
+            device=self.device,
+        )
         # The relaxation pass reads contact curvature after body factorization.
         # Its lifetime overlaps the body metric and its in-place path inverse.
         self.body_dynamic_contact_hessian = wp.zeros(self.graph_body_count, dtype=wp.spatial_matrix, device=self.device)
@@ -8666,7 +8674,7 @@ class StructuralGraphKKT:
                                 compliance,
                                 residual,
                             ],
-                            outputs=[self.body_matrix],
+                            outputs=[self.body_matrix_scalar],
                             device=self.device,
                             block_dim=self.spatial_block_dim,
                         )
