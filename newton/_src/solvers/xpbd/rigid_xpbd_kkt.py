@@ -19,6 +19,7 @@ import warp as wp
 
 from ...math import vec_max, vec_min
 from ...sim import JointType
+from ...sim.articulation import eval_angular_coordinates
 from ...sim.contacts import contact_surface_separation
 from ..vbd.rigid_vbd_kkt import (
     StructuralGraphKKT,
@@ -668,75 +669,102 @@ def linearize_xpbd_joint_rows(
     if kind == JointType.FIXED or kind == JointType.PRISMATIC or kind == JointType.REVOLUTE or kind == JointType.D6:
         q_parent = wp.transform_get_rotation(X_wp)
         q_child = wp.transform_get_rotation(X_wc)
-        if wp.dot(q_parent, q_child) < 0.0:
-            q_child = -q_child
-        relative_q = wp.quat_inverse(q_parent) * q_child
+        angular_covectors = wp.mat33(0.0)
+        use_d6_coordinates = kind == JointType.D6 and angular_count >= 2
+        if use_d6_coordinates:
+            errors, angular_covectors = eval_angular_coordinates(
+                joint_axis, axis_start + linear_count, angular_count, q_parent, q_child
+            )
+            angular_lower = wp.vec3(0.0)
+            angular_upper = wp.vec3(0.0)
+            angular_target = wp.vec3(0.0)
+            angular_stiffness = wp.vec3(0.0)
+            angular_target_velocity = wp.vec3(0.0)
+            angular_damping = wp.vec3(0.0)
+            # The third coordinate of a two-axis D6 remains locked at zero.
+            for axis in range(angular_count):
+                dof = axis_start + linear_count + axis
+                angular_lower[axis] = joint_limit_lower[dof]
+                angular_upper[axis] = joint_limit_upper[dof]
+                angular_target[axis] = joint_target_q[target_start + linear_count + axis]
+                angular_stiffness[axis] = joint_target_ke[dof]
+                angular_target_velocity[axis] = joint_target_qd[dof]
+                angular_damping[axis] = joint_target_kd[dof]
+        else:
+            if wp.dot(q_parent, q_child) < 0.0:
+                q_child = -q_child
+            relative_q = wp.quat_inverse(q_parent) * q_child
 
-        twist = wp.normalize(wp.quat(relative_q[0], 0.0, 0.0, relative_q[3]))
-        swing = relative_q * wp.quat_inverse(twist)
-        s = wp.sqrt(relative_q[0] * relative_q[0] + relative_q[3] * relative_q[3])
-        inv_s = 1.0 / wp.max(s, 1.0e-9)
-        inv_s_cubed = inv_s * inv_s * inv_s
-        twist_w = wp.max(wp.abs(twist[3]), 1.0e-9)
+            twist = wp.normalize(wp.quat(relative_q[0], 0.0, 0.0, relative_q[3]))
+            swing = relative_q * wp.quat_inverse(twist)
+            s = wp.sqrt(relative_q[0] * relative_q[0] + relative_q[3] * relative_q[3])
+            inv_s = 1.0 / wp.max(s, 1.0e-9)
+            inv_s_cubed = inv_s * inv_s * inv_s
+            twist_w = wp.max(wp.abs(twist[3]), 1.0e-9)
 
-        errors = wp.vec3(
-            2.0 * wp.asin(wp.clamp(twist[0], -1.0, 1.0)),
-            swing[1],
-            swing[2],
-        )
-        grad_0 = wp.quat(
-            inv_s - relative_q[0] * relative_q[0] * inv_s_cubed,
-            0.0,
-            0.0,
-            -(relative_q[3] * relative_q[0]) * inv_s_cubed,
-        )
-        grad_1 = wp.quat(
-            -relative_q[3] * (relative_q[3] * relative_q[2] + relative_q[0] * relative_q[1]) * inv_s_cubed,
-            relative_q[3] * inv_s,
-            -relative_q[0] * inv_s,
-            relative_q[0] * (relative_q[3] * relative_q[2] + relative_q[0] * relative_q[1]) * inv_s_cubed,
-        )
-        grad_2 = wp.quat(
-            relative_q[3] * (relative_q[3] * relative_q[1] - relative_q[0] * relative_q[2]) * inv_s_cubed,
-            relative_q[0] * inv_s,
-            relative_q[3] * inv_s,
-            relative_q[0] * (relative_q[2] * relative_q[0] - relative_q[3] * relative_q[1]) * inv_s_cubed,
-        )
-        grad_0 = grad_0 * (2.0 / twist_w)
+            errors = wp.vec3(
+                2.0 * wp.asin(wp.clamp(twist[0], -1.0, 1.0)),
+                swing[1],
+                swing[2],
+            )
+            grad_0 = wp.quat(
+                inv_s - relative_q[0] * relative_q[0] * inv_s_cubed,
+                0.0,
+                0.0,
+                -(relative_q[3] * relative_q[0]) * inv_s_cubed,
+            )
+            grad_1 = wp.quat(
+                -relative_q[3] * (relative_q[3] * relative_q[2] + relative_q[0] * relative_q[1]) * inv_s_cubed,
+                relative_q[3] * inv_s,
+                -relative_q[0] * inv_s,
+                relative_q[0] * (relative_q[3] * relative_q[2] + relative_q[0] * relative_q[1]) * inv_s_cubed,
+            )
+            grad_2 = wp.quat(
+                relative_q[3] * (relative_q[3] * relative_q[1] - relative_q[0] * relative_q[2]) * inv_s_cubed,
+                relative_q[0] * inv_s,
+                relative_q[3] * inv_s,
+                relative_q[0] * (relative_q[2] * relative_q[0] - relative_q[3] * relative_q[1]) * inv_s_cubed,
+            )
+            grad_0 = grad_0 * (2.0 / twist_w)
 
-        swing_sq = swing[3] * swing[3]
-        if swing_sq + 1.0e-4 < 1.0:
-            denominator = wp.sqrt(1.0 - swing_sq)
-            angle_scale = 2.0 * wp.acos(wp.clamp(swing[3], -1.0, 1.0)) / denominator
-            errors[1] = errors[1] * angle_scale
-            errors[2] = errors[2] * angle_scale
-            grad_1 = grad_1 * angle_scale
-            grad_2 = grad_2 * angle_scale
+            swing_sq = swing[3] * swing[3]
+            if swing_sq + 1.0e-4 < 1.0:
+                denominator = wp.sqrt(1.0 - swing_sq)
+                angle_scale = 2.0 * wp.acos(wp.clamp(swing[3], -1.0, 1.0)) / denominator
+                errors[1] = errors[1] * angle_scale
+                errors[2] = errors[2] * angle_scale
+                grad_1 = grad_1 * angle_scale
+                grad_2 = grad_2 * angle_scale
 
-        grad_x = wp.vec3(grad_0[0], grad_1[0], grad_2[0])
-        grad_y = wp.vec3(grad_0[1], grad_1[1], grad_2[1])
-        grad_z = wp.vec3(grad_0[2], grad_1[2], grad_2[2])
-        grad_w = wp.vec3(grad_0[3], grad_1[3], grad_2[3])
-        (
-            angular_lower,
-            angular_upper,
-            angular_target,
-            angular_stiffness,
-            angular_target_velocity,
-            angular_damping,
-        ) = _axis_controls(
-            axis_start,
-            target_start,
-            linear_count,
-            angular_count,
-            joint_axis,
-            joint_limit_lower,
-            joint_limit_upper,
-            joint_target_q,
-            joint_target_qd,
-            joint_target_ke,
-            joint_target_kd,
-        )
+            grad_x = wp.vec3(grad_0[0], grad_1[0], grad_2[0])
+            grad_y = wp.vec3(grad_0[1], grad_1[1], grad_2[1])
+            grad_z = wp.vec3(grad_0[2], grad_1[2], grad_2[2])
+            grad_w = wp.vec3(grad_0[3], grad_1[3], grad_2[3])
+            (
+                angular_lower,
+                angular_upper,
+                angular_target,
+                angular_stiffness,
+                angular_target_velocity,
+                angular_damping,
+            ) = _axis_controls(
+                axis_start,
+                target_start,
+                linear_count,
+                angular_count,
+                joint_axis,
+                joint_limit_lower,
+                joint_limit_upper,
+                joint_target_q,
+                joint_target_qd,
+                joint_target_ke,
+                joint_target_kd,
+            )
+
+            for axis in range(3):
+                gradient = wp.quat(grad_x[axis], grad_y[axis], grad_z[axis], grad_w[axis])
+                child_gradient_q = 0.5 * q_parent * gradient * wp.quat_inverse(q_child)
+                angular_covectors[axis] = wp.vec3(child_gradient_q[0], child_gradient_q[1], child_gradient_q[2])
 
         for axis in range(3):
             value = errors[axis]
@@ -764,11 +792,9 @@ def linearize_xpbd_joint_rows(
 
             if active:
                 output_row = axis + 3
-                gradient = wp.quat(grad_x[axis], grad_y[axis], grad_z[axis], grad_w[axis])
-                child_gradient_q = 0.5 * q_parent * gradient * wp.quat_inverse(q_child)
-                angular_c = wp.vec3(child_gradient_q[0], child_gradient_q[1], child_gradient_q[2])
+                angular_c = angular_covectors[axis]
                 angular_p = -angular_c
-                gradient_length = wp.length(angular_c)
+                gradient_length = 1.0 if use_d6_coordinates else wp.length(angular_c)
                 error_rate = (
                     wp.dot(angular_p, parent_omega)
                     + wp.dot(angular_c, child_omega)

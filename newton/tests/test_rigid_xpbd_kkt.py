@@ -337,29 +337,13 @@ def test_global_joint_topology_routes(test, device):
         test.assertTrue(np.isfinite(state_in.body_qd.numpy()).all())
 
 
-def test_unsupported_mixed_island_remains_local(test, device):
-    """Leave an entire island local when one of its joints is unsupported."""
-    model = _build_mixed_unsupported_island(device)
-    local_state_in = model.state()
-    local_state_out = model.state()
-    global_state_in = model.state()
-    global_state_out = model.state()
-    local_solver = newton.solvers.SolverXPBD(model, iterations=2)
-    global_solver = newton.solvers.SolverXPBD(model, iterations=2, rigid_joint_global_iterations=1)
-    test.assertFalse(global_solver._rigid_joint_global_solver.active)
-
-    for _ in range(3):
-        local_solver.step(local_state_in, local_state_out, None, None, 1.0 / 120.0)
-        global_solver.step(global_state_in, global_state_out, None, None, 1.0 / 120.0)
-        local_state_in, local_state_out = local_state_out, local_state_in
-        global_state_in, global_state_out = global_state_out, global_state_in
-
-    np.testing.assert_array_equal(global_state_in.body_q.numpy(), local_state_in.body_q.numpy())
-    np.testing.assert_array_equal(global_state_in.body_qd.numpy(), local_state_in.body_qd.numpy())
-
-    rod_model = _build_rod_only_island(device)
-    rod_solver = newton.solvers.SolverXPBD(rod_model, iterations=2, rigid_joint_global_iterations=1)
-    test.assertFalse(rod_solver._rigid_joint_global_solver.active)
+def test_rod_islands_are_rejected(test, device):
+    """Honor upstream XPBD's ROD rejection in both local and global modes."""
+    for build in (_build_mixed_unsupported_island, _build_rod_only_island):
+        model = build(device)
+        for global_count in (0, 1):
+            with test.assertRaisesRegex(ValueError, "does not support JointType.ROD"):
+                newton.solvers.SolverXPBD(model, iterations=2, rigid_joint_global_iterations=global_count)
 
 
 def test_free_root_does_not_hide_supported_constraints(test, device):
@@ -811,8 +795,8 @@ add_function_test(
 )
 add_function_test(
     TestRigidXPBDKKT,
-    "test_unsupported_mixed_island_remains_local",
-    test_unsupported_mixed_island_remains_local,
+    "test_rod_islands_are_rejected",
+    test_rod_islands_are_rejected,
     devices=get_test_devices(),
 )
 add_function_test(

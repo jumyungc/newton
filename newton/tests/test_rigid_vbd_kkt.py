@@ -14,6 +14,7 @@ import warp as wp
 import newton
 from newton._src.solvers.vbd import rigid_vbd_kkt
 from newton._src.solvers.vbd.rigid_vbd_kernels import (
+    compute_kappa_and_jacobian,
     evaluate_angular_constraint_force_hessian,
     ldlt6_solve,
 )
@@ -35,6 +36,7 @@ from newton._src.solvers.vbd.rigid_vbd_kkt import (
     linearize_joint_path_rows,
     suppress_nonfinite_correction,
 )
+from newton.exceptions import NewtonWarning
 from newton.tests.unittest_utils import (
     add_function_test,
     get_cuda_test_devices,
@@ -111,11 +113,17 @@ def _evaluate_local_angular_damping(
     dt: float,
     result: wp.array[wp.vec3],
 ):
-    torque, _hessian, _kappa, _jacobian = evaluate_angular_constraint_force_hessian(
+    kappa, jacobian = compute_kappa_and_jacobian(
         wp.transform_get_rotation(body_q[0]),
         wp.transform_get_rotation(body_q[1]),
         wp.quat_identity(),
         wp.quat_identity(),
+    )
+    torque, _hessian = evaluate_angular_constraint_force_hessian(
+        wp.transform_get_rotation(body_q[0]),
+        wp.transform_get_rotation(body_q[1]),
+        kappa,
+        jacobian,
         wp.transform_get_rotation(body_q_prev[0]),
         wp.transform_get_rotation(body_q_prev[1]),
         False,
@@ -225,10 +233,8 @@ def _build_y_tree(device, *, segments_per_branch=6, stiffness=1.0e9):
             current = len(positions) - 1
             edges.append((previous, current))
             previous = current
-    bodies, joints = builder.add_rod_graph(
-        node_positions=positions,
-        edges=edges,
-        radius=0.01,
+    bodies, joints = builder.add_rod(
+        rod=newton.Rod(positions, edges=edges, radius=0.01),
         cfg=builder.default_shape_cfg.copy(),
         stretch_stiffness=stiffness,
         bend_stiffness=1.0e4,
@@ -260,10 +266,8 @@ def _build_y_trees(device, branch_segments, *, stiffness=1.0e7):
                 positions.append(positions[0] + direction * (0.03 * segment))
                 edges.append((previous, len(positions) - 1))
                 previous = len(positions) - 1
-        bodies, _ = builder.add_rod_graph(
-            node_positions=positions,
-            edges=edges,
-            radius=0.01,
+        bodies, _ = builder.add_rod(
+            rod=newton.Rod(positions, edges=edges, radius=0.01),
             cfg=builder.default_shape_cfg.copy(),
             stretch_stiffness=stiffness,
             bend_stiffness=1.0e4,
@@ -294,10 +298,8 @@ def _build_spurred_tree(device, *, arm_segments=8, stiffness=1.0e9):
             current = len(positions) - 1
             edges.append((previous, current))
             previous = current
-    bodies, joints = builder.add_rod_graph(
-        node_positions=positions,
-        edges=edges,
-        radius=0.01,
+    bodies, joints = builder.add_rod(
+        rod=newton.Rod(positions, edges=edges, radius=0.01),
         cfg=builder.default_shape_cfg.copy(),
         stretch_stiffness=stiffness,
         bend_stiffness=1.0e4,
@@ -342,17 +344,17 @@ def _build_loop_with_branch(
     positions.extend((wp.vec3(radius + 0.06, 0.0, height), wp.vec3(radius + 0.12, 0.0, height)))
     edges = [(index, (index + 1) % ring_segments) for index in range(ring_segments)]
     edges.extend(((0, ring_segments), (ring_segments, ring_segments + 1)))
-    bodies, joints = builder.add_rod_graph(
-        node_positions=positions,
-        edges=edges,
-        radius=cable_radius,
-        cfg=shape,
-        stretch_stiffness=stiffness,
-        bend_stiffness=bend_stiffness,
-        bend_damping=1.0e3,
-        wrap_in_articulation=True,
-        body_frame_origin="com",
-    )
+    # This fixture deliberately restores the omitted closure below.
+    with unittest.TestCase().assertWarnsRegex(NewtonWarning, "^Rod graph contains a cycle"):
+        bodies, joints = builder.add_rod(
+            rod=newton.Rod(positions, edges=edges, radius=cable_radius),
+            cfg=shape,
+            stretch_stiffness=stiffness,
+            bend_stiffness=bend_stiffness,
+            bend_damping=1.0e3,
+            wrap_in_articulation=True,
+            body_frame_origin="com",
+        )
     jointed_pairs = {frozenset((int(builder.joint_parent[joint]), int(builder.joint_child[joint]))) for joint in joints}
     for node in range(ring_segments):
         previous_edge = (node - 1) % ring_segments
@@ -2878,10 +2880,8 @@ def _structural_kkt_mixed_rod_tree_uses_stable_leaf_route(test, device):
             current = len(positions) - 1
             edges.append((previous, current))
             previous = current
-    bodies, _ = builder.add_rod_graph(
-        node_positions=positions,
-        edges=edges,
-        radius=0.01,
+    bodies, _ = builder.add_rod(
+        rod=newton.Rod(positions, edges=edges, radius=0.01),
         cfg=builder.default_shape_cfg.copy(),
         stretch_stiffness=1.0e9,
         bend_stiffness=1.0e4,

@@ -1,0 +1,1 @@
+Align the experimental rigid VBD and XPBD global corrections with the current D6 angular-coordinate conventions; retain local tendon support and reject global corrections for models containing unrepresented tendon forces.

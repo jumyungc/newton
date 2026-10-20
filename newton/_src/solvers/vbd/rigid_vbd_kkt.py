@@ -65,7 +65,7 @@ from .rigid_vbd_kernels import (
     _transported_twist_angle_jacobian_from_measure,
     _unwrap_hinge_angle,
     build_joint_projectors,
-    compute_kappa_and_jacobian,
+    compute_joint_kappa_and_jacobian,
     compute_kappa_dot,
     contact_surface_separation,
     evaluate_rigid_contact_from_collision,
@@ -1404,8 +1404,6 @@ def linearize_joint_path_rows(
         )
         return
 
-    kappa, angular_jacobian_world = compute_kappa_and_jacobian(q_wp, q_wc, q_wp_rest, q_wc_rest)
-
     lin_count = 0
     ang_count = 0
     qd_start = joint_qd_start[joint]
@@ -1416,6 +1414,9 @@ def linearize_joint_path_rows(
     elif jt == JointType.D6:
         lin_count = joint_dof_dim[joint, 0]
         ang_count = joint_dof_dim[joint, 1]
+    kappa, angular_jacobian_world = compute_joint_kappa_and_jacobian(
+        joint_axis, qd_start + lin_count, ang_count, q_wp, q_wc, q_wp_rest, q_wc_rest
+    )
     p_linear, p_angular = build_joint_projectors(jt, joint_axis, qd_start, lin_count, ang_count, q_wp)
     if jt == JointType.BALL:
         p_angular = wp.mat33(0.0)

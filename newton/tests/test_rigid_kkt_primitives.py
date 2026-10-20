@@ -7,8 +7,11 @@ import unittest
 import numpy as np
 import warp as wp
 
+import newton
 from newton._src.solvers.vbd import rigid_vbd_kkt as kkt
 from newton._src.solvers.xpbd import rigid_xpbd_kkt as xpbd_kkt
+from newton.tests.test_rigid_vbd_kkt import _linearize_bucket
+from newton.tests.test_tendon_vbd import build_single_span_tendon
 from newton.tests.unittest_utils import add_function_test, get_test_devices
 
 
@@ -249,6 +252,60 @@ def test_quadratic_merit_matches_dense_model(test, device):
     np.testing.assert_allclose(merit.numpy()[0], [linear, quadratic], rtol=2.0e-14)
 
 
+def test_global_d6_preserves_authored_equilibrium(test, device):
+    """Keep multi-axis D6 drive equilibria consistent with forward kinematics."""
+    for axis_count in (2, 3):
+        builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+        body = builder.add_link(mass=1.0, inertia=wp.mat33(np.eye(3)))
+        rotation = wp.quat_from_axis_angle(wp.normalize(wp.vec3(1.0, 2.0, -1.0)), 0.3)
+        axes = [wp.quat_rotate(rotation, axis) for axis in (wp.vec3(1, 0, 0), wp.vec3(0, 1, 0), wp.vec3(0, 0, 1))]
+        targets = (0.45, -0.35, 0.2)[:axis_count]
+        config = newton.ModelBuilder.JointDofConfig
+        joint = builder.add_joint_d6(
+            -1,
+            body,
+            angular_axes=[
+                config(axis=axis, target_pos=target, target_ke=1.0e4, target_kd=0.0)
+                for axis, target in zip(axes[:axis_count], targets, strict=True)
+            ],
+        )
+        builder.add_articulation([joint])
+        builder.color()
+        model = builder.finalize(device=device)
+        coordinates = wp.array(targets, dtype=float, device=device)
+        for solver_type in (newton.solvers.SolverVBD, newton.solvers.SolverXPBD):
+            for global_count in (0, 1):
+                with test.subTest(axes=axis_count, solver=solver_type.__name__, global_count=global_count):
+                    options = {"iterations": 2, "rigid_joint_global_iterations": global_count}
+                    if solver_type is newton.solvers.SolverVBD:
+                        options["rigid_compliant_alm"] = True
+                    solver = solver_type(model, **options)
+                    state_in, state_out = model.state(), model.state()
+                    newton.eval_fk(model, coordinates, model.joint_qd, state_in)
+                    initial = state_in.body_q.numpy()
+                    solver.step(state_in, state_out, model.control(), None, 1.0 / 60.0)
+                    np.testing.assert_allclose(state_out.body_q.numpy(), initial, rtol=0.0, atol=2.0e-5)
+                    if solver_type is newton.solvers.SolverVBD and global_count:
+                        solver.body_q_prev.assign(state_in.body_q)
+                        bucket = solver._structural_graph_kkt.buckets[0]
+                        _linearize_bucket(model, solver, bucket, state_in.body_q, 1.0 / 60.0)
+                        np.testing.assert_allclose(bucket.residual.numpy(), 0.0, rtol=0.0, atol=2.0e-5)
+
+
+def test_global_rejects_unrepresented_tendons(test, device):
+    """Reject G1 when routed-tendon forces are absent from its objective."""
+    with wp.ScopedDevice(device):
+        model, _ = build_single_span_tendon()
+        for solver_type in (newton.solvers.SolverVBD, newton.solvers.SolverXPBD):
+            options = {"iterations": 2}
+            if solver_type is newton.solvers.SolverVBD:
+                options["rigid_compliant_alm"] = True
+            # The same physical model remains supported through upstream's local path.
+            solver_type(model, rigid_joint_global_iterations=0, **options)
+            with test.assertRaisesRegex(ValueError, "models containing tendons"):
+                solver_type(model, rigid_joint_global_iterations=1, **options)
+
+
 class TestRigidKKTPrimitives(unittest.TestCase):
     pass
 
@@ -259,6 +316,8 @@ for _test in (
     test_refined_paired_scatter,
     test_directional_step_guard,
     test_directional_derivative_matches_dense_model,
+    test_global_d6_preserves_authored_equilibrium,
+    test_global_rejects_unrepresented_tendons,
 ):
     add_function_test(TestRigidKKTPrimitives, _test.__name__, _test, devices=get_test_devices())
 
