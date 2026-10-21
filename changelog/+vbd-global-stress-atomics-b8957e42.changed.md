@@ -1,1 +1,1 @@
-Reduce rigid VBD global stress-assembly atomics to the nonzero angular entries, without changing the solver budget or adding device storage.
+Assemble rigid VBD global angular stress blocks in a fixed per-body joint order and fuse path-body inversion into assembly. This removes stress-atomic ordering variability without changing solver budgets or material laws; additional incidence scratch is included in the global memory budget. Contact reductions retain their existing determinism behavior.

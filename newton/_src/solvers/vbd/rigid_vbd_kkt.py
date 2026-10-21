@@ -870,10 +870,24 @@ def build_body_surrogate(
     contact_forces: wp.array[wp.vec3],
     contact_torques: wp.array[wp.vec3],
     dynamic_contact_hessian: wp.array[wp.spatial_matrix],
+    include_stress: int,
+    stress_offsets: wp.array[wp.int32],
+    body_stress: wp.array[wp.mat33],
+    body_path_inverse: wp.array[wp.int32],
     body_matrix_out: wp.array[wp.spatial_matrix],
     body_rhs_out: wp.array[wp.spatial_vector],
 ):
-    """Build the contact-proximal body metric for a structural correction."""
+    """Build the contact-proximal body metric for a structural correction.
+
+    With ``include_stress``, add the angular stress-majorizer blocks of the
+    body's incident rows, stored contiguously in ascending joint order at
+    ``body_stress[stress_offsets[slot]:stress_offsets[slot + 1]]``. Entries are
+    added one at a time and only where nonzero, which reproduces a sequential
+    per-row sum.
+
+    Bodies of path components (``body_path_inverse``) store the inverse metric
+    and free motion that path assembly consumes; tree bodies keep the metric.
+    """
     slot = wp.tid()
     body = body_ids[slot]
     if body_inv_mass[body] <= 0.0:
@@ -887,7 +901,7 @@ def build_body_surrogate(
     rotation = wp.transform_get_rotation(pose)
     com_local = body_com[body]
 
-    body_matrix_out[slot] = _body_surrogate_matrix(
+    matrix = _body_surrogate_matrix(
         rotation,
         body_mass[body],
         body_inertia[body],
@@ -897,7 +911,21 @@ def build_body_surrogate(
         dynamic_contact_hessian[slot],
         dt_inv_sq,
     )
-    body_rhs_out[slot] = _body_objective_rhs(
+    if include_stress != 0:
+        first = stress_offsets[slot]
+        last = stress_offsets[slot + 1]
+        if last > first:
+            # Sum into the angular block only; the loop then carries 9 values, not 36.
+            angular = _spatial_block(matrix, 1, 1)
+            for entry in range(first, last):
+                stress = body_stress[entry]
+                for row in range(3):
+                    for column in range(3):
+                        value = stress[row, column]
+                        if value != 0.0:
+                            angular[row, column] = angular[row, column] + value
+            matrix = _set_spatial_block(matrix, 1, 1, angular)
+    rhs = _body_objective_rhs(
         pose,
         inertial_pose,
         body_mass[body],
@@ -907,10 +935,18 @@ def build_body_surrogate(
         contact_torques[body],
         dt_inv_sq,
     )
+    if body_path_inverse[slot] != 0:
+        inverse = _inverse_spatial_robust(matrix)
+        body_matrix_out[slot] = inverse
+        body_rhs_out[slot] = inverse * rhs
+    else:
+        body_matrix_out[slot] = matrix
+        body_rhs_out[slot] = rhs
 
 
 @wp.kernel
 def add_joint_stress_majorizer(
+    joint_stress_slot: wp.array[wp.vec2i],
     joint_ids: wp.array[int],
     joint_type: wp.array[int],
     joint_parent: wp.array[int],
@@ -925,16 +961,26 @@ def add_joint_stress_majorizer(
     jacobian_child: wp.array[wp.spatial_matrix],
     compliance: wp.array[wp.spatial_matrix],
     residual: wp.array[wp.spatial_vector],
-    body_matrix: wp.array3d[float],
+    body_stress: wp.array[wp.mat33],
 ):
     """Bound positional joint stress curvature omitted by Gauss--Newton.
 
     This changes only the solve metric, not forces, materials, or ALM state.
     The bound is local to the current pose, not a finite-step descent proof.
+
+    Each row writes its parent/child angular blocks, zero where it adds none, to the slots
+    ``joint_stress_slot[joint]`` of its dynamic endpoint bodies (``-1`` otherwise). Every body owns a
+    contiguous range of slots in ascending joint order, which ``build_body_surrogate`` sums. The body
+    metric therefore depends neither on thread scheduling nor on how components are grouped into
+    buckets, and needs no atomics.
     """
     row = wp.tid()
     joint = joint_ids[row]
     parent, child = joint_parent[joint], joint_child[joint]
+    destinations = joint_stress_slot[joint]
+    # Each destination is written exactly once below, zero where the row adds no stress.
+    stress_parent = wp.mat33(0.0)
+    stress_child = wp.mat33(0.0)
     reaction = _inverse_spatial_robust(compliance[row]) * residual[row]
     if joint_type[joint] == JointType.ROD and parent >= 0:
         anchor = wp.transform_point(body_q[child], wp.transform_get_translation(joint_X_c[joint]))
@@ -998,9 +1044,14 @@ def add_joint_stress_majorizer(
                 body = parent if side == 0 else child
                 slot = body_slot[body]
                 if slot >= 0 and body_inv_mass[body] > 0.0:
-                    angular = force_norm * (lp + length) if side == 0 else force_norm * lc
-                    for axis in range(3):
-                        wp.atomic_add(body_matrix, slot, axis + 3, axis + 3, angular)
+                    if side == 0:
+                        stress_parent = (force_norm * (lp + length)) * wp.identity(3, float)
+                    else:
+                        stress_child = (force_norm * lc) * wp.identity(3, float)
+        if destinations[0] >= 0:
+            body_stress[destinations[0]] = stress_parent
+        if destinations[1] >= 0:
+            body_stress[destinations[1]] = stress_child
         return
 
     # Ordinary world-frame anchor errors have only rotational self stress.
@@ -1024,28 +1075,14 @@ def add_joint_stress_majorizer(
                 for axis in range(3):
                     positive[axis, axis] = wp.max(eigenvalues[axis], 0.0)
                 positive = eigenvectors * positive * wp.transpose(eigenvectors)
-                for i in range(3):
-                    for j in range(3):
-                        wp.atomic_add(body_matrix, slot, i + 3, j + 3, positive[i, j])
-
-
-@wp.kernel
-def invert_body_surrogate_in_place(
-    body_ids: wp.array[wp.int32],
-    body_inv_mass: wp.array[float],
-    body_matrix_and_inverse: wp.array[wp.spatial_matrix],
-    body_rhs_and_free: wp.array[wp.spatial_vector],
-):
-    """Replace each path body's metric and rhs by inverse and free motion."""
-    slot = wp.tid()
-    body = body_ids[slot]
-    if body_inv_mass[body] <= 0.0:
-        body_matrix_and_inverse[slot] = wp.spatial_matrix(0.0)
-        body_rhs_and_free[slot] = wp.spatial_vector()
-        return
-    inverse = _inverse_spatial_robust(body_matrix_and_inverse[slot])
-    body_matrix_and_inverse[slot] = inverse
-    body_rhs_and_free[slot] = inverse * body_rhs_and_free[slot]
+                if side == 0:
+                    stress_parent = positive
+                else:
+                    stress_child = positive
+    if destinations[0] >= 0:
+        body_stress[destinations[0]] = stress_parent
+    if destinations[1] >= 0:
+        body_stress[destinations[1]] = stress_child
 
 
 @wp.func
@@ -4796,6 +4833,7 @@ def _closed_tree_bucket_diagnostics(
 
 def _shared_structural_payload_bytes(
     model_body_count: int,
+    model_joint_count: int,
     graph_body_count: int,
     island_count: int,
     joint_count: int,
@@ -4818,6 +4856,10 @@ def _shared_structural_payload_bytes(
         + _array_payload_bytes(island_count, wp.spatial_matrixd)
         + 2 * _array_payload_bytes(island_count, wp.spatial_vectord)
         + _array_payload_bytes(joint_count + 2 * island_count + 2, wp.int32)
+        + _array_payload_bytes(model_joint_count, wp.vec2i)
+        + _array_payload_bytes(graph_body_count, wp.int32)
+        + _array_payload_bytes(2 * joint_count, wp.mat33)
+        + _array_payload_bytes(graph_body_count + 1, wp.int32)
         + _array_payload_bytes(island_count, wp.float32)
         + 2 * _array_payload_bytes(graph_body_count, wp.spatial_matrix)
         + _array_payload_bytes(graph_body_count, wp.spatial_vector)
@@ -8234,6 +8276,7 @@ class StructuralGraphKKT:
                 prospective_total = selected_bucket_bytes + prefix_diagnostics.estimated_bytes
                 prospective_total += _shared_structural_payload_bytes(
                     model.body_count,
+                    model.joint_count,
                     len(prospective_body_ids),
                     selected_island_count + middle,
                     len(prospective_joint_ids),
@@ -8397,6 +8440,13 @@ class StructuralGraphKKT:
         body_slot_by_id[graph_body_ids] = np.arange(len(graph_body_ids), dtype=np.int32)
         self.graph_joint_ids = wp.array(graph_joint_ids, dtype=wp.int32, device=self.device)
         self.body_slot_by_id = wp.array(body_slot_by_id, dtype=wp.int32, device=self.device)
+        self._plan_stress_incidence(parent, child, body_slot_by_id, body_inv_mass_host, graph_joint_ids)
+        # Path assembly consumes inverse metrics; the surrogate build writes them directly.
+        body_path_inverse = np.zeros(self.graph_body_count, dtype=np.int32)
+        for bucket in self.path_buckets:
+            path_slots = body_slot_by_id[bucket.body_ids_host]
+            body_path_inverse[path_slots[path_slots >= 0]] = 1
+        self.body_path_inverse = wp.array(body_path_inverse, dtype=wp.int32, device=self.device)
         self.line_search_pose = wp.empty_like(model.body_q)
         self.line_search_enabled = wp.ones(len(components), dtype=bool, device=self.device)
         self.line_search_slope = wp.zeros(len(components), dtype=wp.float64, device=self.device)
@@ -8405,15 +8455,6 @@ class StructuralGraphKKT:
         self.body_correction = wp.zeros(self.graph_body_count, dtype=wp.spatial_vector, device=self.device)
         self.island_step_scale = wp.ones(len(components), dtype=float, device=self.device)
         self.body_matrix = wp.zeros(self.graph_body_count, dtype=wp.spatial_matrix, device=self.device)
-        # Share the allocation so stress assembly emits only nonzero angular
-        # entries, not 36-component atomics (including 27 or 33 zeros). This
-        # also reduces deterministic reduction work without another launch.
-        self.body_matrix_scalar = wp.array(
-            ptr=self.body_matrix.ptr,
-            shape=(self.graph_body_count, 6, 6),
-            dtype=float,
-            device=self.device,
-        )
         # The relaxation pass reads contact curvature after body factorization.
         # Its lifetime overlaps the body metric and its in-place path inverse.
         self.body_dynamic_contact_hessian = wp.zeros(self.graph_body_count, dtype=wp.spatial_matrix, device=self.device)
@@ -8421,16 +8462,49 @@ class StructuralGraphKKT:
         # Tree equilibration is consumed before its scatter writes the final
         # correction, so both lifetimes share the same compact body buffer.
         self.body_scale = self.body_correction
-        # Tree factorization consumes the metric/rhs before path CR. Reuse the
-        # same storage in place for path inverse/free motion afterward.
+        # Tree bodies keep their metric/rhs for tree factorization; path bodies
+        # hold their inverse/free motion in the same storage (disjoint slots).
         self.body_inverse = self.body_matrix
         self.body_free = self.body_rhs
         self._estimated_bytes = selected_bucket_bytes + _shared_structural_payload_bytes(
             model.body_count,
+            model.joint_count,
             self.graph_body_count,
             len(components),
             len(graph_joint_ids),
         )
+
+    def _plan_stress_incidence(
+        self,
+        parent: np.ndarray,
+        child: np.ndarray,
+        body_slot_by_id: np.ndarray,
+        body_inv_mass_host: np.ndarray,
+        graph_joint_ids: list[int],
+    ):
+        """Give every dynamic graph body a contiguous range of stress slots.
+
+        Each range lists the body's incident joint sides in ascending joint id
+        order (a joint's parent side before its child side), a sum order that is
+        the same on CPU and CUDA and independent of the bucket layout.
+        ``joint_stress_slot[joint]`` holds the parent and child destinations,
+        ``-1`` for a static, kinematic, or out-of-graph endpoint.
+        """
+        joint_count = len(graph_joint_ids)
+        incident: list[list[tuple[int, int]]] = [[] for _ in range(self.graph_body_count)]
+        for joint in graph_joint_ids:
+            for side, body in enumerate((int(parent[joint]), int(child[joint]))):
+                if body >= 0 and body_slot_by_id[body] >= 0 and body_inv_mass_host[body] > 0.0:
+                    incident[int(body_slot_by_id[body])].append((int(joint), side))
+        offsets = np.zeros(self.graph_body_count + 1, dtype=np.int32)
+        offsets[1:] = np.cumsum([len(entries) for entries in incident])
+        joint_stress_slot = np.full((len(parent), 2), -1, dtype=np.int32)
+        for slot, entries in enumerate(incident):
+            for rank, (joint, side) in enumerate(entries):
+                joint_stress_slot[joint, side] = offsets[slot] + rank
+        self.joint_stress_slot = wp.array(joint_stress_slot, dtype=wp.vec2i, device=self.device)
+        self.stress_offsets = wp.array(offsets, dtype=wp.int32, device=self.device)
+        self.body_stress = wp.zeros(2 * joint_count, dtype=wp.mat33, device=self.device)
 
     @property
     def active(self) -> bool:
@@ -8525,30 +8599,8 @@ class StructuralGraphKKT:
         translation_only=False,
     ):
         def linearize(*, build_majorizer=True, build_body=True, slope_only=False):
-            if build_body:
-                wp.launch(
-                    build_body_surrogate,
-                    self.graph_body_ids.shape[0],
-                    inputs=[
-                        self.graph_body_ids,
-                        dt,
-                        body_q,
-                        body_inertia_q,
-                        body_mass,
-                        body_inv_mass,
-                        body_inertia,
-                        body_com,
-                        contact_hessian_ll,
-                        contact_hessian_al,
-                        contact_hessian_aa,
-                        contact_forces,
-                        contact_torques,
-                        dynamic_contact_hessian,
-                    ],
-                    outputs=[self.body_matrix, self.body_rhs],
-                    device=self.device,
-                    block_dim=self.spatial_block_dim,
-                )
+            # Rows are linearized first: the stress majorizer writes per-row
+            # blocks that the body surrogate then sums in fixed order.
             for bucket in self.buckets:
                 linearizations = (
                     (
@@ -8660,6 +8712,7 @@ class StructuralGraphKKT:
                             add_joint_stress_majorizer,
                             linearization_size,
                             inputs=[
+                                self.joint_stress_slot,
                                 linearization_joint_ids,
                                 joint_type,
                                 joint_parent,
@@ -8675,10 +8728,38 @@ class StructuralGraphKKT:
                                 compliance,
                                 residual,
                             ],
-                            outputs=[self.body_matrix_scalar],
+                            outputs=[self.body_stress],
                             device=self.device,
                             block_dim=self.spatial_block_dim,
                         )
+            if build_body:
+                wp.launch(
+                    build_body_surrogate,
+                    self.graph_body_ids.shape[0],
+                    inputs=[
+                        self.graph_body_ids,
+                        dt,
+                        body_q,
+                        body_inertia_q,
+                        body_mass,
+                        body_inv_mass,
+                        body_inertia,
+                        body_com,
+                        contact_hessian_ll,
+                        contact_hessian_al,
+                        contact_hessian_aa,
+                        contact_forces,
+                        contact_torques,
+                        dynamic_contact_hessian,
+                        int(build_majorizer),
+                        self.stress_offsets,
+                        self.body_stress,
+                        self.body_path_inverse,
+                    ],
+                    outputs=[self.body_matrix, self.body_rhs],
+                    device=self.device,
+                    block_dim=self.spatial_block_dim,
+                )
 
         def refresh_contact_objective(*, translation=False, forces_only=False):
             if translation:
@@ -8847,8 +8928,7 @@ class StructuralGraphKKT:
         linearize()
 
         # Trees consume the body metric directly. Path Schur systems consume
-        # its inverse, so solve trees first and then change the shared body
-        # buffers to inverse/free-motion form in place.
+        # its inverse, which the surrogate build already wrote for path bodies.
         if not self.use_fused_solve_reset:
             self.body_correction.zero_()
         for bucket in self.tree_buckets:
@@ -8862,15 +8942,6 @@ class StructuralGraphKKT:
         for bucket in self.closed_tree_buckets:
             bucket.solve_tree(self.body_matrix, self.body_rhs, self.body_scale, self.body_correction)
 
-        if self.path_buckets:
-            wp.launch(
-                invert_body_surrogate_in_place,
-                self.graph_body_count,
-                inputs=[self.graph_body_ids, body_inv_mass],
-                outputs=[self.body_inverse, self.body_free],
-                device=self.device,
-                block_dim=self.spatial_block_dim,
-            )
         for bucket in self.path_buckets:
             wp.launch(
                 assemble_joint_path_system,

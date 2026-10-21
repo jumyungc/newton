@@ -67,7 +67,7 @@ def _local_factor_recovery_is_opt_in(test, device):
     """Keep the main factorization unless global numerical recovery is enabled."""
     with wp.ScopedDevice(device):
         angular = wp.array(
-            [wp.identity(3, float), wp.mat33(1.0, 2.0, 0.0, 2.0, 1.0, 0.0, 0.0, 0.0, 1.0)],
+            [np.eye(3), np.array([[1.0, 2.0, 0.0], [2.0, 1.0, 0.0], [0.0, 0.0, 1.0]])],
             dtype=wp.mat33,
         )
         default, disabled, enabled = (wp.empty(2, dtype=wp.spatial_vector) for _ in range(3))
@@ -591,6 +591,7 @@ def _closed_prefix_payload_budget(model, count):
     joint_ids = {joint for component in prefix for joint in component.joints}
     return diagnostics.estimated_bytes + rigid_vbd_kkt._shared_structural_payload_bytes(
         model.body_count,
+        model.joint_count,
         len(body_ids),
         count,
         len(joint_ids),
@@ -1689,6 +1690,10 @@ def _structural_kkt_majorizes_only_represented_dynamic_contact(test, device):
             contact_force,
             contact_force,
             dynamic_hessian,
+            0,
+            wp.zeros(2, dtype=wp.int32, device=device),
+            wp.zeros(0, dtype=wp.mat33, device=device),
+            wp.zeros(1, dtype=wp.int32, device=device),
         ],
         outputs=[matrix, rhs],
         device=device,
@@ -1737,9 +1742,9 @@ def _structural_kkt_bounds_material_frame_rod_stress(test, device):
             jc = wp.array([child_jacobian], dtype=wp.spatial_matrix, device=device)
             C = wp.array([np.eye(6)], dtype=wp.spatial_matrix, device=device)
             c = wp.array([before_residual], dtype=wp.spatial_vector, device=device)
-            matrix = wp.zeros(2, dtype=wp.spatial_matrix, device=device)
-            matrix_scalar = wp.array(ptr=matrix.ptr, shape=(2, 6, 6), dtype=float, device=device)
+            row_stress = wp.zeros(2, dtype=wp.mat33, device=device)
             inputs = [
+                wp.array([wp.vec2i(0, 1)], dtype=wp.vec2i, device=device),
                 ids,
                 kind,
                 ids,
@@ -1761,7 +1766,7 @@ def _structural_kkt_bounds_material_frame_rod_stress(test, device):
                         add_joint_stress_majorizer,
                         1,
                         inputs=inputs,
-                        outputs=[matrix_scalar],
+                        outputs=[row_stress],
                         device=device,
                     )
                 wp.capture_launch(capture.graph)
@@ -1770,10 +1775,11 @@ def _structural_kkt_bounds_material_frame_rod_stress(test, device):
                     add_joint_stress_majorizer,
                     1,
                     inputs=inputs,
-                    outputs=[matrix_scalar],
+                    outputs=[row_stress],
                     device=device,
                 )
-            value = matrix.numpy().astype(np.float64)
+            value = np.zeros((2, 6, 6))
+            value[:, 3:, 3:] = row_stress.numpy()
             jacobian = np.hstack([jp.numpy()[0], jc.numpy()[0]]).astype(np.float64)
             stiffness = np.linalg.inv(C.numpy()[0].astype(np.float64))
             np.testing.assert_allclose(
@@ -1810,16 +1816,16 @@ def _structural_kkt_bounds_material_frame_rod_stress(test, device):
                 bound = direction.ravel() @ bound_matrix @ direction.ravel()
                 test.assertLessEqual(abs(stress), bound + 1e-7)
             c.zero_()
-            matrix.zero_()
+            row_stress.zero_()
             before = (jp.numpy(), jc.numpy(), C.numpy())
             wp.launch(
                 add_joint_stress_majorizer,
                 1,
                 inputs=inputs,
-                outputs=[matrix_scalar],
+                outputs=[row_stress],
                 device=device,
             )
-            np.testing.assert_array_equal(matrix.numpy(), 0.0)
+            np.testing.assert_array_equal(row_stress.numpy(), 0.0)
             for expected, actual in zip(before, (jp.numpy(), jc.numpy(), C.numpy()), strict=True):
                 np.testing.assert_array_equal(actual, expected)
 
@@ -1840,8 +1846,8 @@ def _structural_kkt_inactive_limit_adds_curvature_without_force(test, device):
     test.assertGreater(float(bucket.compliance.numpy()[0, 5, 5]), 0.0)
 
 
-def _structural_kkt_open_contact_adds_curvature_without_force(test, device):
-    """An open collision candidate bounds activation but exerts no force."""
+def _structural_kkt_open_contact_activates_on_penetration(test, device):
+    """An open candidate is inactive; refreshing a penetrating trial activates it."""
     model, pipeline, contacts, solver, bodies, _, _ = _build_grounded_chain(
         device, global_iterations=1, iterations=1, segments=4, contact_kd=0.0
     )
@@ -1854,10 +1860,23 @@ def _structural_kkt_open_contact_adds_curvature_without_force(test, device):
     solver.body_body_contact_C0.zero_()
     solver._reset_structural_solve_state()
     solver._refresh_structural_contact_objective(state, contacts, 1.0 / 600.0)
-    test.assertGreater(float(np.max(solver.body_hessian_ll.numpy()[bodies, 2, 2])), 0.0)
+    np.testing.assert_array_equal(solver.body_hessian_ll.numpy()[bodies], 0.0)
+    np.testing.assert_array_equal(solver.body_hessian_al.numpy()[bodies], 0.0)
+    np.testing.assert_array_equal(solver.body_hessian_aa.numpy()[bodies], 0.0)
     np.testing.assert_array_equal(solver.body_forces.numpy()[bodies], 0.0)
     np.testing.assert_array_equal(solver.body_torques.numpy()[bodies], 0.0)
     np.testing.assert_array_equal(solver._structural_graph_kkt.island_contact_state.numpy(), 1)
+
+    # Reuse the same collision candidates, as the global line search does.
+    # Move through the initial 1 mm clearance without changing contact history.
+    pose = state.body_q.numpy()
+    pose[bodies, 2] -= 0.002
+    state.body_q.assign(pose)
+    solver._reset_structural_solve_state()
+    solver._refresh_structural_contact_objective(state, contacts, 1.0 / 600.0)
+    test.assertGreater(float(np.max(solver.body_hessian_ll.numpy()[bodies, 2, 2])), 0.0)
+    test.assertGreater(float(np.sum(solver.body_forces.numpy()[bodies, 2])), 0.0)
+    np.testing.assert_array_equal(solver.body_body_contact_lambda.numpy(), 0.0)
 
 
 def _structural_kkt_inactive_trees_do_not_apply_free_body_corrections(test, device):
@@ -2698,9 +2717,11 @@ def _structural_kkt_estimates_allocation_payloads_exactly(test, device):
             backend, allocated_bytes = _build_structural_backend_with_intercepted_bytes(build_model())
             test.assertTrue(backend.active)
             test.assertEqual(backend._estimated_bytes, allocated_bytes)
-            test.assertEqual(backend.body_matrix_scalar.ptr, backend.body_matrix.ptr)
-            test.assertEqual(backend.body_matrix_scalar.capacity, backend.body_matrix.capacity)
-            test.assertEqual(backend.body_matrix_scalar.shape, (backend.graph_body_count, 6, 6))
+            test.assertEqual(backend.body_stress.shape, (2 * backend.joint_count,))
+            test.assertEqual(backend.stress_offsets.shape, (backend.graph_body_count + 1,))
+            destinations = backend.joint_stress_slot.numpy()
+            used = np.sort(destinations[destinations >= 0])
+            np.testing.assert_array_equal(used, np.arange(int(backend.stress_offsets.numpy()[-1])))
             test.assertTrue(
                 all(bucket._estimated_bytes == bucket._diagnostics.estimated_bytes for bucket in backend.buckets)
             )
@@ -2940,6 +2961,7 @@ def _structural_kkt_partial_fallback_preserves_healthy_island(test, device):
     )
     healthy_payload_budget = healthy_diagnostics.estimated_bytes + rigid_vbd_kkt._shared_structural_payload_bytes(
         reference_model.body_count,
+        reference_model.joint_count,
         healthy_diagnostics.body_count_total,
         healthy_diagnostics.batch_count,
         healthy_diagnostics.row_count_total,
@@ -4435,6 +4457,31 @@ def _structural_kkt_inherits_solver_deterministic_mode(test, device):
     test.assertEqual(options["deterministic_max_records"], 0)
 
 
+def _structural_kkt_default_mode_matches_run_to_run(test, device):
+    """Sum global stress blocks in a fixed order, so default and run-to-run modes agree bitwise."""
+    builders = (
+        lambda: _build_y_trees(device, ((12, 12, 12), (16, 9, 14), (20, 7, 11))),
+        lambda: _build_chains(device, (3, 9, 40)),
+    )
+    for index, build in enumerate(builders):
+        with test.subTest(model=index):
+            results = []
+            for deterministic in (None, wp.DeterministicMode.RUN_TO_RUN):
+                model = build()
+                solver = newton.solvers.SolverVBD(
+                    model,
+                    iterations=2,
+                    rigid_compliant_alm=True,
+                    rigid_joint_global_iterations=1,
+                    deterministic=deterministic,
+                )
+                state = _simulate(model, solver, 30, 1.0 / 600.0)
+                results.append((state.body_q.numpy(), state.body_qd.numpy()))
+            test.assertTrue(np.isfinite(results[0][0]).all())
+            np.testing.assert_array_equal(results[0][0], results[1][0])
+            np.testing.assert_array_equal(results[0][1], results[1][1])
+
+
 def _structural_kkt_preflight_is_deterministic_and_capture_safe(test, device):
     """Keep supported cyclic diagnostics and results stable on CPU and in CUDA capture."""
 
@@ -4781,11 +4828,15 @@ def _structural_kkt_directional_search_rejects_overshoot(test, device):
             solve()
         wp.capture_launch(capture.graph)
     np.testing.assert_array_equal(pose.numpy()[0], original.numpy()[0])
-    test.assertEqual(float(pose.numpy()[1, 0]), 0.0)
-    np.testing.assert_array_equal(scale.numpy(), [0.0, 0.25])
+    # The first trial reaches x=-3: slopes -4 and 108 interpolate to 1/28,
+    # clamped to 0.1. The re-evaluated x=0.6 has negative slope and is accepted.
+    # This is a safeguarded directional search, not fixed-factor halving.
+    np.testing.assert_allclose(pose.numpy()[1, 0], 0.6, atol=1.0e-7)
+    np.testing.assert_allclose(scale.numpy(), [0.0, 0.1], atol=1.0e-8)
+    test.assertLess(float(pose.numpy()[1, 0]) ** 4, 1.0)
     test.assertEqual(
         int(evaluations.numpy()[0]),
-        4 if device.is_cpu or wp.is_conditional_graph_supported() else 6,
+        3 if device.is_cpu or wp.is_conditional_graph_supported() else 6,
     )
 
 
@@ -4943,8 +4994,8 @@ add_function_test(
 )
 add_function_test(
     TestVBDRigidKKT,
-    "test_structural_kkt_open_contact_adds_curvature_without_force",
-    _structural_kkt_open_contact_adds_curvature_without_force,
+    "test_structural_kkt_open_contact_activates_on_penetration",
+    _structural_kkt_open_contact_activates_on_penetration,
     devices=get_test_devices(),
 )
 
@@ -5281,6 +5332,12 @@ add_function_test(
     "test_structural_kkt_inherits_solver_deterministic_mode",
     _structural_kkt_inherits_solver_deterministic_mode,
     devices=get_test_devices(),
+)
+add_function_test(
+    TestVBDRigidKKT,
+    "test_structural_kkt_default_mode_matches_run_to_run",
+    _structural_kkt_default_mode_matches_run_to_run,
+    devices=get_cuda_test_devices(),
 )
 add_function_test(
     TestVBDRigidKKT,
