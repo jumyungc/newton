@@ -427,6 +427,7 @@ def clear_structural_contact_objective(
 @wp.kernel
 def reset_structural_solve_state(
     island_count: int,
+    has_contacts: int,
     body_ids: wp.array[wp.int32],
     body_forces: wp.array[wp.vec3],
     body_torques: wp.array[wp.vec3],
@@ -440,13 +441,14 @@ def reset_structural_solve_state(
 ):
     """Reset all per-pass structural scratch in one launch."""
     slot = wp.tid()
-    body = body_ids[slot]
-    body_forces[body] = wp.vec3(0.0)
-    body_torques[body] = wp.vec3(0.0)
-    body_hessian_ll[body] = wp.mat33(0.0)
-    body_hessian_al[body] = wp.mat33(0.0)
-    body_hessian_aa[body] = wp.mat33(0.0)
-    body_dynamic_contact_hessian[slot] = wp.spatial_matrix(0.0)
+    if has_contacts != 0:
+        body = body_ids[slot]
+        body_forces[body] = wp.vec3(0.0)
+        body_torques[body] = wp.vec3(0.0)
+        body_hessian_ll[body] = wp.mat33(0.0)
+        body_hessian_al[body] = wp.mat33(0.0)
+        body_hessian_aa[body] = wp.mat33(0.0)
+        body_dynamic_contact_hessian[slot] = wp.spatial_matrix(0.0)
     body_correction[slot] = wp.spatial_vector()
     if slot < island_count:
         island_contact_state[slot] = 1
@@ -870,6 +872,7 @@ def build_body_surrogate(
     contact_forces: wp.array[wp.vec3],
     contact_torques: wp.array[wp.vec3],
     dynamic_contact_hessian: wp.array[wp.spatial_matrix],
+    has_contacts: int,
     include_stress: int,
     stress_offsets: wp.array[wp.int32],
     body_stress: wp.array[wp.mat33],
@@ -901,14 +904,15 @@ def build_body_surrogate(
     rotation = wp.transform_get_rotation(pose)
     com_local = body_com[body]
 
+    zero3 = wp.mat33(0.0)
     matrix = _body_surrogate_matrix(
         rotation,
         body_mass[body],
         body_inertia[body],
-        contact_hessian_ll[body],
-        contact_hessian_al[body],
-        contact_hessian_aa[body],
-        dynamic_contact_hessian[slot],
+        contact_hessian_ll[body] if has_contacts != 0 else zero3,
+        contact_hessian_al[body] if has_contacts != 0 else zero3,
+        contact_hessian_aa[body] if has_contacts != 0 else zero3,
+        dynamic_contact_hessian[slot] if has_contacts != 0 else wp.spatial_matrix(0.0),
         dt_inv_sq,
     )
     if include_stress != 0:
@@ -925,14 +929,15 @@ def build_body_surrogate(
                         if value != 0.0:
                             angular[row, column] = angular[row, column] + value
             matrix = _set_spatial_block(matrix, 1, 1, angular)
+    zero_v = wp.vec3(0.0)
     rhs = _body_objective_rhs(
         pose,
         inertial_pose,
         body_mass[body],
         body_inertia[body],
         com_local,
-        contact_forces[body],
-        contact_torques[body],
+        contact_forces[body] if has_contacts != 0 else zero_v,
+        contact_torques[body] if has_contacts != 0 else zero_v,
         dt_inv_sq,
     )
     if body_path_inverse[slot] != 0:
@@ -1853,6 +1858,7 @@ def _reduce_cr_row(
     local_row: int,
     stride: int,
     row_count: int,
+    invert_limit: int,
     lower: wp.array[wp.spatial_matrix],
     diagonal: wp.array[wp.spatial_matrix],
     upper: wp.array[wp.spatial_matrix],
@@ -1878,6 +1884,11 @@ def _reduce_cr_row(
         if local_row + 2 * stride < row_count:
             upper_value = -(factor * upper[eliminated])
 
+    next_stride = 2 * stride
+    if invert_limit > 0 and (row_count + next_stride - 1) // next_stride > invert_limit:
+        if ((local_row // next_stride) & 1) == 1:
+            diagonal_value = _inverse_spatial_robust(diagonal_value)
+
     lower[row] = lower_value
     diagonal[row] = diagonal_value
     upper[row] = upper_value
@@ -1887,6 +1898,7 @@ def _reduce_cr_row(
 @wp.kernel
 def reduce_cr_in_place(
     stride: int,
+    invert_limit: int,
     survivor_rows: wp.array[wp.vec3i],
     lower: wp.array[wp.spatial_matrix],
     diagonal: wp.array[wp.spatial_matrix],
@@ -1895,7 +1907,7 @@ def reduce_cr_in_place(
 ):
     """Reduce retained CR rows without allocating a second hierarchy."""
     entry = survivor_rows[wp.tid()]
-    _reduce_cr_row(entry[0], entry[1], stride, entry[2], lower, diagonal, upper, rhs)
+    _reduce_cr_row(entry[0], entry[1], stride, entry[2], invert_limit, lower, diagonal, upper, rhs)
 
 
 @wp.func
@@ -2010,7 +2022,7 @@ def solve_cr_persistent(
         survivor_count = (row_count + 2 * stride - 1) // (2 * stride)
         local = lane
         while local < survivor_count:
-            _reduce_cr_row(base, 2 * stride * local, stride, row_count, lower, diagonal, upper, rhs)
+            _reduce_cr_row(base, 2 * stride * local, stride, row_count, 0, lower, diagonal, upper, rhs)
             local += block_dim
         _synchronize_cr_block()
         stride *= 2
@@ -2071,7 +2083,7 @@ def solve_cr_tail_persistent(
         _synchronize_cr_block()
         row = 2 * stride * lane
         while row < row_count:
-            _reduce_cr_row(base, row, stride, row_count, lower, diagonal, upper, rhs)
+            _reduce_cr_row(base, row, stride, row_count, 0, lower, diagonal, upper, rhs)
             row += 2 * stride * width
         _synchronize_cr_block()
         stride *= 2
@@ -5131,19 +5143,25 @@ def _make_tree(
             bodies[node],
         ),
     )
-    active = set(range(node_count))
+    # The graph is a connected tree. Orient each edge toward the root,
+    # then a node's leaf-removal round is its maximum child round plus one.
+    # This avoids rescanning all surviving nodes at every level of a long tree.
     parent_node = [-1] * node_count
-    elimination_levels: list[list[int]] = []
-    while len(active) > 1:
-        leaves = sorted(node for node in active if node != root and len(adjacency[node] & active) == 1)
-        if not leaves:
-            return None
-        for node in leaves:
-            parent_node[node] = next(iter(adjacency[node] & active))
-        elimination_levels.append(leaves)
-        active.difference_update(leaves)
-    if active != {root}:
-        return None
+    order = [root]
+    for node in order:
+        for neighbor in adjacency[node]:
+            if neighbor != parent_node[node]:
+                parent_node[neighbor] = node
+                order.append(neighbor)
+    height = [0] * node_count
+    for node in reversed(order[1:]):
+        neighbor = parent_node[node]
+        height[neighbor] = max(height[neighbor], height[node] + 1)
+    elimination_levels: list[list[int]] = [[] for _ in range(height[root])]
+    # Ascending node order preserves the previous sorted leaves exactly.
+    for node, level in enumerate(height):
+        if node != root:
+            elimination_levels[level].append(node)
 
     node_body = [*bodies, *([-1] * len(joints))]
     node_row = [*([-1] * len(bodies)), *range(len(joints))]
@@ -6627,6 +6645,7 @@ class _PathBucket:
                 return None
             return wp.array(np.asarray(values, dtype=np.int32), dtype=dtype, device=self.device)
 
+        self.cr_fused = bool(fused)
         self.cr_schedule = _path_cr_schedule(self.row_counts, fused)
         self.persistent_paths = device_array(self.cr_schedule.persistent, wp.vec2i)
         self.tail_paths = device_array(self.cr_schedule.tails, wp.vec3i)
@@ -6639,6 +6658,7 @@ class _PathBucket:
     def solve_rows(self):
         """Solve every block-tridiagonal path in four in-place row buffers."""
         buffers = [self.lower[0], self.diagonal[0], self.upper[0], self.rhs[0]]
+        invert_limit = _CR_TAIL_MAX_ROWS if self.cr_fused else _CR_SERIAL_TERMINAL_SIZE
         if self.persistent_paths is not None:
             wp.launch(
                 solve_cr_persistent,
@@ -6648,19 +6668,20 @@ class _PathBucket:
                 device=self.device,
                 block_dim=self.spatial_block_dim,
             )
-        for stride, eliminated, survivors in self.cr_levels:
-            wp.launch(
-                invert_cr_eliminated_in_place,
-                eliminated.shape[0],
-                inputs=[eliminated],
-                outputs=[self.diagonal[0]],
-                device=self.device,
-                block_dim=self.spatial_block_dim,
-            )
+        for level_idx, (stride, eliminated, survivors) in enumerate(self.cr_levels):
+            if level_idx == 0:
+                wp.launch(
+                    invert_cr_eliminated_in_place,
+                    eliminated.shape[0],
+                    inputs=[eliminated],
+                    outputs=[self.diagonal[0]],
+                    device=self.device,
+                    block_dim=self.spatial_block_dim,
+                )
             wp.launch(
                 reduce_cr_in_place,
                 survivors.shape[0],
-                inputs=[stride, survivors],
+                inputs=[stride, invert_limit, survivors],
                 outputs=buffers,
                 device=self.device,
                 block_dim=self.spatial_block_dim,
@@ -8751,6 +8772,7 @@ class StructuralGraphKKT:
                         contact_forces,
                         contact_torques,
                         dynamic_contact_hessian,
+                        int(contacts is not None and contacts.rigid_contact_max > 0),
                         int(build_majorizer),
                         self.stress_offsets,
                         self.body_stress,

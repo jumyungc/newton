@@ -1690,6 +1690,7 @@ def _structural_kkt_majorizes_only_represented_dynamic_contact(test, device):
             contact_force,
             contact_force,
             dynamic_hessian,
+            1,
             0,
             wp.zeros(2, dtype=wp.int32, device=device),
             wp.zeros(0, dtype=wp.mat33, device=device),

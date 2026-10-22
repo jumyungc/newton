@@ -157,6 +157,11 @@ def _load_rigid_vbd_kkt():
     return importlib.import_module(".rigid_vbd_kkt", __package__)
 
 
+def _load_particle_vbd_global():
+    """Load the optional particle global backend without affecting the G=0 import path."""
+    return importlib.import_module(".particle_vbd_global", __package__)
+
+
 def _validate_compliant_alm_material_coefficient(
     values: Any,
     name: str,
@@ -403,9 +408,11 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         particle_rest_shape_contact_exclusion_radius: float = 0.0,
         particle_external_vertex_contact_filtering_map: dict | None = None,
         particle_external_edge_contact_filtering_map: dict | None = None,
+        # Experimental tetrahedral particle-global correction
+        particle_global_iterations: int = 0,
         # Rigid body - constraint formulation and stabilization
         rigid_compliant_alm: bool = True,
-        rigid_joint_global_iterations: int = 0,  # Optional global structural corrections per step
+        rigid_joint_global_iterations: int = 0,
         rigid_avbd_alpha: float | None = None,  # Shared alpha override; None uses mode defaults
         rigid_avbd_joint_alpha: float | None = None,  # Joint alpha override
         rigid_avbd_contact_alpha: float | None = None,  # Body-body contact alpha override
@@ -542,6 +549,26 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 slowly. If every iteration includes a correction, contact mode places the last
                 correction before the last local sweep to preserve the configured local budget;
                 without a contact buffer, one final local sweep reconciles the corrected pose.
+            particle_global_iterations: Experimental number of additional tetrahedral primal
+                Newton--Krylov stages per step. ``0`` disables the backend; positive counts must
+                be smaller than ``iterations`` so a local sweep follows the final correction.
+                This is distinct from the rigid-joint KKT solve. Currently requires a single
+                world, no rigid bodies, springs, tendons, membrane/bending or self-contact,
+                and frictionless, undamped static-shape contact without DAT or a log barrier.
+                Feature-filtered mesh contacts are not supported. Tet coefficients must be
+                finite with nonnegative shear, lambda + mu, and damping; lambda + mu must
+                be at least 1e-6 when mu is positive, to match local VBD's constitutive law.
+                Particle topology, rest geometry, masses and active flags must remain fixed;
+                construct a new solver if they change. For supported material/contact changes,
+                call :meth:`notify_model_changed` outside graph capture before stepping.
+                One stage follows the penultimate local sweep; multiple stages are distributed
+                with a final local sweep. Each uses up to 32 CG iterations with a full tangent
+                and affine preconditioning; guarded Gauss--Newton fallback may add a second
+                solve. The constant-velocity starting iterate does not change the physical
+                inertia target. These are experimental implementation choices, not additional
+                public controls or a convergence guarantee. CUDA capture requires conditional
+                graph support; contact-buffer growth follows the local VBD allocation policy.
+                This is not a fully coupled rigid-deformable global solve.
             rigid_avbd_alpha: C0 stabilization strength (``C_stab = C - alpha * C0``). Range: [0, 1].
                 Controls both joints and body-body contacts when neither class-specific
                 override (``rigid_avbd_joint_alpha`` / ``rigid_avbd_contact_alpha``) is set.
@@ -794,6 +821,17 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             raise ValueError("rigid_joint_global_iterations does not support models containing tendons")
         if rigid_joint_global_iterations > 0 and model.device.is_capturing:
             raise RuntimeError("The global VBD joint topology must be constructed before CUDA graph capture.")
+        if not isinstance(particle_global_iterations, int) or isinstance(particle_global_iterations, bool):
+            raise TypeError("particle_global_iterations must be an integer")
+        if particle_global_iterations < 0 or (
+            particle_global_iterations > 0 and particle_global_iterations >= iterations
+        ):
+            raise ValueError(
+                "particle_global_iterations must be 0 or in [1, iterations - 1], "
+                f"got {particle_global_iterations} for iterations={iterations}"
+            )
+        if particle_global_iterations > 0 and model.device.is_capturing:
+            raise RuntimeError("The global VBD particle backend must be constructed before CUDA graph capture.")
         if (
             rigid_contact_stick_motion_eps is not None
             or rigid_contact_stick_freeze_translation_eps is not None
@@ -1090,6 +1128,15 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         self._structural_graph_kkt_payload_budget_bytes = 0
         self._structural_graph_kkt_estimated_bytes = 0
         self._rebuild_structural_graph_kkt()
+
+        self.particle_global_iterations = particle_global_iterations
+        self._particle_global_vbd = None
+        self._particle_global_iteration_indices: frozenset[int] = frozenset()
+        self._particle_global_module_options = {
+            "deterministic": effective_deterministic,
+            "deterministic_max_records": particle_deterministic_max_records,
+        }
+        self._rebuild_particle_global_vbd()
 
         self._has_joint_mimics = self._integrates_rigid_bodies and has_supported_joint_mimics(model, "SolverVBD")
         self._mimic_body_deltas = None
@@ -1532,7 +1579,22 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
 
     @override
     def notify_model_changed(self, flags: ModelFlags | int) -> None:
-        """Refresh solver caches affected by the specified model-property flags."""
+        """Refresh solver caches affected by the specified model-property flags.
+
+        For experimental particle-global support, MODEL_PROPERTIES revalidates tet
+        materials and global soft-contact coefficients; SHAPE_PROPERTIES revalidates
+        static-shape contact materials. These values are read live, so validation does
+        not replace captured buffers. Notify outside capture. Particle topology, rest
+        geometry, masses and active flags require constructing a new solver. Recapture
+        graphs after changing host scalars or replacing model arrays; an existing graph
+        retains its recorded scalar values and array pointers.
+        """
+        if self._particle_global_vbd is not None and flags & (
+            ModelFlags.MODEL_PROPERTIES | ModelFlags.SHAPE_PROPERTIES
+        ):
+            if self.device.is_capturing:
+                raise RuntimeError("Particle-global model properties must be validated outside CUDA graph capture.")
+            self._particle_global_vbd.validate_model()
         self._apply_module_options()
         if flags & ModelFlags.TENDON_PROPERTIES:
             self._refresh_tendon_properties()
@@ -1589,6 +1651,24 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             dynamic_mask = np.asarray(self.body_inv_mass_effective.numpy()) > 0.0
             if backend is None or not np.array_equal(dynamic_mask, backend.dynamic_body_mask_host):
                 self._rebuild_structural_graph_kkt()
+
+    def _rebuild_particle_global_vbd(self, **options) -> None:
+        """Construct the private backend; keyword overrides are for internal diagnostics.
+
+        Rebuilding replaces device scratch, so discard and recapture any existing graphs.
+        Supported model-property notifications validate live values instead of rebuilding.
+        """
+        if self.particle_global_iterations == 0:
+            self._particle_global_vbd = None
+            self._particle_global_iteration_indices = frozenset()
+            return
+        if self.device.is_capturing:
+            raise RuntimeError("The global VBD particle backend must be constructed before CUDA graph capture.")
+        particle_vbd_global = _load_particle_vbd_global()
+        self._set_module_options(self._particle_global_module_options, module=particle_vbd_global)
+        backend = particle_vbd_global.ParticleGlobalVBD(self, global_stages=self.particle_global_iterations, **options)
+        self._particle_global_vbd = backend
+        self._particle_global_iteration_indices = backend.global_indices
 
     def _rebuild_structural_graph_kkt(self) -> None:
         """Build compact graph-capturable topology for the optional global correction."""
@@ -2857,6 +2937,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 need to be allocated or grown during graph capture.
         """
         contacts = self._resolve_step_contacts(contacts)
+        if self._particle_global_vbd is not None:
+            self._particle_global_vbd.validate_step(contacts)
         self.validate_observables(observables, contacts)
         self._apply_module_options()
         update_rigid = self._update_rigid_history
@@ -2934,8 +3016,11 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             )
             if global_iteration:
                 self._solve_structural_graph_kkt(state_in, control, contacts, dt)
+                self._update_rigid_body_contact_duals(state_in, contacts, dt)
                 self._update_rigid_joint_duals(state_in, control, dt)
             self._solve_particle_iteration(state_in, state_out, contacts, dt)
+            if iter_num in self._particle_global_iteration_indices:
+                self._solve_particle_global_vbd(state_in, state_out, contacts, dt)
 
         if use_global and self.rigid_joint_global_iterations == self.iterations and contacts is None:
             self._solve_rigid_body_iteration(state_in, state_out, control, contacts, dt)
@@ -3596,6 +3681,17 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         )
 
         self._penetration_free_truncation(state_in, contacts)
+        if self._particle_global_vbd is not None:
+            self._particle_global_vbd.apply_initial_guess(state_in, dt)
+
+    def _solve_particle_global_vbd(
+        self, state_in: State, state_out: State, contacts: Contacts | None, dt: float
+    ) -> None:
+        """Apply one primal correction and synchronize the local solver's output positions."""
+        backend = self._particle_global_vbd
+        if backend is not None:
+            backend.solve(state_in, contacts, dt)
+            wp.copy(state_out.particle_q, state_in.particle_q)
 
     def _refresh_rigid_contact_state(
         self, contacts: Contacts | None, refresh: bool, *, restore_history: bool = False
@@ -4440,7 +4536,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             device=self.device,
         )
 
-    def _reset_structural_solve_state(self) -> None:
+    def _reset_structural_solve_state(self, *, clear_contacts: bool = True) -> None:
         """Reset scratch consumed by one global structural correction."""
         backend = self._structural_graph_kkt
         rigid_vbd_kkt = self._rigid_vbd_kkt
@@ -4450,7 +4546,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             wp.launch(
                 rigid_vbd_kkt.reset_structural_solve_state,
                 backend.graph_body_count,
-                inputs=[backend.island_count, backend.graph_body_ids],
+                inputs=[backend.island_count, int(clear_contacts), backend.graph_body_ids],
                 outputs=[
                     self.body_forces,
                     self.body_torques,
@@ -4497,7 +4593,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             return
         model = self.model
 
-        self._reset_structural_solve_state()
+        self._reset_structural_solve_state(clear_contacts=contacts is not None and contacts.rigid_contact_max > 0)
         if contacts is not None and contacts.rigid_contact_max > 0 and not backend.use_fused_contact_classification:
             wp.launch(
                 kernel=rigid_vbd_kkt.classify_global_contact_islands,
@@ -5034,40 +5130,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 dt,
             )
 
-        if contacts is not None and contacts.rigid_contact_max > 0:
-            wp.launch(
-                kernel=update_duals_body_body_contacts,
-                dim=contacts.rigid_contact_max,
-                inputs=[
-                    contacts.rigid_contact_count,
-                    contacts.rigid_contact_shape0,
-                    contacts.rigid_contact_shape1,
-                    contacts.rigid_contact_point0,
-                    contacts.rigid_contact_point1,
-                    contacts.rigid_contact_surface_velocity,
-                    contacts.rigid_contact_offset0,
-                    contacts.rigid_contact_offset1,
-                    contacts.rigid_contact_normal,
-                    contacts.rigid_contact_margin0,
-                    contacts.rigid_contact_margin1,
-                    model.shape_body,
-                    state_in.body_q,
-                    self.body_q_prev,
-                    dt,
-                    self.body_body_contact_material_mu,
-                    self.body_body_contact_C0,
-                    self.rigid_contact_alpha,
-                    self.rigid_contact_hard,
-                    self.rigid_compliant_alm,
-                    self.body_body_contact_material_ke,
-                    self.body_body_contact_tangent_rho,
-                    self.body_body_contact_normal_rho,
-                    self.rigid_linear_beta,
-                    self.body_body_contact_penalty_k,  # input/output
-                    self.body_body_contact_lambda,  # input/output
-                ],
-                device=self.device,
-            )
+        if not defer_joint_dual:
+            self._update_rigid_body_contact_duals(state_in, contacts, dt)
         if contacts is not None and model.particle_count > 0:
             wp.launch(
                 kernel=update_duals_body_particle_contacts,
@@ -5094,6 +5158,45 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
 
         if not defer_joint_dual:
             self._update_rigid_joint_duals(state_in, control, dt)
+
+    def _update_rigid_body_contact_duals(self, state_in: State, contacts: Contacts | None, dt: float) -> None:
+        """Update rigid body-body contact multipliers at the current pose."""
+        if contacts is None or contacts.rigid_contact_max <= 0:
+            return
+        model = self.model
+        wp.launch(
+            kernel=update_duals_body_body_contacts,
+            dim=contacts.rigid_contact_max,
+            inputs=[
+                contacts.rigid_contact_count,
+                contacts.rigid_contact_shape0,
+                contacts.rigid_contact_shape1,
+                contacts.rigid_contact_point0,
+                contacts.rigid_contact_point1,
+                contacts.rigid_contact_surface_velocity,
+                contacts.rigid_contact_offset0,
+                contacts.rigid_contact_offset1,
+                contacts.rigid_contact_normal,
+                contacts.rigid_contact_margin0,
+                contacts.rigid_contact_margin1,
+                model.shape_body,
+                state_in.body_q,
+                self.body_q_prev,
+                dt,
+                self.body_body_contact_material_mu,
+                self.body_body_contact_C0,
+                self.rigid_contact_alpha,
+                self.rigid_contact_hard,
+                self.rigid_compliant_alm,
+                self.body_body_contact_material_ke,
+                self.body_body_contact_tangent_rho,
+                self.body_body_contact_normal_rho,
+                self.rigid_linear_beta,
+                self.body_body_contact_penalty_k,  # input/output
+                self.body_body_contact_lambda,  # input/output
+            ],
+            device=self.device,
+        )
 
     def _update_rigid_joint_duals(self, state_in: State, control: Control, dt: float) -> None:
         """Update structural, drive, and limit multipliers at the current pose."""
