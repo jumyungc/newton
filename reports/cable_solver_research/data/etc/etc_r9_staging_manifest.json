@@ -1,0 +1,560 @@
+{
+  "etc_config": "etc: galerkin, energy, freeze_hc=30, spectral theta=0.35 both-channel (stretch+bend) with 0.5-theta hysteresis latch, cooldown=20, r=32, closed-loop c1",
+  "generated_utc": "20260709T094503Z",
+  "owner_line_start": "OWNER: Team Fable (claimed 2026-07-09T09:07:05Z \u2014 round 9: ETC-spectral applied to the full chain registry at 301f vs r4 baselines (hash-verified identical starts), 4-panel films, perf+stretch+bend tables on report; branched/loop scenes routed to GLOBAL per portfolio (r4 films stand); honest N/A rows; single push)",
+  "routed_scenes": {
+    "offcenter_anchor": "small anchor: routed to GLOBAL (r4 film stands)",
+    "ring_chord": "loop: routed to GLOBAL/splu (r4 film stands)",
+    "y127_default": "branched: routed to GLOBAL (r3/r4 films stand)",
+    "y_junction": "branched: routed to GLOBAL (r4 film stands)",
+    "y_junction_stiff": "branched: routed to GLOBAL (r4 film stands)"
+  },
+  "scenes": {
+    "horiz_cantilever_stretch": {
+      "initial_state_hash": "5d28fd8ed57c69a72a63f2044412bb1752795c31c35a64d966daf36da211e026",
+      "methods": {
+        "etc": {
+          "metrics": {
+            "corrections_accepted": 201,
+            "corrections_attempted": 222,
+            "energy_rejects": 68,
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.003862891811877489,
+            "fuse_trip_substep": -1,
+            "futility_backoffs": 139,
+            "max_bend_rad": 2.990571975708008,
+            "max_stretch_m": 0.013135375455021858,
+            "n_substeps": 3000,
+            "passivity_trips": 0,
+            "spectral_skips": 2778,
+            "substep_ms_mean": 1.6730010000367959,
+            "substep_ms_p50": 0.6921673193573952,
+            "trigger_fires": 222,
+            "wall_s": 7.993154048919678
+          }
+        },
+        "global_bgn": {
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.0030471067875623703,
+            "final_ratio": 0.9973817316722164,
+            "max_stretch_m": 0.015296976082026958,
+            "n_substeps": 3000,
+            "substep_ms_p50": 45.627630315721035,
+            "substep_ms_p95": 52.98270005732774
+          }
+        },
+        "vbd_2": {
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.0032903053797781467,
+            "final_ratio": 0.9887820401505013,
+            "max_stretch_m": 0.020994246006011963,
+            "n_substeps": 3000,
+            "substep_ms_p50": 0.6046062335371971,
+            "substep_ms_p95": 0.736551359295845
+          }
+        },
+        "vbd_80": {
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.0029145388398319483,
+            "final_ratio": 0.9984954619746786,
+            "max_stretch_m": 0.015375095419585705,
+            "n_substeps": 3000,
+            "substep_ms_p50": 18.00516527146101,
+            "substep_ms_p95": 18.251857720315456
+          }
+        }
+      },
+      "n_bodies": 128,
+      "status": "complete"
+    },
+    "horiz_cantilever_stretch_bend": {
+      "initial_state_hash": "5d28fd8ed57c69a72a63f2044412bb1752795c31c35a64d966daf36da211e026",
+      "methods": {
+        "etc": {
+          "metrics": {
+            "corrections_accepted": 351,
+            "corrections_attempted": 480,
+            "energy_rejects": 186,
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.004488857928663492,
+            "fuse_trip_substep": -1,
+            "futility_backoffs": 126,
+            "max_bend_rad": 0.868924617767334,
+            "max_stretch_m": 0.01032582763582468,
+            "n_substeps": 3000,
+            "passivity_trips": 0,
+            "spectral_skips": 2520,
+            "substep_ms_mean": 2.671119876205921,
+            "substep_ms_p50": 0.6897775456309319,
+            "trigger_fires": 480,
+            "wall_s": 8.958218097686768
+          }
+        },
+        "global_bgn": {
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.008153152652084827,
+            "final_ratio": 0.9996975726615162,
+            "max_stretch_m": 0.016264712437987328,
+            "n_substeps": 3000,
+            "substep_ms_p50": 40.4193177819252,
+            "substep_ms_p95": 52.1167792379856
+          }
+        },
+        "vbd_2": {
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.0032796214800328016,
+            "final_ratio": 0.9996350558732789,
+            "max_stretch_m": 0.020336052402853966,
+            "n_substeps": 3000,
+            "substep_ms_p50": 0.6055403500795364,
+            "substep_ms_p95": 0.7442603819072247
+          }
+        },
+        "vbd_80": {
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.008182663470506668,
+            "final_ratio": 0.9996947525087805,
+            "max_stretch_m": 0.01620943285524845,
+            "n_substeps": 3000,
+            "substep_ms_p50": 17.98195391893387,
+            "substep_ms_p95": 18.311302084475756
+          }
+        }
+      },
+      "n_bodies": 128,
+      "status": "complete"
+    },
+    "horiz_pinned_both": {
+      "initial_state_hash": "5d28fd8ed57c69a72a63f2044412bb1752795c31c35a64d966daf36da211e026",
+      "methods": {
+        "etc": {
+          "metrics": {
+            "corrections_accepted": 14,
+            "corrections_attempted": 76,
+            "energy_rejects": 185,
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.003309453371912241,
+            "fuse_trip_substep": 351,
+            "futility_backoffs": 14,
+            "max_bend_rad": 1.0041035413742065,
+            "max_stretch_m": 0.009629196487367153,
+            "n_substeps": 3000,
+            "passivity_trips": 1,
+            "spectral_skips": 2924,
+            "substep_ms_mean": 1.1749933219204347,
+            "substep_ms_p50": 0.6806571036577225,
+            "trigger_fires": 76,
+            "wall_s": 4.473015069961548
+          }
+        },
+        "global_bgn": {
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.005944056902080774,
+            "final_ratio": 0.999772288371796,
+            "max_stretch_m": 0.0076547544449567795,
+            "n_substeps": 3000,
+            "substep_ms_p50": 45.615178532898426,
+            "substep_ms_p95": 51.92705104127526
+          }
+        },
+        "vbd_2": {
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.002717128023505211,
+            "final_ratio": 0.999774457022515,
+            "max_stretch_m": 0.009903018362820148,
+            "n_substeps": 3000,
+            "substep_ms_p50": 0.6050700321793556,
+            "substep_ms_p95": 0.7384956814348698
+          }
+        },
+        "vbd_80": {
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.005957650952041149,
+            "final_ratio": 0.9997714737149643,
+            "max_stretch_m": 0.0076556638814508915,
+            "n_substeps": 3000,
+            "substep_ms_p50": 17.895483411848545,
+            "substep_ms_p95": 18.27841131016612
+          }
+        }
+      },
+      "n_bodies": 128,
+      "status": "complete"
+    },
+    "long_cantilever_1024_superbend500": {
+      "initial_state_hash": "413d90e0a0f9c7e6ddabec5c2df58de01012925f23408d48574badc54c1fc505",
+      "methods": {
+        "etc": {
+          "metrics": {
+            "corrections_accepted": 243,
+            "corrections_attempted": 336,
+            "energy_rejects": 279,
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.07489988952875137,
+            "fuse_trip_substep": 1461,
+            "futility_backoffs": 56,
+            "max_bend_rad": 0.433665007352829,
+            "max_stretch_m": 0.0999743863940239,
+            "n_substeps": 3000,
+            "passivity_trips": 1,
+            "spectral_skips": 2664,
+            "substep_ms_mean": 4.9639728628098965,
+            "substep_ms_p50": 0.6841588765382767,
+            "trigger_fires": 336,
+            "wall_s": 21.300781965255737
+          }
+        },
+        "global_bgn": {
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.06422603875398636,
+            "final_ratio": 0.9999921582541704,
+            "max_stretch_m": 0.06422603875398636,
+            "n_substeps": 3000,
+            "substep_ms_p50": 263.1775978952646,
+            "substep_ms_p95": 303.6771978251636
+          }
+        },
+        "vbd_2": {
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.07415948063135147,
+            "final_ratio": 0.9999918899300351,
+            "max_stretch_m": 0.07415948063135147,
+            "n_substeps": 3000,
+            "substep_ms_p50": 0.6078537553548813,
+            "substep_ms_p95": 0.7111263461410999
+          }
+        },
+        "vbd_80": {
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.06391479820013046,
+            "final_ratio": 0.9999923854104856,
+            "max_stretch_m": 0.06391479820013046,
+            "n_substeps": 3000,
+            "substep_ms_p50": 18.074991181492805,
+            "substep_ms_p95": 18.2572721503675
+          }
+        }
+      },
+      "n_bodies": 1024,
+      "status": "complete"
+    },
+    "long_cantilever_2048_superbend500": {
+      "initial_state_hash": "374ac7ffd147a6066b8a04fb0470a8e91ad7ca7536a7ac3437ee7cf38491a53c",
+      "methods": {
+        "etc": {
+          "metrics": {
+            "corrections_accepted": 315,
+            "corrections_attempted": 366,
+            "energy_rejects": 153,
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.07810885459184647,
+            "fuse_trip_substep": 1611,
+            "futility_backoffs": 62,
+            "max_bend_rad": 0.635424017906189,
+            "max_stretch_m": 0.11480564624071121,
+            "n_substeps": 3000,
+            "passivity_trips": 1,
+            "spectral_skips": 2634,
+            "substep_ms_mean": 7.846104179819425,
+            "substep_ms_p50": 0.6893696263432503,
+            "trigger_fires": 366,
+            "wall_s": 36.61801552772522
+          }
+        },
+        "global_bgn": {
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.06455039232969284,
+            "final_ratio": -1.0,
+            "max_stretch_m": 0.06455039232969284,
+            "n_substeps": 3000,
+            "substep_ms_p50": 564.606674015522,
+            "substep_ms_p95": 590.1753801852465
+          }
+        },
+        "vbd_2": {
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.07785645872354507,
+            "final_ratio": -1.0,
+            "max_stretch_m": 0.07785645872354507,
+            "n_substeps": 3000,
+            "substep_ms_p50": 0.6044507026672363,
+            "substep_ms_p95": 0.6948948837816715
+          }
+        },
+        "vbd_80": {
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.06550765037536621,
+            "final_ratio": -1.0,
+            "max_stretch_m": 0.06550765037536621,
+            "n_substeps": 3000,
+            "substep_ms_p50": 18.00619810819626,
+            "substep_ms_p95": 18.22458617389202
+          }
+        }
+      },
+      "n_bodies": 2048,
+      "status": "complete"
+    },
+    "long_cantilever_4096_superbend500": {
+      "initial_state_hash": "e18b3a73b5e39ca524b1fca4d10340c899429061303c8bd412f60d47db88bb1d",
+      "methods": {
+        "etc": {
+          "metrics": {
+            "corrections_accepted": 479,
+            "corrections_attempted": 569,
+            "energy_rejects": 270,
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.07955580204725266,
+            "fuse_trip_substep": 1621,
+            "futility_backoffs": 52,
+            "max_bend_rad": 0.699370265007019,
+            "max_stretch_m": 0.14355291426181793,
+            "n_substeps": 3000,
+            "passivity_trips": 1,
+            "spectral_skips": 2431,
+            "substep_ms_mean": 23.24460525996983,
+            "substep_ms_p50": 0.6925612688064575,
+            "trigger_fires": 569,
+            "wall_s": 98.16547560691833
+          }
+        },
+        "global_bgn": {
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.06455039978027344,
+            "final_ratio": -1.0,
+            "max_stretch_m": 0.06455039978027344,
+            "n_substeps": 3000,
+            "substep_ms_p50": 1105.9130681678653,
+            "substep_ms_p95": 1152.8220451436937
+          }
+        },
+        "vbd_2": {
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.07768595218658447,
+            "final_ratio": -1.0,
+            "max_stretch_m": 0.07768595218658447,
+            "n_substeps": 3000,
+            "substep_ms_p50": 0.6096139550209045,
+            "substep_ms_p95": 0.8055585436522961
+          }
+        },
+        "vbd_80": {
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.06640706211328506,
+            "final_ratio": -1.0,
+            "max_stretch_m": 0.06640706211328506,
+            "n_substeps": 3000,
+            "substep_ms_p50": 17.97202881425619,
+            "substep_ms_p95": 18.244093842804432
+          }
+        }
+      },
+      "n_bodies": 4096,
+      "status": "complete"
+    },
+    "long_cantilever_512_bend": {
+      "initial_state_hash": "f7bcac7e27bbf60210e83424a05993a467c7df748aa3cda2b3a40f65d343eead",
+      "methods": {
+        "etc": {
+          "metrics": {
+            "corrections_accepted": 36,
+            "corrections_attempted": 36,
+            "energy_rejects": 0,
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.005282064434140921,
+            "fuse_trip_substep": 781,
+            "futility_backoffs": 36,
+            "max_bend_rad": 1.825903058052063,
+            "max_stretch_m": 0.06234963983297348,
+            "n_substeps": 3000,
+            "passivity_trips": 1,
+            "spectral_skips": 2964,
+            "substep_ms_mean": 0.9809027904023727,
+            "substep_ms_p50": 0.6856583058834076,
+            "trigger_fires": 36,
+            "wall_s": 6.191363334655762
+          }
+        },
+        "global_bgn": {
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.0035438104532659054,
+            "final_ratio": 0.9991616211890193,
+            "max_stretch_m": 0.04466898739337921,
+            "n_substeps": 3000,
+            "substep_ms_p50": 160.60351580381393,
+            "substep_ms_p95": 162.18452071771026
+          }
+        },
+        "vbd_2": {
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.00459766760468483,
+            "final_ratio": 0.9987865343497261,
+            "max_stretch_m": 0.06247631460428238,
+            "n_substeps": 3000,
+            "substep_ms_p50": 0.6098514422774315,
+            "substep_ms_p95": 0.7065809331834316
+          }
+        },
+        "vbd_80": {
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.0035911209415644407,
+            "final_ratio": 0.9991841379884563,
+            "max_stretch_m": 0.04414277896285057,
+            "n_substeps": 3000,
+            "substep_ms_p50": 18.12231633812189,
+            "substep_ms_p95": 18.37274692952633
+          }
+        }
+      },
+      "n_bodies": 512,
+      "status": "complete"
+    },
+    "long_vertical_1024_stiffbend": {
+      "initial_state_hash": "f23ec67a84ad997bb4764eee2aa2f5ae0f637e2f1f5734d95005882c2a4f4bd3",
+      "methods": {
+        "etc": {
+          "metrics": {
+            "corrections_accepted": 301,
+            "corrections_attempted": 436,
+            "energy_rejects": 394,
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.04775242134928703,
+            "fuse_trip_substep": 1081,
+            "futility_backoffs": 32,
+            "max_bend_rad": 0.697907567024231,
+            "max_stretch_m": 0.17775660753250122,
+            "n_substeps": 3000,
+            "passivity_trips": 1,
+            "spectral_skips": 2564,
+            "substep_ms_mean": 6.152245503539841,
+            "substep_ms_p50": 0.6906930357217789,
+            "trigger_fires": 436,
+            "wall_s": 24.87039041519165
+          }
+        },
+        "global_bgn": {
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.023662567138671875,
+            "final_ratio": 0.9999964976840352,
+            "max_stretch_m": 0.0499114990234375,
+            "n_substeps": 3000,
+            "substep_ms_p50": 273.1245802715421,
+            "substep_ms_p95": 276.1731268838048
+          }
+        },
+        "vbd_2": {
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.048175811767578125,
+            "final_ratio": 0.9999974671118586,
+            "max_stretch_m": 0.06792068481445312,
+            "n_substeps": 3000,
+            "substep_ms_p50": 0.6069233641028404,
+            "substep_ms_p95": 0.7636477239429951
+          }
+        },
+        "vbd_80": {
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.023738861083984375,
+            "final_ratio": 0.999996710869006,
+            "max_stretch_m": 0.049503326416015625,
+            "n_substeps": 3000,
+            "substep_ms_p50": 18.029604107141495,
+            "substep_ms_p95": 18.39588899165392
+          }
+        }
+      },
+      "n_bodies": 1024,
+      "status": "complete"
+    },
+    "vertical_hanging": {
+      "initial_state_hash": "3cf876dd56af0c2bc440225bc09e03409b16b908bea8f84680fe775be06b80ea",
+      "methods": {
+        "etc": {
+          "metrics": {
+            "corrections_accepted": 163,
+            "corrections_attempted": 1414,
+            "energy_rejects": 3764,
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.004827538505196571,
+            "fuse_trip_substep": -1,
+            "futility_backoffs": 80,
+            "max_bend_rad": 0.00422858539968729,
+            "max_stretch_m": 0.00786733627319336,
+            "n_substeps": 3000,
+            "passivity_trips": 0,
+            "spectral_skips": 1586,
+            "substep_ms_mean": 10.1391516191264,
+            "substep_ms_p50": 1.888718456029892,
+            "trigger_fires": 1414,
+            "wall_s": 31.36855983734131
+          }
+        },
+        "global_bgn": {
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.0021162033081054688,
+            "final_ratio": 0.9997203661208041,
+            "max_stretch_m": 0.005983829498291016,
+            "n_substeps": 3000,
+            "substep_ms_p50": 45.58856785297394,
+            "substep_ms_p95": 45.9058066830039
+          }
+        },
+        "vbd_2": {
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.004299640655517578,
+            "final_ratio": 0.9998117798891185,
+            "max_stretch_m": 0.00826883316040039,
+            "n_substeps": 3000,
+            "substep_ms_p50": 0.6053056567907333,
+            "substep_ms_p95": 0.7377313449978828
+          }
+        },
+        "vbd_80": {
+          "metrics": {
+            "fallback_substeps": 0,
+            "final_max_stretch_m": 0.0021271705627441406,
+            "final_ratio": 0.9997194230912818,
+            "max_stretch_m": 0.005992412567138672,
+            "n_substeps": 3000,
+            "substep_ms_p50": 17.999079078435898,
+            "substep_ms_p95": 18.229898903518915
+          }
+        }
+      },
+      "n_bodies": 128,
+      "status": "complete"
+    }
+  },
+  "schema": "fable-etc-staging/v1",
+  "semantics": "Track-B (damped-GN frame semantics) vs production VBD; descriptive timings; initial states hash-verified identical to the r4 coverage baselines",
+  "source_manifests": {
+    "etc_registry_manifest.json": "2c2dbc44c47308139c66c4b1ee330d4874425d15fc726e960477cab7537cc695",
+    "r4_coverage_manifest.json": "557339dd10bbd26b30ac9e3276e2c7400b5eed61f4697119326fd52f1a18a535"
+  }
+}

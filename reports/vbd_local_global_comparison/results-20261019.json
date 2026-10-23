@@ -1,0 +1,3642 @@
+{
+  "report_date": "2026-10-19",
+  "scope": "Results-only report. No solver code or private discussions included. Prior G1 versus current path unless a local G0 comparison is explicitly stated.",
+  "hardware": "NVIDIA L40",
+  "provenance_inputs": {
+    "final_contact_comparison.json": "8172bbf556d0ea3089d7eac1c86cd86dcad07f16024e00bca7c18a4208fe5c41",
+    "final_scale_comparison.json": "436e261396c57c3b0a2ed32cccd953937b7bb59fe9d8a5011447c1a904b06219",
+    "scale_default_comparison.json": "0f9bf4ca69414b1945fef3e4e2342582cb9b4c35021a3ea30ae1b92ac41b1dcb",
+    "research_friction_comparison.json": "3127349583b0102923dac6cfcbc39f48169822afc59acabb235b80cb256c97bf",
+    "particle_g1_matched_comparison.json": "862021c8c20cea02b3254d889a9919898d7b5ae952050e8928603fc17b1a8145"
+  },
+  "contact": [
+    {
+      "prefix": "final_contact_a1",
+      "metadata_sha256": "b6411551059838968a0bc7f3206c67406f76063558255ffc7e2574a4a0426486",
+      "recording_sha256": "ca10f56f9c7421f762f48d6caaed0889cb874dd99c2a9902a34ced360e66472f",
+      "settings": {
+        "scene": "mixed9",
+        "device": "cuda:0",
+        "ground": true,
+        "steps": 3000,
+        "sample": 100,
+        "iterations": 10,
+        "global_iterations": 1,
+        "hz": 6000,
+        "stiffness": 1000000,
+        "damping": 0,
+        "contact_capacity": 1048576,
+        "contacts_per_body": 2048
+      },
+      "physical_metadata": {
+        "actual_model_hashes": {
+          "body_mass": "32e70521fcecb19757c7a7c6cf26ff1d5c276e72837ccc6a6e737dbd5912a85b",
+          "body_inertia": "862ab2f670a90cbe5ac68ca16377fb6ca0369ab538be44f9170ad8cedddf0679",
+          "body_inv_inertia": "f5e62918826e86813087b1422c8be96db55b53769caa7e06964bf64b611e6d3e",
+          "body_com": "b38a4115030a9504592191502f477810d9424f3f7a513f9f1997e904f3a04163",
+          "joint_parent": "9bdc6833f656a134d80a2a63a6a7ce7bcd9e3c82981c4f482d54d87aa34dbdc1",
+          "joint_child": "1033a9b11e74c62e75c9c3ced70e9a8b5222d00846298c6593141f14693952b5",
+          "joint_type": "2a18fe4bde708c8e2595ced39a63ea2bdf0a2847c63ac891c73886ee53f46d04",
+          "joint_X_p": "f05e33c96eb7686585993423ef9144438a7707c24f9d5e872ec9f8985db8a194",
+          "joint_X_c": "c6e1812648110ed96828e3e1795292e9cad34a32f1597bc8bba29ab149ee2ed0"
+        },
+        "material_parameters": {
+          "shape_material_ke": [
+            2500
+          ],
+          "shape_material_kd": [
+            100
+          ],
+          "shape_material_kf": [
+            1000
+          ],
+          "shape_material_ka": [
+            0
+          ],
+          "shape_material_mu": [
+            1
+          ],
+          "shape_material_restitution": [
+            0
+          ],
+          "shape_gap": [
+            0.10000000149011612
+          ]
+        },
+        "resolved_solver_options": {
+          "iterations": 10,
+          "rigid_compliant_alm": true,
+          "rigid_joint_global_iterations": 1,
+          "friction_epsilon": 0.01,
+          "rigid_avbd_gamma": 0.999,
+          "rigid_contact_hard": 1,
+          "rigid_contact_history": false,
+          "deterministic": "1",
+          "body_body_contact_buffer_pre_alloc": 2048
+        }
+      },
+      "provenance_collection_s": 0.010212663561105728,
+      "timed_steps": 2998,
+      "end_to_end_ms_per_step": 40.9757912984047,
+      "gpu_ms_per_step": 40.97540165123103,
+      "all_sampled_finite": true,
+      "all_sampled_capacities_valid": true,
+      "sampled_max_penetration_m": 0.000008116223916426702,
+      "last_sample": {
+        "finite": true,
+        "min_capsule_surface_z_m": -0.000008116223916426702,
+        "joint_anchor_gap_max_m": 3.582642549160002e-7,
+        "linear_speed_max_m_s": 0.07510783925206224,
+        "kinetic_energy_J": 0.000012737870618160537,
+        "gravity_potential_J": 0.006184783772018493,
+        "contact_count": 367071,
+        "max_body_contacts": 874,
+        "capacity_valid": true,
+        "nonzero_normal_multiplier_count": 1649,
+        "normal_multiplier_l1_N": 0.3520697355270386,
+        "step": 3000,
+        "time_s": 0.5
+      },
+      "setup": {
+        "model_build_s": 2.299180019646883,
+        "collision_pipeline_s": 0.11863743141293526,
+        "solver_constructor_s": 7.32035281136632,
+        "first_two_steps_compile_and_simulation_s": 36.55286244302988,
+        "capture_s": 0.1484861932694912,
+        "diagnostics_s": 0.24057193100452423
+      },
+      "q_bitwise_equal_first_run": true,
+      "qd_bitwise_equal_first_run": true,
+      "source_hashes": {
+        "rigid_vbd_kkt.py": "99d92531c2858b363fa587386ce1f9b182833a240c99487cc92b2d5bff17c044",
+        "solver_vbd.py": "53914c439671a3a62638b90fa73340c6d7f74966743e886a718692137e4d272d",
+        "rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+        "builder.py": "b421fc46530d740d35df38ecc1f2be1e1df4e3db188e7f178eb6c662eac38c4b",
+        "inertia.py": "db4e68fa9bce8a3ef8ca4085719b9840aef38dbcade825f75a864325ad4ae33d"
+      }
+    },
+    {
+      "prefix": "final_contact_b1",
+      "metadata_sha256": "de7a498a399e38ec09790747bc2e01205438bd52966d367cee02115c27d05445",
+      "recording_sha256": "ca10f56f9c7421f762f48d6caaed0889cb874dd99c2a9902a34ced360e66472f",
+      "settings": {
+        "scene": "mixed9",
+        "device": "cuda:0",
+        "ground": true,
+        "steps": 3000,
+        "sample": 100,
+        "iterations": 10,
+        "global_iterations": 1,
+        "hz": 6000,
+        "stiffness": 1000000,
+        "damping": 0,
+        "contact_capacity": 1048576,
+        "contacts_per_body": 2048
+      },
+      "physical_metadata": {
+        "actual_model_hashes": {
+          "body_mass": "32e70521fcecb19757c7a7c6cf26ff1d5c276e72837ccc6a6e737dbd5912a85b",
+          "body_inertia": "862ab2f670a90cbe5ac68ca16377fb6ca0369ab538be44f9170ad8cedddf0679",
+          "body_inv_inertia": "f5e62918826e86813087b1422c8be96db55b53769caa7e06964bf64b611e6d3e",
+          "body_com": "b38a4115030a9504592191502f477810d9424f3f7a513f9f1997e904f3a04163",
+          "joint_parent": "9bdc6833f656a134d80a2a63a6a7ce7bcd9e3c82981c4f482d54d87aa34dbdc1",
+          "joint_child": "1033a9b11e74c62e75c9c3ced70e9a8b5222d00846298c6593141f14693952b5",
+          "joint_type": "2a18fe4bde708c8e2595ced39a63ea2bdf0a2847c63ac891c73886ee53f46d04",
+          "joint_X_p": "f05e33c96eb7686585993423ef9144438a7707c24f9d5e872ec9f8985db8a194",
+          "joint_X_c": "c6e1812648110ed96828e3e1795292e9cad34a32f1597bc8bba29ab149ee2ed0"
+        },
+        "material_parameters": {
+          "shape_material_ke": [
+            2500
+          ],
+          "shape_material_kd": [
+            100
+          ],
+          "shape_material_kf": [
+            1000
+          ],
+          "shape_material_ka": [
+            0
+          ],
+          "shape_material_mu": [
+            1
+          ],
+          "shape_material_restitution": [
+            0
+          ],
+          "shape_gap": [
+            0.10000000149011612
+          ]
+        },
+        "resolved_solver_options": {
+          "iterations": 10,
+          "rigid_compliant_alm": true,
+          "rigid_joint_global_iterations": 1,
+          "friction_epsilon": 0.01,
+          "rigid_avbd_gamma": 0.999,
+          "rigid_contact_hard": 1,
+          "rigid_contact_history": false,
+          "deterministic": "1",
+          "body_body_contact_buffer_pre_alloc": 2048
+        }
+      },
+      "provenance_collection_s": 0.010384533554315567,
+      "timed_steps": 2998,
+      "end_to_end_ms_per_step": 33.58125486091187,
+      "gpu_ms_per_step": 33.58087308856946,
+      "all_sampled_finite": true,
+      "all_sampled_capacities_valid": true,
+      "sampled_max_penetration_m": 0.000008116223916426702,
+      "last_sample": {
+        "finite": true,
+        "min_capsule_surface_z_m": -0.000008116223916426702,
+        "joint_anchor_gap_max_m": 3.582642549160002e-7,
+        "linear_speed_max_m_s": 0.07510783925206224,
+        "kinetic_energy_J": 0.000012737870618160537,
+        "gravity_potential_J": 0.006184783772018493,
+        "contact_count": 367071,
+        "max_body_contacts": 874,
+        "capacity_valid": true,
+        "nonzero_normal_multiplier_count": 1649,
+        "normal_multiplier_l1_N": 0.3520697355270386,
+        "step": 3000,
+        "time_s": 0.5
+      },
+      "setup": {
+        "model_build_s": 2.2822703756392,
+        "collision_pipeline_s": 0.11341630294919014,
+        "solver_constructor_s": 7.07891633734107,
+        "first_two_steps_compile_and_simulation_s": 35.91065737605095,
+        "capture_s": 0.10026711225509644,
+        "diagnostics_s": 0.4155513495206833
+      },
+      "q_bitwise_equal_first_run": true,
+      "qd_bitwise_equal_first_run": true,
+      "source_hashes": {
+        "rigid_vbd_kkt.py": "0c95a947b4cc64d76cf5f2d147e1f9ffd4a85d87c5b8956b7424f22b0e6f2e8d",
+        "solver_vbd.py": "c6be3919eae993a7a0c3bd36af652af2894cd2600f8d5d9714560f628b04bd72",
+        "rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+        "builder.py": "b421fc46530d740d35df38ecc1f2be1e1df4e3db188e7f178eb6c662eac38c4b",
+        "inertia.py": "db4e68fa9bce8a3ef8ca4085719b9840aef38dbcade825f75a864325ad4ae33d"
+      }
+    },
+    {
+      "prefix": "final_contact_b2",
+      "metadata_sha256": "9fb97e407efae22c9d124d79931a4186bae4f91e807ccf24f6caa4e513e8ec50",
+      "recording_sha256": "ca10f56f9c7421f762f48d6caaed0889cb874dd99c2a9902a34ced360e66472f",
+      "settings": {
+        "scene": "mixed9",
+        "device": "cuda:0",
+        "ground": true,
+        "steps": 3000,
+        "sample": 100,
+        "iterations": 10,
+        "global_iterations": 1,
+        "hz": 6000,
+        "stiffness": 1000000,
+        "damping": 0,
+        "contact_capacity": 1048576,
+        "contacts_per_body": 2048
+      },
+      "physical_metadata": {
+        "actual_model_hashes": {
+          "body_mass": "32e70521fcecb19757c7a7c6cf26ff1d5c276e72837ccc6a6e737dbd5912a85b",
+          "body_inertia": "862ab2f670a90cbe5ac68ca16377fb6ca0369ab538be44f9170ad8cedddf0679",
+          "body_inv_inertia": "f5e62918826e86813087b1422c8be96db55b53769caa7e06964bf64b611e6d3e",
+          "body_com": "b38a4115030a9504592191502f477810d9424f3f7a513f9f1997e904f3a04163",
+          "joint_parent": "9bdc6833f656a134d80a2a63a6a7ce7bcd9e3c82981c4f482d54d87aa34dbdc1",
+          "joint_child": "1033a9b11e74c62e75c9c3ced70e9a8b5222d00846298c6593141f14693952b5",
+          "joint_type": "2a18fe4bde708c8e2595ced39a63ea2bdf0a2847c63ac891c73886ee53f46d04",
+          "joint_X_p": "f05e33c96eb7686585993423ef9144438a7707c24f9d5e872ec9f8985db8a194",
+          "joint_X_c": "c6e1812648110ed96828e3e1795292e9cad34a32f1597bc8bba29ab149ee2ed0"
+        },
+        "material_parameters": {
+          "shape_material_ke": [
+            2500
+          ],
+          "shape_material_kd": [
+            100
+          ],
+          "shape_material_kf": [
+            1000
+          ],
+          "shape_material_ka": [
+            0
+          ],
+          "shape_material_mu": [
+            1
+          ],
+          "shape_material_restitution": [
+            0
+          ],
+          "shape_gap": [
+            0.10000000149011612
+          ]
+        },
+        "resolved_solver_options": {
+          "iterations": 10,
+          "rigid_compliant_alm": true,
+          "rigid_joint_global_iterations": 1,
+          "friction_epsilon": 0.01,
+          "rigid_avbd_gamma": 0.999,
+          "rigid_contact_hard": 1,
+          "rigid_contact_history": false,
+          "deterministic": "1",
+          "body_body_contact_buffer_pre_alloc": 2048
+        }
+      },
+      "provenance_collection_s": 0.010987434536218643,
+      "timed_steps": 2998,
+      "end_to_end_ms_per_step": 33.56535748775559,
+      "gpu_ms_per_step": 33.565013801518724,
+      "all_sampled_finite": true,
+      "all_sampled_capacities_valid": true,
+      "sampled_max_penetration_m": 0.000008116223916426702,
+      "last_sample": {
+        "finite": true,
+        "min_capsule_surface_z_m": -0.000008116223916426702,
+        "joint_anchor_gap_max_m": 3.582642549160002e-7,
+        "linear_speed_max_m_s": 0.07510783925206224,
+        "kinetic_energy_J": 0.000012737870618160537,
+        "gravity_potential_J": 0.006184783772018493,
+        "contact_count": 367071,
+        "max_body_contacts": 874,
+        "capacity_valid": true,
+        "nonzero_normal_multiplier_count": 1649,
+        "normal_multiplier_l1_N": 0.3520697355270386,
+        "step": 3000,
+        "time_s": 0.5
+      },
+      "setup": {
+        "model_build_s": 2.292003992944956,
+        "collision_pipeline_s": 0.11229071766138077,
+        "solver_constructor_s": 7.0559773705899715,
+        "first_two_steps_compile_and_simulation_s": 36.10465109348297,
+        "capture_s": 0.09634372591972351,
+        "diagnostics_s": 0.37612997367978096
+      },
+      "q_bitwise_equal_first_run": true,
+      "qd_bitwise_equal_first_run": true,
+      "source_hashes": {
+        "rigid_vbd_kkt.py": "0c95a947b4cc64d76cf5f2d147e1f9ffd4a85d87c5b8956b7424f22b0e6f2e8d",
+        "solver_vbd.py": "c6be3919eae993a7a0c3bd36af652af2894cd2600f8d5d9714560f628b04bd72",
+        "rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+        "builder.py": "b421fc46530d740d35df38ecc1f2be1e1df4e3db188e7f178eb6c662eac38c4b",
+        "inertia.py": "db4e68fa9bce8a3ef8ca4085719b9840aef38dbcade825f75a864325ad4ae33d"
+      }
+    },
+    {
+      "prefix": "final_contact_a2",
+      "metadata_sha256": "3ca32a8991760145291cd07a49443e645df09742f9d0b96e6e312961e40a4a99",
+      "recording_sha256": "ca10f56f9c7421f762f48d6caaed0889cb874dd99c2a9902a34ced360e66472f",
+      "settings": {
+        "scene": "mixed9",
+        "device": "cuda:0",
+        "ground": true,
+        "steps": 3000,
+        "sample": 100,
+        "iterations": 10,
+        "global_iterations": 1,
+        "hz": 6000,
+        "stiffness": 1000000,
+        "damping": 0,
+        "contact_capacity": 1048576,
+        "contacts_per_body": 2048
+      },
+      "physical_metadata": {
+        "actual_model_hashes": {
+          "body_mass": "32e70521fcecb19757c7a7c6cf26ff1d5c276e72837ccc6a6e737dbd5912a85b",
+          "body_inertia": "862ab2f670a90cbe5ac68ca16377fb6ca0369ab538be44f9170ad8cedddf0679",
+          "body_inv_inertia": "f5e62918826e86813087b1422c8be96db55b53769caa7e06964bf64b611e6d3e",
+          "body_com": "b38a4115030a9504592191502f477810d9424f3f7a513f9f1997e904f3a04163",
+          "joint_parent": "9bdc6833f656a134d80a2a63a6a7ce7bcd9e3c82981c4f482d54d87aa34dbdc1",
+          "joint_child": "1033a9b11e74c62e75c9c3ced70e9a8b5222d00846298c6593141f14693952b5",
+          "joint_type": "2a18fe4bde708c8e2595ced39a63ea2bdf0a2847c63ac891c73886ee53f46d04",
+          "joint_X_p": "f05e33c96eb7686585993423ef9144438a7707c24f9d5e872ec9f8985db8a194",
+          "joint_X_c": "c6e1812648110ed96828e3e1795292e9cad34a32f1597bc8bba29ab149ee2ed0"
+        },
+        "material_parameters": {
+          "shape_material_ke": [
+            2500
+          ],
+          "shape_material_kd": [
+            100
+          ],
+          "shape_material_kf": [
+            1000
+          ],
+          "shape_material_ka": [
+            0
+          ],
+          "shape_material_mu": [
+            1
+          ],
+          "shape_material_restitution": [
+            0
+          ],
+          "shape_gap": [
+            0.10000000149011612
+          ]
+        },
+        "resolved_solver_options": {
+          "iterations": 10,
+          "rigid_compliant_alm": true,
+          "rigid_joint_global_iterations": 1,
+          "friction_epsilon": 0.01,
+          "rigid_avbd_gamma": 0.999,
+          "rigid_contact_hard": 1,
+          "rigid_contact_history": false,
+          "deterministic": "1",
+          "body_body_contact_buffer_pre_alloc": 2048
+        }
+      },
+      "provenance_collection_s": 0.010165557265281677,
+      "timed_steps": 2998,
+      "end_to_end_ms_per_step": 40.922765119909606,
+      "gpu_ms_per_step": 40.922385757171455,
+      "all_sampled_finite": true,
+      "all_sampled_capacities_valid": true,
+      "sampled_max_penetration_m": 0.000008116223916426702,
+      "last_sample": {
+        "finite": true,
+        "min_capsule_surface_z_m": -0.000008116223916426702,
+        "joint_anchor_gap_max_m": 3.582642549160002e-7,
+        "linear_speed_max_m_s": 0.07510783925206224,
+        "kinetic_energy_J": 0.000012737870618160537,
+        "gravity_potential_J": 0.006184783772018493,
+        "contact_count": 367071,
+        "max_body_contacts": 874,
+        "capacity_valid": true,
+        "nonzero_normal_multiplier_count": 1649,
+        "normal_multiplier_l1_N": 0.35206976532936096,
+        "step": 3000,
+        "time_s": 0.5
+      },
+      "setup": {
+        "model_build_s": 2.273568030446768,
+        "collision_pipeline_s": 0.11459190398454666,
+        "solver_constructor_s": 7.255196362733841,
+        "first_two_steps_compile_and_simulation_s": 37.01429895311594,
+        "capture_s": 0.13698703795671463,
+        "diagnostics_s": 0.37538058683276176
+      },
+      "q_bitwise_equal_first_run": true,
+      "qd_bitwise_equal_first_run": true,
+      "source_hashes": {
+        "rigid_vbd_kkt.py": "99d92531c2858b363fa587386ce1f9b182833a240c99487cc92b2d5bff17c044",
+        "solver_vbd.py": "53914c439671a3a62638b90fa73340c6d7f74966743e886a718692137e4d272d",
+        "rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+        "builder.py": "b421fc46530d740d35df38ecc1f2be1e1df4e3db188e7f178eb6c662eac38c4b",
+        "inertia.py": "db4e68fa9bce8a3ef8ca4085719b9840aef38dbcade825f75a864325ad4ae33d"
+      }
+    }
+  ],
+  "scale": [
+    {
+      "scene": "ladder50",
+      "device": "cuda:0",
+      "bodies": 200,
+      "physical": {
+        "segment_centerline_m": 0.003,
+        "radius_m": 0.0016,
+        "density_input_kg_per_m": 0.01,
+        "stretch_shear_n_m": 100000,
+        "bend_twist_nm_rad": 0.1,
+        "damping": 0,
+        "gravity_m_s2": [
+          0,
+          0,
+          -9.81
+        ],
+        "contact": false,
+        "first_body_pinned": true,
+        "note": "Density input is converted to volumetric density using pi*r^2; native capsule mass includes caps. Native builder inertia validation is retained unchanged. These are matched execution controls, not calibrated industrial-cable physics. Y-farm differs in material/segment settings and is not a same-material scaling sequence."
+      },
+      "all_saved_states_bitwise_equal": true,
+      "mean_speedup": 1.0923704680676185,
+      "baseline_range_ms": [
+        0.5292121856706996,
+        0.5293440783900959
+      ],
+      "candidate_range_ms": [
+        0.4845044908914279,
+        0.4845406224695735
+      ],
+      "interpretation": "Equal recorded states at matched budgets; finite sampled evidence only.",
+      "runs": {
+        "A1": {
+          "prefix": "scale_default_ladder50_cuda0_a1",
+          "wall_ms": 0.5292121856706996,
+          "gpu_ms": 0.5289963846621306,
+          "metadata_sha256": "097c17c8448ebb878c358da08531cc19cc602c6013b77a9af9abf81678f77f26",
+          "recording_sha256": "51d7082cc206d02e4789f2a639cbc3c10dd5319eda63a028738b973a5ca8528c",
+          "setup": {
+            "model_build_s": 0.6947327293455601,
+            "constructor_s": 0.2184474766254425,
+            "first_two_steps_compile_and_simulation_s": 0.1429295726120472,
+            "capture_s": 0.0067220814526081085,
+            "diagnostics_s": 0.005998242646455765,
+            "model_signature_diagnostics_s": 0.0012522675096988678
+          },
+          "samples": [
+            {
+              "step": 0,
+              "time_s": 0,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.13391669133883e-8,
+              "maximum_linear_speed_m_s": 0
+            },
+            {
+              "step": 60,
+              "time_s": 0.01,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.668838327175797e-7,
+              "maximum_linear_speed_m_s": 0.0018103530164808035
+            },
+            {
+              "step": 120,
+              "time_s": 0.02,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9595868434416135e-7,
+              "maximum_linear_speed_m_s": 0.0013663845602422953
+            },
+            {
+              "step": 180,
+              "time_s": 0.03,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.65440763070071e-7,
+              "maximum_linear_speed_m_s": 0.001937616616487503
+            },
+            {
+              "step": 240,
+              "time_s": 0.04,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.6476339391405715e-7,
+              "maximum_linear_speed_m_s": 0.0024600885808467865
+            },
+            {
+              "step": 300,
+              "time_s": 0.049999999999999996,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.6401789282080805e-7,
+              "maximum_linear_speed_m_s": 0.0029224902391433716
+            },
+            {
+              "step": 360,
+              "time_s": 0.06,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9238088115615253e-7,
+              "maximum_linear_speed_m_s": 0.003329012542963028
+            },
+            {
+              "step": 420,
+              "time_s": 0.06999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.625852854644073e-7,
+              "maximum_linear_speed_m_s": 0.0036863277200609446
+            },
+            {
+              "step": 480,
+              "time_s": 0.08,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.6115049710672354e-7,
+              "maximum_linear_speed_m_s": 0.003996770828962326
+            },
+            {
+              "step": 540,
+              "time_s": 0.09,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.902348289531868e-7,
+              "maximum_linear_speed_m_s": 0.004306409507989883
+            },
+            {
+              "step": 600,
+              "time_s": 0.09999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.6043904838489316e-7,
+              "maximum_linear_speed_m_s": 0.004479782190173864
+            }
+          ],
+          "source_hashes": {
+            "_src/solvers/vbd/solver_vbd.py": "53914c439671a3a62638b90fa73340c6d7f74966743e886a718692137e4d272d",
+            "_src/solvers/vbd/rigid_vbd_kkt.py": "99d92531c2858b363fa587386ce1f9b182833a240c99487cc92b2d5bff17c044",
+            "_src/solvers/vbd/rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+            "cable_scenes.py": "9b912909b8de813700375968c564d23f245d5a4d2c3a47c70672ba62da9055f7",
+            "yfarm_bench.py": "1e9f3d8678ed6bffdecaee29a67fbc2f3f13df7702a2927b85d4626218b69aee",
+            "cable_run.py": "a470e3115b0927e290a8a6b8051746d13e2a5fd06b4d7e4101f8f5be1114cfa9"
+          }
+        },
+        "B1": {
+          "prefix": "scale_default_ladder50_cuda0_b1",
+          "wall_ms": 0.4845044908914279,
+          "gpu_ms": 0.48429394087265165,
+          "metadata_sha256": "5fa1d079b6163b3a66dc6617486d89b4483f8a9e5f58b2bb95cb58fc4a2cf123",
+          "recording_sha256": "51d7082cc206d02e4789f2a639cbc3c10dd5319eda63a028738b973a5ca8528c",
+          "setup": {
+            "model_build_s": 0.5609004460275173,
+            "constructor_s": 0.20325583219528198,
+            "first_two_steps_compile_and_simulation_s": 0.11512373015284538,
+            "capture_s": 0.0064451321959495544,
+            "diagnostics_s": 0.004842299968004227,
+            "model_signature_diagnostics_s": 0.00119888037443161
+          },
+          "samples": [
+            {
+              "step": 0,
+              "time_s": 0,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.13391669133883e-8,
+              "maximum_linear_speed_m_s": 0
+            },
+            {
+              "step": 60,
+              "time_s": 0.01,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.668838327175797e-7,
+              "maximum_linear_speed_m_s": 0.0018103530164808035
+            },
+            {
+              "step": 120,
+              "time_s": 0.02,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9595868434416135e-7,
+              "maximum_linear_speed_m_s": 0.0013663845602422953
+            },
+            {
+              "step": 180,
+              "time_s": 0.03,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.65440763070071e-7,
+              "maximum_linear_speed_m_s": 0.001937616616487503
+            },
+            {
+              "step": 240,
+              "time_s": 0.04,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.6476339391405715e-7,
+              "maximum_linear_speed_m_s": 0.0024600885808467865
+            },
+            {
+              "step": 300,
+              "time_s": 0.049999999999999996,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.6401789282080805e-7,
+              "maximum_linear_speed_m_s": 0.0029224902391433716
+            },
+            {
+              "step": 360,
+              "time_s": 0.06,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9238088115615253e-7,
+              "maximum_linear_speed_m_s": 0.003329012542963028
+            },
+            {
+              "step": 420,
+              "time_s": 0.06999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.625852854644073e-7,
+              "maximum_linear_speed_m_s": 0.0036863277200609446
+            },
+            {
+              "step": 480,
+              "time_s": 0.08,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.6115049710672354e-7,
+              "maximum_linear_speed_m_s": 0.003996770828962326
+            },
+            {
+              "step": 540,
+              "time_s": 0.09,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.902348289531868e-7,
+              "maximum_linear_speed_m_s": 0.004306409507989883
+            },
+            {
+              "step": 600,
+              "time_s": 0.09999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.6043904838489316e-7,
+              "maximum_linear_speed_m_s": 0.004479782190173864
+            }
+          ],
+          "source_hashes": {
+            "_src/solvers/vbd/solver_vbd.py": "c6be3919eae993a7a0c3bd36af652af2894cd2600f8d5d9714560f628b04bd72",
+            "_src/solvers/vbd/rigid_vbd_kkt.py": "bc31052f1e212333cbfaaf6b1de26e10f6f0e4ccc66a3dd7e0ffca3b1b65c047",
+            "_src/solvers/vbd/rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+            "cable_scenes.py": "9b912909b8de813700375968c564d23f245d5a4d2c3a47c70672ba62da9055f7",
+            "yfarm_bench.py": "1e9f3d8678ed6bffdecaee29a67fbc2f3f13df7702a2927b85d4626218b69aee",
+            "cable_run.py": "a470e3115b0927e290a8a6b8051746d13e2a5fd06b4d7e4101f8f5be1114cfa9"
+          }
+        },
+        "B2": {
+          "prefix": "scale_default_ladder50_cuda0_b2",
+          "wall_ms": 0.4845406224695735,
+          "gpu_ms": 0.484314436896589,
+          "metadata_sha256": "5e6f1b84d25cc0462d4fd3163700936a66928552e72cce7a64961f6c95f87641",
+          "recording_sha256": "51d7082cc206d02e4789f2a639cbc3c10dd5319eda63a028738b973a5ca8528c",
+          "setup": {
+            "model_build_s": 0.6233915351331234,
+            "constructor_s": 0.21566953882575035,
+            "first_two_steps_compile_and_simulation_s": 0.11936992034316063,
+            "capture_s": 0.006547741591930389,
+            "diagnostics_s": 0.005085941404104233,
+            "model_signature_diagnostics_s": 0.0012342296540737152
+          },
+          "samples": [
+            {
+              "step": 0,
+              "time_s": 0,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.13391669133883e-8,
+              "maximum_linear_speed_m_s": 0
+            },
+            {
+              "step": 60,
+              "time_s": 0.01,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.668838327175797e-7,
+              "maximum_linear_speed_m_s": 0.0018103530164808035
+            },
+            {
+              "step": 120,
+              "time_s": 0.02,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9595868434416135e-7,
+              "maximum_linear_speed_m_s": 0.0013663845602422953
+            },
+            {
+              "step": 180,
+              "time_s": 0.03,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.65440763070071e-7,
+              "maximum_linear_speed_m_s": 0.001937616616487503
+            },
+            {
+              "step": 240,
+              "time_s": 0.04,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.6476339391405715e-7,
+              "maximum_linear_speed_m_s": 0.0024600885808467865
+            },
+            {
+              "step": 300,
+              "time_s": 0.049999999999999996,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.6401789282080805e-7,
+              "maximum_linear_speed_m_s": 0.0029224902391433716
+            },
+            {
+              "step": 360,
+              "time_s": 0.06,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9238088115615253e-7,
+              "maximum_linear_speed_m_s": 0.003329012542963028
+            },
+            {
+              "step": 420,
+              "time_s": 0.06999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.625852854644073e-7,
+              "maximum_linear_speed_m_s": 0.0036863277200609446
+            },
+            {
+              "step": 480,
+              "time_s": 0.08,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.6115049710672354e-7,
+              "maximum_linear_speed_m_s": 0.003996770828962326
+            },
+            {
+              "step": 540,
+              "time_s": 0.09,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.902348289531868e-7,
+              "maximum_linear_speed_m_s": 0.004306409507989883
+            },
+            {
+              "step": 600,
+              "time_s": 0.09999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.6043904838489316e-7,
+              "maximum_linear_speed_m_s": 0.004479782190173864
+            }
+          ],
+          "source_hashes": {
+            "_src/solvers/vbd/solver_vbd.py": "c6be3919eae993a7a0c3bd36af652af2894cd2600f8d5d9714560f628b04bd72",
+            "_src/solvers/vbd/rigid_vbd_kkt.py": "bc31052f1e212333cbfaaf6b1de26e10f6f0e4ccc66a3dd7e0ffca3b1b65c047",
+            "_src/solvers/vbd/rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+            "cable_scenes.py": "9b912909b8de813700375968c564d23f245d5a4d2c3a47c70672ba62da9055f7",
+            "yfarm_bench.py": "1e9f3d8678ed6bffdecaee29a67fbc2f3f13df7702a2927b85d4626218b69aee",
+            "cable_run.py": "a470e3115b0927e290a8a6b8051746d13e2a5fd06b4d7e4101f8f5be1114cfa9"
+          }
+        },
+        "A2": {
+          "prefix": "scale_default_ladder50_cuda0_a2",
+          "wall_ms": 0.5293440783900959,
+          "gpu_ms": 0.5291672454629853,
+          "metadata_sha256": "1432aac204ebdae1661119a226333e48efa62a21c5e4e54347268eb9d4570544",
+          "recording_sha256": "51d7082cc206d02e4789f2a639cbc3c10dd5319eda63a028738b973a5ca8528c",
+          "setup": {
+            "model_build_s": 0.6559840366244316,
+            "constructor_s": 0.2176160141825676,
+            "first_two_steps_compile_and_simulation_s": 0.12318569421768188,
+            "capture_s": 0.00685984268784523,
+            "diagnostics_s": 0.004940543323755264,
+            "model_signature_diagnostics_s": 0.0012580938637256622
+          },
+          "samples": [
+            {
+              "step": 0,
+              "time_s": 0,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.13391669133883e-8,
+              "maximum_linear_speed_m_s": 0
+            },
+            {
+              "step": 60,
+              "time_s": 0.01,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.668838327175797e-7,
+              "maximum_linear_speed_m_s": 0.0018103530164808035
+            },
+            {
+              "step": 120,
+              "time_s": 0.02,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9595868434416135e-7,
+              "maximum_linear_speed_m_s": 0.0013663845602422953
+            },
+            {
+              "step": 180,
+              "time_s": 0.03,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.65440763070071e-7,
+              "maximum_linear_speed_m_s": 0.001937616616487503
+            },
+            {
+              "step": 240,
+              "time_s": 0.04,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.6476339391405715e-7,
+              "maximum_linear_speed_m_s": 0.0024600885808467865
+            },
+            {
+              "step": 300,
+              "time_s": 0.049999999999999996,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.6401789282080805e-7,
+              "maximum_linear_speed_m_s": 0.0029224902391433716
+            },
+            {
+              "step": 360,
+              "time_s": 0.06,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9238088115615253e-7,
+              "maximum_linear_speed_m_s": 0.003329012542963028
+            },
+            {
+              "step": 420,
+              "time_s": 0.06999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.625852854644073e-7,
+              "maximum_linear_speed_m_s": 0.0036863277200609446
+            },
+            {
+              "step": 480,
+              "time_s": 0.08,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.6115049710672354e-7,
+              "maximum_linear_speed_m_s": 0.003996770828962326
+            },
+            {
+              "step": 540,
+              "time_s": 0.09,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.902348289531868e-7,
+              "maximum_linear_speed_m_s": 0.004306409507989883
+            },
+            {
+              "step": 600,
+              "time_s": 0.09999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.6043904838489316e-7,
+              "maximum_linear_speed_m_s": 0.004479782190173864
+            }
+          ],
+          "source_hashes": {
+            "_src/solvers/vbd/solver_vbd.py": "53914c439671a3a62638b90fa73340c6d7f74966743e886a718692137e4d272d",
+            "_src/solvers/vbd/rigid_vbd_kkt.py": "99d92531c2858b363fa587386ce1f9b182833a240c99487cc92b2d5bff17c044",
+            "_src/solvers/vbd/rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+            "cable_scenes.py": "9b912909b8de813700375968c564d23f245d5a4d2c3a47c70672ba62da9055f7",
+            "yfarm_bench.py": "1e9f3d8678ed6bffdecaee29a67fbc2f3f13df7702a2927b85d4626218b69aee",
+            "cable_run.py": "a470e3115b0927e290a8a6b8051746d13e2a5fd06b4d7e4101f8f5be1114cfa9"
+          }
+        }
+      }
+    },
+    {
+      "scene": "rack",
+      "device": "cuda:0",
+      "bodies": 92694,
+      "physical": {
+        "segment_centerline_m": 0.003,
+        "radius_m": 0.0016,
+        "density_input_kg_per_m": 0.01,
+        "stretch_shear_n_m": 100000,
+        "bend_twist_nm_rad": 0.1,
+        "damping": 0,
+        "gravity_m_s2": [
+          0,
+          0,
+          -9.81
+        ],
+        "contact": false,
+        "first_body_pinned": true,
+        "note": "Density input is converted to volumetric density using pi*r^2; native capsule mass includes caps. Native builder inertia validation is retained unchanged. These are matched execution controls, not calibrated industrial-cable physics. Y-farm differs in material/segment settings and is not a same-material scaling sequence."
+      },
+      "all_saved_states_bitwise_equal": true,
+      "mean_speedup": 8.230711089139954,
+      "baseline_range_ms": [
+        22.97630427050152,
+        22.98879965417162
+      ],
+      "candidate_range_ms": [
+        2.792285742817515,
+        2.792299042976022
+      ],
+      "interpretation": "Equal recorded states at matched budgets; finite sampled evidence only.",
+      "runs": {
+        "A1": {
+          "prefix": "scale_default_rack_cuda0_a1",
+          "wall_ms": 22.98879965417162,
+          "gpu_ms": 22.98834698016827,
+          "metadata_sha256": "52475b95979a43aeed0b9979daf134553204006633562d7b12fcd2b016b4b061",
+          "recording_sha256": "9cb74a61b81fb33c148c6ff83367156c1f384d39defb7f85436cb75ccf8c1096",
+          "setup": {
+            "model_build_s": 89.25753027573228,
+            "constructor_s": 20.495412155985832,
+            "first_two_steps_compile_and_simulation_s": 0.2443552315235138,
+            "capture_s": 0.13612233102321625,
+            "diagnostics_s": 0.4131792150437832,
+            "model_signature_diagnostics_s": 0.03712289035320282
+          },
+          "samples": [
+            {
+              "step": 0,
+              "time_s": 0,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000003104343217746887,
+              "maximum_linear_speed_m_s": 0
+            },
+            {
+              "step": 60,
+              "time_s": 0.01,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000002737009178104806,
+              "maximum_linear_speed_m_s": 0.10017666965723038
+            },
+            {
+              "step": 120,
+              "time_s": 0.02,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000004905661017357681,
+              "maximum_linear_speed_m_s": 0.18690983951091766
+            },
+            {
+              "step": 180,
+              "time_s": 0.03,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.0000075070752290131454,
+              "maximum_linear_speed_m_s": 0.25633376836776733
+            },
+            {
+              "step": 240,
+              "time_s": 0.04,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.00000986676235300181,
+              "maximum_linear_speed_m_s": 0.16846702992916107
+            },
+            {
+              "step": 300,
+              "time_s": 0.049999999999999996,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000011564060811009722,
+              "maximum_linear_speed_m_s": 0.1432919204235077
+            },
+            {
+              "step": 360,
+              "time_s": 0.06,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000012026519623594808,
+              "maximum_linear_speed_m_s": 0.17427387833595276
+            },
+            {
+              "step": 420,
+              "time_s": 0.06999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000010128291115364766,
+              "maximum_linear_speed_m_s": 0.2053302824497223
+            },
+            {
+              "step": 480,
+              "time_s": 0.08,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000007740129814594938,
+              "maximum_linear_speed_m_s": 0.2337152361869812
+            },
+            {
+              "step": 540,
+              "time_s": 0.09,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000006314109516666986,
+              "maximum_linear_speed_m_s": 0.19643253087997437
+            },
+            {
+              "step": 600,
+              "time_s": 0.09999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000007029460074250568,
+              "maximum_linear_speed_m_s": 0.16481329500675201
+            }
+          ],
+          "source_hashes": {
+            "_src/solvers/vbd/solver_vbd.py": "53914c439671a3a62638b90fa73340c6d7f74966743e886a718692137e4d272d",
+            "_src/solvers/vbd/rigid_vbd_kkt.py": "99d92531c2858b363fa587386ce1f9b182833a240c99487cc92b2d5bff17c044",
+            "_src/solvers/vbd/rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+            "cable_scenes.py": "9b912909b8de813700375968c564d23f245d5a4d2c3a47c70672ba62da9055f7",
+            "yfarm_bench.py": "1e9f3d8678ed6bffdecaee29a67fbc2f3f13df7702a2927b85d4626218b69aee",
+            "cable_run.py": "a470e3115b0927e290a8a6b8051746d13e2a5fd06b4d7e4101f8f5be1114cfa9"
+          }
+        },
+        "B1": {
+          "prefix": "scale_default_rack_cuda0_b1",
+          "wall_ms": 2.792285742817515,
+          "gpu_ms": 2.7921275518410984,
+          "metadata_sha256": "f65683739b0af81c8b2e609af0fb05a5b85d04cf6a8f6796f026fc3bbbd7b736",
+          "recording_sha256": "9cb74a61b81fb33c148c6ff83367156c1f384d39defb7f85436cb75ccf8c1096",
+          "setup": {
+            "model_build_s": 88.27988973632455,
+            "constructor_s": 5.124928195029497,
+            "first_two_steps_compile_and_simulation_s": 0.1106809452176094,
+            "capture_s": 0.0071267858147621155,
+            "diagnostics_s": 0.3698752261698246,
+            "model_signature_diagnostics_s": 0.0376649908721447
+          },
+          "samples": [
+            {
+              "step": 0,
+              "time_s": 0,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000003104343217746887,
+              "maximum_linear_speed_m_s": 0
+            },
+            {
+              "step": 60,
+              "time_s": 0.01,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000002737009178104806,
+              "maximum_linear_speed_m_s": 0.10017666965723038
+            },
+            {
+              "step": 120,
+              "time_s": 0.02,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000004905661017357681,
+              "maximum_linear_speed_m_s": 0.18690983951091766
+            },
+            {
+              "step": 180,
+              "time_s": 0.03,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.0000075070752290131454,
+              "maximum_linear_speed_m_s": 0.25633376836776733
+            },
+            {
+              "step": 240,
+              "time_s": 0.04,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.00000986676235300181,
+              "maximum_linear_speed_m_s": 0.16846702992916107
+            },
+            {
+              "step": 300,
+              "time_s": 0.049999999999999996,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000011564060811009722,
+              "maximum_linear_speed_m_s": 0.1432919204235077
+            },
+            {
+              "step": 360,
+              "time_s": 0.06,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000012026519623594808,
+              "maximum_linear_speed_m_s": 0.17427387833595276
+            },
+            {
+              "step": 420,
+              "time_s": 0.06999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000010128291115364766,
+              "maximum_linear_speed_m_s": 0.2053302824497223
+            },
+            {
+              "step": 480,
+              "time_s": 0.08,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000007740129814594938,
+              "maximum_linear_speed_m_s": 0.2337152361869812
+            },
+            {
+              "step": 540,
+              "time_s": 0.09,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000006314109516666986,
+              "maximum_linear_speed_m_s": 0.19643253087997437
+            },
+            {
+              "step": 600,
+              "time_s": 0.09999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000007029460074250568,
+              "maximum_linear_speed_m_s": 0.16481329500675201
+            }
+          ],
+          "source_hashes": {
+            "_src/solvers/vbd/solver_vbd.py": "c6be3919eae993a7a0c3bd36af652af2894cd2600f8d5d9714560f628b04bd72",
+            "_src/solvers/vbd/rigid_vbd_kkt.py": "bc31052f1e212333cbfaaf6b1de26e10f6f0e4ccc66a3dd7e0ffca3b1b65c047",
+            "_src/solvers/vbd/rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+            "cable_scenes.py": "9b912909b8de813700375968c564d23f245d5a4d2c3a47c70672ba62da9055f7",
+            "yfarm_bench.py": "1e9f3d8678ed6bffdecaee29a67fbc2f3f13df7702a2927b85d4626218b69aee",
+            "cable_run.py": "a470e3115b0927e290a8a6b8051746d13e2a5fd06b4d7e4101f8f5be1114cfa9"
+          }
+        },
+        "B2": {
+          "prefix": "scale_default_rack_cuda0_b2",
+          "wall_ms": 2.792299042976022,
+          "gpu_ms": 2.7921259698261784,
+          "metadata_sha256": "fa4456aa9ca628755223606e1235f13b1f0cfb65193a6ce025824aea2cb1a913",
+          "recording_sha256": "9cb74a61b81fb33c148c6ff83367156c1f384d39defb7f85436cb75ccf8c1096",
+          "setup": {
+            "model_build_s": 88.05767151340842,
+            "constructor_s": 5.254088584333658,
+            "first_two_steps_compile_and_simulation_s": 0.11428938433527946,
+            "capture_s": 0.007090814411640167,
+            "diagnostics_s": 0.35107070207595825,
+            "model_signature_diagnostics_s": 0.03784339502453804
+          },
+          "samples": [
+            {
+              "step": 0,
+              "time_s": 0,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000003104343217746887,
+              "maximum_linear_speed_m_s": 0
+            },
+            {
+              "step": 60,
+              "time_s": 0.01,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000002737009178104806,
+              "maximum_linear_speed_m_s": 0.10017666965723038
+            },
+            {
+              "step": 120,
+              "time_s": 0.02,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000004905661017357681,
+              "maximum_linear_speed_m_s": 0.18690983951091766
+            },
+            {
+              "step": 180,
+              "time_s": 0.03,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.0000075070752290131454,
+              "maximum_linear_speed_m_s": 0.25633376836776733
+            },
+            {
+              "step": 240,
+              "time_s": 0.04,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.00000986676235300181,
+              "maximum_linear_speed_m_s": 0.16846702992916107
+            },
+            {
+              "step": 300,
+              "time_s": 0.049999999999999996,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000011564060811009722,
+              "maximum_linear_speed_m_s": 0.1432919204235077
+            },
+            {
+              "step": 360,
+              "time_s": 0.06,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000012026519623594808,
+              "maximum_linear_speed_m_s": 0.17427387833595276
+            },
+            {
+              "step": 420,
+              "time_s": 0.06999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000010128291115364766,
+              "maximum_linear_speed_m_s": 0.2053302824497223
+            },
+            {
+              "step": 480,
+              "time_s": 0.08,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000007740129814594938,
+              "maximum_linear_speed_m_s": 0.2337152361869812
+            },
+            {
+              "step": 540,
+              "time_s": 0.09,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000006314109516666986,
+              "maximum_linear_speed_m_s": 0.19643253087997437
+            },
+            {
+              "step": 600,
+              "time_s": 0.09999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000007029460074250568,
+              "maximum_linear_speed_m_s": 0.16481329500675201
+            }
+          ],
+          "source_hashes": {
+            "_src/solvers/vbd/solver_vbd.py": "c6be3919eae993a7a0c3bd36af652af2894cd2600f8d5d9714560f628b04bd72",
+            "_src/solvers/vbd/rigid_vbd_kkt.py": "bc31052f1e212333cbfaaf6b1de26e10f6f0e4ccc66a3dd7e0ffca3b1b65c047",
+            "_src/solvers/vbd/rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+            "cable_scenes.py": "9b912909b8de813700375968c564d23f245d5a4d2c3a47c70672ba62da9055f7",
+            "yfarm_bench.py": "1e9f3d8678ed6bffdecaee29a67fbc2f3f13df7702a2927b85d4626218b69aee",
+            "cable_run.py": "a470e3115b0927e290a8a6b8051746d13e2a5fd06b4d7e4101f8f5be1114cfa9"
+          }
+        },
+        "A2": {
+          "prefix": "scale_default_rack_cuda0_a2",
+          "wall_ms": 22.97630427050152,
+          "gpu_ms": 22.975808236112567,
+          "metadata_sha256": "0c348bd02041f53a1aa4a455ca86eb7e06f53ff6cfe50e5b61737a65f4431bf5",
+          "recording_sha256": "9cb74a61b81fb33c148c6ff83367156c1f384d39defb7f85436cb75ccf8c1096",
+          "setup": {
+            "model_build_s": 87.43639647960663,
+            "constructor_s": 20.441683921962976,
+            "first_two_steps_compile_and_simulation_s": 0.24468275159597397,
+            "capture_s": 0.1333739198744297,
+            "diagnostics_s": 0.40696610137820244,
+            "model_signature_diagnostics_s": 0.03737778961658478
+          },
+          "samples": [
+            {
+              "step": 0,
+              "time_s": 0,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000003104343217746887,
+              "maximum_linear_speed_m_s": 0
+            },
+            {
+              "step": 60,
+              "time_s": 0.01,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000002737009178104806,
+              "maximum_linear_speed_m_s": 0.10017666965723038
+            },
+            {
+              "step": 120,
+              "time_s": 0.02,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000004905661017357681,
+              "maximum_linear_speed_m_s": 0.18690983951091766
+            },
+            {
+              "step": 180,
+              "time_s": 0.03,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.0000075070752290131454,
+              "maximum_linear_speed_m_s": 0.25633376836776733
+            },
+            {
+              "step": 240,
+              "time_s": 0.04,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.00000986676235300181,
+              "maximum_linear_speed_m_s": 0.16846702992916107
+            },
+            {
+              "step": 300,
+              "time_s": 0.049999999999999996,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000011564060811009722,
+              "maximum_linear_speed_m_s": 0.1432919204235077
+            },
+            {
+              "step": 360,
+              "time_s": 0.06,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000012026519623594808,
+              "maximum_linear_speed_m_s": 0.17427387833595276
+            },
+            {
+              "step": 420,
+              "time_s": 0.06999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000010128291115364766,
+              "maximum_linear_speed_m_s": 0.2053302824497223
+            },
+            {
+              "step": 480,
+              "time_s": 0.08,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000007740129814594938,
+              "maximum_linear_speed_m_s": 0.2337152361869812
+            },
+            {
+              "step": 540,
+              "time_s": 0.09,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000006314109516666986,
+              "maximum_linear_speed_m_s": 0.19643253087997437
+            },
+            {
+              "step": 600,
+              "time_s": 0.09999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000007029460074250568,
+              "maximum_linear_speed_m_s": 0.16481329500675201
+            }
+          ],
+          "source_hashes": {
+            "_src/solvers/vbd/solver_vbd.py": "53914c439671a3a62638b90fa73340c6d7f74966743e886a718692137e4d272d",
+            "_src/solvers/vbd/rigid_vbd_kkt.py": "99d92531c2858b363fa587386ce1f9b182833a240c99487cc92b2d5bff17c044",
+            "_src/solvers/vbd/rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+            "cable_scenes.py": "9b912909b8de813700375968c564d23f245d5a4d2c3a47c70672ba62da9055f7",
+            "yfarm_bench.py": "1e9f3d8678ed6bffdecaee29a67fbc2f3f13df7702a2927b85d4626218b69aee",
+            "cable_run.py": "a470e3115b0927e290a8a6b8051746d13e2a5fd06b4d7e4101f8f5be1114cfa9"
+          }
+        }
+      }
+    },
+    {
+      "scene": "yharness",
+      "device": "cuda:0",
+      "bodies": 1197,
+      "physical": {
+        "segment_centerline_m": 0.003,
+        "radius_m": 0.0016,
+        "density_input_kg_per_m": 0.01,
+        "stretch_shear_n_m": 100000,
+        "bend_twist_nm_rad": 0.1,
+        "damping": 0,
+        "gravity_m_s2": [
+          0,
+          0,
+          -9.81
+        ],
+        "contact": false,
+        "first_body_pinned": true,
+        "note": "Density input is converted to volumetric density using pi*r^2; native capsule mass includes caps. Native builder inertia validation is retained unchanged. These are matched execution controls, not calibrated industrial-cable physics. Y-farm differs in material/segment settings and is not a same-material scaling sequence."
+      },
+      "all_saved_states_bitwise_equal": true,
+      "mean_speedup": 1.0479620915774508,
+      "baseline_range_ms": [
+        0.757241372430205,
+        0.7580336133472896
+      ],
+      "candidate_range_ms": [
+        0.7229620858678052,
+        0.7229632944067984
+      ],
+      "interpretation": "Equal recorded states at matched budgets; finite sampled evidence only.",
+      "runs": {
+        "A1": {
+          "prefix": "scale_default_yharness_cuda0_a1",
+          "wall_ms": 0.757241372430205,
+          "gpu_ms": 0.7571115334297104,
+          "metadata_sha256": "8b25a5e2211c40da5ff28ede13fe8d251dce93ba247cf0d47e21a3f7c22fd1fc",
+          "recording_sha256": "0231c67395e0a5a73f236ead24cad5b6261dfc21805a684cbcfd98811625ec6d",
+          "setup": {
+            "model_build_s": 1.4072807244956493,
+            "constructor_s": 0.7185205072164536,
+            "first_two_steps_compile_and_simulation_s": 0.12797516584396362,
+            "capture_s": 0.021227765828371048,
+            "diagnostics_s": 0.007001820951700211,
+            "model_signature_diagnostics_s": 0.0016893856227397919
+          },
+          "samples": [
+            {
+              "step": 0,
+              "time_s": 0,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 1.2011125840524787e-7,
+              "maximum_linear_speed_m_s": 0
+            },
+            {
+              "step": 60,
+              "time_s": 0.01,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000002262480106586479,
+              "maximum_linear_speed_m_s": 0.09942199289798737
+            },
+            {
+              "step": 120,
+              "time_s": 0.02,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000004878511339868379,
+              "maximum_linear_speed_m_s": 0.1751304268836975
+            },
+            {
+              "step": 180,
+              "time_s": 0.03,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000008561059854852511,
+              "maximum_linear_speed_m_s": 0.1589248776435852
+            },
+            {
+              "step": 240,
+              "time_s": 0.04,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000010942102387388494,
+              "maximum_linear_speed_m_s": 0.1265573799610138
+            },
+            {
+              "step": 300,
+              "time_s": 0.049999999999999996,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000010816371591782607,
+              "maximum_linear_speed_m_s": 0.14727941155433655
+            },
+            {
+              "step": 360,
+              "time_s": 0.06,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000008782961386937522,
+              "maximum_linear_speed_m_s": 0.21481744945049286
+            },
+            {
+              "step": 420,
+              "time_s": 0.06999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000005152110828146013,
+              "maximum_linear_speed_m_s": 0.24900436401367188
+            },
+            {
+              "step": 480,
+              "time_s": 0.08,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.0000024565645173713658,
+              "maximum_linear_speed_m_s": 0.23953726887702942
+            },
+            {
+              "step": 540,
+              "time_s": 0.09,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.0000010229660750319158,
+              "maximum_linear_speed_m_s": 0.2399238497018814
+            },
+            {
+              "step": 600,
+              "time_s": 0.09999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.0000024379459665889256,
+              "maximum_linear_speed_m_s": 0.28445181250572205
+            }
+          ],
+          "source_hashes": {
+            "_src/solvers/vbd/solver_vbd.py": "53914c439671a3a62638b90fa73340c6d7f74966743e886a718692137e4d272d",
+            "_src/solvers/vbd/rigid_vbd_kkt.py": "99d92531c2858b363fa587386ce1f9b182833a240c99487cc92b2d5bff17c044",
+            "_src/solvers/vbd/rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+            "cable_scenes.py": "9b912909b8de813700375968c564d23f245d5a4d2c3a47c70672ba62da9055f7",
+            "yfarm_bench.py": "1e9f3d8678ed6bffdecaee29a67fbc2f3f13df7702a2927b85d4626218b69aee",
+            "cable_run.py": "a470e3115b0927e290a8a6b8051746d13e2a5fd06b4d7e4101f8f5be1114cfa9"
+          }
+        },
+        "B1": {
+          "prefix": "scale_default_yharness_cuda0_b1",
+          "wall_ms": 0.7229620858678052,
+          "gpu_ms": 0.7227841061493226,
+          "metadata_sha256": "64853d58ced2909e47ddad57a58eb9ac944fb2a76af25ae15b75f996291e29be",
+          "recording_sha256": "0231c67395e0a5a73f236ead24cad5b6261dfc21805a684cbcfd98811625ec6d",
+          "setup": {
+            "model_build_s": 1.4458469599485397,
+            "constructor_s": 0.7151510193943977,
+            "first_two_steps_compile_and_simulation_s": 0.12234217673540115,
+            "capture_s": 0.021306931972503662,
+            "diagnostics_s": 0.007111378014087677,
+            "model_signature_diagnostics_s": 0.0017237588763237
+          },
+          "samples": [
+            {
+              "step": 0,
+              "time_s": 0,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 1.2011125840524787e-7,
+              "maximum_linear_speed_m_s": 0
+            },
+            {
+              "step": 60,
+              "time_s": 0.01,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000002262480106586479,
+              "maximum_linear_speed_m_s": 0.09942199289798737
+            },
+            {
+              "step": 120,
+              "time_s": 0.02,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000004878511339868379,
+              "maximum_linear_speed_m_s": 0.1751304268836975
+            },
+            {
+              "step": 180,
+              "time_s": 0.03,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000008561059854852511,
+              "maximum_linear_speed_m_s": 0.1589248776435852
+            },
+            {
+              "step": 240,
+              "time_s": 0.04,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000010942102387388494,
+              "maximum_linear_speed_m_s": 0.1265573799610138
+            },
+            {
+              "step": 300,
+              "time_s": 0.049999999999999996,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000010816371591782607,
+              "maximum_linear_speed_m_s": 0.14727941155433655
+            },
+            {
+              "step": 360,
+              "time_s": 0.06,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000008782961386937522,
+              "maximum_linear_speed_m_s": 0.21481744945049286
+            },
+            {
+              "step": 420,
+              "time_s": 0.06999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000005152110828146013,
+              "maximum_linear_speed_m_s": 0.24900436401367188
+            },
+            {
+              "step": 480,
+              "time_s": 0.08,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.0000024565645173713658,
+              "maximum_linear_speed_m_s": 0.23953726887702942
+            },
+            {
+              "step": 540,
+              "time_s": 0.09,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.0000010229660750319158,
+              "maximum_linear_speed_m_s": 0.2399238497018814
+            },
+            {
+              "step": 600,
+              "time_s": 0.09999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.0000024379459665889256,
+              "maximum_linear_speed_m_s": 0.28445181250572205
+            }
+          ],
+          "source_hashes": {
+            "_src/solvers/vbd/solver_vbd.py": "c6be3919eae993a7a0c3bd36af652af2894cd2600f8d5d9714560f628b04bd72",
+            "_src/solvers/vbd/rigid_vbd_kkt.py": "bc31052f1e212333cbfaaf6b1de26e10f6f0e4ccc66a3dd7e0ffca3b1b65c047",
+            "_src/solvers/vbd/rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+            "cable_scenes.py": "9b912909b8de813700375968c564d23f245d5a4d2c3a47c70672ba62da9055f7",
+            "yfarm_bench.py": "1e9f3d8678ed6bffdecaee29a67fbc2f3f13df7702a2927b85d4626218b69aee",
+            "cable_run.py": "a470e3115b0927e290a8a6b8051746d13e2a5fd06b4d7e4101f8f5be1114cfa9"
+          }
+        },
+        "B2": {
+          "prefix": "scale_default_yharness_cuda0_b2",
+          "wall_ms": 0.7229632944067984,
+          "gpu_ms": 0.7228365997008257,
+          "metadata_sha256": "6784c1db20facb1d907f57428aa217e4d08589cd980cec52c520a7b2598e151b",
+          "recording_sha256": "0231c67395e0a5a73f236ead24cad5b6261dfc21805a684cbcfd98811625ec6d",
+          "setup": {
+            "model_build_s": 1.3794739060103893,
+            "constructor_s": 0.7259059138596058,
+            "first_two_steps_compile_and_simulation_s": 0.12754061073064804,
+            "capture_s": 0.021625544875860214,
+            "diagnostics_s": 0.006763197481632233,
+            "model_signature_diagnostics_s": 0.001749373972415924
+          },
+          "samples": [
+            {
+              "step": 0,
+              "time_s": 0,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 1.2011125840524787e-7,
+              "maximum_linear_speed_m_s": 0
+            },
+            {
+              "step": 60,
+              "time_s": 0.01,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000002262480106586479,
+              "maximum_linear_speed_m_s": 0.09942199289798737
+            },
+            {
+              "step": 120,
+              "time_s": 0.02,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000004878511339868379,
+              "maximum_linear_speed_m_s": 0.1751304268836975
+            },
+            {
+              "step": 180,
+              "time_s": 0.03,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000008561059854852511,
+              "maximum_linear_speed_m_s": 0.1589248776435852
+            },
+            {
+              "step": 240,
+              "time_s": 0.04,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000010942102387388494,
+              "maximum_linear_speed_m_s": 0.1265573799610138
+            },
+            {
+              "step": 300,
+              "time_s": 0.049999999999999996,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000010816371591782607,
+              "maximum_linear_speed_m_s": 0.14727941155433655
+            },
+            {
+              "step": 360,
+              "time_s": 0.06,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000008782961386937522,
+              "maximum_linear_speed_m_s": 0.21481744945049286
+            },
+            {
+              "step": 420,
+              "time_s": 0.06999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000005152110828146013,
+              "maximum_linear_speed_m_s": 0.24900436401367188
+            },
+            {
+              "step": 480,
+              "time_s": 0.08,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.0000024565645173713658,
+              "maximum_linear_speed_m_s": 0.23953726887702942
+            },
+            {
+              "step": 540,
+              "time_s": 0.09,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.0000010229660750319158,
+              "maximum_linear_speed_m_s": 0.2399238497018814
+            },
+            {
+              "step": 600,
+              "time_s": 0.09999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.0000024379459665889256,
+              "maximum_linear_speed_m_s": 0.28445181250572205
+            }
+          ],
+          "source_hashes": {
+            "_src/solvers/vbd/solver_vbd.py": "c6be3919eae993a7a0c3bd36af652af2894cd2600f8d5d9714560f628b04bd72",
+            "_src/solvers/vbd/rigid_vbd_kkt.py": "bc31052f1e212333cbfaaf6b1de26e10f6f0e4ccc66a3dd7e0ffca3b1b65c047",
+            "_src/solvers/vbd/rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+            "cable_scenes.py": "9b912909b8de813700375968c564d23f245d5a4d2c3a47c70672ba62da9055f7",
+            "yfarm_bench.py": "1e9f3d8678ed6bffdecaee29a67fbc2f3f13df7702a2927b85d4626218b69aee",
+            "cable_run.py": "a470e3115b0927e290a8a6b8051746d13e2a5fd06b4d7e4101f8f5be1114cfa9"
+          }
+        },
+        "A2": {
+          "prefix": "scale_default_yharness_cuda0_a2",
+          "wall_ms": 0.7580336133472896,
+          "gpu_ms": 0.7578547168336186,
+          "metadata_sha256": "21322853ddef92f9d6d0390ec8978bede73937281b520a88199855faf32c015f",
+          "recording_sha256": "0231c67395e0a5a73f236ead24cad5b6261dfc21805a684cbcfd98811625ec6d",
+          "setup": {
+            "model_build_s": 1.4153031408786774,
+            "constructor_s": 0.7270162217319012,
+            "first_two_steps_compile_and_simulation_s": 0.13390259444713593,
+            "capture_s": 0.022691048681735992,
+            "diagnostics_s": 0.00748288631439209,
+            "model_signature_diagnostics_s": 0.0017817877233028412
+          },
+          "samples": [
+            {
+              "step": 0,
+              "time_s": 0,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 1.2011125840524787e-7,
+              "maximum_linear_speed_m_s": 0
+            },
+            {
+              "step": 60,
+              "time_s": 0.01,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000002262480106586479,
+              "maximum_linear_speed_m_s": 0.09942199289798737
+            },
+            {
+              "step": 120,
+              "time_s": 0.02,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000004878511339868379,
+              "maximum_linear_speed_m_s": 0.1751304268836975
+            },
+            {
+              "step": 180,
+              "time_s": 0.03,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000008561059854852511,
+              "maximum_linear_speed_m_s": 0.1589248776435852
+            },
+            {
+              "step": 240,
+              "time_s": 0.04,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000010942102387388494,
+              "maximum_linear_speed_m_s": 0.1265573799610138
+            },
+            {
+              "step": 300,
+              "time_s": 0.049999999999999996,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000010816371591782607,
+              "maximum_linear_speed_m_s": 0.14727941155433655
+            },
+            {
+              "step": 360,
+              "time_s": 0.06,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000008782961386937522,
+              "maximum_linear_speed_m_s": 0.21481744945049286
+            },
+            {
+              "step": 420,
+              "time_s": 0.06999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.000005152110828146013,
+              "maximum_linear_speed_m_s": 0.24900436401367188
+            },
+            {
+              "step": 480,
+              "time_s": 0.08,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.0000024565645173713658,
+              "maximum_linear_speed_m_s": 0.23953726887702942
+            },
+            {
+              "step": 540,
+              "time_s": 0.09,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.0000010229660750319158,
+              "maximum_linear_speed_m_s": 0.2399238497018814
+            },
+            {
+              "step": 600,
+              "time_s": 0.09999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 0.0000024379459665889256,
+              "maximum_linear_speed_m_s": 0.28445181250572205
+            }
+          ],
+          "source_hashes": {
+            "_src/solvers/vbd/solver_vbd.py": "53914c439671a3a62638b90fa73340c6d7f74966743e886a718692137e4d272d",
+            "_src/solvers/vbd/rigid_vbd_kkt.py": "99d92531c2858b363fa587386ce1f9b182833a240c99487cc92b2d5bff17c044",
+            "_src/solvers/vbd/rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+            "cable_scenes.py": "9b912909b8de813700375968c564d23f245d5a4d2c3a47c70672ba62da9055f7",
+            "yfarm_bench.py": "1e9f3d8678ed6bffdecaee29a67fbc2f3f13df7702a2927b85d4626218b69aee",
+            "cable_run.py": "a470e3115b0927e290a8a6b8051746d13e2a5fd06b4d7e4101f8f5be1114cfa9"
+          }
+        }
+      }
+    },
+    {
+      "scene": "yfarm72",
+      "device": "cuda:0",
+      "bodies": 17802,
+      "physical": {
+        "segment_centerline_m": 0.005,
+        "radius_m": 0.0016,
+        "density_input_kg_per_m": 0.02,
+        "stretch_shear_n_m": 1000000,
+        "bend_twist_nm_rad": 0.05,
+        "damping": 0,
+        "gravity_m_s2": [
+          0,
+          0,
+          -9.81
+        ],
+        "contact": false,
+        "first_body_pinned": true,
+        "note": "Density input is converted to volumetric density using pi*r^2; native capsule mass includes caps. Native builder inertia validation is retained unchanged. These are matched execution controls, not calibrated industrial-cable physics. Y-farm differs in material/segment settings and is not a same-material scaling sequence."
+      },
+      "all_saved_states_bitwise_equal": false,
+      "mean_speedup": 10.22776175823911,
+      "baseline_range_ms": [
+        9.786141002208094,
+        9.786537160044132
+      ],
+      "candidate_range_ms": [
+        0.9567325990833965,
+        0.9569488714969278
+      ],
+      "interpretation": "Default-atomic states differ. Compare within-source and between-source deltas; cost ratio alone is not a demonstrated matched-accuracy speedup.",
+      "runs": {
+        "A1": {
+          "prefix": "scale_default_yfarm72_cuda0_a1",
+          "wall_ms": 9.786141002208094,
+          "gpu_ms": 9.78576894906851,
+          "metadata_sha256": "a71660b1fb729e6752e3418de5dcdad05f8242a439e940436347b1724ae869b8",
+          "recording_sha256": "953f8e14f200eb3ed2d5aeeb96146afa55f9ce4bfd7e30acddaa53445cad46bb",
+          "setup": {
+            "model_build_s": 14.767344444990158,
+            "constructor_s": 3.2996115125715733,
+            "first_two_steps_compile_and_simulation_s": 0.2695785276591778,
+            "capture_s": 0.15742219612002373,
+            "diagnostics_s": 0.06485911086201668,
+            "model_signature_diagnostics_s": 0.009003102779388428
+          },
+          "samples": [
+            {
+              "step": 0,
+              "time_s": 0,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.404099370535176e-7,
+              "maximum_linear_speed_m_s": 0
+            },
+            {
+              "step": 60,
+              "time_s": 0.01,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.736669895943707e-7,
+              "maximum_linear_speed_m_s": 0.12375074625015259
+            },
+            {
+              "step": 120,
+              "time_s": 0.02,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.397269440892564e-7,
+              "maximum_linear_speed_m_s": 0.24653740227222443
+            },
+            {
+              "step": 180,
+              "time_s": 0.03,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.6497770639758876e-7,
+              "maximum_linear_speed_m_s": 0.3701295256614685
+            },
+            {
+              "step": 240,
+              "time_s": 0.04,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.871250648129886e-7,
+              "maximum_linear_speed_m_s": 0.4913887679576874
+            },
+            {
+              "step": 300,
+              "time_s": 0.049999999999999996,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.724553493225712e-7,
+              "maximum_linear_speed_m_s": 0.6115320324897766
+            },
+            {
+              "step": 360,
+              "time_s": 0.06,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.6651365430939857e-7,
+              "maximum_linear_speed_m_s": 0.7342581152915955
+            },
+            {
+              "step": 420,
+              "time_s": 0.06999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.7823448233540215e-7,
+              "maximum_linear_speed_m_s": 0.8539168834686279
+            },
+            {
+              "step": 480,
+              "time_s": 0.08,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 4.054845640487062e-7,
+              "maximum_linear_speed_m_s": 0.9761760830879211
+            },
+            {
+              "step": 540,
+              "time_s": 0.09,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.929650385363594e-7,
+              "maximum_linear_speed_m_s": 1.0956016778945923
+            },
+            {
+              "step": 600,
+              "time_s": 0.09999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.817403141456413e-7,
+              "maximum_linear_speed_m_s": 1.2196437120437622
+            }
+          ],
+          "source_hashes": {
+            "_src/solvers/vbd/solver_vbd.py": "53914c439671a3a62638b90fa73340c6d7f74966743e886a718692137e4d272d",
+            "_src/solvers/vbd/rigid_vbd_kkt.py": "99d92531c2858b363fa587386ce1f9b182833a240c99487cc92b2d5bff17c044",
+            "_src/solvers/vbd/rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+            "cable_scenes.py": "9b912909b8de813700375968c564d23f245d5a4d2c3a47c70672ba62da9055f7",
+            "yfarm_bench.py": "1e9f3d8678ed6bffdecaee29a67fbc2f3f13df7702a2927b85d4626218b69aee",
+            "cable_run.py": "a470e3115b0927e290a8a6b8051746d13e2a5fd06b4d7e4101f8f5be1114cfa9"
+          }
+        },
+        "B1": {
+          "prefix": "scale_default_yfarm72_cuda0_b1",
+          "wall_ms": 0.9569488714969278,
+          "gpu_ms": 0.9568097934276364,
+          "metadata_sha256": "e209dcb2cd288e6ec42eb0dc009ab6ef8687f5921cf99761a5f69d13108e9804",
+          "recording_sha256": "f5e996bff9c535b8d0fd7e6bf437c9d46f0f5bb73eca397e2054372162ee3cce",
+          "setup": {
+            "model_build_s": 14.868560623377562,
+            "constructor_s": 4.818781316280365,
+            "first_two_steps_compile_and_simulation_s": 0.12764542177319527,
+            "capture_s": 0.020945735275745392,
+            "diagnostics_s": 0.0602046437561512,
+            "model_signature_diagnostics_s": 0.008882176131010056
+          },
+          "samples": [
+            {
+              "step": 0,
+              "time_s": 0,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.404099370535176e-7,
+              "maximum_linear_speed_m_s": 0
+            },
+            {
+              "step": 60,
+              "time_s": 0.01,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.6485639984863544e-7,
+              "maximum_linear_speed_m_s": 0.1233866736292839
+            },
+            {
+              "step": 120,
+              "time_s": 0.02,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.822886186939766e-7,
+              "maximum_linear_speed_m_s": 0.2479478120803833
+            },
+            {
+              "step": 180,
+              "time_s": 0.03,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.726263638911837e-7,
+              "maximum_linear_speed_m_s": 0.3701637387275696
+            },
+            {
+              "step": 240,
+              "time_s": 0.04,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.7391001629298594e-7,
+              "maximum_linear_speed_m_s": 0.49071043729782104
+            },
+            {
+              "step": 300,
+              "time_s": 0.049999999999999996,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.5816411851222897e-7,
+              "maximum_linear_speed_m_s": 0.6118047833442688
+            },
+            {
+              "step": 360,
+              "time_s": 0.06,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.696270678245303e-7,
+              "maximum_linear_speed_m_s": 0.733823299407959
+            },
+            {
+              "step": 420,
+              "time_s": 0.06999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.820542520525462e-7,
+              "maximum_linear_speed_m_s": 0.8525559902191162
+            },
+            {
+              "step": 480,
+              "time_s": 0.08,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.491063015992888e-7,
+              "maximum_linear_speed_m_s": 0.9751330614089966
+            },
+            {
+              "step": 540,
+              "time_s": 0.09,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.640822212512492e-7,
+              "maximum_linear_speed_m_s": 1.098602294921875
+            },
+            {
+              "step": 600,
+              "time_s": 0.09999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.789495087462182e-7,
+              "maximum_linear_speed_m_s": 1.2242463827133179
+            }
+          ],
+          "source_hashes": {
+            "_src/solvers/vbd/solver_vbd.py": "c6be3919eae993a7a0c3bd36af652af2894cd2600f8d5d9714560f628b04bd72",
+            "_src/solvers/vbd/rigid_vbd_kkt.py": "bc31052f1e212333cbfaaf6b1de26e10f6f0e4ccc66a3dd7e0ffca3b1b65c047",
+            "_src/solvers/vbd/rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+            "cable_scenes.py": "9b912909b8de813700375968c564d23f245d5a4d2c3a47c70672ba62da9055f7",
+            "yfarm_bench.py": "1e9f3d8678ed6bffdecaee29a67fbc2f3f13df7702a2927b85d4626218b69aee",
+            "cable_run.py": "a470e3115b0927e290a8a6b8051746d13e2a5fd06b4d7e4101f8f5be1114cfa9"
+          }
+        },
+        "B2": {
+          "prefix": "scale_default_yfarm72_cuda0_b2",
+          "wall_ms": 0.9567325990833965,
+          "gpu_ms": 0.9566146888860492,
+          "metadata_sha256": "4119e612c7c71225e14432b6e046d6a2f703809fa28cb1734205bc49fa0ae528",
+          "recording_sha256": "e0d05f8815f6ca3339a96fcb56119b7b1801bfd43c0fb60c4ccefa824aa7c9ed",
+          "setup": {
+            "model_build_s": 14.820174273103476,
+            "constructor_s": 4.844764553010464,
+            "first_two_steps_compile_and_simulation_s": 0.12859172374010086,
+            "capture_s": 0.021170366555452347,
+            "diagnostics_s": 0.061324458569288254,
+            "model_signature_diagnostics_s": 0.009023495018482208
+          },
+          "samples": [
+            {
+              "step": 0,
+              "time_s": 0,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.404099370535176e-7,
+              "maximum_linear_speed_m_s": 0
+            },
+            {
+              "step": 60,
+              "time_s": 0.01,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.695028495449859e-7,
+              "maximum_linear_speed_m_s": 0.12374596297740936
+            },
+            {
+              "step": 120,
+              "time_s": 0.02,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.4835048364750213e-7,
+              "maximum_linear_speed_m_s": 0.24683791399002075
+            },
+            {
+              "step": 180,
+              "time_s": 0.03,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.8594414817274224e-7,
+              "maximum_linear_speed_m_s": 0.3701295256614685
+            },
+            {
+              "step": 240,
+              "time_s": 0.04,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.964010394815017e-7,
+              "maximum_linear_speed_m_s": 0.4920847713947296
+            },
+            {
+              "step": 300,
+              "time_s": 0.049999999999999996,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.4859430120787534e-7,
+              "maximum_linear_speed_m_s": 0.612592875957489
+            },
+            {
+              "step": 360,
+              "time_s": 0.06,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.8858806362369966e-7,
+              "maximum_linear_speed_m_s": 0.7340447306632996
+            },
+            {
+              "step": 420,
+              "time_s": 0.06999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.5950744923551304e-7,
+              "maximum_linear_speed_m_s": 0.8546847701072693
+            },
+            {
+              "step": 480,
+              "time_s": 0.08,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.471803237602114e-7,
+              "maximum_linear_speed_m_s": 0.9760358929634094
+            },
+            {
+              "step": 540,
+              "time_s": 0.09,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.7576809847068e-7,
+              "maximum_linear_speed_m_s": 1.094323992729187
+            },
+            {
+              "step": 600,
+              "time_s": 0.09999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.93014226167929e-7,
+              "maximum_linear_speed_m_s": 1.2212671041488647
+            }
+          ],
+          "source_hashes": {
+            "_src/solvers/vbd/solver_vbd.py": "c6be3919eae993a7a0c3bd36af652af2894cd2600f8d5d9714560f628b04bd72",
+            "_src/solvers/vbd/rigid_vbd_kkt.py": "bc31052f1e212333cbfaaf6b1de26e10f6f0e4ccc66a3dd7e0ffca3b1b65c047",
+            "_src/solvers/vbd/rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+            "cable_scenes.py": "9b912909b8de813700375968c564d23f245d5a4d2c3a47c70672ba62da9055f7",
+            "yfarm_bench.py": "1e9f3d8678ed6bffdecaee29a67fbc2f3f13df7702a2927b85d4626218b69aee",
+            "cable_run.py": "a470e3115b0927e290a8a6b8051746d13e2a5fd06b4d7e4101f8f5be1114cfa9"
+          }
+        },
+        "A2": {
+          "prefix": "scale_default_yfarm72_cuda0_a2",
+          "wall_ms": 9.786537160044132,
+          "gpu_ms": 9.786145570684836,
+          "metadata_sha256": "e2f1179a14bfe774e9dc1cfcd08f00bd9d08b1108ba7cfc86a17cbcfb522e5e5",
+          "recording_sha256": "953f8e14f200eb3ed2d5aeeb96146afa55f9ce4bfd7e30acddaa53445cad46bb",
+          "setup": {
+            "model_build_s": 14.769076406955719,
+            "constructor_s": 3.2947251461446285,
+            "first_two_steps_compile_and_simulation_s": 0.2647808603942394,
+            "capture_s": 0.15661627054214478,
+            "diagnostics_s": 0.06600149348378181,
+            "model_signature_diagnostics_s": 0.009029138833284378
+          },
+          "samples": [
+            {
+              "step": 0,
+              "time_s": 0,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.404099370535176e-7,
+              "maximum_linear_speed_m_s": 0
+            },
+            {
+              "step": 60,
+              "time_s": 0.01,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.736669895943707e-7,
+              "maximum_linear_speed_m_s": 0.12375074625015259
+            },
+            {
+              "step": 120,
+              "time_s": 0.02,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.397269440892564e-7,
+              "maximum_linear_speed_m_s": 0.24653740227222443
+            },
+            {
+              "step": 180,
+              "time_s": 0.03,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.6497770639758876e-7,
+              "maximum_linear_speed_m_s": 0.3701295256614685
+            },
+            {
+              "step": 240,
+              "time_s": 0.04,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.871250648129886e-7,
+              "maximum_linear_speed_m_s": 0.4913887679576874
+            },
+            {
+              "step": 300,
+              "time_s": 0.049999999999999996,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.724553493225712e-7,
+              "maximum_linear_speed_m_s": 0.6115320324897766
+            },
+            {
+              "step": 360,
+              "time_s": 0.06,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.6651365430939857e-7,
+              "maximum_linear_speed_m_s": 0.7342581152915955
+            },
+            {
+              "step": 420,
+              "time_s": 0.06999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.7823448233540215e-7,
+              "maximum_linear_speed_m_s": 0.8539168834686279
+            },
+            {
+              "step": 480,
+              "time_s": 0.08,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 4.054845640487062e-7,
+              "maximum_linear_speed_m_s": 0.9761760830879211
+            },
+            {
+              "step": 540,
+              "time_s": 0.09,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.929650385363594e-7,
+              "maximum_linear_speed_m_s": 1.0956016778945923
+            },
+            {
+              "step": 600,
+              "time_s": 0.09999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.817403141456413e-7,
+              "maximum_linear_speed_m_s": 1.2196437120437622
+            }
+          ],
+          "source_hashes": {
+            "_src/solvers/vbd/solver_vbd.py": "53914c439671a3a62638b90fa73340c6d7f74966743e886a718692137e4d272d",
+            "_src/solvers/vbd/rigid_vbd_kkt.py": "99d92531c2858b363fa587386ce1f9b182833a240c99487cc92b2d5bff17c044",
+            "_src/solvers/vbd/rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+            "cable_scenes.py": "9b912909b8de813700375968c564d23f245d5a4d2c3a47c70672ba62da9055f7",
+            "yfarm_bench.py": "1e9f3d8678ed6bffdecaee29a67fbc2f3f13df7702a2927b85d4626218b69aee",
+            "cable_run.py": "a470e3115b0927e290a8a6b8051746d13e2a5fd06b4d7e4101f8f5be1114cfa9"
+          }
+        }
+      }
+    },
+    {
+      "scene": "ladder50",
+      "device": "cpu",
+      "bodies": 200,
+      "physical": {
+        "segment_centerline_m": 0.003,
+        "radius_m": 0.0016,
+        "density_input_kg_per_m": 0.01,
+        "stretch_shear_n_m": 100000,
+        "bend_twist_nm_rad": 0.1,
+        "damping": 0,
+        "gravity_m_s2": [
+          0,
+          0,
+          -9.81
+        ],
+        "contact": false,
+        "first_body_pinned": true,
+        "note": "Density input is converted to volumetric density using pi*r^2; native capsule mass includes caps. Native builder inertia validation is retained unchanged. These are matched execution controls, not calibrated industrial-cable physics. Y-farm differs in material/segment settings and is not a same-material scaling sequence."
+      },
+      "all_saved_states_bitwise_equal": true,
+      "mean_speedup": 1.011633767773865,
+      "baseline_range_ms": [
+        6.028909634885979,
+        6.11652730400347
+      ],
+      "candidate_range_ms": [
+        5.9808345393193605,
+        6.024930121557769
+      ],
+      "interpretation": "Equal recorded states at matched budgets; finite sampled evidence only.",
+      "runs": {
+        "A1": {
+          "prefix": "scale_default_ladder50_cpu_a1",
+          "wall_ms": 6.11652730400347,
+          "gpu_ms": null,
+          "metadata_sha256": "76293ef1140741beab13d9a299a217096540d22fe750467c3b868961c70cd570",
+          "recording_sha256": "06958274c7e47ee66d4b6caf64eae2bd35b89b1ea426d6edaf41341937319c0a",
+          "setup": {
+            "model_build_s": 0.4312122203409672,
+            "constructor_s": 0.16433977335691452,
+            "first_two_steps_compile_and_simulation_s": 0.07257990911602974,
+            "capture_s": 9.611248970031738e-7,
+            "diagnostics_s": 0.0044233910739421844,
+            "model_signature_diagnostics_s": 0.0003758333623409271
+          },
+          "samples": [
+            {
+              "step": 0,
+              "time_s": 0,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.13391669133883e-8,
+              "maximum_linear_speed_m_s": 0
+            },
+            {
+              "step": 60,
+              "time_s": 0.01,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.668945019656349e-7,
+              "maximum_linear_speed_m_s": 0.0018944996409118176
+            },
+            {
+              "step": 120,
+              "time_s": 0.02,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9596805220460525e-7,
+              "maximum_linear_speed_m_s": 0.00137928721960634
+            },
+            {
+              "step": 180,
+              "time_s": 0.03,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.952540359522808e-7,
+              "maximum_linear_speed_m_s": 0.0019466558005660772
+            },
+            {
+              "step": 240,
+              "time_s": 0.04,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9452745588297934e-7,
+              "maximum_linear_speed_m_s": 0.002468470484018326
+            },
+            {
+              "step": 300,
+              "time_s": 0.049999999999999996,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.6402896719407936e-7,
+              "maximum_linear_speed_m_s": 0.0029350630939006805
+            },
+            {
+              "step": 360,
+              "time_s": 0.06,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9239291096956225e-7,
+              "maximum_linear_speed_m_s": 0.003348367288708687
+            },
+            {
+              "step": 420,
+              "time_s": 0.06999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.618684599307334e-7,
+              "maximum_linear_speed_m_s": 0.0037146953400224447
+            },
+            {
+              "step": 480,
+              "time_s": 0.08,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9095253797524736e-7,
+              "maximum_linear_speed_m_s": 0.0040689995512366295
+            },
+            {
+              "step": 540,
+              "time_s": 0.09,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.902353346149322e-7,
+              "maximum_linear_speed_m_s": 0.004306409507989883
+            },
+            {
+              "step": 600,
+              "time_s": 0.09999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9024201661572735e-7,
+              "maximum_linear_speed_m_s": 0.004538284614682198
+            }
+          ],
+          "source_hashes": {
+            "_src/solvers/vbd/solver_vbd.py": "53914c439671a3a62638b90fa73340c6d7f74966743e886a718692137e4d272d",
+            "_src/solvers/vbd/rigid_vbd_kkt.py": "99d92531c2858b363fa587386ce1f9b182833a240c99487cc92b2d5bff17c044",
+            "_src/solvers/vbd/rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+            "cable_scenes.py": "9b912909b8de813700375968c564d23f245d5a4d2c3a47c70672ba62da9055f7",
+            "yfarm_bench.py": "1e9f3d8678ed6bffdecaee29a67fbc2f3f13df7702a2927b85d4626218b69aee",
+            "cable_run.py": "a470e3115b0927e290a8a6b8051746d13e2a5fd06b4d7e4101f8f5be1114cfa9"
+          }
+        },
+        "B1": {
+          "prefix": "scale_default_ladder50_cpu_b1",
+          "wall_ms": 5.9808345393193605,
+          "gpu_ms": null,
+          "metadata_sha256": "9ff788c8210d5556040a1fa67773918193ae38f4063041171f0b7f214aa9e503",
+          "recording_sha256": "06958274c7e47ee66d4b6caf64eae2bd35b89b1ea426d6edaf41341937319c0a",
+          "setup": {
+            "model_build_s": 0.530917402356863,
+            "constructor_s": 0.16363679990172386,
+            "first_two_steps_compile_and_simulation_s": 0.0741562768816948,
+            "capture_s": 0.0000010915100574493408,
+            "diagnostics_s": 0.005066365003585815,
+            "model_signature_diagnostics_s": 0.00036084651947021484
+          },
+          "samples": [
+            {
+              "step": 0,
+              "time_s": 0,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.13391669133883e-8,
+              "maximum_linear_speed_m_s": 0
+            },
+            {
+              "step": 60,
+              "time_s": 0.01,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.668945019656349e-7,
+              "maximum_linear_speed_m_s": 0.0018944996409118176
+            },
+            {
+              "step": 120,
+              "time_s": 0.02,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9596805220460525e-7,
+              "maximum_linear_speed_m_s": 0.00137928721960634
+            },
+            {
+              "step": 180,
+              "time_s": 0.03,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.952540359522808e-7,
+              "maximum_linear_speed_m_s": 0.0019466558005660772
+            },
+            {
+              "step": 240,
+              "time_s": 0.04,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9452745588297934e-7,
+              "maximum_linear_speed_m_s": 0.002468470484018326
+            },
+            {
+              "step": 300,
+              "time_s": 0.049999999999999996,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.6402896719407936e-7,
+              "maximum_linear_speed_m_s": 0.0029350630939006805
+            },
+            {
+              "step": 360,
+              "time_s": 0.06,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9239291096956225e-7,
+              "maximum_linear_speed_m_s": 0.003348367288708687
+            },
+            {
+              "step": 420,
+              "time_s": 0.06999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.618684599307334e-7,
+              "maximum_linear_speed_m_s": 0.0037146953400224447
+            },
+            {
+              "step": 480,
+              "time_s": 0.08,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9095253797524736e-7,
+              "maximum_linear_speed_m_s": 0.0040689995512366295
+            },
+            {
+              "step": 540,
+              "time_s": 0.09,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.902353346149322e-7,
+              "maximum_linear_speed_m_s": 0.004306409507989883
+            },
+            {
+              "step": 600,
+              "time_s": 0.09999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9024201661572735e-7,
+              "maximum_linear_speed_m_s": 0.004538284614682198
+            }
+          ],
+          "source_hashes": {
+            "_src/solvers/vbd/solver_vbd.py": "c6be3919eae993a7a0c3bd36af652af2894cd2600f8d5d9714560f628b04bd72",
+            "_src/solvers/vbd/rigid_vbd_kkt.py": "bc31052f1e212333cbfaaf6b1de26e10f6f0e4ccc66a3dd7e0ffca3b1b65c047",
+            "_src/solvers/vbd/rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+            "cable_scenes.py": "9b912909b8de813700375968c564d23f245d5a4d2c3a47c70672ba62da9055f7",
+            "yfarm_bench.py": "1e9f3d8678ed6bffdecaee29a67fbc2f3f13df7702a2927b85d4626218b69aee",
+            "cable_run.py": "a470e3115b0927e290a8a6b8051746d13e2a5fd06b4d7e4101f8f5be1114cfa9"
+          }
+        },
+        "B2": {
+          "prefix": "scale_default_ladder50_cpu_b2",
+          "wall_ms": 6.024930121557769,
+          "gpu_ms": null,
+          "metadata_sha256": "07bc717ff4bacea4e0a78949054a45a61348243820baf3a108e19caa1df3f008",
+          "recording_sha256": "06958274c7e47ee66d4b6caf64eae2bd35b89b1ea426d6edaf41341937319c0a",
+          "setup": {
+            "model_build_s": 0.4308873862028122,
+            "constructor_s": 0.16411696001887321,
+            "first_two_steps_compile_and_simulation_s": 0.06947512924671173,
+            "capture_s": 0.0000010617077350616455,
+            "diagnostics_s": 0.004885818809270859,
+            "model_signature_diagnostics_s": 0.00036061182618141174
+          },
+          "samples": [
+            {
+              "step": 0,
+              "time_s": 0,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.13391669133883e-8,
+              "maximum_linear_speed_m_s": 0
+            },
+            {
+              "step": 60,
+              "time_s": 0.01,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.668945019656349e-7,
+              "maximum_linear_speed_m_s": 0.0018944996409118176
+            },
+            {
+              "step": 120,
+              "time_s": 0.02,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9596805220460525e-7,
+              "maximum_linear_speed_m_s": 0.00137928721960634
+            },
+            {
+              "step": 180,
+              "time_s": 0.03,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.952540359522808e-7,
+              "maximum_linear_speed_m_s": 0.0019466558005660772
+            },
+            {
+              "step": 240,
+              "time_s": 0.04,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9452745588297934e-7,
+              "maximum_linear_speed_m_s": 0.002468470484018326
+            },
+            {
+              "step": 300,
+              "time_s": 0.049999999999999996,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.6402896719407936e-7,
+              "maximum_linear_speed_m_s": 0.0029350630939006805
+            },
+            {
+              "step": 360,
+              "time_s": 0.06,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9239291096956225e-7,
+              "maximum_linear_speed_m_s": 0.003348367288708687
+            },
+            {
+              "step": 420,
+              "time_s": 0.06999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.618684599307334e-7,
+              "maximum_linear_speed_m_s": 0.0037146953400224447
+            },
+            {
+              "step": 480,
+              "time_s": 0.08,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9095253797524736e-7,
+              "maximum_linear_speed_m_s": 0.0040689995512366295
+            },
+            {
+              "step": 540,
+              "time_s": 0.09,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.902353346149322e-7,
+              "maximum_linear_speed_m_s": 0.004306409507989883
+            },
+            {
+              "step": 600,
+              "time_s": 0.09999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9024201661572735e-7,
+              "maximum_linear_speed_m_s": 0.004538284614682198
+            }
+          ],
+          "source_hashes": {
+            "_src/solvers/vbd/solver_vbd.py": "c6be3919eae993a7a0c3bd36af652af2894cd2600f8d5d9714560f628b04bd72",
+            "_src/solvers/vbd/rigid_vbd_kkt.py": "bc31052f1e212333cbfaaf6b1de26e10f6f0e4ccc66a3dd7e0ffca3b1b65c047",
+            "_src/solvers/vbd/rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+            "cable_scenes.py": "9b912909b8de813700375968c564d23f245d5a4d2c3a47c70672ba62da9055f7",
+            "yfarm_bench.py": "1e9f3d8678ed6bffdecaee29a67fbc2f3f13df7702a2927b85d4626218b69aee",
+            "cable_run.py": "a470e3115b0927e290a8a6b8051746d13e2a5fd06b4d7e4101f8f5be1114cfa9"
+          }
+        },
+        "A2": {
+          "prefix": "scale_default_ladder50_cpu_a2",
+          "wall_ms": 6.028909634885979,
+          "gpu_ms": null,
+          "metadata_sha256": "14d223f25c5fef400df04bfb82b2fa1c2f0a3ef998a553825ac4577d99addae3",
+          "recording_sha256": "06958274c7e47ee66d4b6caf64eae2bd35b89b1ea426d6edaf41341937319c0a",
+          "setup": {
+            "model_build_s": 0.5278868898749352,
+            "constructor_s": 0.17229151353240013,
+            "first_two_steps_compile_and_simulation_s": 0.07060759142041206,
+            "capture_s": 0.0000010691583156585693,
+            "diagnostics_s": 0.005005422979593277,
+            "model_signature_diagnostics_s": 0.0003600120544433594
+          },
+          "samples": [
+            {
+              "step": 0,
+              "time_s": 0,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 3.13391669133883e-8,
+              "maximum_linear_speed_m_s": 0
+            },
+            {
+              "step": 60,
+              "time_s": 0.01,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.668945019656349e-7,
+              "maximum_linear_speed_m_s": 0.0018944996409118176
+            },
+            {
+              "step": 120,
+              "time_s": 0.02,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9596805220460525e-7,
+              "maximum_linear_speed_m_s": 0.00137928721960634
+            },
+            {
+              "step": 180,
+              "time_s": 0.03,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.952540359522808e-7,
+              "maximum_linear_speed_m_s": 0.0019466558005660772
+            },
+            {
+              "step": 240,
+              "time_s": 0.04,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9452745588297934e-7,
+              "maximum_linear_speed_m_s": 0.002468470484018326
+            },
+            {
+              "step": 300,
+              "time_s": 0.049999999999999996,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.6402896719407936e-7,
+              "maximum_linear_speed_m_s": 0.0029350630939006805
+            },
+            {
+              "step": 360,
+              "time_s": 0.06,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9239291096956225e-7,
+              "maximum_linear_speed_m_s": 0.003348367288708687
+            },
+            {
+              "step": 420,
+              "time_s": 0.06999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.618684599307334e-7,
+              "maximum_linear_speed_m_s": 0.0037146953400224447
+            },
+            {
+              "step": 480,
+              "time_s": 0.08,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9095253797524736e-7,
+              "maximum_linear_speed_m_s": 0.0040689995512366295
+            },
+            {
+              "step": 540,
+              "time_s": 0.09,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.902353346149322e-7,
+              "maximum_linear_speed_m_s": 0.004306409507989883
+            },
+            {
+              "step": 600,
+              "time_s": 0.09999999999999999,
+              "finite": true,
+              "maximum_constrained_anchor_gap_m": 2.9024201661572735e-7,
+              "maximum_linear_speed_m_s": 0.004538284614682198
+            }
+          ],
+          "source_hashes": {
+            "_src/solvers/vbd/solver_vbd.py": "53914c439671a3a62638b90fa73340c6d7f74966743e886a718692137e4d272d",
+            "_src/solvers/vbd/rigid_vbd_kkt.py": "99d92531c2858b363fa587386ce1f9b182833a240c99487cc92b2d5bff17c044",
+            "_src/solvers/vbd/rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+            "cable_scenes.py": "9b912909b8de813700375968c564d23f245d5a4d2c3a47c70672ba62da9055f7",
+            "yfarm_bench.py": "1e9f3d8678ed6bffdecaee29a67fbc2f3f13df7702a2927b85d4626218b69aee",
+            "cable_run.py": "a470e3115b0927e290a8a6b8051746d13e2a5fd06b4d7e4101f8f5be1114cfa9"
+          }
+        }
+      }
+    }
+  ],
+  "final_scale": {
+    "baseline_range_ms": [
+      9.788532065458122,
+      9.789332211715323
+    ],
+    "candidate_range_ms": [
+      0.957052232728754,
+      0.9578752104055921
+    ],
+    "mean_ratio": 10.223815188072333,
+    "scope": "Final hardened source versus unchanged canonical baseline, native-default G1/I10, no contact, identical model signatures and 600 steps. Matched-budget throughput, not an accuracy-matched gain when saved states differ.",
+    "pairs": {
+      "a1_b1": {
+        "q": {
+          "bitwise": false,
+          "finite": true,
+          "translation_m": {
+            "max": 0.0014395138836400948,
+            "rms": 0.00011888138064071063
+          },
+          "orientation_geodesic_rad": {
+            "max": 0.017840166590981796,
+            "rms": 0.0018626239207086687
+          }
+        },
+        "qd": {
+          "bitwise": false,
+          "finite": true,
+          "linear_velocity_m_s": {
+            "max": 0.04732053253275802,
+            "rms": 0.0048456311766939325
+          },
+          "angular_velocity_rad_s": {
+            "max": 2.677207712265985,
+            "rms": 0.42394434006422665
+          }
+        }
+      },
+      "a1_b2": {
+        "q": {
+          "bitwise": false,
+          "finite": true,
+          "translation_m": {
+            "max": 0.001538516177412841,
+            "rms": 0.00011380306496674503
+          },
+          "orientation_geodesic_rad": {
+            "max": 0.018346612792307912,
+            "rms": 0.0018557088498035099
+          }
+        },
+        "qd": {
+          "bitwise": false,
+          "finite": true,
+          "linear_velocity_m_s": {
+            "max": 0.038364653583251626,
+            "rms": 0.004852821203135279
+          },
+          "angular_velocity_rad_s": {
+            "max": 2.6151238686181935,
+            "rms": 0.432183840183464
+          }
+        }
+      },
+      "a1_a2": {
+        "q": {
+          "bitwise": true,
+          "finite": true,
+          "translation_m": {
+            "max": 0,
+            "rms": 0
+          },
+          "orientation_geodesic_rad": {
+            "max": 0,
+            "rms": 0
+          }
+        },
+        "qd": {
+          "bitwise": true,
+          "finite": true,
+          "linear_velocity_m_s": {
+            "max": 0,
+            "rms": 0
+          },
+          "angular_velocity_rad_s": {
+            "max": 0,
+            "rms": 0
+          }
+        }
+      },
+      "b1_b2": {
+        "q": {
+          "bitwise": false,
+          "finite": true,
+          "translation_m": {
+            "max": 0.0020334354630937874,
+            "rms": 0.00011486450329036253
+          },
+          "orientation_geodesic_rad": {
+            "max": 0.017485341322559262,
+            "rms": 0.0018788684874079993
+          }
+        },
+        "qd": {
+          "bitwise": false,
+          "finite": true,
+          "linear_velocity_m_s": {
+            "max": 0.03719501766485749,
+            "rms": 0.004816773070895581
+          },
+          "angular_velocity_rad_s": {
+            "max": 2.8310895546791772,
+            "rms": 0.42947714822193794
+          }
+        }
+      },
+      "b1_a2": {
+        "q": {
+          "bitwise": false,
+          "finite": true,
+          "translation_m": {
+            "max": 0.0014395138836400948,
+            "rms": 0.00011888138064071063
+          },
+          "orientation_geodesic_rad": {
+            "max": 0.017840166590981796,
+            "rms": 0.0018626239207086687
+          }
+        },
+        "qd": {
+          "bitwise": false,
+          "finite": true,
+          "linear_velocity_m_s": {
+            "max": 0.04732053253275802,
+            "rms": 0.0048456311766939325
+          },
+          "angular_velocity_rad_s": {
+            "max": 2.677207712265985,
+            "rms": 0.42394434006422665
+          }
+        }
+      },
+      "b2_a2": {
+        "q": {
+          "bitwise": false,
+          "finite": true,
+          "translation_m": {
+            "max": 0.001538516177412841,
+            "rms": 0.00011380306496674503
+          },
+          "orientation_geodesic_rad": {
+            "max": 0.018346612792307912,
+            "rms": 0.0018557088498035099
+          }
+        },
+        "qd": {
+          "bitwise": false,
+          "finite": true,
+          "linear_velocity_m_s": {
+            "max": 0.038364653583251626,
+            "rms": 0.004852821203135279
+          },
+          "angular_velocity_rad_s": {
+            "max": 2.6151238686181935,
+            "rms": 0.432183840183464
+          }
+        }
+      }
+    },
+    "script_sha256": "c8fff590331c2cc6fe95afebb152e7091d06e5cd49625dedacae283801629617",
+    "runs": {
+      "a1": {
+        "file": "final_scale_yfarm72_a1.json",
+        "wall_ms": 9.789332211715323,
+        "metadata_sha256": "9aedfeb41f6c15f73ddc4394095cd6725eb6562804607f271df5d97ab330714a",
+        "recording_sha256": "953f8e14f200eb3ed2d5aeeb96146afa55f9ce4bfd7e30acddaa53445cad46bb",
+        "setup": {
+          "model_build_s": 14.961567543447018,
+          "constructor_s": 3.314293261617422,
+          "first_two_steps_compile_and_simulation_s": 0.26487643644213676,
+          "capture_s": 0.15579818934202194,
+          "diagnostics_s": 0.0655842088162899
+        },
+        "source_hashes": {
+          "_src/solvers/vbd/solver_vbd.py": "53914c439671a3a62638b90fa73340c6d7f74966743e886a718692137e4d272d",
+          "_src/solvers/vbd/rigid_vbd_kkt.py": "99d92531c2858b363fa587386ce1f9b182833a240c99487cc92b2d5bff17c044",
+          "_src/solvers/vbd/rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+          "cable_scenes.py": "9b912909b8de813700375968c564d23f245d5a4d2c3a47c70672ba62da9055f7",
+          "yfarm_bench.py": "1e9f3d8678ed6bffdecaee29a67fbc2f3f13df7702a2927b85d4626218b69aee",
+          "cable_run.py": "a0f22bee0fe3d0e814d93fda564ceb19d5f2cbd5a14a104642c26b5d63fa2516"
+        }
+      },
+      "b1": {
+        "file": "final_scale_yfarm72_b1.json",
+        "wall_ms": 0.957052232728754,
+        "metadata_sha256": "946b0ca47715f98d7467267b58b63e85734f350137c859c64be3cc645f713066",
+        "recording_sha256": "bc9813fd4fd4518d9e963449613bcef131327e39e31058a24812ea1e62b1d91c",
+        "setup": {
+          "model_build_s": 15.236304719001055,
+          "constructor_s": 4.829635079950094,
+          "first_two_steps_compile_and_simulation_s": 0.12569979205727577,
+          "capture_s": 0.020658642053604126,
+          "diagnostics_s": 0.05613906681537628
+        },
+        "source_hashes": {
+          "_src/solvers/vbd/solver_vbd.py": "c6be3919eae993a7a0c3bd36af652af2894cd2600f8d5d9714560f628b04bd72",
+          "_src/solvers/vbd/rigid_vbd_kkt.py": "0c95a947b4cc64d76cf5f2d147e1f9ffd4a85d87c5b8956b7424f22b0e6f2e8d",
+          "_src/solvers/vbd/rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+          "cable_scenes.py": "9b912909b8de813700375968c564d23f245d5a4d2c3a47c70672ba62da9055f7",
+          "yfarm_bench.py": "1e9f3d8678ed6bffdecaee29a67fbc2f3f13df7702a2927b85d4626218b69aee",
+          "cable_run.py": "a0f22bee0fe3d0e814d93fda564ceb19d5f2cbd5a14a104642c26b5d63fa2516"
+        }
+      },
+      "b2": {
+        "file": "final_scale_yfarm72_b2.json",
+        "wall_ms": 0.9578752104055921,
+        "metadata_sha256": "34d3dd6e1c78e0230297ab595f5559527eda6bf54c5dcd5b986d044e85f4fb36",
+        "recording_sha256": "35fb83e38f10e5183f85df82716836dbf234d0378b003604030d90ba89991569",
+        "setup": {
+          "model_build_s": 14.975736863911152,
+          "constructor_s": 4.943473920226097,
+          "first_two_steps_compile_and_simulation_s": 0.12511364370584488,
+          "capture_s": 0.02144993469119072,
+          "diagnostics_s": 0.06132914125919342
+        },
+        "source_hashes": {
+          "_src/solvers/vbd/solver_vbd.py": "c6be3919eae993a7a0c3bd36af652af2894cd2600f8d5d9714560f628b04bd72",
+          "_src/solvers/vbd/rigid_vbd_kkt.py": "0c95a947b4cc64d76cf5f2d147e1f9ffd4a85d87c5b8956b7424f22b0e6f2e8d",
+          "_src/solvers/vbd/rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+          "cable_scenes.py": "9b912909b8de813700375968c564d23f245d5a4d2c3a47c70672ba62da9055f7",
+          "yfarm_bench.py": "1e9f3d8678ed6bffdecaee29a67fbc2f3f13df7702a2927b85d4626218b69aee",
+          "cable_run.py": "a0f22bee0fe3d0e814d93fda564ceb19d5f2cbd5a14a104642c26b5d63fa2516"
+        }
+      },
+      "a2": {
+        "file": "final_scale_yfarm72_a2.json",
+        "wall_ms": 9.788532065458122,
+        "metadata_sha256": "d7fcad3e4dfcd75698074422f1596754371ad650c3b0570ecfc206c2e6354d3d",
+        "recording_sha256": "953f8e14f200eb3ed2d5aeeb96146afa55f9ce4bfd7e30acddaa53445cad46bb",
+        "setup": {
+          "model_build_s": 15.036435823887587,
+          "constructor_s": 3.246201418340206,
+          "first_two_steps_compile_and_simulation_s": 0.2638191543519497,
+          "capture_s": 0.1512259617447853,
+          "diagnostics_s": 0.06488556414842606
+        },
+        "source_hashes": {
+          "_src/solvers/vbd/solver_vbd.py": "53914c439671a3a62638b90fa73340c6d7f74966743e886a718692137e4d272d",
+          "_src/solvers/vbd/rigid_vbd_kkt.py": "99d92531c2858b363fa587386ce1f9b182833a240c99487cc92b2d5bff17c044",
+          "_src/solvers/vbd/rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+          "cable_scenes.py": "9b912909b8de813700375968c564d23f245d5a4d2c3a47c70672ba62da9055f7",
+          "yfarm_bench.py": "1e9f3d8678ed6bffdecaee29a67fbc2f3f13df7702a2927b85d4626218b69aee",
+          "cable_run.py": "a0f22bee0fe3d0e814d93fda564ceb19d5f2cbd5a14a104642c26b5d63fa2516"
+        }
+      }
+    }
+  },
+  "friction": [
+    {
+      "mu": 0.25,
+      "g": 0,
+      "status": "passed",
+      "process_wall_s": 90.88343734666705,
+      "measurements": {
+        "finite": true,
+        "frames": 366,
+        "dt": 0.002777777777777778,
+        "motion_screen": {
+          "status": "passed"
+        },
+        "hold_rod_rms_um": [
+          23.798229961113936,
+          158.41064847580913
+        ],
+        "hold_metric": "Affine-detrended rod-center RMS over 1.8–2.3 and 4.8–5.3 s; includes settling",
+        "mean_step_us_excluding_first_frame": 38742.497248668646,
+        "timing_scope": "Observational; includes frame stepping, excludes measurements; use matched-state benchmark for speed claims",
+        "contact_count_range": [
+          33,
+          55
+        ],
+        "global_joint_count": 0,
+        "model_joint_count": 293,
+        "buckets": []
+      },
+      "capacity_valid": true,
+      "settings": {
+        "case": "toy4_ba",
+        "device": "cuda:0",
+        "g": 0,
+        "iterations": 256,
+        "substeps": 6,
+        "steps": 366,
+        "deterministic": false,
+        "collision": "main",
+        "contact_policy": "authored_toy_contacts"
+      },
+      "control": {
+        "requested_pulley_mu": 0.25,
+        "observed": [
+          {
+            "iterations": 256,
+            "substeps": 6,
+            "global_iterations": 0,
+            "cable_rigidity_N": 1000,
+            "dt": 0.002777777777777778,
+            "requested_nonzero_pulley_mu": 0.25,
+            "authored_pulley_mu": [
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0,
+              0
+            ],
+            "effective_pulley_mu": [
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0,
+              0
+            ],
+            "shape_material_mu_unique": [
+              0,
+              0.0625,
+              1
+            ],
+            "model_array_sha256": {
+              "body_mass": "18b83511041c5acd5e01ae1d8352972a51d44dee6dbda518e0b2b9a252cc936a",
+              "body_inertia": "cdb6c08d6c04e64bd62a46465216777c85d03d9f841aa1fd17affa8fec94f1a3",
+              "body_com": "eb539da010eb982d80ae9b64ec1ffaafc5fffa1b19f2317a20f8a61160e63918",
+              "joint_parent": "5b1fee1af0dd3bd82d256f7f6cf5cf37fd2420ce70007796b7173980861149aa",
+              "joint_child": "d8afbe15a8d3a7b2aca77f3097f98658a01c57b24eed699a62fdf151e6c56ac0",
+              "joint_type": "7461a90c4c98279225a1dfe845cbac3122796c00104cee45b22ac8d0cab8556f",
+              "shape_material_mu": "a0d25f538a9615390a818833dffd956af92a508fb2b87efa1b5fcc5e0af7848d"
+            },
+            "initial_q_sha256": "45ea6aa020b831efb5591259c4310a66c4f338056420be8c0add1dc61cca4877"
+          }
+        ],
+        "wrapper_sha256": "432fc58e4cdbe702bbdf8be1db5f05e1c9310f7e88c402544771b8966f4527cd",
+        "interpretation": "Human 256x6 interpreted as I256/S6. Authored ordinary 1000 N rigidity and original two-pulse screen retained; user stiffness and criterion unspecified. Both G0/G1 use identical friction per pair. No supplied scene file is modified. Diagnostic capacity reductions are charged, not a clean performance benchmark."
+      }
+    },
+    {
+      "mu": 0.25,
+      "g": 1,
+      "status": "passed",
+      "process_wall_s": 93.53210907801986,
+      "measurements": {
+        "finite": true,
+        "frames": 366,
+        "dt": 0.002777777777777778,
+        "motion_screen": {
+          "status": "passed"
+        },
+        "hold_rod_rms_um": [
+          0.02967051845394904,
+          0.056627829654687635
+        ],
+        "hold_metric": "Affine-detrended rod-center RMS over 1.8–2.3 and 4.8–5.3 s; includes settling",
+        "mean_step_us_excluding_first_frame": 39484.099228972715,
+        "timing_scope": "Observational; includes frame stepping, excludes measurements; use matched-state benchmark for speed claims",
+        "contact_count_range": [
+          35,
+          55
+        ],
+        "global_joint_count": 292,
+        "model_joint_count": 293,
+        "buckets": [
+          "_TreeBucket"
+        ]
+      },
+      "capacity_valid": true,
+      "settings": {
+        "case": "toy4_ba",
+        "device": "cuda:0",
+        "g": 1,
+        "iterations": 256,
+        "substeps": 6,
+        "steps": 366,
+        "deterministic": false,
+        "collision": "main",
+        "contact_policy": "authored_toy_contacts"
+      },
+      "control": {
+        "requested_pulley_mu": 0.25,
+        "observed": [
+          {
+            "iterations": 256,
+            "substeps": 6,
+            "global_iterations": 1,
+            "cable_rigidity_N": 1000,
+            "dt": 0.002777777777777778,
+            "requested_nonzero_pulley_mu": 0.25,
+            "authored_pulley_mu": [
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0,
+              0
+            ],
+            "effective_pulley_mu": [
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0,
+              0
+            ],
+            "shape_material_mu_unique": [
+              0,
+              0.0625,
+              1
+            ],
+            "model_array_sha256": {
+              "body_mass": "18b83511041c5acd5e01ae1d8352972a51d44dee6dbda518e0b2b9a252cc936a",
+              "body_inertia": "cdb6c08d6c04e64bd62a46465216777c85d03d9f841aa1fd17affa8fec94f1a3",
+              "body_com": "eb539da010eb982d80ae9b64ec1ffaafc5fffa1b19f2317a20f8a61160e63918",
+              "joint_parent": "5b1fee1af0dd3bd82d256f7f6cf5cf37fd2420ce70007796b7173980861149aa",
+              "joint_child": "d8afbe15a8d3a7b2aca77f3097f98658a01c57b24eed699a62fdf151e6c56ac0",
+              "joint_type": "7461a90c4c98279225a1dfe845cbac3122796c00104cee45b22ac8d0cab8556f",
+              "shape_material_mu": "a0d25f538a9615390a818833dffd956af92a508fb2b87efa1b5fcc5e0af7848d"
+            },
+            "initial_q_sha256": "45ea6aa020b831efb5591259c4310a66c4f338056420be8c0add1dc61cca4877"
+          }
+        ],
+        "wrapper_sha256": "432fc58e4cdbe702bbdf8be1db5f05e1c9310f7e88c402544771b8966f4527cd",
+        "interpretation": "Human 256x6 interpreted as I256/S6. Authored ordinary 1000 N rigidity and original two-pulse screen retained; user stiffness and criterion unspecified. Both G0/G1 use identical friction per pair. No supplied scene file is modified. Diagnostic capacity reductions are charged, not a clean performance benchmark."
+      }
+    },
+    {
+      "mu": 0.2,
+      "g": 0,
+      "status": "passed",
+      "process_wall_s": 90.8629060126841,
+      "measurements": {
+        "finite": true,
+        "frames": 366,
+        "dt": 0.002777777777777778,
+        "motion_screen": {
+          "status": "passed"
+        },
+        "hold_rod_rms_um": [
+          13.47378436262053,
+          212.1470595503592
+        ],
+        "hold_metric": "Affine-detrended rod-center RMS over 1.8–2.3 and 4.8–5.3 s; includes settling",
+        "mean_step_us_excluding_first_frame": 38749.09710394193,
+        "timing_scope": "Observational; includes frame stepping, excludes measurements; use matched-state benchmark for speed claims",
+        "contact_count_range": [
+          34,
+          56
+        ],
+        "global_joint_count": 0,
+        "model_joint_count": 293,
+        "buckets": []
+      },
+      "capacity_valid": true,
+      "settings": {
+        "case": "toy4_ba",
+        "device": "cuda:0",
+        "g": 0,
+        "iterations": 256,
+        "substeps": 6,
+        "steps": 366,
+        "deterministic": false,
+        "collision": "main",
+        "contact_policy": "authored_toy_contacts"
+      },
+      "control": {
+        "requested_pulley_mu": 0.2,
+        "observed": [
+          {
+            "iterations": 256,
+            "substeps": 6,
+            "global_iterations": 0,
+            "cable_rigidity_N": 1000,
+            "dt": 0.002777777777777778,
+            "requested_nonzero_pulley_mu": 0.2,
+            "authored_pulley_mu": [
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0,
+              0
+            ],
+            "effective_pulley_mu": [
+              0.2,
+              0.2,
+              0.2,
+              0.2,
+              0.2,
+              0.2,
+              0.2,
+              0.2,
+              0,
+              0
+            ],
+            "shape_material_mu_unique": [
+              0,
+              0.03999999910593033,
+              1
+            ],
+            "model_array_sha256": {
+              "body_mass": "18b83511041c5acd5e01ae1d8352972a51d44dee6dbda518e0b2b9a252cc936a",
+              "body_inertia": "cdb6c08d6c04e64bd62a46465216777c85d03d9f841aa1fd17affa8fec94f1a3",
+              "body_com": "eb539da010eb982d80ae9b64ec1ffaafc5fffa1b19f2317a20f8a61160e63918",
+              "joint_parent": "5b1fee1af0dd3bd82d256f7f6cf5cf37fd2420ce70007796b7173980861149aa",
+              "joint_child": "d8afbe15a8d3a7b2aca77f3097f98658a01c57b24eed699a62fdf151e6c56ac0",
+              "joint_type": "7461a90c4c98279225a1dfe845cbac3122796c00104cee45b22ac8d0cab8556f",
+              "shape_material_mu": "b8e49d73c6e0c166dccdd204aba1e3da1b67334c36b09725386b446c6ed8d6b9"
+            },
+            "initial_q_sha256": "45ea6aa020b831efb5591259c4310a66c4f338056420be8c0add1dc61cca4877"
+          }
+        ],
+        "wrapper_sha256": "432fc58e4cdbe702bbdf8be1db5f05e1c9310f7e88c402544771b8966f4527cd",
+        "interpretation": "Human 256x6 interpreted as I256/S6. Authored ordinary 1000 N rigidity and original two-pulse screen retained; user stiffness and criterion unspecified. Both G0/G1 use identical friction per pair. No supplied scene file is modified. Diagnostic capacity reductions are charged, not a clean performance benchmark."
+      }
+    },
+    {
+      "mu": 0.2,
+      "g": 1,
+      "status": "passed",
+      "process_wall_s": 93.22632657364011,
+      "measurements": {
+        "finite": true,
+        "frames": 366,
+        "dt": 0.002777777777777778,
+        "motion_screen": {
+          "status": "passed"
+        },
+        "hold_rod_rms_um": [
+          0.032552716033951795,
+          0.05671308165323974
+        ],
+        "hold_metric": "Affine-detrended rod-center RMS over 1.8–2.3 and 4.8–5.3 s; includes settling",
+        "mean_step_us_excluding_first_frame": 39496.24276188411,
+        "timing_scope": "Observational; includes frame stepping, excludes measurements; use matched-state benchmark for speed claims",
+        "contact_count_range": [
+          37,
+          54
+        ],
+        "global_joint_count": 292,
+        "model_joint_count": 293,
+        "buckets": [
+          "_TreeBucket"
+        ]
+      },
+      "capacity_valid": true,
+      "settings": {
+        "case": "toy4_ba",
+        "device": "cuda:0",
+        "g": 1,
+        "iterations": 256,
+        "substeps": 6,
+        "steps": 366,
+        "deterministic": false,
+        "collision": "main",
+        "contact_policy": "authored_toy_contacts"
+      },
+      "control": {
+        "requested_pulley_mu": 0.2,
+        "observed": [
+          {
+            "iterations": 256,
+            "substeps": 6,
+            "global_iterations": 1,
+            "cable_rigidity_N": 1000,
+            "dt": 0.002777777777777778,
+            "requested_nonzero_pulley_mu": 0.2,
+            "authored_pulley_mu": [
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0.25,
+              0,
+              0
+            ],
+            "effective_pulley_mu": [
+              0.2,
+              0.2,
+              0.2,
+              0.2,
+              0.2,
+              0.2,
+              0.2,
+              0.2,
+              0,
+              0
+            ],
+            "shape_material_mu_unique": [
+              0,
+              0.03999999910593033,
+              1
+            ],
+            "model_array_sha256": {
+              "body_mass": "18b83511041c5acd5e01ae1d8352972a51d44dee6dbda518e0b2b9a252cc936a",
+              "body_inertia": "cdb6c08d6c04e64bd62a46465216777c85d03d9f841aa1fd17affa8fec94f1a3",
+              "body_com": "eb539da010eb982d80ae9b64ec1ffaafc5fffa1b19f2317a20f8a61160e63918",
+              "joint_parent": "5b1fee1af0dd3bd82d256f7f6cf5cf37fd2420ce70007796b7173980861149aa",
+              "joint_child": "d8afbe15a8d3a7b2aca77f3097f98658a01c57b24eed699a62fdf151e6c56ac0",
+              "joint_type": "7461a90c4c98279225a1dfe845cbac3122796c00104cee45b22ac8d0cab8556f",
+              "shape_material_mu": "b8e49d73c6e0c166dccdd204aba1e3da1b67334c36b09725386b446c6ed8d6b9"
+            },
+            "initial_q_sha256": "45ea6aa020b831efb5591259c4310a66c4f338056420be8c0add1dc61cca4877"
+          }
+        ],
+        "wrapper_sha256": "432fc58e4cdbe702bbdf8be1db5f05e1c9310f7e88c402544771b8966f4527cd",
+        "interpretation": "Human 256x6 interpreted as I256/S6. Authored ordinary 1000 N rigidity and original two-pulse screen retained; user stiffness and criterion unspecified. Both G0/G1 use identical friction per pair. No supplied scene file is modified. Diagnostic capacity reductions are charged, not a clean performance benchmark."
+      }
+    }
+  ],
+  "media": [
+    {
+      "stem": "final_contact_a1_detail",
+      "group": "contact",
+      "title": "Prior G1 · active contact",
+      "caption": "Same 0.5 s trajectory and contact settings; 31 recorded states.",
+      "src": "videos/20261019/final_contact_a1_detail.mp4",
+      "poster": "videos/20261019/final_contact_a1_detail_030.png",
+      "poster_sha256": "70c4c9e9d36ad3e2bac0cd65ad005731391a831ba6164ce5ac49ff7e245c0375",
+      "renderer": "Newton ViewerGL",
+      "input_npz_sha256": "ca10f56f9c7421f762f48d6caaed0889cb874dd99c2a9902a34ced360e66472f",
+      "input_json_sha256": "b6411551059838968a0bc7f3206c67406f76063558255ffc7e2574a4a0426486",
+      "newton_viewer_sha256": "513ea2560ed57fbc5c459c6a2df8f9e184a342133a7552a0f7ab702c66b01413",
+      "script_sha256": "5438b6492e0566ae45a28059924699b887398e903f51a1dfda569e031703705d",
+      "output_sha256": "828cf1e27875fead391926ecd561bea3251d7b82aa79cf73ede13514d18b0fa5",
+      "frames": 31,
+      "fps": 60,
+      "playback_speed": 1,
+      "simulation_duration_s": 0.5,
+      "encoded_duration_s": 0.5166666666666667,
+      "endpoint_dwell_s": 0.016666666666666666,
+      "camera_position": [
+        0.18,
+        -0.19,
+        0.258
+      ],
+      "camera_target": [
+        0.18,
+        0.04,
+        0.008
+      ],
+      "source_hashes": {
+        "rigid_vbd_kkt.py": "99d92531c2858b363fa587386ce1f9b182833a240c99487cc92b2d5bff17c044",
+        "solver_vbd.py": "53914c439671a3a62638b90fa73340c6d7f74966743e886a718692137e4d272d",
+        "rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+        "builder.py": "b421fc46530d740d35df38ecc1f2be1e1df4e3db188e7f178eb6c662eac38c4b",
+        "inertia.py": "db4e68fa9bce8a3ef8ca4085719b9840aef38dbcade825f75a864325ad4ae33d"
+      },
+      "render_cost_s": 16.70102473348379
+    },
+    {
+      "stem": "final_contact_b1_detail",
+      "group": "contact",
+      "title": "Retained G1 · active contact",
+      "caption": "Final KKT hash 0c95a947. Same saved trajectory; 18.0% lower full-step cost.",
+      "src": "videos/20261019/final_contact_b1_detail.mp4",
+      "poster": "videos/20261019/final_contact_b1_detail_030.png",
+      "poster_sha256": "6586c81881d8755c995fbe95516d346cc681a13fafaa610166181b76c17b1be1",
+      "renderer": "Newton ViewerGL",
+      "input_npz_sha256": "ca10f56f9c7421f762f48d6caaed0889cb874dd99c2a9902a34ced360e66472f",
+      "input_json_sha256": "de7a498a399e38ec09790747bc2e01205438bd52966d367cee02115c27d05445",
+      "newton_viewer_sha256": "513ea2560ed57fbc5c459c6a2df8f9e184a342133a7552a0f7ab702c66b01413",
+      "script_sha256": "5438b6492e0566ae45a28059924699b887398e903f51a1dfda569e031703705d",
+      "output_sha256": "7e0bd493159801e5fc3ac429859cbf0457178ceb90293e6d03ed1519545c2348",
+      "frames": 31,
+      "fps": 60,
+      "playback_speed": 1,
+      "simulation_duration_s": 0.5,
+      "encoded_duration_s": 0.5166666666666667,
+      "endpoint_dwell_s": 0.016666666666666666,
+      "camera_position": [
+        0.18,
+        -0.19,
+        0.258
+      ],
+      "camera_target": [
+        0.18,
+        0.04,
+        0.008
+      ],
+      "source_hashes": {
+        "rigid_vbd_kkt.py": "0c95a947b4cc64d76cf5f2d147e1f9ffd4a85d87c5b8956b7424f22b0e6f2e8d",
+        "solver_vbd.py": "c6be3919eae993a7a0c3bd36af652af2894cd2600f8d5d9714560f628b04bd72",
+        "rigid_vbd_kernels.py": "1dde17bb00fc8e3028d4845cc8a5d84e70e3f23e6da43a4a659dc875e299cea9",
+        "builder.py": "b421fc46530d740d35df38ecc1f2be1e1df4e3db188e7f178eb6c662eac38c4b",
+        "inertia.py": "db4e68fa9bce8a3ef8ca4085719b9840aef38dbcade825f75a864325ad4ae33d"
+      },
+      "render_cost_s": 18.177449949085712
+    },
+    {
+      "stem": "native_final_y_a1",
+      "group": "native-y",
+      "title": "Prior G1 · native Y-junction",
+      "caption": "I5/G1, 20 substeps/frame. Native checks pass. Not the mixed-Y timing scene.",
+      "src": "videos/20261019/native_final_y_a1.mp4",
+      "poster": "videos/20261019/native_final_y_a1_last.png",
+      "poster_sha256": "77f2ac2d10ed88d3eeaf628312cab38a5ebeb2ff7b0bdcf446560b0dbcfdfa1a",
+      "renderer": "Newton ViewerGL",
+      "input_npz_sha256": "15a55bc54249f96614326790f271cfacd62cc50707dd0d143bdaedb465717b0d",
+      "input_json_sha256": "921b691447bf1855c81fcdc9b120d8d1f5500503182fa6cf80ef5781adcc0989",
+      "newton_viewer_sha256": "513ea2560ed57fbc5c459c6a2df8f9e184a342133a7552a0f7ab702c66b01413",
+      "script_sha256": "c6226bb9b6f3f7919c31116bceff0b0fede645bc3da7914c434ae94048c8ed64",
+      "output_sha256": "731b6883cc0d048423d9a8428075c72b16231664f5978362138e38b0e02174a2",
+      "frames": 100,
+      "fps": 60,
+      "playback_speed": 1,
+      "first_sim_time_s": 0.016666666666666666,
+      "last_sim_time_s": 1.6666666666666656,
+      "encoded_duration_s": 1.6666666666666667,
+      "camera": {
+        "position": [
+          1.6,
+          -2,
+          2.05
+        ],
+        "target": [
+          0,
+          0,
+          0.95
+        ],
+        "shared_between_sources": true
+      },
+      "note": "Native model/timestep/material/iterations unchanged; camera and framebuffer annotations only. Rendering run is not a simulation benchmark.",
+      "total_including_simulation_setup_render_s": 8.577850807458162,
+      "source_hashes": {
+        "solver_vbd.py": "53914c439671a3a62638b90fa73340c6d7f74966743e886a718692137e4d272d",
+        "rigid_vbd_kkt.py": "99d92531c2858b363fa587386ce1f9b182833a240c99487cc92b2d5bff17c044"
+      },
+      "render_cost_s": 5.083255413919687
+    },
+    {
+      "stem": "native_final_y_b1",
+      "group": "native-y",
+      "title": "Retained G1 · native Y-junction",
+      "caption": "Final source; matched camera and native budget. Native checks pass.",
+      "src": "videos/20261019/native_final_y_b1.mp4",
+      "poster": "videos/20261019/native_final_y_b1_last.png",
+      "poster_sha256": "f2f57c2f45205058f63d8f1093dd41bc1454ce6e9a0da0b239ad5b0f24d4756a",
+      "renderer": "Newton ViewerGL",
+      "input_npz_sha256": "15a55bc54249f96614326790f271cfacd62cc50707dd0d143bdaedb465717b0d",
+      "input_json_sha256": "91eb2f88d63a23414f24f3c7c99ec416099809a73e93e3bbfe014297430343d6",
+      "newton_viewer_sha256": "513ea2560ed57fbc5c459c6a2df8f9e184a342133a7552a0f7ab702c66b01413",
+      "script_sha256": "c6226bb9b6f3f7919c31116bceff0b0fede645bc3da7914c434ae94048c8ed64",
+      "output_sha256": "8b3eaeadfd9b74adc15662dae0d8a43e2b7219c60e986bf54d4283d45e1990f6",
+      "frames": 100,
+      "fps": 60,
+      "playback_speed": 1,
+      "first_sim_time_s": 0.016666666666666666,
+      "last_sim_time_s": 1.6666666666666656,
+      "encoded_duration_s": 1.6666666666666667,
+      "camera": {
+        "position": [
+          1.6,
+          -2,
+          2.05
+        ],
+        "target": [
+          0,
+          0,
+          0.95
+        ],
+        "shared_between_sources": true
+      },
+      "note": "Native model/timestep/material/iterations unchanged; camera and framebuffer annotations only. Rendering run is not a simulation benchmark.",
+      "total_including_simulation_setup_render_s": 8.569737557321787,
+      "source_hashes": {
+        "solver_vbd.py": "c6be3919eae993a7a0c3bd36af652af2894cd2600f8d5d9714560f628b04bd72",
+        "rigid_vbd_kkt.py": "0c95a947b4cc64d76cf5f2d147e1f9ffd4a85d87c5b8956b7424f22b0e6f2e8d"
+      },
+      "render_cost_s": 5.125082325190306
+    },
+    {
+      "stem": "research_human_ba_mu025_i256_s6_g0_video",
+      "group": "toy",
+      "title": "Local G0 · Toy4 BA · µ=0.25",
+      "caption": "I256/S6, ordinary 1000 N rigidity, 6.1 s. Authored motion screen passes.",
+      "src": "videos/20261019/research_human_ba_mu025_i256_s6_g0_video.mp4",
+      "poster": "videos/20261019/research_human_ba_mu025_i256_s6_g0_video_last.png",
+      "poster_sha256": "d0354d5227c27be3ec9ce3349cea5d7f6f1a54dee91888f2cf066b0283652a50",
+      "renderer": "Newton ViewerGL",
+      "input_npz_sha256": "772547426373b7dbb3a94d2b561eda44a21315a25d1e5f3fe081c32046e72d89",
+      "input_json_sha256": "2a45ed29f9c9eb6903ed6220b447269915835793807eb1a91a6c6a1886d90c36",
+      "newton_viewer_sha256": "513ea2560ed57fbc5c459c6a2df8f9e184a342133a7552a0f7ab702c66b01413",
+      "script_sha256": "a7477511f0487266745d9a8128d6a94d1f477b70cf922b8fb7b5b63501f7c479",
+      "output_sha256": "32f165118551cd6f486cdf2b28a1aaa17c87ca3eca540063f9ee45985ade7e54",
+      "frames": 366,
+      "fps": 60,
+      "playback_speed": 1,
+      "first_sim_time_s": 0.016666666666666666,
+      "last_sim_time_s": 6.099999999999984,
+      "encoded_duration_s": 6.1,
+      "camera": {
+        "position": [
+          0.015,
+          0.015,
+          0.3
+        ],
+        "pitch": -90,
+        "yaw": 90,
+        "scope": "Shared wider top-down camera with mechanism below the text band; no state/geometry changes."
+      },
+      "note": "Complete recorded trajectory at native 60fps; model reconstructed with source-hash checks and the documented scalar-gravity adapter. No resimulation, time resampling or discarded frames. Newton framebuffer with text labels and a shared wider camera. Original main collision and fixture-level inertia restoration retained. Explicit pulley-friction reconstruction is verified against every recorded model-array and initial-state hash before replay.",
+      "setup_s": 1.4160265028476715,
+      "source_hashes": {
+        "_src/solvers/vbd/rigid_vbd_kkt.py": "0c95a947b4cc64d76cf5f2d147e1f9ffd4a85d87c5b8956b7424f22b0e6f2e8d",
+        "_src/solvers/vbd/solver_vbd.py": "c6be3919eae993a7a0c3bd36af652af2894cd2600f8d5d9714560f628b04bd72",
+        "_src/solvers/xpbd/rigid_xpbd_kkt.py": "83981355b8abced545f9df23e55b1e7516248d6f7b8ad6b9999ec7fd9d0ad414",
+        "test_rigid_vbd_kkt.py": "056df957e54cce2ea9bff73741934ccf447101bd9fa3f1881396d89f4635e677",
+        "test_rigid_kkt_primitives.py": "b077d727da977411e4f90c4d211e9e60f173eb3013dc8669d977be927d405090",
+        "_src/geometry/collision_core.py": "daccb7ad4fe6a2acd0ef5fae83bbd6ba3e655d9e16226677b003e7fc1870de1a",
+        "_src/geometry/collision_primitive.py": "13aaa4c4da5d45b586908694dce3885cb4bcd6c5eeede0139b2ee1e177b24937",
+        "_src/geometry/narrow_phase.py": "d5f6d5e38aa4b903f804bf7ec9bf81b6e1569e9b1e63e278d86dd418d8981737",
+        "cases.json": "9f8c4aa7d149324b82312dbce19755a4c9b7eccce79b2b5a4ed712a591845486",
+        "fixtures.py": "a1d1432ca04069083c47c9c9d877038805406a7c3cce48872bf115ff5ee69499",
+        "import-2026-09-29.json": "734a2646c61f24edd136f8ad71a14bd4b5c1b4259a51fefe7148880ab96aab08",
+        "assets.json": "b7df6aec54820875c1e9d0a3e2fe4b4fa9155f35aa7c9d2f1145d692a5f420a7",
+        "foot_geometry.py": "615858f862b2ae759c153a85398aaf766bf63f73c57fe888deb9ee0d2ea94395",
+        "four_bar.py": "a9c82d15f2e7cf145a3ee24fda4f3de1409ba8a3f6165fd7062308e93f679dd8",
+        "h2.py": "070df07060811bebc71ea5be96f322e35f2062ff1107ea38935d0cd3a6387328",
+        "mechanisms.py": "6c0f70573495d7f5f9bc4af73084119c60dcad2428ba008d333b11ba20056510",
+        "scenes.py": "b2c86a8b9cd9bc5bdb4937b303c1a7336948235b76a4c2f21fac2d26f4f3a2ac",
+        "manifest.json": "ab480bd7be460ddb59c5cd55dd29b0294780e98495ced43d763b02d11d822245",
+        "analytic_collision_test.patch": "5ef0e12cc58e3615f9ae5fc95d5d9393c3dd512f5c9f747f5d663cbd43fb9870",
+        "convex_core_radius_test.patch": "48ca614cceccb5ad862687130d67b3c86da723d2612b028140a3ee3cc8050b76",
+        "protocols.py": "c0bcf2807dee8935bdd966fe7bb1762b28f24e053216b81e1f10dd44f6f4c9b7",
+        "regressions.py": "6e189493b68a9b56ef8ad5dffe3fe72c1dccb05ec6a2b4bfd8aae451fba60082",
+        "run.py": "4203f49a8f4e6f29b334095c054dd150ae9703c9f03982b4624acf1567b3837d",
+        "runtime.py": "d4d4e899829207bf96e9564c7854c2d502f66593d26834e5fdfa9612fbdb22d8",
+        "example_toy3.py": "392bfcf7147b3c029f6b0845fcaa69506ed7b19d00b8129117a8a0bb78f3be9c",
+        "example_toy4.py": "5aabcf8a1c3a0ae65ee8a819294b9321849f7dfbb234ce620c3c942ee5e8da48",
+        "toy_cable_common.py": "519f8dceb0d3be962a653b900ef4268f61eb2ee1b8d74737de150fe7630ff857",
+        "validation-2026-09-29.json": "ebf4d3c422592ec668c75ca2f528fe3eac5237e4e6d93e79bd528ba29dc878c1",
+        "validation.json": "2d4f9dc1888cdbf54038016f56e255e93904e3f5f6328ea53306100a8ab48fa5"
+      },
+      "render_cost_s": 39.877585880458355
+    },
+    {
+      "stem": "research_human_ba_mu025_i256_s6_g1_video",
+      "group": "toy",
+      "title": "G1 · Toy4 BA · µ=0.25",
+      "caption": "Same model and budget. Quieter recorded hold motion; not an equilibrium-error proof.",
+      "src": "videos/20261019/research_human_ba_mu025_i256_s6_g1_video.mp4",
+      "poster": "videos/20261019/research_human_ba_mu025_i256_s6_g1_video_last.png",
+      "poster_sha256": "e0bd2aa5d5723314d3193da7b31a13eb95c4f0455872392cf5f720ee0cd2cb74",
+      "renderer": "Newton ViewerGL",
+      "input_npz_sha256": "b5baeeee579c5c95d116abca5f0e76656aa77bf5667caedd5a8fd57d83080a2b",
+      "input_json_sha256": "bcce455128a13d3d808d7fb70b65b03e37d13003be6edf7612cc7a826bd3817c",
+      "newton_viewer_sha256": "513ea2560ed57fbc5c459c6a2df8f9e184a342133a7552a0f7ab702c66b01413",
+      "script_sha256": "a7477511f0487266745d9a8128d6a94d1f477b70cf922b8fb7b5b63501f7c479",
+      "output_sha256": "8f345b90a04ecdf69a5bae4321c455787344effbfdefa869c1e0b265f86ab0d3",
+      "frames": 366,
+      "fps": 60,
+      "playback_speed": 1,
+      "first_sim_time_s": 0.016666666666666666,
+      "last_sim_time_s": 6.099999999999984,
+      "encoded_duration_s": 6.1,
+      "camera": {
+        "position": [
+          0.015,
+          0.015,
+          0.3
+        ],
+        "pitch": -90,
+        "yaw": 90,
+        "scope": "Shared wider top-down camera with mechanism below the text band; no state/geometry changes."
+      },
+      "note": "Complete recorded trajectory at native 60fps; model reconstructed with source-hash checks and the documented scalar-gravity adapter. No resimulation, time resampling or discarded frames. Newton framebuffer with text labels and a shared wider camera. Original main collision and fixture-level inertia restoration retained. Explicit pulley-friction reconstruction is verified against every recorded model-array and initial-state hash before replay.",
+      "setup_s": 1.582090601325035,
+      "source_hashes": {
+        "_src/solvers/vbd/rigid_vbd_kkt.py": "0c95a947b4cc64d76cf5f2d147e1f9ffd4a85d87c5b8956b7424f22b0e6f2e8d",
+        "_src/solvers/vbd/solver_vbd.py": "c6be3919eae993a7a0c3bd36af652af2894cd2600f8d5d9714560f628b04bd72",
+        "_src/solvers/xpbd/rigid_xpbd_kkt.py": "83981355b8abced545f9df23e55b1e7516248d6f7b8ad6b9999ec7fd9d0ad414",
+        "test_rigid_vbd_kkt.py": "056df957e54cce2ea9bff73741934ccf447101bd9fa3f1881396d89f4635e677",
+        "test_rigid_kkt_primitives.py": "b077d727da977411e4f90c4d211e9e60f173eb3013dc8669d977be927d405090",
+        "_src/geometry/collision_core.py": "daccb7ad4fe6a2acd0ef5fae83bbd6ba3e655d9e16226677b003e7fc1870de1a",
+        "_src/geometry/collision_primitive.py": "13aaa4c4da5d45b586908694dce3885cb4bcd6c5eeede0139b2ee1e177b24937",
+        "_src/geometry/narrow_phase.py": "d5f6d5e38aa4b903f804bf7ec9bf81b6e1569e9b1e63e278d86dd418d8981737",
+        "cases.json": "9f8c4aa7d149324b82312dbce19755a4c9b7eccce79b2b5a4ed712a591845486",
+        "fixtures.py": "a1d1432ca04069083c47c9c9d877038805406a7c3cce48872bf115ff5ee69499",
+        "import-2026-09-29.json": "734a2646c61f24edd136f8ad71a14bd4b5c1b4259a51fefe7148880ab96aab08",
+        "assets.json": "b7df6aec54820875c1e9d0a3e2fe4b4fa9155f35aa7c9d2f1145d692a5f420a7",
+        "foot_geometry.py": "615858f862b2ae759c153a85398aaf766bf63f73c57fe888deb9ee0d2ea94395",
+        "four_bar.py": "a9c82d15f2e7cf145a3ee24fda4f3de1409ba8a3f6165fd7062308e93f679dd8",
+        "h2.py": "070df07060811bebc71ea5be96f322e35f2062ff1107ea38935d0cd3a6387328",
+        "mechanisms.py": "6c0f70573495d7f5f9bc4af73084119c60dcad2428ba008d333b11ba20056510",
+        "scenes.py": "b2c86a8b9cd9bc5bdb4937b303c1a7336948235b76a4c2f21fac2d26f4f3a2ac",
+        "manifest.json": "ab480bd7be460ddb59c5cd55dd29b0294780e98495ced43d763b02d11d822245",
+        "analytic_collision_test.patch": "5ef0e12cc58e3615f9ae5fc95d5d9393c3dd512f5c9f747f5d663cbd43fb9870",
+        "convex_core_radius_test.patch": "48ca614cceccb5ad862687130d67b3c86da723d2612b028140a3ee3cc8050b76",
+        "protocols.py": "c0bcf2807dee8935bdd966fe7bb1762b28f24e053216b81e1f10dd44f6f4c9b7",
+        "regressions.py": "6e189493b68a9b56ef8ad5dffe3fe72c1dccb05ec6a2b4bfd8aae451fba60082",
+        "run.py": "4203f49a8f4e6f29b334095c054dd150ae9703c9f03982b4624acf1567b3837d",
+        "runtime.py": "d4d4e899829207bf96e9564c7854c2d502f66593d26834e5fdfa9612fbdb22d8",
+        "example_toy3.py": "392bfcf7147b3c029f6b0845fcaa69506ed7b19d00b8129117a8a0bb78f3be9c",
+        "example_toy4.py": "5aabcf8a1c3a0ae65ee8a819294b9321849f7dfbb234ce620c3c942ee5e8da48",
+        "toy_cable_common.py": "519f8dceb0d3be962a653b900ef4268f61eb2ee1b8d74737de150fe7630ff857",
+        "validation-2026-09-29.json": "ebf4d3c422592ec668c75ca2f528fe3eac5237e4e6d93e79bd528ba29dc878c1",
+        "validation.json": "2d4f9dc1888cdbf54038016f56e255e93904e3f5f6328ea53306100a8ab48fa5"
+      },
+      "render_cost_s": 39.302022613584995
+    },
+    {
+      "stem": "research_final_toy4_ab_x1000_g1_video",
+      "group": "adverse",
+      "title": "Remaining failure · stiff Toy4 AB ×1000",
+      "caption": "Final source, authored stiff motion screen fails. No softened constraints or hidden cuts.",
+      "src": "videos/20261019/research_final_toy4_ab_x1000_g1_video.mp4",
+      "poster": "videos/20261019/research_final_toy4_ab_x1000_g1_video_last.png",
+      "poster_sha256": "4d91c9922bdbbf90c1d6c88b21ca9b1b0db0fd00d52a4f4117a5421844eb9a9f",
+      "renderer": "Newton ViewerGL",
+      "input_npz_sha256": "aad50cce6509b0866500aae19de51b7f3f0ef077cd6376bc7be438084e1c3a69",
+      "input_json_sha256": "d22465e4c5701f037b2c7753d5d96195dbd29b2d3b49c7aea7fecaf35616f821",
+      "newton_viewer_sha256": "513ea2560ed57fbc5c459c6a2df8f9e184a342133a7552a0f7ab702c66b01413",
+      "script_sha256": "8a3cbba79883572c0bcf597999507a5a17a5459b6c66566c000069b9b8ec1124",
+      "output_sha256": "3431aa2238d4b0d3c8937369065ed947273538f827922106664efd94fd6e1fa1",
+      "frames": 366,
+      "fps": 60,
+      "playback_speed": 1,
+      "first_sim_time_s": 0.016666666666666666,
+      "last_sim_time_s": 6.099999999999984,
+      "encoded_duration_s": 6.1,
+      "camera": {
+        "position": [
+          0.015,
+          0.015,
+          0.3
+        ],
+        "pitch": -90,
+        "yaw": 90,
+        "scope": "Shared wider top-down camera with mechanism below the text band; no state/geometry changes."
+      },
+      "note": "Complete recorded trajectory at native 60fps; model reconstructed with source-hash checks and the documented scalar-gravity adapter. No resimulation, time resampling or discarded frames. Newton framebuffer with text labels and a shared wider camera. Original main collision and fixture-level inertia restoration retained.",
+      "setup_s": 1.4521657191216946,
+      "source_hashes": {
+        "_src/solvers/vbd/rigid_vbd_kkt.py": "0c95a947b4cc64d76cf5f2d147e1f9ffd4a85d87c5b8956b7424f22b0e6f2e8d",
+        "_src/solvers/vbd/solver_vbd.py": "c6be3919eae993a7a0c3bd36af652af2894cd2600f8d5d9714560f628b04bd72",
+        "_src/solvers/xpbd/rigid_xpbd_kkt.py": "83981355b8abced545f9df23e55b1e7516248d6f7b8ad6b9999ec7fd9d0ad414",
+        "test_rigid_vbd_kkt.py": "056df957e54cce2ea9bff73741934ccf447101bd9fa3f1881396d89f4635e677",
+        "test_rigid_kkt_primitives.py": "b077d727da977411e4f90c4d211e9e60f173eb3013dc8669d977be927d405090",
+        "_src/geometry/collision_core.py": "daccb7ad4fe6a2acd0ef5fae83bbd6ba3e655d9e16226677b003e7fc1870de1a",
+        "_src/geometry/collision_primitive.py": "13aaa4c4da5d45b586908694dce3885cb4bcd6c5eeede0139b2ee1e177b24937",
+        "_src/geometry/narrow_phase.py": "d5f6d5e38aa4b903f804bf7ec9bf81b6e1569e9b1e63e278d86dd418d8981737",
+        "cases.json": "9f8c4aa7d149324b82312dbce19755a4c9b7eccce79b2b5a4ed712a591845486",
+        "fixtures.py": "a1d1432ca04069083c47c9c9d877038805406a7c3cce48872bf115ff5ee69499",
+        "import-2026-09-29.json": "734a2646c61f24edd136f8ad71a14bd4b5c1b4259a51fefe7148880ab96aab08",
+        "assets.json": "b7df6aec54820875c1e9d0a3e2fe4b4fa9155f35aa7c9d2f1145d692a5f420a7",
+        "foot_geometry.py": "615858f862b2ae759c153a85398aaf766bf63f73c57fe888deb9ee0d2ea94395",
+        "four_bar.py": "a9c82d15f2e7cf145a3ee24fda4f3de1409ba8a3f6165fd7062308e93f679dd8",
+        "h2.py": "070df07060811bebc71ea5be96f322e35f2062ff1107ea38935d0cd3a6387328",
+        "mechanisms.py": "6c0f70573495d7f5f9bc4af73084119c60dcad2428ba008d333b11ba20056510",
+        "scenes.py": "b2c86a8b9cd9bc5bdb4937b303c1a7336948235b76a4c2f21fac2d26f4f3a2ac",
+        "manifest.json": "ab480bd7be460ddb59c5cd55dd29b0294780e98495ced43d763b02d11d822245",
+        "analytic_collision_test.patch": "5ef0e12cc58e3615f9ae5fc95d5d9393c3dd512f5c9f747f5d663cbd43fb9870",
+        "convex_core_radius_test.patch": "48ca614cceccb5ad862687130d67b3c86da723d2612b028140a3ee3cc8050b76",
+        "protocols.py": "c0bcf2807dee8935bdd966fe7bb1762b28f24e053216b81e1f10dd44f6f4c9b7",
+        "regressions.py": "6e189493b68a9b56ef8ad5dffe3fe72c1dccb05ec6a2b4bfd8aae451fba60082",
+        "run.py": "4203f49a8f4e6f29b334095c054dd150ae9703c9f03982b4624acf1567b3837d",
+        "runtime.py": "d4d4e899829207bf96e9564c7854c2d502f66593d26834e5fdfa9612fbdb22d8",
+        "example_toy3.py": "392bfcf7147b3c029f6b0845fcaa69506ed7b19d00b8129117a8a0bb78f3be9c",
+        "example_toy4.py": "5aabcf8a1c3a0ae65ee8a819294b9321849f7dfbb234ce620c3c942ee5e8da48",
+        "toy_cable_common.py": "519f8dceb0d3be962a653b900ef4268f61eb2ee1b8d74737de150fe7630ff857",
+        "validation-2026-09-29.json": "ebf4d3c422592ec668c75ca2f528fe3eac5237e4e6d93e79bd528ba29dc878c1",
+        "validation.json": "2d4f9dc1888cdbf54038016f56e255e93904e3f5f6328ea53306100a8ab48fa5"
+      },
+      "render_cost_s": 34.43294243887067
+    }
+  ]
+}

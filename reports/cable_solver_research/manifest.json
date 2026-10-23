@@ -1,0 +1,512 @@
+{
+  "exact_set_rule": "actual files equal manifest.json plus files; bytes and SHA-256 exact",
+  "files": [
+    {
+      "bytes": 2356,
+      "path": "build_contract.json",
+      "sha256": "fd46ff1396efcc42374c1b491ed6fe9982ab7a64c222ae6201a149b25bdc4c03"
+    },
+    {
+      "bytes": 7974,
+      "path": "data/ccdsn/exact_law_oracle.json",
+      "sha256": "7982dc5bd88e3b21ea53746152a6da38b29bde76bfefc032307b910e21c91f38"
+    },
+    {
+      "bytes": 24003,
+      "path": "data/contact/dense_robustness.json",
+      "sha256": "789055c31ef4bb35b87265e87700255cf36a481075c57da5af899f61013ad83f"
+    },
+    {
+      "bytes": 9202,
+      "path": "data/contact/dense_visual_manifest.json",
+      "sha256": "c8553c992363ad69f29f820d44401e06dfc0bcbcc5699fa1e63471730384d8ea"
+    },
+    {
+      "bytes": 102205,
+      "path": "data/contact/kkt_v2_negative.json",
+      "sha256": "bd30d94f6de25a4c85120e892f799099b05c90a40eae69015d8692d47dc8ec8c"
+    },
+    {
+      "bytes": 282356,
+      "path": "data/contact/kkt_v3_negative.json",
+      "sha256": "03d93f47ec4d1f97d70371fa558ad517154d2b986f7f97aeadcc9e3e68650060"
+    },
+    {
+      "bytes": 452028,
+      "path": "data/contact/kkt_v5_small_full_pass.json",
+      "sha256": "640cf7fc826ae1dcda3aae38cb598a0f20cda06467d22dd14b9a5f1732238941"
+    },
+    {
+      "bytes": 9166,
+      "path": "data/etc/etc_e1_manifest.json",
+      "sha256": "e399d3f9efb75d8820603698400676415087000737b9fb0a7ae7c3f79fbd66e0"
+    },
+    {
+      "bytes": 4092,
+      "path": "data/etc/etc_e1b_manifest.json",
+      "sha256": "f7b617d400665110ca0e358198c010d84549daef2828b2ae928fd0b3a6f106c9"
+    },
+    {
+      "bytes": 4341,
+      "path": "data/etc/etc_e1c_manifest.json",
+      "sha256": "3af7a259beb97d5eb4664c3d778228105520db400a8b6563efd1b9496e865a25"
+    },
+    {
+      "bytes": 7042,
+      "path": "data/etc/etc_e1d_manifest.json",
+      "sha256": "a4268c85a5a396d1b0205af4f0b5c2029d2e52f9537cc75daef742e1ee6056b6"
+    },
+    {
+      "bytes": 3860,
+      "path": "data/etc/etc_final_manifest.json",
+      "sha256": "72715384ad48fadc48d7587fff581815d20069e5b54694c4d064c0ca9c8d309e"
+    },
+    {
+      "bytes": 3088,
+      "path": "data/etc/etc_g3_manifest.json",
+      "sha256": "09de0ae3608ee011289e27a7aee16b43d35580635a87d8ff53dac623c2d5cb24"
+    },
+    {
+      "bytes": 3006,
+      "path": "data/etc/etc_r8_horizon_manifest.json",
+      "sha256": "e4e3d4809db6f4935c6e47210afb961bd868211b6ff6d091cb5bc9807f41cbca"
+    },
+    {
+      "bytes": 7027,
+      "path": "data/etc/etc_r8_spectral_manifest.json",
+      "sha256": "b2660196497995884189a4f9585f99c1ab3b245c96e444761eb7e2180f907eb9"
+    },
+    {
+      "bytes": 9839,
+      "path": "data/etc/etc_r9_registry_manifest.json",
+      "sha256": "2c2dbc44c47308139c66c4b1ee330d4874425d15fc726e960477cab7537cc695"
+    },
+    {
+      "bytes": 4337,
+      "path": "data/etc/etc_r9_render_record.json",
+      "sha256": "59b1601cde0c0ebf1f7a22f0ac8a6bc400220d41ff80172ac28570dd477a7bb8"
+    },
+    {
+      "bytes": 20198,
+      "path": "data/etc/etc_r9_staging_manifest.json",
+      "sha256": "ed2d45f0520dc49c859cd0dcd47b4547eada4588e35c48b83a3502340799eff8"
+    },
+    {
+      "bytes": 39574,
+      "path": "data/etc/rival_r10_manifest.json",
+      "sha256": "6d5ae62f9992cec3a6d4427aa06e7719f7cda238e56655c1daffafd2e333c1bf"
+    },
+    {
+      "bytes": 39810,
+      "path": "data/fable/coverage_manifest.json",
+      "sha256": "557339dd10bbd26b30ac9e3276e2c7400b5eed61f4697119326fd52f1a18a535"
+    },
+    {
+      "bytes": 5973,
+      "path": "data/fable/coverage_render_record.json",
+      "sha256": "8a891a390424dba2380332f1b56cddc5cf4fda215cf5fbdbaa303b214d99ee7f"
+    },
+    {
+      "bytes": 41227,
+      "path": "data/hard/n128_same_hard_parity.json",
+      "sha256": "febfce298a81e358accc318a142b85ca1608c92fa39d836147cea32433b878ff"
+    },
+    {
+      "bytes": 19576,
+      "path": "data/hard/n128_trajectory.json",
+      "sha256": "597305e713f3f0ac24b3829126d3d9c2fd61168c530acf35c8a0f68120e3be56"
+    },
+    {
+      "bytes": 19945,
+      "path": "data/hard/n512_adaptive_scale_boundary.json",
+      "sha256": "988f83b688350d5f561e79e96e862eb7be583eb0e1e0461a594a4178cd0562d7"
+    },
+    {
+      "bytes": 47511,
+      "path": "data/hard/n512_preregistered_k24_probe.json",
+      "sha256": "6a19861f2110df1c73becfbb9ef75ef074db9cd80a367f2fb25629fa661c8f31"
+    },
+    {
+      "bytes": 5690,
+      "path": "data/hard/visual_manifest.json",
+      "sha256": "e9d1853d1ff7423ae619809c8510e76b0edf7ebdd11c3668193f83dc30e9938c"
+    },
+    {
+      "bytes": 6145,
+      "path": "data/ladder/ladder301_manifest.json",
+      "sha256": "d0bd513cfc87ea8407a251a404494a81caf01d4456d558feeeb319b30afdf16d"
+    },
+    {
+      "bytes": 20392,
+      "path": "data/ladder/ladder_manifest.json",
+      "sha256": "4655ec4c71f0e47b8f69749926fc8009ca415365d74bcd216d5e1391c5870ba9"
+    },
+    {
+      "bytes": 1609,
+      "path": "data/ladder/ladder_render_record.json",
+      "sha256": "541c3d74d72153e863554f0aa5d955264197046f2f0626dabc2647b4ff92ecb4"
+    },
+    {
+      "bytes": 11160,
+      "path": "data/legacy/v5_manifest.json",
+      "sha256": "e92ec18f60ba78a38dbba62c20e21396149f8e830b2ae7bfb6e83c86d84bd517"
+    },
+    {
+      "bytes": 246056,
+      "path": "data/legacy/v5_report.json",
+      "sha256": "27c22e17ee85b9542fef15858eca86a09e2cfb6d9ea0a4ba223d2205cfaa3724"
+    },
+    {
+      "bytes": 12528,
+      "path": "data/mg/mg_baselines_manifest.json",
+      "sha256": "206b012a3f95ef4193778d9ecfc9caddddad98309c39d8dea239ca4fe4435a8f"
+    },
+    {
+      "bytes": 5910,
+      "path": "data/mg/mg_galerkin_manifest.json",
+      "sha256": "ab1d91c9022e59e5db6701ed5685826eab7e69671baf82d20ec8fd2596857213"
+    },
+    {
+      "bytes": 31019,
+      "path": "data/smooth/base_report.json",
+      "sha256": "98c61e348234b3b2cfb0b1f1f1d63a8ea8144cd1f4a05951bb18419112828460"
+    },
+    {
+      "bytes": 39810,
+      "path": "data/smooth/coverage_manifest.json",
+      "sha256": "557339dd10bbd26b30ac9e3276e2c7400b5eed61f4697119326fd52f1a18a535"
+    },
+    {
+      "bytes": 5973,
+      "path": "data/smooth/y127_render_manifest.json",
+      "sha256": "8a891a390424dba2380332f1b56cddc5cf4fda215cf5fbdbaa303b214d99ee7f"
+    },
+    {
+      "bytes": 54335,
+      "path": "index.html",
+      "sha256": "f15c684d0c4a325ff8de8bc30b98fe37e359c5224c18753366e300e648fc7a7b"
+    },
+    {
+      "bytes": 2383457,
+      "path": "media/contact/dense.mp4",
+      "sha256": "788508ab54f1893ba2be723f8e12169b8ea4698e773a23c3242e5d2bf9e0d338"
+    },
+    {
+      "bytes": 150081,
+      "path": "media/contact/dense_poster.png",
+      "sha256": "d84b7a8e576c0cf55641a3165008f530ff0f7c9bd4229f5aedcd7e78f21ac3d8"
+    },
+    {
+      "bytes": 1500667,
+      "path": "media/etc9/horiz_cantilever_stretch_2x2.mp4",
+      "sha256": "b1322821d0d14c26b1b3f089dfd47e98012517a5a0e8373e058288d9559af847"
+    },
+    {
+      "bytes": 1344240,
+      "path": "media/etc9/horiz_cantilever_stretch_bend_2x2.mp4",
+      "sha256": "ce923a52d8a0b1159ba8f91a98f82fbe7f5b171a8aee052ea158d906afe2c549"
+    },
+    {
+      "bytes": 76539,
+      "path": "media/etc9/horiz_cantilever_stretch_bend_poster.png",
+      "sha256": "c01829adc9f72049b556af32646d20ae537d205f8e68a5e88b652f4ec7adc8b8"
+    },
+    {
+      "bytes": 75808,
+      "path": "media/etc9/horiz_cantilever_stretch_poster.png",
+      "sha256": "82cd6c6b3849ed4108a5942ca49e589e0b9a2e04312dc2c28178bb670393ade6"
+    },
+    {
+      "bytes": 3359168,
+      "path": "media/etc9/horiz_pinned_both_2x2.mp4",
+      "sha256": "863f013ec0d8e04aee1f163609e090da644ec99fcc9ebdb923a13d5c8f9613e7"
+    },
+    {
+      "bytes": 81201,
+      "path": "media/etc9/horiz_pinned_both_poster.png",
+      "sha256": "16754d602584554868425c2c3df544c89a7a501d05a33b627ac6a6fda72537db"
+    },
+    {
+      "bytes": 967086,
+      "path": "media/etc9/long_cantilever_1024_superbend500_2x2.mp4",
+      "sha256": "afa3708a28b91c7cc42b224e5bcc9117e5b67ed489863be4a0df65b557bd9a90"
+    },
+    {
+      "bytes": 71392,
+      "path": "media/etc9/long_cantilever_1024_superbend500_poster.png",
+      "sha256": "4dfd0f57d718d82ba298734eff1acc3cf31ff311d9127ca21bc31a844d8e5256"
+    },
+    {
+      "bytes": 988369,
+      "path": "media/etc9/long_cantilever_2048_superbend500_2x2.mp4",
+      "sha256": "d8f1010dd378a32226b06de18d44e0b2162a15ef54c000a16c84f654386ddcc8"
+    },
+    {
+      "bytes": 72347,
+      "path": "media/etc9/long_cantilever_2048_superbend500_poster.png",
+      "sha256": "a567f48f8c428bda5ca9b635341a14542f8b6472b772fc0a0a6e4e522af34ef0"
+    },
+    {
+      "bytes": 1292103,
+      "path": "media/etc9/long_cantilever_4096_superbend500_2x2.mp4",
+      "sha256": "960fd8ccfcaf03e447289863b7d419745ce86a4da7831f732fbfb8c39c01448e"
+    },
+    {
+      "bytes": 74830,
+      "path": "media/etc9/long_cantilever_4096_superbend500_poster.png",
+      "sha256": "70f6b879b4573a2e078fe5cac5fc7d21f08205d6e725a7066c871b50e0d36fd6"
+    },
+    {
+      "bytes": 1142444,
+      "path": "media/etc9/long_cantilever_512_bend_2x2.mp4",
+      "sha256": "ee7319d9bd60ded15d53f05c1d043d0f4944734adf037a76c5f8e10173842fc7"
+    },
+    {
+      "bytes": 70718,
+      "path": "media/etc9/long_cantilever_512_bend_poster.png",
+      "sha256": "8c3c0372d9d4cbe7ade45c44b24fe4c5579012d4211f6e8749d2c961618938fb"
+    },
+    {
+      "bytes": 623351,
+      "path": "media/etc9/long_vertical_1024_stiffbend_2x2.mp4",
+      "sha256": "a43478d5142fb621c65cccfd3b1f69601b92727c6cc0cebb66a6241431b19c23"
+    },
+    {
+      "bytes": 69408,
+      "path": "media/etc9/long_vertical_1024_stiffbend_poster.png",
+      "sha256": "31e4d41be3b19c76a30d239078e3f735b26f350d7f849241def5d468f2940f0d"
+    },
+    {
+      "bytes": 685329,
+      "path": "media/etc9/offcenter_anchor_r4_2x2.mp4",
+      "sha256": "e2626d4459ae43062baa2060a03d5b13d9d177fae3f1d9d30d6fb09273390415"
+    },
+    {
+      "bytes": 71543,
+      "path": "media/etc9/offcenter_anchor_r4_poster.png",
+      "sha256": "276e90e0b1d3a07926edf12c465fb456555daac287311e65b2ef93e79febfba5"
+    },
+    {
+      "bytes": 3570838,
+      "path": "media/etc9/ring_chord_r4_2x2.mp4",
+      "sha256": "7e530894d9d0fa244950bf38fe1500a27a9a60c670c4405be32cd4660ff58819"
+    },
+    {
+      "bytes": 77187,
+      "path": "media/etc9/ring_chord_r4_poster.png",
+      "sha256": "bbbf1087315194a85956c2dba71af4bf19f18c4b3864c96d3594755382167c82"
+    },
+    {
+      "bytes": 698103,
+      "path": "media/etc9/vertical_hanging_2x2.mp4",
+      "sha256": "5e9a299beedce6da729442806506ad3ca9f6e4a9a6b86ffa761f8dd1469b5d8d"
+    },
+    {
+      "bytes": 69759,
+      "path": "media/etc9/vertical_hanging_poster.png",
+      "sha256": "11ac6188fa6c4aab218b22d800aeb7d3cdb509df79cb6fcefa256f0cabd2e0b2"
+    },
+    {
+      "bytes": 802237,
+      "path": "media/etc9/y_junction_r4_2x2.mp4",
+      "sha256": "1fd4dac00664ad1e51ec1d954dbb1cae8f891b0541337bd075c82421b6ab4c4a"
+    },
+    {
+      "bytes": 73380,
+      "path": "media/etc9/y_junction_r4_poster.png",
+      "sha256": "4bbbf15773cfebdf5187f0ae9e6658006313f83a29ab3cc5215e93a2dcc9d894"
+    },
+    {
+      "bytes": 478573,
+      "path": "media/etc9/y_junction_stiff_r4_2x2.mp4",
+      "sha256": "492546d15608b6ec36a83564f0fbf0e9085691fef42e9ab58bad16cc633c4f19"
+    },
+    {
+      "bytes": 74367,
+      "path": "media/etc9/y_junction_stiff_r4_poster.png",
+      "sha256": "3262f7ba27e703c8f6c210252f48b48140acb1c907c3e37641ea48a5d452c9f0"
+    },
+    {
+      "bytes": 1133740,
+      "path": "media/fable/y127_default_2x2.mp4",
+      "sha256": "4c02c0a4a9860730e161a350d0e2267f5334c5545bb17187999c5876bc717750"
+    },
+    {
+      "bytes": 74266,
+      "path": "media/fable/y127_default_poster.png",
+      "sha256": "689840dc2d4f09d48bfbe24847d02b749df87885172f5c10021829eb9c66eafc"
+    },
+    {
+      "bytes": 246431,
+      "path": "media/hard/n128_hard_vs_finite.mp4",
+      "sha256": "2f89d0fcf515775fae0058e8df37f790bd6eff6d95c55df350c6d8affdc714d9"
+    },
+    {
+      "bytes": 143214,
+      "path": "media/hard/n128_hard_vs_finite_poster.png",
+      "sha256": "9b414ed15d745027c79bf30036da9ea8e6e8f554687302c46c517df34bdb0f31"
+    },
+    {
+      "bytes": 871718,
+      "path": "media/ladder/n1024_s1e+07_b2500_2x2.mp4",
+      "sha256": "624c6fbe53a6d33d86d03bd224bdb07964825b6d33b685362a0f3336cf494fd1"
+    },
+    {
+      "bytes": 73902,
+      "path": "media/ladder/n1024_s1e+07_b2500_poster.png",
+      "sha256": "820784c37d52a092f41a3c25a9dde28b4466718d05dc8f7f36b1046c6bfcd129"
+    },
+    {
+      "bytes": 879969,
+      "path": "media/ladder/n1024_s1e+07_b5_2x2.mp4",
+      "sha256": "c574dd2a979d1cc1883b98a7dcbc412980f49b87afb7080a0c1c86a642fe0fc3"
+    },
+    {
+      "bytes": 73656,
+      "path": "media/ladder/n1024_s1e+07_b5_poster.png",
+      "sha256": "6c654269a3581107a0074fd5273f80f488953194eeac9e38708abcb3433e964b"
+    },
+    {
+      "bytes": 1133740,
+      "path": "media/smooth/y127.mp4",
+      "sha256": "4c02c0a4a9860730e161a350d0e2267f5334c5545bb17187999c5876bc717750"
+    },
+    {
+      "bytes": 74266,
+      "path": "media/smooth/y127_poster.png",
+      "sha256": "689840dc2d4f09d48bfbe24847d02b749df87885172f5c10021829eb9c66eafc"
+    },
+    {
+      "bytes": 32711,
+      "path": "report.json",
+      "sha256": "b290fd156b24dfe8da652f2db9a0ce0420cd8a5a5aacd26b01dcb7129ba4e062"
+    },
+    {
+      "bytes": 69084,
+      "path": "source/codex_cable_report_v6.py",
+      "sha256": "632720a77d0ff90c07ebfb27fdb323cba27bdc17079b19652ad921a3d6a3412c"
+    },
+    {
+      "bytes": 38268,
+      "path": "source/codex_ccdsn.py",
+      "sha256": "4745497a074e00f8bde67125ed28a40f7c91000ab8937f7112b042a0c53b2ae0"
+    },
+    {
+      "bytes": 7847,
+      "path": "source/codex_ccdsn_reference_benchmark.py",
+      "sha256": "60deb73d9d21bc73db9bb7e94c5742f772226f19a05045e4d17d9d3093493d62"
+    },
+    {
+      "bytes": 39336,
+      "path": "source/codex_contact_kkt_v2.py",
+      "sha256": "b0bebe8b2956e74f1de2960e7a9888eec8bdc6153b4ed86a872db78bc699306b"
+    },
+    {
+      "bytes": 4872,
+      "path": "source/codex_contact_kkt_v2_pile.py",
+      "sha256": "a4695fb21d7faff7561cea16bf0ed681acc1c1bda41253367b5756ab94a8d8e0"
+    },
+    {
+      "bytes": 16831,
+      "path": "source/codex_contact_kkt_v3.py",
+      "sha256": "cea6f2670aed973efd9f0adac814743cdfe75289ba7a8b5d903d09cf1c8df3e4"
+    },
+    {
+      "bytes": 23741,
+      "path": "source/codex_contact_kkt_v3_pile.py",
+      "sha256": "e1cc02f806ff254407f48a118d3130ffbeeae503e24f2f3e9bc4dbdf4872dd7a"
+    },
+    {
+      "bytes": 12368,
+      "path": "source/codex_contact_kkt_v5.py",
+      "sha256": "9234a23ad5be1297adc5632fb8d3feb0b8f1ce7c5668084e8bf8fbd07a77cbbd"
+    },
+    {
+      "bytes": 5247,
+      "path": "source/codex_contact_kkt_v5_pile.py",
+      "sha256": "54020c73fd29416fc08cc9214260ec622d8e8b0ccc0e6b1283f6d7944eaf3016"
+    },
+    {
+      "bytes": 11434,
+      "path": "source/codex_contact_safe_predictor.py",
+      "sha256": "f0532771a2299467afff057054d3015991a414298233b27dc0c93d7445fc9c58"
+    },
+    {
+      "bytes": 14643,
+      "path": "source/codex_desaxce.py",
+      "sha256": "afaa83a37399690dce8c656136271562adbafb1b5954faf6883fc932f5ec6fe5"
+    },
+    {
+      "bytes": 28523,
+      "path": "source/codex_hard_kkt_adaptive_n512.py",
+      "sha256": "cbac9b4130cbc67fad04d43d3a6513d367c93e2006a2e8b7875934526ec2c61c"
+    },
+    {
+      "bytes": 31913,
+      "path": "source/codex_hard_kkt_bgn.py",
+      "sha256": "0e6d848c483ce146b558efcb1d3078db88347a70dca6798c50b58e1f8afae604"
+    },
+    {
+      "bytes": 21028,
+      "path": "source/codex_hard_kkt_k24_probe.py",
+      "sha256": "c9ed41fffac32e275dacbed1440ffbb1f095a0c3809660c9050b198da780c448"
+    },
+    {
+      "bytes": 22901,
+      "path": "source/codex_hard_kkt_parity.py",
+      "sha256": "40c4dbf9c17982dc728f1d94a31d4ab1d6889930aa6a7f10cb159850e9da47a4"
+    },
+    {
+      "bytes": 19279,
+      "path": "source/codex_hard_kkt_review_render.py",
+      "sha256": "82003cbf0609bacfe896a17d67c92356d85174d9b1d7b989d749680910cd686e"
+    },
+    {
+      "bytes": 30189,
+      "path": "source/codex_hard_kkt_trajectory.py",
+      "sha256": "d0904f2babb5fec06efc35652035e0c89b6b92ac36fb92ccf0f3613ace35f8b5"
+    },
+    {
+      "bytes": 7031,
+      "path": "source/test_codex_cable_report_v6.py",
+      "sha256": "b51c6176f099b674f29368efe3cd264bf36bdea25723f184bedfc51a27ed2b3f"
+    },
+    {
+      "bytes": 16022,
+      "path": "source/test_codex_ccdsn.py",
+      "sha256": "9bc535ee631b93ccb6e2157bf5de55b8e7046ac5a213820c8d2e71e66f24e3be"
+    },
+    {
+      "bytes": 8161,
+      "path": "source/test_codex_contact_kkt_v2.py",
+      "sha256": "4420c3ca2a2d82d2144ad3620e9029bc4aec47e68437c7cf53c4f6aa2ab86662"
+    },
+    {
+      "bytes": 8829,
+      "path": "source/test_codex_contact_kkt_v3.py",
+      "sha256": "f80c587bc88a949e4575ee83c3d1b0b26222192eea3674ad5bd5167581bd265e"
+    },
+    {
+      "bytes": 4893,
+      "path": "source/test_codex_contact_kkt_v5.py",
+      "sha256": "7a99088d9a8a5067b85922cccd1ec988eaa9f8312107b94847ef47042f51eae2"
+    },
+    {
+      "bytes": 4320,
+      "path": "source/test_codex_contact_safe_predictor.py",
+      "sha256": "d3704544eebb3d3bab364d0d7724da3b0bda64daa49b11705465bc01e96c4289"
+    },
+    {
+      "bytes": 4066,
+      "path": "styles.css",
+      "sha256": "2aa0ccfe0470c23920287478c9bf055b200eaf9a68ecd1e52e11e0a46a3e01ad"
+    }
+  ],
+  "generated_utc": "2026-07-12T07:36:55Z",
+  "immutable_stage": true,
+  "owner_line": "OWNER: Team Fable (claimed 2026-07-12T06:27:32Z \u2014 round 10: rival head-to-head vs Macklin sparse VBD articulation solver (branch horde/vbd-sparse-articulation-main, SolverVBD rigid_articulation_solve=block_sparse_joints): clone as separate repo, run chain registry + stiffness ladder under its own build with our recorder at iterations 2/4/8 + its local-VBD control; report max stretch/bend + closure RMS + cost-vs-N; hash policy: verify vs r4, else self-consistent within-build with honest note; maintainer-requested comparison; single push at end)",
+  "publication_ready": false,
+  "schema": "codex-cable-results-review-manifest/v6",
+  "verdict": "BEST VERIFIED RESULT IS A ROUTER, NOT ONE UNIVERSAL SOLVER",
+  "visible_videos": 3
+}

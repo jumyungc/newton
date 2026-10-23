@@ -1,0 +1,137 @@
+{
+  "frames": 1200,
+  "results": [
+    {
+      "suite": "contacts_stack",
+      "mode": "old_soft",
+      "title": "Old VBD soft penalty",
+      "config": {
+        "substeps": 8,
+        "iterations": 1,
+        "alpha": 0.95,
+        "ke": 10000000.0
+      },
+      "frames": 1200,
+      "stable": false,
+      "error": null,
+      "finite": true,
+      "top_xy_drift": 3.695291757583618,
+      "top_z": 1.3766893148422241,
+      "max_box_xy_drift": 66.58064270019531,
+      "min_z": 0.39892494678497314,
+      "max_abs_pos": 61.460601806640625,
+      "runtime_s": 7.027237560017966,
+      "budget_cost": 8
+    },
+    {
+      "suite": "contacts_stack",
+      "mode": "old_soft",
+      "title": "Old VBD soft penalty",
+      "config": {
+        "substeps": 8,
+        "iterations": 1,
+        "alpha": 0.95,
+        "ke": 30000000.0
+      },
+      "frames": 1200,
+      "stable": false,
+      "error": null,
+      "finite": true,
+      "top_xy_drift": 3.125246047973633,
+      "top_z": 12.240129470825195,
+      "max_box_xy_drift": 12.06146240234375,
+      "min_z": 0.39938223361968994,
+      "max_abs_pos": 20.704010009765625,
+      "runtime_s": 6.798288851976395,
+      "budget_cost": 8
+    },
+    {
+      "suite": "contacts_stack",
+      "mode": "old_soft",
+      "title": "Old VBD soft penalty",
+      "config": {
+        "substeps": 8,
+        "iterations": 2,
+        "alpha": 0.95,
+        "ke": 10000000.0
+      },
+      "frames": 1200,
+      "stable": false,
+      "error": null,
+      "finite": true,
+      "top_xy_drift": 1.094486951828003,
+      "top_z": 15.57956314086914,
+      "max_box_xy_drift": 1.094486951828003,
+      "min_z": 0.4000195264816284,
+      "max_abs_pos": 15.57956314086914,
+      "runtime_s": 8.088057134998962,
+      "budget_cost": 16
+    },
+    {
+      "suite": "contacts_stack",
+      "mode": "old_soft",
+      "title": "Old VBD soft penalty",
+      "config": {
+        "substeps": 4,
+        "iterations": 4,
+        "alpha": 0.95,
+        "ke": 3000000.0
+      },
+      "frames": 1200,
+      "stable": false,
+      "error": null,
+      "finite": true,
+      "top_xy_drift": 18.181848526000977,
+      "top_z": 1.0042270421981812,
+      "max_box_xy_drift": 33.15835952758789,
+      "min_z": 0.3923935890197754,
+      "max_abs_pos": 47.190895080566406,
+      "runtime_s": 5.386036851035897,
+      "budget_cost": 16
+    },
+    {
+      "suite": "contacts_stack",
+      "mode": "old_soft",
+      "title": "Old VBD soft penalty",
+      "config": {
+        "substeps": 8,
+        "iterations": 2,
+        "alpha": 0.95,
+        "ke": 3000000.0
+      },
+      "frames": 1200,
+      "stable": false,
+      "error": null,
+      "finite": true,
+      "top_xy_drift": 22.98509407043457,
+      "top_z": 1.4936671257019043,
+      "max_box_xy_drift": 25.9619083404541,
+      "min_z": 0.3949055075645447,
+      "max_abs_pos": 39.88562774658203,
+      "runtime_s": 8.07687246898422,
+      "budget_cost": 16
+    },
+    {
+      "suite": "contacts_stack",
+      "mode": "old_soft",
+      "title": "Old VBD soft penalty",
+      "config": {
+        "substeps": 4,
+        "iterations": 4,
+        "alpha": 0.95,
+        "ke": 10000000.0
+      },
+      "frames": 1200,
+      "stable": false,
+      "error": null,
+      "finite": true,
+      "top_xy_drift": 5.527877330780029,
+      "top_z": 2.0988714694976807,
+      "max_box_xy_drift": 18.252927780151367,
+      "min_z": 0.3964110314846039,
+      "max_abs_pos": 15.786331176757812,
+      "runtime_s": 5.398135919007473,
+      "budget_cost": 16
+    }
+  ]
+}

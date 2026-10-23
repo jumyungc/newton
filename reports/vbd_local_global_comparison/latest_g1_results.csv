@@ -1,0 +1,5 @@
+scene,iterations,global_iterations,runs_per_version,previous_gpu_mean_ms_per_frame,updated_gpu_mean_ms_per_frame,lower_time_percent,collision_control,measurement_date
+cable_pile,5,1,3,9.737666331263032,9.537724657233086,2.0532812198342354,matched_radius_corrected,2026-10-04
+slinky,5,1,3,28.258672531059773,27.608444328883184,2.300986366086044,matched_radius_corrected,2026-10-04
+single_pulley_contact,5,1,1,12.508965963494639,12.43627159559547,0.5811381061497478,matched_radius_corrected,2026-10-04
+high_stiffness_droop,4,1,1,2.5088675243059794,2.5097912208636603,-0.03681727108872934,no_contact,2026-10-04

@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cable Bend Cantilever Sweep</title>
+  <style>
+:root {
+  color-scheme: light;
+  --ink: #17202a;
+  --muted: #5f6f82;
+  --line: #d9e0e8;
+  --panel: #f7f9fb;
+  --accent: #1f6f8b;
+  --good: #146c43;
+  --warn: #9a5b00;
+  --max: 1280px;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: #ffffff;
+  color: var(--ink);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+header { border-bottom: 1px solid var(--line); background: #fbfcfd; }
+main, .header-inner, footer { width: min(var(--max), calc(100vw - 32px)); margin: 0 auto; }
+.header-inner { padding: 36px 0 28px; }
+h1 { margin: 0 0 10px; font-size: clamp(2rem, 4vw, 3.35rem); line-height: 1.05; letter-spacing: 0; }
+.subtitle { max-width: 850px; margin: 0; color: var(--muted); font-size: 1.05rem; }
+.metric-row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
+.metric { border: 1px solid var(--line); border-radius: 8px; background: #ffffff; padding: 14px 16px; }
+.metric .label { color: var(--muted); font-size: 0.82rem; font-weight: 650; text-transform: uppercase; }
+.metric .value { display: block; margin-top: 4px; font-size: 1.25rem; font-weight: 760; }
+main { padding: 28px 0 48px; }
+section { margin: 0 0 34px; }
+h2 { margin: 0 0 10px; font-size: 1.45rem; line-height: 1.2; letter-spacing: 0; }
+h3 { margin: 0 0 10px; font-size: 1rem; line-height: 1.25; }
+p { margin: 0 0 12px; }
+a { color: var(--accent); }
+code {
+  padding: 0.08em 0.25em;
+  border-radius: 4px;
+  background: #edf2f7;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+}
+pre { margin: 12px 0 0; padding: 14px 16px; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+pre code { padding: 0; background: transparent; }
+.two-col { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 0.9fr); gap: 22px; align-items: start; }
+.plot-grid { display: grid; grid-template-columns: 1fr; gap: 18px; }
+.plot-block { margin-top: 18px; }
+.plot-block:first-child { margin-top: 0; }
+.breadcrumb { margin: 0 0 14px; font-size: 0.92rem; font-weight: 650; }
+.breadcrumb a { color: var(--accent); text-decoration: none; }
+.breadcrumb a:hover { text-decoration: underline; }
+.video-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; max-width: 1120px; margin: 18px auto 0; }
+.video-grid-single { grid-template-columns: minmax(0, 1fr); max-width: 1280px; }
+.video-main { max-width: 820px; margin: 14px auto 18px; }
+figure { margin: 0; border: 1px solid var(--line); border-radius: 8px; background: #ffffff; overflow: hidden; }
+figure img, video { display: block; width: 100%; height: auto; }
+video { background: #111827; }
+figcaption { padding: 10px 12px 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.92rem; }
+.takeaways, .card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+.takeaway, .card { border: 1px solid var(--line); border-radius: 8px; padding: 14px; background: #ffffff; }
+.card { display: block; color: inherit; text-decoration: none; }
+.takeaway strong, .card strong { display: block; margin-bottom: 6px; }
+.check-list { margin: 0; padding-left: 1.15rem; }
+.check-list li { margin: 0.35rem 0; }
+.note { border-left: 4px solid var(--accent); background: var(--panel); padding: 12px 14px; }
+table { width: 100%; border-collapse: collapse; border: 1px solid var(--line); background: white; }
+th, td { padding: 9px 10px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+th { background: var(--panel); color: var(--muted); font-size: 0.86rem; text-transform: uppercase; }
+footer { padding: 0 0 42px; color: var(--muted); font-size: 0.9rem; }
+@media (max-width: 820px) {
+  .metric-row, .takeaways, .two-col, .plot-grid, .video-grid, .card-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+  <header>
+    <div class="header-inner">
+      <nav class="breadcrumb"><a href="../cable_bend_twist_verification/">&larr; Cable Bend/Twist Verification</a></nav>
+      <h1>Cable Bend Cantilever Sweep</h1>
+      <p class="subtitle">Loaded cantilevers verify the bend stiffness path and monotone stiffness response.</p>
+      <div class="metric-row">
+        <div class="metric"><span class="label">Stiffness sweep</span><span class="value">100, 300, 900</span></div>
+<div class="metric"><span class="label">Deflection*k</span><span class="value">39.14, 41.92, 41.95</span></div>
+<div class="metric"><span class="label">Max scale residual</span><span class="value">4.55%</span></div>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="two-col">
+      <div>
+        <h2>Verification Target</h2>
+        <p>This test verifies the loaded bend force-response path. Three horizontal cantilever cables receive the same downward tip force; only bend stiffness changes, so stiffer cables should deflect less and deflection times stiffness should remain nearly constant.</p>
+        <p class="note">The analytic boundary-value case is kinematic. This case uses an actual external force, so it checks the solver path that turns load into bend.</p>
+      </div>
+      <div>
+        <h2>Key Metrics</h2>
+        <table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody><tr><td>Stiffness sweep</td><td>100, 300, 900</td></tr>
+<tr><td>Deflection*k</td><td>39.14, 41.92, 41.95</td></tr>
+<tr><td>Max scale residual</td><td>4.55%</td></tr>
+<tr><td>Delta*k range</td><td>6.87%</td></tr>
+<tr><td>Max side drift</td><td>0.00e+00 m</td></tr></tbody></table>
+      </div>
+    </section>
+
+    <section>
+      <h2>Simulation Setup</h2>
+      <table><thead><tr><th>Setting</th><th>Value</th></tr></thead><tbody><tr><td>Solver fps</td><td>60 Hz</td></tr>
+<tr><td>Solver timestep</td><td>1/600 s (10 substeps per frame)</td></tr>
+<tr><td>VBD iterations</td><td>10 per substep</td></tr>
+<tr><td>Segments / radius</td><td>16 segments, h = 0.10 m, r = 0.010 m</td></tr>
+<tr><td>Cable stiffness</td><td>stretch = 1.0e6 N/m, bend = 100, 300, 900 N m</td></tr>
+<tr><td>Twist stiffness</td><td>0.77 * bend stiffness</td></tr>
+<tr><td>Load schedule</td><td>0.50 N tip force, 2 s ramp + 6 s hold</td></tr>
+<tr><td>Report video</td><td>30 fps render, 510 solver frames, stride 3</td></tr></tbody></table>
+    </section>
+
+    <section>
+      <h2>Video Checks</h2>
+      <p>The video shows the same vertical tip load applied to three cantilevers. The visible ordering is the main sanity check: low bend stiffness should sag most, high bend stiffness least. The plot below is the quantitative flat-delta-k check.</p>
+
+      <figure class="video-main">
+        <video controls preload="metadata" muted playsinline>
+          <source src="assets/cable_bend_cantilever_sweep.mp4?v=1779848565-109381" type="video/mp4">
+        </video>
+        <figcaption>The three cables settle in order: low stiffness sags most, high stiffness sags least. The quantitative scaling check is in the plot below the video.</figcaption>
+      </figure>
+
+
+
+    </section>
+
+
+    <section>
+      <h2>Acceptance Criteria</h2>
+      <div class="card-grid">
+
+        <div class="card">
+          <h3>Passes When</h3>
+          <ul class="check-list"><li>The lowest-stiffness cable sags the most</li><li>The highest-stiffness cable sags the least</li><li>Tip markers stay ordered and close to the green 1/k guide</li><li>Sideways drift remains near zero</li></ul>
+        </div>
+
+        <div class="card">
+          <h3>Watch For</h3>
+          <ul class="check-list"><li>A stiffer cable sags more than a softer cable</li><li>The cables drift sideways under a purely vertical load</li><li>Tip deflection keeps oscillating instead of settling</li></ul>
+        </div>
+
+        <div class="card">
+          <h3>Validated Behavior</h3>
+          <ul class="check-list"><li>Bend stiffness controls loaded bend response</li><li>Loaded bend remains stable in the full solver</li><li>The bend path behaves approximately Hookean over a stiffness sweep</li></ul>
+        </div>
+
+      </div>
+    </section>
+
+
+
+    <section>
+      <h2>Plot Checks</h2>
+
+        <div class="plot-block">
+          <h3>Loaded Bend Response</h3>
+          <p>The sweep plot checks the primary assertion. Deflection must decrease monotonically as bend stiffness increases, and deflection times stiffness should stay nearly flat.</p>
+          <div class="plot-grid">
+
+        <figure>
+          <img src="assets/bend_stiffness_sweep.png?v=1779943467-95485" alt="Cable Bend Cantilever Sweep plot bend_stiffness_sweep.png">
+          <figcaption>Tip deflection and deflection times stiffness for the loaded cantilever sweep.</figcaption>
+        </figure>
+
+          </div>
+        </div>
+
+
+        <div class="plot-block">
+          <h3>Bend Reference Laws</h3>
+          <p>This plot is interpretive rather than the main pass/fail gate. It shows the cantilever moment law and the discrete-to-continuum bend convergence trend.</p>
+          <div class="plot-grid">
+
+        <figure>
+          <img src="assets/mechanical_laws.png?v=1779943468-116050" alt="Cable Bend Cantilever Sweep plot mechanical_laws.png">
+          <figcaption>Cantilever bending moment law and discrete-to-continuum bend convergence.</figcaption>
+        </figure>
+
+          </div>
+        </div>
+
+    </section>
+
+
+    <section>
+      <h2>Reproduce</h2>
+      <pre><code>uv run --extra examples python -m newton.examples cable_bend --test --viewer null</code></pre>
+    </section>
+  </main>
+
+  <footer>
+    Report payload: this page, Newton-rendered MP4 video(s), and selected PNG plots in <code>assets/</code>.
+    Parent hub: <a href="../cable_bend_twist_verification/">Cable Bend/Twist Verification</a>.
+  </footer>
+</body>
+</html>

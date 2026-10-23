@@ -1,0 +1,852 @@
+{
+  "broad": [
+    {
+      "canonical_parity": 4.301294849993686e-10,
+      "case": "y_junction_stiff",
+      "cold_prepare_plus_step_ms": 41.735828,
+      "dynamic_bodies": 57,
+      "label": "Y junction / stiff",
+      "objective_ratio": 0.008641862341686053,
+      "pass": true
+    },
+    {
+      "canonical_parity": 4.33191457592443e-14,
+      "case": "y_junction",
+      "cold_prepare_plus_step_ms": 42.939719000000004,
+      "dynamic_bodies": 59,
+      "label": "y junction",
+      "objective_ratio": 0.013021327093825318,
+      "pass": true
+    },
+    {
+      "canonical_parity": 4.818248664634206e-13,
+      "case": "horiz_pinned_both",
+      "cold_prepare_plus_step_ms": 76.838013,
+      "dynamic_bodies": 126,
+      "label": "horiz pinned both",
+      "objective_ratio": 0.2721731871146041,
+      "pass": true
+    },
+    {
+      "canonical_parity": 4.818248664634206e-13,
+      "case": "horiz_cantilever_stretch",
+      "cold_prepare_plus_step_ms": 86.840093,
+      "dynamic_bodies": 127,
+      "label": "Horizontal 128 / stretch",
+      "objective_ratio": 0.2721835059501515,
+      "pass": true
+    },
+    {
+      "canonical_parity": 2.5545974637422066e-13,
+      "case": "horiz_cantilever_stretch_bend",
+      "cold_prepare_plus_step_ms": 77.929618,
+      "dynamic_bodies": 127,
+      "label": "Horizontal 128 / stretch+bend",
+      "objective_ratio": 0.5809725528266584,
+      "pass": true
+    },
+    {
+      "canonical_parity": 1.1690097778682671e-08,
+      "case": "vertical_hanging",
+      "cold_prepare_plus_step_ms": 89.789624,
+      "dynamic_bodies": 127,
+      "label": "vertical hanging",
+      "objective_ratio": 0.593313435131072,
+      "pass": true
+    },
+    {
+      "canonical_parity": 4.818248664634206e-13,
+      "case": "long_cantilever_256",
+      "cold_prepare_plus_step_ms": 143.691726,
+      "dynamic_bodies": 255,
+      "label": "long cantilever 256",
+      "objective_ratio": 0.2722004179404599,
+      "pass": true
+    },
+    {
+      "canonical_parity": 4.818248664634206e-13,
+      "case": "long_cantilever_512",
+      "cold_prepare_plus_step_ms": 276.703659,
+      "dynamic_bodies": 511,
+      "label": "long cantilever 512",
+      "objective_ratio": 0.2722342419210766,
+      "pass": true
+    },
+    {
+      "canonical_parity": 8.88316818107443e-13,
+      "case": "long_cantilever_512_bend",
+      "cold_prepare_plus_step_ms": 276.15322699999996,
+      "dynamic_bodies": 511,
+      "label": "Long chain 512 / bend",
+      "objective_ratio": 0.403278065210905,
+      "pass": true
+    },
+    {
+      "canonical_parity": 4.818248664634206e-13,
+      "case": "long_cantilever_1024",
+      "cold_prepare_plus_step_ms": 671.6009039999999,
+      "dynamic_bodies": 1023,
+      "label": "long cantilever 1024",
+      "objective_ratio": 0.27230188988283394,
+      "pass": true
+    },
+    {
+      "canonical_parity": 8.88316818107443e-13,
+      "case": "long_cantilever_1024_bend",
+      "cold_prepare_plus_step_ms": 625.8451849999999,
+      "dynamic_bodies": 1023,
+      "label": "long cantilever 1024 bend",
+      "objective_ratio": 0.4033457131726627,
+      "pass": true
+    },
+    {
+      "canonical_parity": 1.1996922552603984e-12,
+      "case": "long_cantilever_1024_superbend50",
+      "cold_prepare_plus_step_ms": 631.2421629999999,
+      "dynamic_bodies": 1023,
+      "label": "long cantilever 1024 superbend50",
+      "objective_ratio": 0.5246189445452103,
+      "pass": true
+    },
+    {
+      "canonical_parity": 2.0465106795623453e-13,
+      "case": "long_cantilever_1024_superbend500",
+      "cold_prepare_plus_step_ms": 662.7253659999999,
+      "dynamic_bodies": 1023,
+      "label": "Long chain 1024 / bend×500",
+      "objective_ratio": 0.5791733503491046,
+      "pass": true
+    },
+    {
+      "canonical_parity": 1.1689927248426089e-08,
+      "case": "long_vertical_1024",
+      "cold_prepare_plus_step_ms": 948.572384,
+      "dynamic_bodies": 1023,
+      "label": "long vertical 1024",
+      "objective_ratio": 0.8573928067593936,
+      "pass": true
+    },
+    {
+      "canonical_parity": 8.875218782122814e-09,
+      "case": "long_vertical_1024_stiffbend",
+      "cold_prepare_plus_step_ms": 892.183098,
+      "dynamic_bodies": 1023,
+      "label": "Vertical 1024 / stiff bend",
+      "objective_ratio": 0.8573928312236542,
+      "pass": true
+    },
+    {
+      "canonical_parity": 4.818248664634206e-13,
+      "case": "long_cantilever_2048",
+      "cold_prepare_plus_step_ms": 1444.624165,
+      "dynamic_bodies": 2047,
+      "label": "long cantilever 2048",
+      "objective_ratio": 0.27243718580821463,
+      "pass": true
+    },
+    {
+      "canonical_parity": 2.0465106795623453e-13,
+      "case": "long_cantilever_2048_superbend500",
+      "cold_prepare_plus_step_ms": 1572.1252789999999,
+      "dynamic_bodies": 2047,
+      "label": "long cantilever 2048 superbend500",
+      "objective_ratio": 0.5793086462744852,
+      "pass": true
+    },
+    {
+      "canonical_parity": 4.818248664634206e-13,
+      "case": "long_cantilever_4096",
+      "cold_prepare_plus_step_ms": 2455.885742,
+      "dynamic_bodies": 4095,
+      "label": "long cantilever 4096",
+      "objective_ratio": 0.2727077776603163,
+      "pass": true
+    },
+    {
+      "canonical_parity": 2.0465106795623453e-13,
+      "case": "long_cantilever_4096_superbend500",
+      "cold_prepare_plus_step_ms": 2918.2673999999997,
+      "dynamic_bodies": 4095,
+      "label": "long cantilever 4096 superbend500",
+      "objective_ratio": 0.579579238126587,
+      "pass": true
+    },
+    {
+      "canonical_parity": 2.0465106795623453e-13,
+      "case": "long_cantilever_8192_superbend500",
+      "cold_prepare_plus_step_ms": 4927.788222,
+      "dynamic_bodies": 8191,
+      "label": "long cantilever 8192 superbend500",
+      "objective_ratio": 0.5801204218307906,
+      "pass": true
+    }
+  ],
+  "broad_skips": [
+    {
+      "case": "long_cantilever_16384_superbend500",
+      "expected_bodies": 16384,
+      "expected_dynamic_bodies": 16383,
+      "factory_constructed": false,
+      "label": "long cantilever 16384 superbend500",
+      "pass": false,
+      "safety_cap_dynamic_bodies": 8192,
+      "status": "skipped_by_explicit_preconstruction_run_safety_cap"
+    },
+    {
+      "case": "long_cantilever_32768_superbend500",
+      "expected_bodies": 32768,
+      "expected_dynamic_bodies": 32767,
+      "factory_constructed": false,
+      "label": "long cantilever 32768 superbend500",
+      "pass": false,
+      "safety_cap_dynamic_bodies": 8192,
+      "status": "skipped_by_explicit_preconstruction_run_safety_cap"
+    }
+  ],
+  "builder_version": "1.0",
+  "contact": [
+    {
+      "accuracy_claim": false,
+      "bodies": 1,
+      "matched_repeat": 1,
+      "max_penetration_m": 0.000499999150633812,
+      "observed_contacts": 1,
+      "p50_gap_m": -0.000499999150633812,
+      "pass": true,
+      "repeat_collision_ms": 1.428821,
+      "route": "explicit_fallback:contact_not_supported_by_compact_bgn",
+      "target": 1,
+      "unique_pairs": 1
+    },
+    {
+      "accuracy_claim": false,
+      "bodies": 12,
+      "matched_repeat": 8,
+      "max_penetration_m": 0.0010000020265579224,
+      "observed_contacts": 8,
+      "p50_gap_m": -0.0010000020265578582,
+      "pass": true,
+      "repeat_collision_ms": 1.243363,
+      "route": "explicit_fallback:contact_not_supported_by_compact_bgn",
+      "target": 8,
+      "unique_pairs": 8
+    },
+    {
+      "accuracy_claim": false,
+      "bodies": 80,
+      "matched_repeat": 64,
+      "max_penetration_m": 0.001000005751847971,
+      "observed_contacts": 64,
+      "p50_gap_m": -0.0009999983012678182,
+      "pass": true,
+      "repeat_collision_ms": 1.2485629999999999,
+      "route": "explicit_fallback:contact_not_supported_by_compact_bgn",
+      "target": 64,
+      "unique_pairs": 64
+    },
+    {
+      "accuracy_claim": false,
+      "bodies": 576,
+      "matched_repeat": 512,
+      "max_penetration_m": 0.001000005751848089,
+      "observed_contacts": 512,
+      "p50_gap_m": -0.0009999983012676794,
+      "pass": true,
+      "repeat_collision_ms": 1.3205559999999998,
+      "route": "explicit_fallback:contact_not_supported_by_compact_bgn",
+      "target": 512,
+      "unique_pairs": 512
+    }
+  ],
+  "factor_tape": [
+    {
+      "case": "all_dynamic_ring",
+      "honest_setup_inclusive_speedup": 0.38879577202581994,
+      "resident_replay_speedup_descriptive": 3.7134894070031748,
+      "verdict": "setup-inclusive negative on this small witness; resident replay is not a frame claim",
+      "worst_parity": 3.1313629377050015e-16
+    },
+    {
+      "case": "chain24_stiff",
+      "honest_setup_inclusive_speedup": 0.3309619859172364,
+      "resident_replay_speedup_descriptive": 6.49052795363162,
+      "verdict": "setup-inclusive negative on this small witness; resident replay is not a frame claim",
+      "worst_parity": 3.2000624955659926e-16
+    },
+    {
+      "case": "ring_chord",
+      "honest_setup_inclusive_speedup": 0.39768303256674326,
+      "resident_replay_speedup_descriptive": 4.872125025052916,
+      "verdict": "setup-inclusive negative on this small witness; resident replay is not a frame claim",
+      "worst_parity": 4.916334557819765e-16
+    },
+    {
+      "case": "y4_soft",
+      "honest_setup_inclusive_speedup": 0.38486426944956864,
+      "resident_replay_speedup_descriptive": 4.650702808787502,
+      "verdict": "setup-inclusive negative on this small witness; resident replay is not a frame claim",
+      "worst_parity": 1.8614298801205172e-16
+    }
+  ],
+  "inputs": [
+    {
+      "bytes": 72255,
+      "label": "prepared",
+      "sha256": "ebdb25451a33c06cca831d855c048ca302c010ae6ef0bc97ca2da4619a0b85ab",
+      "source_name": "summary_20260704T091617Z_1720960.json",
+      "stage_path": "data/canonical/prepared__summary_20260704T091617Z_1720960.json"
+    },
+    {
+      "bytes": 115733,
+      "label": "cold",
+      "sha256": "b12126d05ff8df2ba85f303e64779edfc6916c9bd31c62af04dec651ab6ccd0e",
+      "source_name": "summary_20260704T092145Z_1721800.json",
+      "stage_path": "data/canonical/cold__summary_20260704T092145Z_1721800.json"
+    },
+    {
+      "bytes": 327726,
+      "label": "broad",
+      "sha256": "a53936052c9a8f686ca469dc87e8d1c04d8d31a633a98bdf1e0f6db25b4655d9",
+      "source_name": "broad_20260705T013247Z_jumyungc-spock_1806917.json",
+      "stage_path": "data/canonical/broad__broad_20260705T013247Z_jumyungc-spock_1806917.json"
+    },
+    {
+      "bytes": 812675,
+      "label": "ten step",
+      "sha256": "21e5fe6c73b9ba88721e1b872fc93bd9df862b56b633cef7c1d4f3f12759dcf9",
+      "source_name": "broad_20260704T092544Z_jumyungc-spock_1724542.json",
+      "stage_path": "data/canonical/ten_step__broad_20260704T092544Z_jumyungc-spock_1724542.json"
+    },
+    {
+      "bytes": 365727,
+      "label": "contact",
+      "sha256": "39cd3c2e1b1eb88aa08f0bd79d93332780e5139d1dfa1ae873cb1a0395d2be80",
+      "source_name": "contact_ladder_20260705T011209Z_1793088.json",
+      "stage_path": "data/canonical/contact__contact_ladder_20260705T011209Z_1793088.json"
+    },
+    {
+      "bytes": 15088,
+      "label": "factor",
+      "sha256": "89077527ed6b6f94853a792f65aa5df0cf328239ede4338651c916181d881dca",
+      "source_name": "factor_tape_20260704T093147Z_1728281.json",
+      "stage_path": "data/canonical/factor__factor_tape_20260704T093147Z_1728281.json"
+    },
+    {
+      "bytes": 483409,
+      "label": "adapter",
+      "sha256": "d01155bdc3bb9f1d41637d7c10030ac20743f98248a701f241cfd01e27c8ba10",
+      "source_name": "campaign_20260704T093000Z_exact_inputs_v2.json",
+      "stage_path": "data/canonical/adapter__campaign_20260704T093000Z_exact_inputs_v2.json"
+    },
+    {
+      "bytes": 17138,
+      "label": "trajectory",
+      "sha256": "b4154ad0d9d58c86a8b992aafba4622b163c8f68c331678772984df7985e056d",
+      "source_name": "codex_bgn_trajectory_run_manifest.json",
+      "stage_path": "data/canonical/trajectory__codex_bgn_trajectory_run_manifest.json"
+    },
+    {
+      "bytes": 528643,
+      "label": "dynamic dense pile canonical failure",
+      "sha256": "ed1842160a435b065048c5668bee50367568e50d6daf118a9a2b35017dd0e2b0",
+      "source_name": "result.json",
+      "stage_path": "data/canonical/dense_pile_failure__run_20260705T011827Z_jumyungc-spock_1798933__result.json"
+    },
+    {
+      "bytes": 1043416,
+      "label": "dynamic dense pile stabilization sweep (negative)",
+      "sha256": "bb9a051b53422b126af84685a70d1c121590cf2db986c2c83a829c7edff76a2d",
+      "source_name": "result.json",
+      "stage_path": "data/canonical/dense_pile_stabilization__sweep_20260705T012406Z_jumyungc-spock_1802269__result.json"
+    },
+    {
+      "bytes": 43316,
+      "label": "canonical dense source: codex_bgn_dense_pile_20e17a.py",
+      "sha256": "20e17a740535101bcb4578abf12e8a3b568bcea8488a9b7d65cc96316c5397ae",
+      "source_name": "codex_bgn_dense_pile_20e17a.py",
+      "stage_path": "source/canonical_dense/codex_bgn_dense_pile_20e17a.py"
+    },
+    {
+      "bytes": 2911,
+      "label": "canonical dense source: test_codex_bgn_dense_pile_38bf6c.py",
+      "sha256": "38bf6c6ea412ed06312e7f5ca364932b7072867c0e5538b5c12ef15ffba65d7c",
+      "source_name": "test_codex_bgn_dense_pile_38bf6c.py",
+      "stage_path": "source/canonical_dense/test_codex_bgn_dense_pile_38bf6c.py"
+    },
+    {
+      "bytes": 57087,
+      "label": "source snapshot: bench/global_cable/codex_bgn_global.py",
+      "sha256": "e20f2bbd65a5058b06c1c569405a9bc6333b950e02fc5d9bc0b79168b1190d93",
+      "source_name": "codex_bgn_global.py",
+      "stage_path": "source/bench/global_cable/codex_bgn_global.py"
+    },
+    {
+      "bytes": 54323,
+      "label": "source snapshot: bench/global_cable/codex_bgn_tournament.py",
+      "sha256": "2d4b1960a08c51a7db6d9c1006cb89bf4772cdeb92f53cd3eca68d9b8d94fb2a",
+      "source_name": "codex_bgn_tournament.py",
+      "stage_path": "source/bench/global_cable/codex_bgn_tournament.py"
+    },
+    {
+      "bytes": 17593,
+      "label": "source snapshot: bench/global_cable/codex_bgn_cold_benchmark.py",
+      "sha256": "0e76511a970a07a9b03badcb35c0c0b8904e59aff1ec51ac3627b7813ae5129c",
+      "source_name": "codex_bgn_cold_benchmark.py",
+      "stage_path": "source/bench/global_cable/codex_bgn_cold_benchmark.py"
+    },
+    {
+      "bytes": 34721,
+      "label": "source snapshot: bench/global_cable/codex_bgn_broad_benchmark.py",
+      "sha256": "30c31b0c252d772d0f35c86381d92c4d03044c67e52804455b189a8a700bf29f",
+      "source_name": "codex_bgn_broad_benchmark.py",
+      "stage_path": "source/bench/global_cable/codex_bgn_broad_benchmark.py"
+    },
+    {
+      "bytes": 8255,
+      "label": "source snapshot: bench/global_cable/test_codex_bgn_broad.py",
+      "sha256": "301282aec3d1b6baf1e8b0853a9b937c245c0e762c2d52771324c954b4249520",
+      "source_name": "test_codex_bgn_broad.py",
+      "stage_path": "source/bench/global_cable/test_codex_bgn_broad.py"
+    },
+    {
+      "bytes": 37866,
+      "label": "source snapshot: bench/global_cable/codex_bgn_trajectory_video.py",
+      "sha256": "60f58feb2d8ce39584a4163ddae73fc082b1bc0a9786cb3acaf4ab152b449f64",
+      "source_name": "codex_bgn_trajectory_video.py",
+      "stage_path": "source/bench/global_cable/codex_bgn_trajectory_video.py"
+    },
+    {
+      "bytes": 28321,
+      "label": "source snapshot: bench/global_cable/codex_contact_ladder.py",
+      "sha256": "beca7d71364770c14bcd53883d253b896c09bba9e7b10fdb529aa439877d23d4",
+      "source_name": "codex_contact_ladder.py",
+      "stage_path": "source/bench/global_cable/codex_contact_ladder.py"
+    },
+    {
+      "bytes": 43513,
+      "label": "source snapshot: bench/global_cable/codex_bgn_dense_pile.py",
+      "sha256": "0599e86b2a591602d5398e00183f1d41a83ab83af87efa1f085e9fa11cb4d01a",
+      "source_name": "codex_bgn_dense_pile.py",
+      "stage_path": "source/bench/global_cable/codex_bgn_dense_pile.py"
+    },
+    {
+      "bytes": 3191,
+      "label": "source snapshot: bench/global_cable/test_codex_bgn_dense_pile.py",
+      "sha256": "990c97d026794dcc5602feddf7c029c2ca5045a2d1bf2ce3ae5e6a7314bff71c",
+      "source_name": "test_codex_bgn_dense_pile.py",
+      "stage_path": "source/bench/global_cable/test_codex_bgn_dense_pile.py"
+    },
+    {
+      "bytes": 6568,
+      "label": "source snapshot: bench/global_cable/codex_bgn_dense_pile_stabilization.py",
+      "sha256": "235702343a2255bcbffb8b84364fc62a24117058f805cf15730b9840bb01609f",
+      "source_name": "codex_bgn_dense_pile_stabilization.py",
+      "stage_path": "source/bench/global_cable/codex_bgn_dense_pile_stabilization.py"
+    },
+    {
+      "bytes": 1258,
+      "label": "source snapshot: bench/global_cable/test_codex_bgn_dense_pile_stabilization.py",
+      "sha256": "899541fb942de9a4db871326c46118391c015e9df44b8cb7dea27b2d66b4f08e",
+      "source_name": "test_codex_bgn_dense_pile_stabilization.py",
+      "stage_path": "source/bench/global_cable/test_codex_bgn_dense_pile_stabilization.py"
+    },
+    {
+      "bytes": 28320,
+      "label": "source snapshot: bench/global_cable/codex_bgn_factor_tape.py",
+      "sha256": "afea642a4990a1a04f71b631bef54b0b49b2b8bd8b793d7ffb47e2716067312d",
+      "source_name": "codex_bgn_factor_tape.py",
+      "stage_path": "source/bench/global_cable/codex_bgn_factor_tape.py"
+    },
+    {
+      "bytes": 26065,
+      "label": "source snapshot: bench/global_cable/codex_bgn_campaign_adapter.py",
+      "sha256": "19666df5c3887a979518fdc5797d151354e004d88fc583427cc9df8b4dfb6ff1",
+      "source_name": "codex_bgn_campaign_adapter.py",
+      "stage_path": "source/bench/global_cable/codex_bgn_campaign_adapter.py"
+    },
+    {
+      "bytes": 69006,
+      "label": "source snapshot: bench/global_cable/codex_bgn_review_report.py",
+      "sha256": "cfdb42aadce40815cdf546758c2285daeb8c4420e9f32b666426cbe6440d2f46",
+      "source_name": "codex_bgn_review_report.py",
+      "stage_path": "source/bench/global_cable/codex_bgn_review_report.py"
+    },
+    {
+      "bytes": 5540,
+      "label": "source snapshot: bench/global_cable/test_codex_bgn_review_report.py",
+      "sha256": "b9bd5d1c38df66c993945973fe64462b3c2edadd99b0813850d290ca2ea2d0e2",
+      "source_name": "test_codex_bgn_review_report.py",
+      "stage_path": "source/bench/global_cable/test_codex_bgn_review_report.py"
+    }
+  ],
+  "method": {
+    "contact": "fail closed to Newton SolverVBD; contact accuracy/champion status is not claimed",
+    "routing": "feature-only: retain VBD2 when it is Pareto-faster at the same target; use compact BGN for supported globally coupled smooth cable systems",
+    "smooth_global": "prepared FP64 compact block Gauss–Newton with vectorized SE(3) kinematics, strict objective decrease, scalar oracle replay, and caller-state isolation",
+    "timing": "prepared/cold canonical tables compare the same target and matched Fable global implementation; video generation is never solver timing"
+  },
+  "pile": [
+    {
+      "bodies": 960,
+      "cables": 16,
+      "canonical_failure_gates": {
+        "all_states_contacts_finite_and_quaternions_normalized": true,
+        "no_contact_buffer_overflow": true,
+        "penetration_below_frozen_limit": false,
+        "real_cable_cable_contact_observed": true,
+        "real_ground_contact_observed": true,
+        "stretch_below_quarter_segment": false,
+        "video_full_decode": true
+      },
+      "canonical_failure_pass": false,
+      "canonical_failure_trajectory": "data/pile/moderate_canonical_failure_trajectory.npz",
+      "canonical_failure_video": "media/pile/moderate_canonical_failure.mp4",
+      "case": "moderate",
+      "contacts_per_body": 0.4375,
+      "display_frames": 120,
+      "label": "Moderate dynamic pile",
+      "max_penetration_m": 0.02476390123454436,
+      "max_stretch_m": 0.043617100258434474,
+      "media_variant": "canonical failure",
+      "pair_births": 4127,
+      "pair_deaths": 4084,
+      "peak_cable_contacts": 207,
+      "peak_contacts": 420,
+      "peak_ground_contacts": 213,
+      "raw_trajectory": "data/pile/moderate_canonical_failure_trajectory.npz",
+      "route_reason": "contact_not_supported_by_compact_bgn",
+      "solver": "Newton SolverVBD, requested iterations=10",
+      "step_p50_ms": 46.7917865,
+      "substeps": 1200,
+      "video": "media/pile/moderate_canonical_failure.mp4"
+    },
+    {
+      "bodies": 7680,
+      "cables": 64,
+      "canonical_failure_gates": {
+        "all_states_contacts_finite_and_quaternions_normalized": true,
+        "no_contact_buffer_overflow": true,
+        "penetration_below_frozen_limit": false,
+        "real_cable_cable_contact_observed": true,
+        "real_ground_contact_observed": true,
+        "stretch_below_quarter_segment": false,
+        "video_full_decode": true
+      },
+      "canonical_failure_pass": false,
+      "canonical_failure_trajectory": "data/pile/dense_canonical_failure_trajectory.npz",
+      "canonical_failure_video": "media/pile/dense_canonical_failure.mp4",
+      "case": "dense",
+      "contacts_per_body": 0.7591145833333334,
+      "display_frames": 120,
+      "label": "Dense dynamic pile",
+      "max_penetration_m": 0.02389240747752193,
+      "max_stretch_m": 0.12065954378920221,
+      "media_variant": "canonical failure",
+      "pair_births": 66311,
+      "pair_deaths": 64932,
+      "peak_cable_contacts": 4223,
+      "peak_contacts": 5830,
+      "peak_ground_contacts": 1607,
+      "raw_trajectory": "data/pile/dense_canonical_failure_trajectory.npz",
+      "route_reason": "contact_not_supported_by_compact_bgn",
+      "solver": "Newton SolverVBD, requested iterations=10",
+      "step_p50_ms": 46.3746055,
+      "substeps": 1200,
+      "video": "media/pile/dense_canonical_failure.mp4"
+    }
+  ],
+  "pile_stabilization": [
+    {
+      "candidate": "vbd10_s20",
+      "iterations": 10,
+      "max_penetration_m": 0.03068584205661104,
+      "max_stretch_m": 0.025119765746046824,
+      "pass": false,
+      "peak_contacts": 500,
+      "penetration_limit_m": 0.012,
+      "simulated_substeps": 2400,
+      "step_p50_ms": 90.829114,
+      "stretch_limit_m": 0.01,
+      "substeps": 20
+    },
+    {
+      "candidate": "vbd20_s10",
+      "iterations": 20,
+      "max_penetration_m": 0.022067399197579975,
+      "max_stretch_m": 0.0554958360925358,
+      "pass": false,
+      "peak_contacts": 717,
+      "penetration_limit_m": 0.012,
+      "simulated_substeps": 1200,
+      "step_p50_ms": 84.07647,
+      "stretch_limit_m": 0.01,
+      "substeps": 10
+    },
+    {
+      "candidate": "vbd20_s20",
+      "iterations": 20,
+      "max_penetration_m": 0.01482964794863006,
+      "max_stretch_m": 0.06803737398056327,
+      "pass": false,
+      "peak_contacts": 553,
+      "penetration_limit_m": 0.012,
+      "simulated_substeps": 2400,
+      "step_p50_ms": 167.24037299999998,
+      "stretch_limit_m": 0.01,
+      "substeps": 20
+    },
+    {
+      "candidate": "vbd50_s10",
+      "iterations": 50,
+      "max_penetration_m": 0.025085801609039324,
+      "max_stretch_m": 0.0607306494152896,
+      "pass": false,
+      "peak_contacts": 677,
+      "penetration_limit_m": 0.012,
+      "simulated_substeps": 1200,
+      "step_p50_ms": 198.446979,
+      "stretch_limit_m": 0.01,
+      "substeps": 10
+    }
+  ],
+  "publication_blockers": [
+    "compact BGN has no contact solve; the unified interface explicitly routes contacts to VBD2",
+    "the frozen 1,200-step VBD10 pile run is finite with real contact/media but fails penetration and stretch gates",
+    "dense dynamic piles are VBD10 fallback baselines, not candidate wins",
+    "a preregistered four-way VBD iteration/substep sweep found no passing stabilization",
+    "broad 20-case runs are candidate-only one-step audits, not matched timing comparisons",
+    "the strict five-component canonical-R adapter remains PENDING",
+    "the factor-tape shortcut is setup-inclusive slower and is not in the production path"
+  ],
+  "publication_ready": false,
+  "schema": "codex-bgn-review-report/v1",
+  "speed": [
+    {
+      "case": "y12_softbend",
+      "cold_global_ci95": [
+        2.689802872812868,
+        2.713204158955312
+      ],
+      "cold_global_speedup": 2.701059333916342,
+      "cold_routed_speedup": 2.239416982773428,
+      "label": "Y-12 soft bend",
+      "objective_r": 0.01328694149017449,
+      "prepared_global_ci95": [
+        3.0549879865829483,
+        3.076731630726505
+      ],
+      "prepared_global_speedup": 3.06497151850221,
+      "prepared_routed_speedup": 2.4206944412147924,
+      "samples_each": 50,
+      "target_met": true,
+      "target_r": 0.1
+    },
+    {
+      "case": "y24_stiff_alltips",
+      "cold_global_ci95": [
+        3.416689688197181,
+        3.527693634017876
+      ],
+      "cold_global_speedup": 3.4424922695887767,
+      "cold_routed_speedup": 2.6990063836151648,
+      "label": "Y-24 stiff / all tips pinned",
+      "objective_r": 0.01001395817137193,
+      "prepared_global_ci95": [
+        3.877899920331634,
+        3.923525787606278
+      ],
+      "prepared_global_speedup": 3.899094692260433,
+      "prepared_routed_speedup": 2.9148834247136746,
+      "samples_each": 50,
+      "target_met": true,
+      "target_r": 0.1
+    },
+    {
+      "case": "y127_default",
+      "cold_global_ci95": [
+        4.303630169465844,
+        4.385966144574376
+      ],
+      "cold_global_speedup": 4.377470312743085,
+      "cold_routed_speedup": 3.295082383877101,
+      "label": "Y-127",
+      "objective_r": 0.011652814014715844,
+      "prepared_global_ci95": [
+        4.831050297366384,
+        5.083218254494296
+      ],
+      "prepared_global_speedup": 5.045805894140538,
+      "prepared_routed_speedup": 3.6051133606744403,
+      "samples_each": 50,
+      "target_met": true,
+      "target_r": 0.1
+    },
+    {
+      "case": "holdout_y17_bend6000",
+      "cold_global_ci95": [
+        3.0729055304038044,
+        3.0885488734903728
+      ],
+      "cold_global_speedup": 3.084584811095948,
+      "cold_routed_speedup": 2.4690305197972666,
+      "label": "Y-17 holdout",
+      "objective_r": 0.013705388569979394,
+      "prepared_global_ci95": [
+        3.4835526116776503,
+        3.5047687512381334
+      ],
+      "prepared_global_speedup": 3.4895756684063803,
+      "prepared_routed_speedup": 2.676199700505414,
+      "samples_each": 50,
+      "target_met": true,
+      "target_r": 0.12
+    },
+    {
+      "case": "holdout_y31_pinned_bend8000",
+      "cold_global_ci95": [
+        3.717666368433323,
+        3.7394031006999326
+      ],
+      "cold_global_speedup": 3.725334696148796,
+      "cold_routed_speedup": 2.8819456002864787,
+      "label": "Y-31 pinned holdout",
+      "objective_r": 0.011669776959426004,
+      "prepared_global_ci95": [
+        4.247930060081647,
+        4.295928762044411
+      ],
+      "prepared_global_speedup": 4.28109085157687,
+      "prepared_routed_speedup": 3.139463393399884,
+      "samples_each": 50,
+      "target_met": true,
+      "target_r": 0.1
+    }
+  ],
+  "summary": {
+    "broad_max_dynamic_bodies": 8191,
+    "broad_pass": 20,
+    "broad_preconstruction_skips": 2,
+    "broad_total": 20,
+    "cold_global_speedup_range": [
+      2.701059333916342,
+      4.377470312743085
+    ],
+    "contact_ladder_pass": 4,
+    "contact_ladder_total": 4,
+    "expected_video_count": 4,
+    "pile_canonical_pass": 0,
+    "pile_canonical_total": 2,
+    "pile_stabilization_winner": null,
+    "prepared_global_speedup_range": [
+      3.06497151850221,
+      5.045805894140538
+    ],
+    "ten_step_pass": 6,
+    "ten_step_total": 6,
+    "trajectory_pass": 2,
+    "trajectory_total": 2
+  },
+  "ten_step": [
+    {
+      "all_steps_pass": true,
+      "case": "horiz_cantilever_stretch",
+      "dynamic_bodies": 127,
+      "first_objective_ratio": 0.2721835059501515,
+      "label": "Horizontal 128 / stretch",
+      "last_objective_ratio": 0.3504832646806598,
+      "max_bend": 0.042432859477774844,
+      "max_stretch": 1.3540884497066425e-05,
+      "steps": 10
+    },
+    {
+      "all_steps_pass": true,
+      "case": "horiz_cantilever_stretch_bend",
+      "dynamic_bodies": 127,
+      "first_objective_ratio": 0.5809725528266584,
+      "label": "Horizontal 128 / stretch+bend",
+      "last_objective_ratio": 0.9468218169326784,
+      "max_bend": 0.0014839063707254444,
+      "max_stretch": 0.00017106535196310677,
+      "steps": 10
+    },
+    {
+      "all_steps_pass": true,
+      "case": "long_cantilever_1024_superbend500",
+      "dynamic_bodies": 1023,
+      "first_objective_ratio": 0.5791733503491043,
+      "label": "Long chain 1024 / bend×500",
+      "last_objective_ratio": 0.9669534423216039,
+      "max_bend": 0.0005705840534737433,
+      "max_stretch": 0.00020951032721348753,
+      "steps": 10
+    },
+    {
+      "all_steps_pass": true,
+      "case": "long_cantilever_512_bend",
+      "dynamic_bodies": 511,
+      "first_objective_ratio": 0.403278065210905,
+      "label": "Long chain 512 / bend",
+      "last_objective_ratio": 0.9505596194818616,
+      "max_bend": 0.007767093807237304,
+      "max_stretch": 8.094772156646784e-05,
+      "steps": 10
+    },
+    {
+      "all_steps_pass": true,
+      "case": "long_vertical_1024_stiffbend",
+      "dynamic_bodies": 1023,
+      "first_objective_ratio": 0.8573928312236516,
+      "label": "Vertical 1024 / stiff bend",
+      "last_objective_ratio": 0.9773165058288898,
+      "max_bend": 1.3537352572257064e-08,
+      "max_stretch": 0.000247955322266349,
+      "steps": 10
+    },
+    {
+      "all_steps_pass": true,
+      "case": "y_junction_stiff",
+      "dynamic_bodies": 57,
+      "first_objective_ratio": 0.008641862341686053,
+      "label": "Y junction / stiff",
+      "last_objective_ratio": 0.010607597926570542,
+      "max_bend": 3.708922732383785e-06,
+      "max_stretch": 3.160464060023948e-07,
+      "steps": 10
+    }
+  ],
+  "trajectory": [
+    {
+      "bgn_bend_max": 0.5570796458855568,
+      "bgn_objective": 60.059867071697454,
+      "bgn_safe": true,
+      "bgn_stretch_max": 0.00862337550006307,
+      "case": "long_cantilever_512_bend",
+      "label": "Long chain 512 / bend",
+      "poster": "media/trajectory/long_cantilever_512_bend_poster.png",
+      "raw_trajectory": "data/trajectory/long_cantilever_512_bend.json",
+      "steps": 600,
+      "vbd10_bend_max": 0.5569899983418318,
+      "vbd10_objective": 60.859520736135025,
+      "vbd10_safe": true,
+      "vbd10_stretch_max": 0.008651990927586384,
+      "video": "media/trajectory/long_cantilever_512_bend.mp4"
+    },
+    {
+      "bgn_bend_max": 0.07657230243658758,
+      "bgn_objective": 66.83088767191775,
+      "bgn_safe": true,
+      "bgn_stretch_max": 0.008669294341927076,
+      "case": "long_cantilever_1024_superbend500",
+      "label": "Long chain 1024 / bend×500",
+      "poster": "media/trajectory/long_cantilever_1024_superbend500_poster.png",
+      "raw_trajectory": "data/trajectory/long_cantilever_1024_superbend500.json",
+      "steps": 600,
+      "vbd10_bend_max": 0.07624837434114076,
+      "vbd10_objective": 67.97842737327795,
+      "vbd10_safe": true,
+      "vbd10_stretch_max": 0.008728535911375216,
+      "video": "media/trajectory/long_cantilever_1024_superbend500.mp4"
+    }
+  ],
+  "verdict": "BEST SMOOTH GLOBAL CANDIDATE; NOT A UNIVERSAL / CONTACT CHAMPION"
+}
