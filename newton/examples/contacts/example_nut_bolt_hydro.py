@@ -8,9 +8,8 @@
 #
 # Command: python -m newton.examples nut_bolt_hydro
 #          python -m newton.examples nut_bolt_hydro --solver kamino
-#          python -m newton.examples nut_bolt_hydro --kh 1e11
-#          python -m newton.examples nut_bolt_hydro --solver vbd --kh 3e8 --kd 0
-#          python -m newton.examples nut_bolt_hydro --solver vbd --kh 3e8 --kd 0 --vbd-iterations 4
+#          python -m newton.examples nut_bolt_hydro --solver vbd
+#          python -m newton.examples nut_bolt_hydro --solver vbd --vbd-iterations 6
 #
 ###########################################################################
 
@@ -44,7 +43,8 @@ SHAPE_CFG = newton.ModelBuilder.ShapeConfig(
     margin=0.0,
     mu=0.01,
     # Hydroelastic supplies the per-contact stiffness for the nut/bolt pair.
-    # VBD retains shape damping when the pipeline supplies no damping override.
+    # VBD scales shape damping down with softer quadrature rows to retain kd/ke;
+    # an explicit positive row damping overrides that material mapping.
     kh=1e11,  # Pressure per penetration depth [N/m^3]
     ke=1e7,
     kd=1e4,
@@ -218,7 +218,16 @@ class Example:
         )
         main_scene.replicate(world_builder, world_count=self.world_count)
         if self.solver_type == "vbd":
-            main_scene.color()
+            # Assign distinct colors within each small world: bolt, nut, then any
+            # additional pairs. Isolated worlds safely reuse the same colors.
+            # Finalize derives both body_colors and body_color_groups from this.
+            if self.num_per_world == 1:
+                main_scene.body_color_groups = [
+                    np.arange(body, main_scene.body_count, world_builder.body_count, dtype=np.int32)
+                    for body in range(world_builder.body_count)
+                ]
+            else:
+                main_scene.color()
 
         self.model = main_scene.finalize()
 
@@ -413,19 +422,10 @@ class Example:
             self.nut_body_indices = None
             return
 
-        # Find bolt and nut body indices by key
-        self.bolt_body_indices = []
-        self.nut_body_indices = []
-
-        for i in range(self.grid_x):
-            for j in range(self.grid_y):
-                bolt_key = f"bolt_{i}_{j}"
-                nut_key = f"nut_{i}_{j}"
-
-                if bolt_key in self.model.body_label:
-                    self.bolt_body_indices.append(self.model.body_label.index(bolt_key))
-                if nut_key in self.model.body_label:
-                    self.nut_body_indices.append(self.model.body_label.index(nut_key))
+        # Replicated worlds reuse labels. Enumerate every instance instead of
+        # list.index(), which only finds bodies in the first world.
+        self.bolt_body_indices = [i for i, label in enumerate(self.model.body_label) if label.startswith("bolt_")]
+        self.nut_body_indices = [i for i, label in enumerate(self.model.body_label) if label.startswith("nut_")]
 
         # Store initial transforms
         body_q = self.state_0.body_q.numpy()
@@ -435,6 +435,7 @@ class Example:
         # Track maximum rotation change and z displacement for nuts
         self.nut_max_rotation_change = [0.0] * len(self.nut_body_indices)
         self.nut_min_z = [body_q[idx][2] for idx in self.nut_body_indices]
+        self.nut_max_radial_offset = [0.0] * len(self.nut_body_indices)
 
     def _track_test_data(self):
         """Track transforms for test validation (called each step in test mode)."""
@@ -460,11 +461,15 @@ class Example:
             # Track minimum z (nuts should move down)
             self.nut_min_z[i] = min(self.nut_min_z[i], current_q[2])
 
+            bolt_q = body_q[self.bolt_body_indices[i]]
+            relative = wp.quat_rotate_inv(wp.quat(*bolt_q[3:7]), wp.vec3(*(current_q[:3] - bolt_q[:3])))
+            self.nut_max_radial_offset[i] = max(self.nut_max_radial_offset[i], float(np.linalg.norm(relative[:2])))
+
     def test_final(self):
         """Verify simulation state after example completes.
 
         - Bolts should stay approximately in place (limited displacement)
-        - Nuts should rotate (thread engagement) and move slightly downward
+        - Nuts should rotate, descend, and remain near their bolt axis
         """
         body_q = self.state_0.body_q.numpy()
 
@@ -484,6 +489,14 @@ class Example:
         min_rotation_threshold = np.radians(45.0)
         min_descent = 0.005
         for i in range(len(self.nut_body_indices)):
+            # Rotation and descent alone also pass when the nut falls off.
+            # Reuse the scene's displacement tolerance as a coarse escape gate,
+            # not as a certificate of thread contact or force convergence.
+            radial_offset = self.nut_max_radial_offset[i]
+            assert radial_offset < max_bolt_displacement, (
+                f"Nut {i}: escaped its bolt axis. "
+                f"Radial offset={radial_offset:.4f} (max allowed={max_bolt_displacement:.4f})"
+            )
             # Check rotation occurred
             max_rotation = self.nut_max_rotation_change[i]
             assert max_rotation > min_rotation_threshold, (
@@ -530,7 +543,7 @@ class Example:
             type=str,
             choices=["xpbd", "mujoco", "kamino", "vbd"],
             default="mujoco",
-            help="Solver to use. For the VBD demonstration use --kh 3e8 --kd 0.",
+            help="Solver to use. Supports xpbd, mujoco, kamino, or vbd.",
         )
         parser.add_argument(
             "--kh",
@@ -543,7 +556,7 @@ class Example:
             type=float,
             default=SHAPE_CFG.kd,
             help="Shape contact damping; must be finite and nonnegative. "
-            "VBD applies this per contact when the pipeline supplies no override. "
+            "VBD scales shape damping down with softer quadrature rows to retain kd/ke. "
             "Material values are not equivalent across solvers.",
         )
         parser.add_argument(

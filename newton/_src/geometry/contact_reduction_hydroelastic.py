@@ -68,6 +68,8 @@ EPS_LARGE = 1e-8
 EPS_SMALL = 1e-20
 MIN_FRICTION_SCALE = 1e-2
 SPECULATIVE_BIN_OFFSET = 128
+# Fixed-point quantum for represented speculative face area [m^2] (integer atomics stay deterministic).
+SPECULATIVE_AREA_SCALE = wp.constant(1099511627776.0)  # 2**40
 _NUM_VOXEL_GROUPS = (NUM_VOXEL_DEPTH_SLOTS + NUM_SPATIAL_DIRECTIONS) // (NUM_SPATIAL_DIRECTIONS + 1)
 assert NUM_NORMAL_BINS + _NUM_VOXEL_GROUPS <= SPECULATIVE_BIN_OFFSET
 assert SPECULATIVE_BIN_OFFSET + _NUM_VOXEL_GROUPS <= 256
@@ -309,7 +311,7 @@ def _register_voxel_contact(
     contact_value: wp.uint64,
     reducer_data: GlobalContactReducerData,
 ):
-    """Register a contact in the voxel group selected by ``bin_offset``."""
+    """Register a contact in its voxel group and return the entry, or -1 on overflow."""
     voxel_idx = wp.clamp(voxel_idx, 0, wp.static(NUM_VOXEL_DEPTH_SLOTS - 1))
     voxels_per_group = wp.static(NUM_SPATIAL_DIRECTIONS + 1)
     voxel_group = voxel_idx // voxels_per_group
@@ -329,6 +331,7 @@ def _register_voxel_contact(
         )
     else:
         wp.atomic_add(reducer_data.ht_insert_failures, 0, 1)
+    return voxel_entry_idx
 
 
 # =============================================================================
@@ -612,6 +615,7 @@ def get_reduce_hydroelastic_contacts_kernel(deterministic: bool = False):
         shape_collision_aabb_upper: wp.array[wp.vec3],
         shape_voxel_resolution: wp.array[wp.vec3i],
         agg_moment_unreduced: wp.array[wp.float32],
+        speculative_area: wp.array[wp.int64],
         total_num_threads: int,
     ):
         """Register hydroelastic contacts in the hashtable for reduction.
@@ -649,7 +653,7 @@ def get_reduce_hydroelastic_contacts_kernel(deterministic: bool = False):
                     aabb_upper,
                     shape_voxel_resolution[shape_b],
                 )
-                _register_voxel_contact(
+                spec_entry = _register_voxel_contact(
                     shape_a,
                     shape_b,
                     wp.static(SPECULATIVE_BIN_OFFSET),
@@ -661,6 +665,15 @@ def get_reduce_hydroelastic_contacts_kernel(deterministic: bool = False):
                     ),
                     reducer_data,
                 )
+                # Represented area of this speculative voxel slot: every face that maps to it.
+                spec_voxel = wp.clamp(voxel_idx, 0, wp.static(NUM_VOXEL_DEPTH_SLOTS - 1))
+                spec_group_size = wp.static(NUM_SPATIAL_DIRECTIONS + 1)
+                if spec_entry >= 0 and speculative_area.shape[0] > 0:
+                    wp.atomic_add(
+                        speculative_area,
+                        (spec_voxel % spec_group_size) * reducer_data.ht_capacity + spec_entry,
+                        wp.int64(reducer_data.contact_area[contact_id] * SPECULATIVE_AREA_SCALE),
+                    )
                 continue
 
             aabb_lower = shape_collision_aabb_lower[shape_b]
@@ -1011,8 +1024,8 @@ def create_export_hydroelastic_reduced_contacts_kernel(
 
     Args:
         writer_func: A warp function with signature (ContactData, writer_data, int) -> None
-        margin_contact_area: Deprecated compatibility area [m^2] for
-            speculative contact activation stiffness.
+        margin_contact_area: Deprecated legacy constant area [m^2] for speculative
+            contact activation stiffness; ``0`` uses the represented speculative face area.
         normal_matching: If True, rotate contact normals so their weighted sum aligns with aggregate force
         anchor_contact: If True, add an anchor contact at the center of pressure for each entry
         moment_matching: If True, adjust per-contact friction scales so that
@@ -1064,6 +1077,8 @@ def create_export_hydroelastic_reduced_contacts_kernel(
         # Shape data for margin
         shape_gap: wp.array[float],
         shape_transform: wp.array[wp.transform],
+        # Represented speculative face area per voxel slot (fixed point)
+        speculative_area: wp.array[wp.int64],
         # Writer data (custom struct)
         writer_data: Any,
         deterministic: int,
@@ -1093,6 +1108,7 @@ def create_export_hydroelastic_reduced_contacts_kernel(
 
             # === First pass: collect unique contacts and compute aggregates ===
             exported_ids = exported_ids_vec()
+            exported_slots = exported_ids_vec()
             exported_depths = exported_depths_vec()
             # Cache decoded normals to avoid double decode_oct in second pass
             cached_nx = exported_nx_vec()
@@ -1124,8 +1140,9 @@ def create_export_hydroelastic_reduced_contacts_kernel(
                 contact_normal = decode_oct(normal[contact_id])
                 depth = pd[3]
 
-                # Record this contact, its depth, and cached normal
+                # Record this contact, its slot, its depth, and cached normal
                 exported_ids[num_exported] = contact_id
+                exported_slots[num_exported] = slot
                 exported_depths[num_exported] = depth
                 cached_nx[num_exported] = contact_normal[0]
                 cached_ny[num_exported] = contact_normal[1]
@@ -1145,6 +1162,15 @@ def create_export_hydroelastic_reduced_contacts_kernel(
                 if depth < 0.0:
                     pen_magnitude = -depth
                     max_pen_depth = wp.max(max_pen_depth, pen_magnitude)
+
+            # Represented speculative area per slot of this entry. Every active entry is visited once here after
+            # accumulation, so zeroing the slots keeps the accumulator clean without a full-array clear.
+            slot_area = exported_depths_vec()
+            if speculative_area.shape[0] > 0:
+                for slot in range(wp.static(VALUES_PER_KEY)):
+                    slot_index = slot * ht_capacity + entry_idx
+                    slot_area[slot] = float(speculative_area[slot_index]) / SPECULATIVE_AREA_SCALE
+                    speculative_area[slot_index] = wp.int64(0)
 
             # Skip entries with no contacts
             if num_exported == 0:
@@ -1392,8 +1418,13 @@ def create_export_hydroelastic_reduced_contacts_kernel(
 
                 if depth >= 0.0:
                     # Speculative contacts never inherit penetrating
-                    # force/wrench-matching stiffness from a mixed bin.
-                    c_stiffness = wp.static(margin_contact_area) * k_eff_first
+                    # force/wrench-matching stiffness from a mixed bin. They activate with the face
+                    # area they represent: the summed area of every speculative face in their voxel slot.
+                    if wp.static(margin_contact_area > 0.0):
+                        c_stiffness = wp.static(margin_contact_area) * k_eff_first
+                    else:
+                        represented_area = wp.max(area_i, slot_area[exported_slots[idx]])
+                        c_stiffness = represented_area * k_eff_first
                     c_friction_scale = 1.0
 
                 # Transform contact to world space
@@ -1473,8 +1504,9 @@ class HydroelasticReductionConfig:
         moment_matching: If True, adjust per-contact friction scales so that the
             maximum friction moment per normal bin is preserved between reduced
             and unreduced contacts. Automatically enables ``anchor_contact``.
-        margin_contact_area: Deprecated compatibility area [m^2] for
-            speculative contact activation stiffness.
+        margin_contact_area: Deprecated legacy constant area [m^2] for
+            speculative contact activation stiffness. ``0`` (default) activates each
+            speculative contact with the summed area of the speculative faces it represents.
         hashtable_size_factor: Multiplier applied to the contact buffer capacity
             when allocating the reduction hashtable. Must be positive.
     """
@@ -1482,7 +1514,7 @@ class HydroelasticReductionConfig:
     normal_matching: bool = True
     anchor_contact: bool = False
     moment_matching: bool = False
-    margin_contact_area: float = 1e-2
+    margin_contact_area: float = 0.0
     hashtable_size_factor: float = 0.25
 
 
@@ -1593,6 +1625,9 @@ class HydroelasticContactReduction:
         # to VALUES_PER_KEY winners from every hashtable entry, which can exceed
         # the contact capacity.  The wider of the two bounds sizes the grid.
         ht_capacity = self.reducer.hashtable.capacity
+        self._speculative_area = wp.zeros(
+            VALUES_PER_KEY * ht_capacity if enable_reduction else 0, dtype=wp.int64, device=device
+        )
         self._mantissa_bits = _fixed_mantissa_bits(max(capacity, ht_capacity * VALUES_PER_KEY))
         if deterministic:
             self._fixed_accum = wp.zeros(NUM_FIXED_SLOTS * ht_capacity, dtype=wp.int64, device=device)
@@ -1766,6 +1801,7 @@ class HydroelasticContactReduction:
                 shape_collision_aabb_upper,
                 shape_voxel_resolution,
                 self.reducer.agg_moment_unreduced,
+                self._speculative_area,
                 grid_size,
             ],
             device=self.device,
@@ -1878,6 +1914,7 @@ class HydroelasticContactReduction:
                 self.reducer.agg_moment2_reduced,
                 shape_gap,
                 shape_transform,
+                self._speculative_area,
                 writer_data,
                 int(self.deterministic),
                 grid_size,

@@ -473,9 +473,13 @@ class HydroelasticSDF:
         margin_contact_area: float = _DEPRECATED_MARGIN_CONTACT_AREA_UNSET
         """Deprecated speculative-contact area [m^2] retained for compatibility.
 
+        By default each speculative contact activates with ``k_eff`` times the summed
+        area of the speculative faces it represents. Reduction preserves represented
+        area, but activation forces and moments remain quadrature approximations.
+
         .. deprecated:: 1.6
 
-            This setting still controls speculative-contact activation
+            Setting this restores the legacy constant-area speculative activation
             stiffness during the deprecation period.
         """
         pressure_func: Any = None
@@ -533,7 +537,8 @@ class HydroelasticSDF:
 
         def __post_init__(self):
             if self.margin_contact_area is _DEPRECATED_MARGIN_CONTACT_AREA_UNSET:
-                self.margin_contact_area = 1.0e-2
+                # Speculative contacts activate with the face area they represent.
+                self.margin_contact_area = 0.0
             else:
                 warnings.warn(
                     "HydroelasticSDF.Config.margin_contact_area is deprecated; remove this setting.",
@@ -1019,9 +1024,10 @@ class HydroelasticSDF:
         )
 
         # Poll infrequently to avoid per-step host sync overhead while still surfacing
-        # dropped-contact conditions outside stdout-captured environments.
+        # dropped-contact conditions outside stdout-captured environments. Host readback
+        # is not capture-safe; the device verification above still runs in captured graphs.
         self._launch_counter += 1
-        if self._launch_counter % self._host_warning_poll_interval == 0:
+        if not self.device.is_capturing and self._launch_counter % self._host_warning_poll_interval == 0:
             hashtable_failures = int(self.contact_reduction.reducer.ht_insert_failures.numpy()[0])
             if hashtable_failures > 0:
                 warnings.warn(
@@ -1912,7 +1918,9 @@ def get_decode_contacts_kernel(
             else:
                 k_a = shape_material_kh[shape_a]
                 k_b = shape_material_kh[shape_b]
-                c_stiffness = wp.static(margin_contact_area) * get_effective_stiffness(k_a, k_b)
+                # Unreduced: each speculative face represents exactly its own area.
+                spec_area = wp.static(margin_contact_area) if wp.static(margin_contact_area > 0.0) else area
+                c_stiffness = spec_area * get_effective_stiffness(k_a, k_b)
 
             # Create ContactData for the writer function
             contact_data = ContactData()

@@ -55,12 +55,15 @@ from .particle_vbd_kernels import (
     update_velocity,
 )
 from .rigid_vbd_kernels import (
+    _CONTACT_SPLIT_MAX_PASSES,
+    _NUM_BODY_BODY_CONTACT_THREADS_PER_BODY,
     _NUM_CONTACT_THREADS_PER_BODY,
     RigidContactHistory,
     RigidForceElementAdjacencyInfo,
     _count_num_adjacent_joints,
     _fill_adjacent_joints,
     accumulate_body_body_contacts_per_body,
+    accumulate_body_body_contacts_wide,
     accumulate_body_particle_contacts_per_body,
     apply_body_truncation_ts,
     apply_rigid_soft_truncation,
@@ -74,11 +77,13 @@ from .rigid_vbd_kernels import (
     init_body_body_contacts_alm,
     init_body_particle_contacts,
     init_rod_rest_bend_twist,
+    refine_body_contact_levels,
     refresh_body_structural_k,
     refresh_joint_material_params,
     reset_rigid_state,
     snapshot_body_body_contact_history,
     solve_rigid_body,
+    split_body_color_group_by_level,
     step_body_body_contact_C0_lambda,
     step_joint_C0_lambda_rho,
     update_body_velocity,
@@ -179,16 +184,20 @@ class SolverVBD(SolverBase, CouplingInterface):
     Rigid contact materials:
         Positive per-contact stiffness and damping from :class:`~newton.Contacts`
         override the mixed shape values; positive per-contact friction values
-        scale the mixed friction coefficient. Zero or absent entries retain the
-        shape material. This includes hydroelastic quadrature stiffness and
+        scale the mixed friction coefficient. Zero or absent entries fall back
+        to the shape material, with the damping mapping below. This includes hydroelastic quadrature stiffness and
         contact-reduction friction scales from :class:`~newton.CollisionPipeline`.
         Set hydroelastic pressure stiffness through
         :attr:`newton.ModelBuilder.ShapeConfig.kh` [N/m^3], not a solver parameter;
         both shapes must provide hydroelastic SDFs.
         Use ``rigid_compliant_alm=True`` to retain the finite hydroelastic
         compliance. Pressure patches and their coefficients are refreshed by
-        collision detection, not by every VBD iteration. Shape damping remains
-        per contact when the pipeline does not supply a damping override.
+        collision detection, not by every VBD iteration. Without a positive row
+        damping override, a row softer than the mixed shape stiffness scales
+        shape damping by ``row_ke / shape_ke``; stiffer rows retain shape damping.
+        Compliant ALM eliminates elastic compression and compression-increment
+        damping together, preserving that material law independently of the
+        numerical penalty. Legacy contact damping is unchanged.
 
     Joint limitations:
         - Supported joint types: BALL, FIXED, FREE, REVOLUTE, PRISMATIC, D6, ROD.
@@ -356,6 +365,7 @@ class SolverVBD(SolverBase, CouplingInterface):
         rigid_avbd_gamma: float = 0.999,  # Per-step decay for persisted lambda (and legacy penalty k)
         # Rigid body - contacts
         rigid_contact_hard: bool = True,  # Legacy body-body contact hard/soft mode
+        rigid_contact_coloring: bool = True,  # Order touching same-color bodies within each color sweep
         rigid_contact_history: bool = False,  # Body-body contact numeric warm-start
         rigid_contact_stick_motion_eps: float | None = None,  # Deprecated and ignored
         rigid_contact_stick_freeze_translation_eps: float | None = None,  # Deprecated and ignored
@@ -505,6 +515,14 @@ class SolverVBD(SolverBase, CouplingInterface):
                 Compliant ALM joints and validated contacts retain lambda by ``gamma``;
                 the legacy path retains lambda by ``alpha * gamma``. Lower values
                 discard history faster.
+            rigid_contact_coloring: Experimental runtime solver policy, default ``True``. Refine each
+                joint color into at most four contact-aware sub-passes to reduce simultaneous updates
+                of touching dynamic bodies. The last sub-pass may still contain contact conflicts;
+                this is not a complete coloring or a convergence guarantee. Refinement and additional
+                sub-passes add work, including on scenes that already converge without them.
+                ``False`` restores the plain joint-color ordering, not the previous damping law.
+                This is not an authored material or USD property. Recapture CUDA graphs after changing
+                this configuration or changing body properties that affect contact sub-pass scheduling.
             rigid_contact_hard: Legacy body-body contact hard/soft mode. With
                 ``rigid_compliant_alm=True``, contacts use the ALM path. With
                 ``rigid_compliant_alm=False``, ``True`` selects legacy hard AVBD contact
@@ -862,6 +880,7 @@ class SolverVBD(SolverBase, CouplingInterface):
             rigid_modules = (
                 rigid_vbd_kernels,
                 accumulate_body_body_contacts_per_body.module,
+                accumulate_body_body_contacts_wide.module,
                 compute_rigid_contact_forces.module,
                 update_duals_body_body_contacts.module,
             )
@@ -913,6 +932,7 @@ class SolverVBD(SolverBase, CouplingInterface):
             rigid_avbd_joint_alpha,
             rigid_avbd_contact_alpha,
             rigid_contact_hard,
+            rigid_contact_coloring,
             rigid_contact_history,
             rigid_contact_k_start,
             rigid_body_contact_buffer_size,
@@ -1054,6 +1074,7 @@ class SolverVBD(SolverBase, CouplingInterface):
         rigid_avbd_joint_alpha: float | None,
         rigid_avbd_contact_alpha: float | None,
         rigid_contact_hard: bool,
+        rigid_contact_coloring: bool,
         rigid_contact_history: bool,
         rigid_contact_k_start: float,
         rigid_body_contact_buffer_size: int,
@@ -1125,6 +1146,7 @@ class SolverVBD(SolverBase, CouplingInterface):
         self.rigid_linear_beta = rigid_avbd_linear_beta
         self.rigid_angular_beta = rigid_avbd_angular_beta
         self.rigid_contact_hard = int(rigid_contact_hard)
+        self.rigid_contact_coloring = bool(rigid_contact_coloring)
         self.rigid_contact_history = rigid_contact_history
         # Contact alpha precedence: contact override > shared override > mode default.
         # Under compliant ALM it controls only residual stabilization.
@@ -1166,17 +1188,36 @@ class SolverVBD(SolverBase, CouplingInterface):
             # Adjacency and dimensions
             self.rigid_adjacency = self._compute_rigid_force_element_adjacency(model).to(self.device)
 
-            # Force accumulation arrays
-            self.body_torques = wp.zeros(model.body_count, dtype=wp.vec3, device=self.device)
-            self.body_forces = wp.zeros(model.body_count, dtype=wp.vec3, device=self.device)
+            # Six force/torque scalars and three 3x3 contact blocks share one reset.
+            n = model.body_count
+            self._rigid_contact_accumulators = wp.zeros(33 * n, dtype=float, device=self.device)
+            scratch = self._rigid_contact_accumulators
+            self.body_forces = scratch[: 3 * n].reshape((n, 3)).view(wp.vec3)
+            self.body_torques = scratch[3 * n : 6 * n].reshape((n, 3)).view(wp.vec3)
+            self.body_hessian_ll = scratch[6 * n : 15 * n].reshape((n, 3, 3)).view(wp.mat33)
+            self.body_hessian_al = scratch[15 * n : 24 * n].reshape((n, 3, 3)).view(wp.mat33)
+            self.body_hessian_aa = scratch[24 * n :].reshape((n, 3, 3)).view(wp.mat33)
 
             # Persistent scratch for joint_f accumulation
             self._body_f_for_integration = wp.zeros(model.body_count, dtype=wp.spatial_vector, device=self.device)
 
-            # Hessian blocks (6x6 block structure: angular-angular, angular-linear, linear-linear)
-            self.body_hessian_aa = wp.zeros(model.body_count, dtype=wp.mat33, device=self.device)
-            self.body_hessian_al = wp.zeros(model.body_count, dtype=wp.mat33, device=self.device)
-            self.body_hessian_ll = wp.zeros(model.body_count, dtype=wp.mat33, device=self.device)
+            # Contact split of the body colors (see _split_body_colors_by_contact): per-level sub-pass
+            # body lists stacked per color (-1 = skip), one flag per (color, level), and level scratch.
+            n_bodies = max(model.body_count, 1)
+            self._contact_split_bodies = wp.full(
+                _CONTACT_SPLIT_MAX_PASSES * n_bodies, -1, dtype=wp.int32, device=self.device
+            )
+            self._contact_split_has_pass = wp.zeros(
+                _CONTACT_SPLIT_MAX_PASSES * n_bodies, dtype=wp.int32, device=self.device
+            )
+            self._contact_split_level_in = wp.zeros(n_bodies, dtype=wp.int32, device=self.device)
+            self._contact_split_level_out = wp.zeros(n_bodies, dtype=wp.int32, device=self.device)
+            self._contact_split_changed = wp.zeros(1, dtype=wp.int32, device=self.device)
+            self._contact_split_offsets = None
+            self._contact_split_cache_key = None
+            self._contact_split_needed = True
+            if model.body_color_groups:
+                self._has_potential_same_color_contacts(model.body_color_groups)
 
             # Per-body contact lists (CSR-like: per-body counts + flat index array).
             # Tight: pre_alloc = 0 when the contact source is absent (no shapes / no particles).
@@ -1337,6 +1378,13 @@ class SolverVBD(SolverBase, CouplingInterface):
         )
         if flags & (ModelFlags.BODY_PROPERTIES | ModelFlags.BODY_INERTIAL_PROPERTIES):
             self._refresh_kinematic_state()
+            if self._integrates_rigid_bodies:
+                # Mass changes can invalidate the isolated-world contact-color fast path.
+                # Re-evaluate before recapture; during capture, conservatively retain refinement.
+                self._contact_split_cache_key = None
+                self._contact_split_needed = True
+                if self.model.body_color_groups:
+                    self._has_potential_same_color_contacts(self.model.body_color_groups)
         if flags & ModelFlags.JOINT_DOF_PROPERTIES and self._integrates_rigid_bodies and self.model.joint_count > 0:
             if self.rigid_compliant_alm:
                 self._validate_compliant_joint_dof_materials()
@@ -3097,6 +3145,7 @@ class SolverVBD(SolverBase, CouplingInterface):
         if refresh:
             if contacts is None:
                 self.body_body_contact_counts.zero_()
+                self._contact_split_offsets = None
             else:
                 contact_launch_dim = contacts.rigid_contact_max
 
@@ -3135,6 +3184,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                     inputs=[self.body_body_contact_overflow_max, self.body_body_contact_buffer_pre_alloc, 0],
                     device=self.device,
                 )
+                self._split_body_colors_by_contact(contacts)
 
                 # Restore AVBD body-body contact state from history and pre-compute material properties
                 if (self.rigid_contact_history or restore_history) and contact_launch_dim > 0:
@@ -3782,6 +3832,115 @@ class SolverVBD(SolverBase, CouplingInterface):
 
         wp.copy(state_out.particle_q, state_in.particle_q)
 
+    def _contact_split_views(self, color: int, offset: int, size: int):
+        """Per-level sub-pass body lists of one body color and its ``_CONTACT_SPLIT_MAX_PASSES`` flags."""
+        n = self.model.body_count
+        lists = [
+            self._contact_split_bodies[k * n + offset : k * n + offset + size] for k in range(_CONTACT_SPLIT_MAX_PASSES)
+        ]
+        flags = self._contact_split_has_pass[
+            color * _CONTACT_SPLIT_MAX_PASSES : (color + 1) * _CONTACT_SPLIT_MAX_PASSES
+        ]
+        return lists, flags
+
+    def _has_potential_same_color_contacts(self, groups) -> bool:
+        if max(g.size for g in groups) <= 1:
+            return False
+        key = (id(groups), *(id(g) for g in groups))
+        if self._contact_split_cache_key != key and not self.device.is_capturing:
+            worlds = self.model.body_world.numpy() if self.model.body_world is not None else None
+            inv_m = self.model.body_inv_mass.numpy() if self.model.body_inv_mass is not None else None
+            self._contact_split_needed = (
+                worlds is None
+                or inv_m is None
+                or bool((worlds < 0).any())
+                or any(len(w := worlds[(idx := g.numpy())[inv_m[idx] > 0.0]]) != len(set(w.tolist())) for g in groups)
+            )
+            self._contact_split_cache_key = key
+        return self._contact_split_needed
+
+    def _split_body_colors_by_contact(self, contacts: Contacts) -> None:
+        """Split every body color into contact-aware sub-passes from the freshly built body-body contact lists.
+
+        Body colors come from the joint graph only, so dynamic bodies in contact can share a color and
+        are then updated simultaneously (Jacobi) inside the color sweep; a contact that is stiff relative
+        to their inertia over-corrects both bodies. Within each color, bodies are greedily leveled so that
+        no body shares a level with a touching lower-index body of its color, and the color's sweep runs
+        one sub-pass per level. The leveling is a Jacobi fixed-point iteration over the lower-index
+        partner DAG, repeated on the device until nothing changes; levels saturate at
+        ``_CONTACT_SPLIT_MAX_PASSES - 1``, so only bodies in that last level can still touch each other.
+        Empty sub-passes are skipped on the device under graph capture.
+        """
+        model = self.model
+        groups = model.body_color_groups
+        self._contact_split_offsets = None
+        if (
+            not self.rigid_contact_coloring
+            or not groups
+            or model.body_colors is None
+            or not self._has_potential_same_color_contacts(groups)
+        ):
+            return
+        offsets = []
+        total = 0
+        for group in groups:
+            offsets.append(total)
+            total += group.size
+        if total > model.body_count or len(groups) * _CONTACT_SPLIT_MAX_PASSES > self._contact_split_has_pass.shape[0]:
+            return
+        level_in = self._contact_split_level_in
+        level_out = self._contact_split_level_out
+        changed = self._contact_split_changed
+
+        def sweep():
+            changed.zero_()
+            wp.launch(
+                kernel=refine_body_contact_levels,
+                dim=model.body_count,
+                inputs=[
+                    model.body_colors,
+                    self.body_inv_mass_effective,
+                    contacts.rigid_contact_count,
+                    contacts.rigid_contact_shape0,
+                    contacts.rigid_contact_shape1,
+                    model.shape_body,
+                    self.body_body_contact_buffer_pre_alloc,
+                    self.body_body_contact_counts,
+                    self.body_body_contact_indices,
+                    level_in,
+                ],
+                outputs=[level_out, changed],
+                device=self.device,
+            )
+            wp.copy(level_in, level_out)
+
+        # The lower-index partner graph is acyclic: refinement reaches the same unique
+        # greedy assignment from any initial levels. Retain the previous step's levels,
+        # but still converge against the current contacts before using the split.
+        if self.device.is_capturing and wp.is_conditional_graph_supported():
+            changed.fill_(1)
+            wp.capture_while(changed, sweep)
+        elif self.device.is_capturing:
+            # A fixed number of DAG sweeps is exact without host readback on graph
+            # backends lacking conditional nodes. It is a fallback, not the fast path.
+            for _sweep in range(max(model.body_count, 1)):
+                sweep()
+        else:
+            for _sweep in range(max(model.body_count, 1)):
+                sweep()
+                if int(changed.numpy()[0]) == 0:
+                    break
+        self._contact_split_has_pass.zero_()
+        for color, group in enumerate(groups):
+            _lists, flags = self._contact_split_views(color, offsets[color], group.size)
+            wp.launch(
+                kernel=split_body_color_group_by_level,
+                dim=group.size,
+                inputs=[group, level_in, model.body_count, offsets[color], self._contact_split_bodies, flags],
+                device=self.device,
+            )
+        self._contact_split_offsets = offsets
+
     def _solve_rigid_body_iteration(
         self,
         state_in: State,
@@ -3828,18 +3987,18 @@ class SolverVBD(SolverBase, CouplingInterface):
                 )
             return
 
-        # Zero out forces and hessians
-        self.body_torques.zero_()
-        self.body_forces.zero_()
-        self.body_hessian_aa.zero_()
-        self.body_hessian_al.zero_()
-        self.body_hessian_ll.zero_()
+        self._rigid_contact_accumulators.zero_()
 
         body_color_groups = model.body_color_groups
 
-        # Gauss-Seidel-style per-color updates
-        for color in range(len(body_color_groups)):
-            color_group = body_color_groups[color]
+        # Gauss-Seidel-style per-color updates. With a contact split, each color runs one sub-pass per
+        # contact level so that touching bodies of the same color are not updated simultaneously.
+        split_offsets = self._contact_split_offsets if contacts is not None else None
+        if split_offsets is not None and len(split_offsets) != len(body_color_groups):
+            split_offsets = None
+        conditional_passes = self.device.is_capturing and wp.is_conditional_graph_supported()
+
+        def solve_color(color_group):
 
             # Accumulate body-particle contact forces/hessians for bodies in this color
             if model.particle_count > 0 and contacts is not None:
@@ -3888,9 +4047,18 @@ class SolverVBD(SolverBase, CouplingInterface):
 
             # Accumulate body-body (rigid-rigid) contact forces and Hessians on bodies (per-body, per-color)
             if contacts is not None:
+                # Eight bodies with 32 lanes each fill one 256-thread block. While the wide launch needs at
+                # most one block per SM, the extra lanes shorten each body's serial contact loop without
+                # another launch or host contact-count readback. Larger groups and CPU retain the narrow kernel.
+                contact_width = _NUM_BODY_BODY_CONTACT_THREADS_PER_BODY
+                contact_kernel = accumulate_body_body_contacts_per_body
+                if self.device.is_cuda and color_group.size <= 8 * self.device.sm_count:
+                    contact_width = 32
+                    contact_kernel = accumulate_body_body_contacts_wide
                 wp.launch(
-                    kernel=accumulate_body_body_contacts_per_body,
-                    dim=color_group.size * _NUM_CONTACT_THREADS_PER_BODY,
+                    kernel=contact_kernel,
+                    dim=color_group.size * contact_width,
+                    block_dim=256,
                     inputs=[
                         dt,
                         color_group,
@@ -4005,6 +4173,27 @@ class SolverVBD(SolverBase, CouplingInterface):
             # forces against them; the last color also feeds the dual updates.
             self._rigid_penetration_free_truncation(state_in, contacts)
 
+        for color in range(len(body_color_groups)):
+            if split_offsets is None:
+                solve_color(body_color_groups[color])
+                continue
+            pass_bodies, has_pass = self._contact_split_views(
+                color, split_offsets[color], body_color_groups[color].size
+            )
+            solve_color(pass_bodies[0])
+            if not conditional_passes:
+                for level in range(1, _CONTACT_SPLIT_MAX_PASSES):
+                    solve_color(pass_bodies[level])
+                continue
+
+            # Nested conditionals: a level is only tested when the previous level was non-empty.
+            def solve_from(level, pass_bodies=pass_bodies, has_pass=has_pass):
+                solve_color(pass_bodies[level])
+                if level + 1 < _CONTACT_SPLIT_MAX_PASSES:
+                    wp.capture_if(has_pass[level + 1 : level + 2], solve_from, level=level + 1)
+
+            wp.capture_if(has_pass[1:2], solve_from, level=1)
+
         if self._has_joint_mimics:
             project_joint_mimics(
                 model,
@@ -4035,6 +4224,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                     model.shape_body,
                     state_in.body_q,
                     self.body_q_prev,
+                    model.body_com,
                     dt,
                     self.body_body_contact_material_mu,
                     self.body_body_contact_C0,
@@ -4042,6 +4232,7 @@ class SolverVBD(SolverBase, CouplingInterface):
                     self.rigid_contact_hard,
                     self.rigid_compliant_alm,
                     self.body_body_contact_material_ke,
+                    self.body_body_contact_material_kd,
                     self.body_body_contact_tangent_rho,
                     self.body_body_contact_normal_rho,
                     self.rigid_linear_beta,

@@ -1351,6 +1351,70 @@ def test_hydroelastic_margin_contact_area_is_deprecated(test, device, reduce_con
     )
 
 
+def test_hydroelastic_speculative_stiffness_matches_patch_area(test, device, reduce_contacts):
+    """Speculative rows activate with the face area they represent, independent of reduction.
+
+    Two 0.2 m hydroelastic boxes 0.1 mm apart (1 mm query gap): the planar speculative rows together must carry the
+    patch stiffness area * k_eff = 0.04 m^2 * 5e7 N/m^3, whether or not the contacts are reduced.
+    """
+    builder = newton.ModelBuilder()
+    cfg = newton.ModelBuilder.ShapeConfig(
+        is_hydroelastic=True,
+        kh=1.0e8,
+        margin=0.0,
+        gap=0.001,
+        sdf_max_resolution=24,
+        sdf_narrow_band_range=(-0.01, 0.01),
+    )
+    for z in (0.0, 0.2001):
+        body = builder.add_body(xform=wp.transform(wp.vec3(0.0, 0.0, z), wp.quat_identity()))
+        builder.add_shape_box(body=body, hx=0.1, hy=0.1, hz=0.1, cfg=cfg)
+    model = builder.finalize(device=device)
+    state = model.state()
+    pipeline = newton.CollisionPipeline(
+        model,
+        rigid_contact_max=50000,
+        broad_phase="explicit",
+        deterministic=True,
+        sdf_hydroelastic_config=HydroelasticSDF.Config(
+            reduce_contacts=reduce_contacts,
+            pre_prune_contacts=False,
+            anchor_contact=False,
+            normal_matching=False,
+            buffer_fraction=1.0,
+            buffer_mult_contact=4,
+            buffer_mult_iso=4,
+        ),
+    )
+    contacts = pipeline.contacts()
+    pipeline.collide(state, contacts)
+    count = int(contacts.rigid_contact_count.numpy()[0])
+    test.assertGreater(count, 0)
+    q = state.body_q.numpy()
+    shape_body = model.shape_body.numpy()
+    s0 = contacts.rigid_contact_shape0.numpy()[:count]
+    s1 = contacts.rigid_contact_shape1.numpy()[:count]
+    p0 = contacts.rigid_contact_point0.numpy()[:count] + q[shape_body[s0], :3]
+    p1 = contacts.rigid_contact_point1.numpy()[:count] + q[shape_body[s1], :3]
+    normal = contacts.rigid_contact_normal.numpy()[:count]
+    separation = (
+        np.sum((p1 - p0) * normal, axis=1)
+        - contacts.rigid_contact_margin0.numpy()[:count]
+        - contacts.rigid_contact_margin1.numpy()[:count]
+    )
+    planar = (separation >= 0.0) & (np.abs(normal[:, 2]) > 0.999)
+    test.assertGreater(int(planar.sum()), 0)
+    stiffness = contacts.rigid_contact_stiffness.numpy()[:count]
+    patch_stiffness = float(np.sum(stiffness[planar] * normal[planar, 2] ** 2))
+    np.testing.assert_allclose(patch_stiffness, 0.04 * 5.0e7, rtol=0.2)
+
+    # Repeated queries must not accumulate represented area across collisions.
+    for _ in range(2):
+        pipeline.collide(state, contacts)
+        test.assertEqual(int(contacts.rigid_contact_count.numpy()[0]), count)
+        np.testing.assert_array_equal(contacts.rigid_contact_stiffness.numpy()[:count], stiffness)
+
+
 def test_mujoco_warp_hydroelastic_speculative_activation(test, device):
     """Keep speculative contacts inactive until they enter the margin band."""
     model, state_0, body_b = _build_margin_gap_boxes(device)
@@ -3654,6 +3718,23 @@ add_function_test(
     test_hydroelastic_traversal_buffers_have_headroom,
     devices=cuda_devices,
     check_output=False,
+)
+
+
+add_function_test(
+    TestHydroelastic,
+    "test_hydroelastic_speculative_stiffness_matches_patch_area_reduced",
+    test_hydroelastic_speculative_stiffness_matches_patch_area,
+    devices=cuda_devices,
+    reduce_contacts=True,
+)
+
+add_function_test(
+    TestHydroelastic,
+    "test_hydroelastic_speculative_stiffness_matches_patch_area_unreduced",
+    test_hydroelastic_speculative_stiffness_matches_patch_area,
+    devices=cuda_devices,
+    reduce_contacts=False,
 )
 
 
