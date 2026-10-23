@@ -2,7 +2,7 @@ Add per-contact stiffness, damping, and friction-scale support to `SolverVBD`, i
 
 Eliminate elastic compression and compression-increment damping together in compliant ALM so free flight before first touch does not create a discontinuous damping impulse and the numerical penalty regularizes the primal metric without attenuating converged material damping.
 
-Refine body colors into at most four contact-aware sub-passes on every `SolverVBD` step (`rigid_contact_coloring=True` by default), skipping refinement when color groups have at most one dynamic body per isolated world. Increase rigid-rigid contact accumulation parallelism to eight threads per body, evaluate each body's step kinematics once per accumulation thread instead of per contact, assemble only the solving body's contact torque and angular Hessian blocks, and pack rigid contact force and Hessian accumulators into disjoint views of a single allocation.
+Refine body colors into at most four contact-aware sub-passes when `SolverVBD` rebuilds its body-contact lists (`rigid_contact_coloring=True` by default), skipping refinement when color groups have at most one dynamic body per isolated world. Reuse the schedule while the collision pipeline reuses those lists. Increase rigid-rigid contact accumulation parallelism to eight threads per body, evaluate each body's step kinematics once per accumulation thread instead of per contact, assemble only the solving body's contact torque and angular Hessian blocks, and pack rigid contact force and Hessian accumulators into disjoint views of a single allocation.
 
 Skip periodic hydroelastic diagnostic host readback during CUDA graph capture; captured device-side overflow verification remains active.
 
