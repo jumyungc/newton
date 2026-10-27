@@ -397,7 +397,13 @@ def color_pair_tail_serial(
             parallel_tail[0] = 1
 
 
-@wp.kernel
+# Exact-color groups have disjoint dynamic endpoints. Their packed order is
+# unobservable; overflow retains its separate, ascending serial order.
+@wp.kernel(
+    enable_backward=False,
+    module="unique",
+    module_options={"deterministic": wp.DeterministicMode.NOT_GUARANTEED},
+)
 def scatter_pair_groups_by_color(
     group_color: wp.array[wp.int32],
     color_cursors: wp.array[wp.int32],

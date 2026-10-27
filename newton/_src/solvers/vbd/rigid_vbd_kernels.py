@@ -4165,7 +4165,14 @@ def forward_step_rigid_bodies(
     body_inertia_v[tid] = wp.spatial_top(qd_new) + delta_com / dt
 
 
-@wp.kernel
+# Integer reservations only permute list entries; the caller sorts every row
+# before use. Avoid Warp's ordered-counter passes without changing that order.
+# As with sorting, repeatability requires sufficient per-body list capacity.
+@wp.kernel(
+    enable_backward=False,
+    module="unique",
+    module_options={"deterministic": wp.DeterministicMode.NOT_GUARANTEED},
+)
 def build_body_body_contact_lists(
     rigid_contact_count: wp.array[int],
     rigid_contact_shape0: wp.array[int],

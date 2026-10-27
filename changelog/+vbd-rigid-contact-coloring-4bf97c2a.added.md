@@ -10,3 +10,4 @@ Require deterministic collision generation and sufficient per-body contact-list 
 for repeatable contact results.
 Use warp-cooperative sorting for short CUDA contact lists while retaining ordered long-row and CPU fallbacks.
 Avoid redundant scratch clears before uncoupled tiled body-contact gathering.
+Avoid ordered integer-reservation overhead where sorted lists or independent pair colors preserve deterministic results.

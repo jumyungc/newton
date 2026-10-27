@@ -1198,7 +1198,15 @@ def test_parallel_pair_completion_replays_changed_graphs(test, device):
         test.assertEqual(int(pair.overflow_count.numpy()[0]), int(np.count_nonzero(colors[leaders] < 0)))
         overflow = np.flatnonzero(colors == -1)
         np.testing.assert_array_equal(pair.group_list.numpy()[pair.capacity - len(overflow) :], overflow)
-        for color in np.unique(colors[colors >= 0]):
+        offsets = pair.color_offsets.numpy()
+        packed = pair.group_list.numpy()
+        for color in range(rigid_pair_contact._COLOR_COUNT):
+            groups = np.flatnonzero(colors == color)
+            test.assertEqual(int(offsets[color + 1] - offsets[color]), len(groups))
+            np.testing.assert_array_equal(
+                np.sort(packed[offsets[color] : offsets[color + 1]]),
+                groups,
+            )
             bodies = endpoints[colors[leaders] == color].ravel()
             dynamic = bodies[inverse[bodies] > 0.0]
             test.assertEqual(len(np.unique(dynamic)), len(dynamic))
@@ -2235,6 +2243,113 @@ add_function_test(
     TestVBDRigidPairContact,
     "test_body_contact_scratch_overwrite_and_accumulate",
     test_body_contact_scratch_overwrite_and_accumulate,
+    devices=devices,
+)
+
+
+def test_body_contact_reservations_preserve_sorted_rows(test, device):
+    """Canonicalize integer reservations across replay, modes, and capacity boundaries."""
+    body_count, capacity, row_capacity = 65, 2048, 192
+    rng = np.random.default_rng(20261012)
+    masses = np.ones(body_count, dtype=np.float32)
+    masses[::7] = 0.0
+    masses[0] = 1.0
+    shape_body = wp.array(np.arange(body_count, dtype=np.int32), device=device)
+    inverse_mass = wp.array(masses, device=device)
+    count = wp.zeros(1, dtype=int, device=device)
+    shape0 = wp.full(capacity, -1, dtype=int, device=device)
+    shape1 = wp.full(capacity, -1, dtype=int, device=device)
+    counts = wp.zeros(body_count, dtype=int, device=device)
+    indices = wp.full(body_count * row_capacity + 32, -7, dtype=int, device=device)
+    overflow = wp.zeros(1, dtype=int, device=device)
+    inputs = [count, shape0, shape1, shape_body, inverse_mass, row_capacity]
+
+    def build():
+        counts.zero_()
+        indices.fill_(-7)
+        overflow.zero_()
+        wp.launch(
+            rigid_vbd_kernels.build_body_body_contact_lists,
+            dim=capacity,
+            inputs=inputs,
+            outputs=[counts, indices, overflow],
+            device=device,
+        )
+        launch = wp.launch_tiled if device.is_cuda else wp.launch
+        launch(
+            kernel=(
+                rigid_vbd_kernels.sort_body_body_contact_lists_tiled
+                if device.is_cuda
+                else rigid_vbd_kernels.sort_body_body_contact_lists
+            ),
+            dim=body_count,
+            block_dim=32 if device.is_cuda else 256,
+            inputs=[row_capacity, counts, indices],
+            device=device,
+        )
+
+    random_rows = rng.integers(-1, body_count, size=(1024, 2), dtype=np.int32)
+    full_row = np.column_stack((np.zeros(row_capacity, dtype=np.int32), np.full(row_capacity, -1, dtype=np.int32)))
+    overfull = np.vstack((full_row, [[0, -1]] * 3)).astype(np.int32)
+    cases = (
+        np.empty((0, 2), dtype=np.int32),
+        np.array([[-1, 1]], dtype=np.int32),
+        random_rows,
+        full_row,
+        overfull,
+        np.empty((0, 2), dtype=np.int32),
+        random_rows,
+    )
+    previous_options = wp.get_module_options(rigid_vbd_kernels)
+    try:
+        for mode in wp.DeterministicMode:
+            with test.subTest(mode=mode):
+                wp.set_module_options({"deterministic": mode}, module=rigid_vbd_kernels)
+                build()
+                graph = None
+                if device.is_cuda:
+                    with wp.ScopedCapture(device=device) as capture:
+                        build()
+                    graph = capture.graph
+                for rows in cases:
+                    host0 = np.full(capacity, -1, dtype=np.int32)
+                    host1 = host0.copy()
+                    host0[: len(rows)], host1[: len(rows)] = rows[:, 0], rows[:, 1]
+                    shape0.assign(host0)
+                    shape1.assign(host1)
+                    count.assign(np.asarray([len(rows)], dtype=np.int32))
+                    expected = [[] for _ in range(body_count)]
+                    for contact, endpoints in enumerate(rows):
+                        for body in endpoints:
+                            if body >= 0 and masses[body] > 0.0:
+                                expected[body].append(contact)
+                    expected_counts = np.asarray(list(map(len, expected)), dtype=np.int32)
+                    maximum = int(expected_counts.max())
+                    for _ in range(3):
+                        build() if graph is None else wp.capture_launch(graph)
+                        np.testing.assert_array_equal(counts.numpy(), expected_counts)
+                        test.assertEqual(int(overflow.numpy()[0]), maximum if maximum > row_capacity else 0)
+                        packed = indices.numpy()
+                        np.testing.assert_array_equal(packed[-32:], -7)
+                        for body, row in enumerate(expected):
+                            active = min(len(row), row_capacity)
+                            actual = packed[body * row_capacity : (body + 1) * row_capacity]
+                            np.testing.assert_array_equal(actual[active:], -7)
+                            if len(row) <= row_capacity:
+                                np.testing.assert_array_equal(actual[:active], row)
+                            else:
+                                # Overflow reports truncation; the retained subset has no order guarantee before sorting.
+                                test.assertTrue(np.all(np.isin(actual[:active], row)))
+                                np.testing.assert_array_equal(actual[:active], np.sort(actual[:active]))
+                test.assertEqual(wp.get_module_options(rigid_vbd_kernels)["deterministic"], mode)
+    finally:
+        wp.set_module_options(previous_options, module=rigid_vbd_kernels)
+
+
+add_function_test(
+    TestVBDRigidPairContact,
+    "test_body_contact_reservations_preserve_sorted_rows",
+    test_body_contact_reservations_preserve_sorted_rows,
     devices=devices,
 )
 
