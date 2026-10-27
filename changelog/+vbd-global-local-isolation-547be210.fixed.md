@@ -1,1 +1,1 @@
-Keep local-only VBD contact scratch allocation and resets consistent with main; reserve pooled scratch for explicitly requested experimental rigid-global solves. Global-stage scheduling and physical laws are unchanged.
+Keep local-only VBD contact scratch allocation and resets consistent with main, and reuse main's pooled scratch for experimental rigid-global solves. Global-stage scheduling and physical laws are unchanged.

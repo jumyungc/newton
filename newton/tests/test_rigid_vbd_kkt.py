@@ -4263,10 +4263,10 @@ def _structural_kkt_uses_explicit_iteration_budget(test, device):
 
     disabled = newton.solvers.SolverVBD(model, iterations=5, rigid_compliant_alm=True)
     test.assertIsNone(disabled._structural_graph_kkt)
-    test.assertIsNone(disabled._rigid_contact_accumulators)
+    test.assertEqual(disabled._body_contact_scratch.shape, (11, model.body_count, 3))
     explicit_zero = newton.solvers.SolverVBD(model, iterations=5, rigid_joint_global_iterations=0)
-    test.assertIsNone(explicit_zero._rigid_contact_accumulators)
-    # Exercise the restored local reset with nonzero scratch, not just its layout.
+    test.assertEqual(explicit_zero._body_contact_scratch.shape, (11, model.body_count, 3))
+    # Exercise main's shared scratch reset with nonzero values, not just its layout.
     disabled.body_forces.fill_(wp.vec3(1.0))
     disabled.body_torques.fill_(wp.vec3(1.0))
     disabled.body_hessian_ll.fill_(wp.mat33(1.0))
@@ -4312,7 +4312,7 @@ def _structural_kkt_uses_explicit_iteration_budget(test, device):
     test.assertIsNotNone(solver._structural_graph_kkt)
 
     events = []
-    test.assertIsNotNone(solver._rigid_contact_accumulators)
+    test.assertEqual(solver._body_contact_scratch.shape, (11, model.body_count, 3))
     local_solve = solver._solve_rigid_body_iteration
     global_solve = solver._solve_structural_graph_kkt
 
