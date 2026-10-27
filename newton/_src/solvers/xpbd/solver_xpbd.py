@@ -205,8 +205,11 @@ class SolverXPBD(TendonStateMixin, SolverBase, CouplingInterface):
                 Active static-contact normals are condensed into the global body metric with numerical
                 hard-row compliance; friction and dynamic-dynamic contacts remain local. Regularized tree
                 directions are safeguarded by minimizing their original quadratic model along the step.
-                These safeguards do not guarantee nonlinear contact feasibility. Models containing tendons
-                are not supported by the global path. Defaults to 0.
+                These safeguards do not guarantee nonlinear contact feasibility. The global path does not support
+                tendons or differentiable simulation. Defaults to 0 (local only); when enabled, must be less than
+                ``iterations``, leaving a final local iteration. Construct the solver before CUDA
+                graph capture. Notify joint/body changes outside capture and recapture after a topology rebuild;
+                see :meth:`notify_model_changed`. This option does not add ROD-joint support.
         """
         if model._has_rod_joints and JointType.ROD in model.joint_type.numpy():  # pyright: ignore[reportPrivateUsage]
             raise ValueError("SolverXPBD does not support JointType.ROD joints.")
@@ -233,6 +236,8 @@ class SolverXPBD(TendonStateMixin, SolverBase, CouplingInterface):
                 "rigid_joint_global_iterations must be less than iterations when enabled, "
                 f"got {rigid_joint_global_iterations} for iterations={iterations}"
             )
+        if rigid_joint_global_iterations > 0 and model.device.is_capturing:
+            raise RuntimeError("The global XPBD joint topology must be constructed before CUDA graph capture.")
 
         self.iterations = iterations
         self.rigid_joint_global_iterations = rigid_joint_global_iterations
@@ -336,6 +341,11 @@ class SolverXPBD(TendonStateMixin, SolverBase, CouplingInterface):
         Effective inverse masses and inertia tensors are refreshed for body-property changes. The optional global
         rigid-joint topology is rebuilt for joint- or body-property changes. Shape-property changes refresh
         cached restitution state; tendon-property changes refresh the authored tendon reset baseline.
+
+        With global joints enabled, notify joint/body/inertial changes outside CUDA graph capture. Joint- and
+        body-property notifications replace the global workspace; inertial changes do so only when dynamic/static
+        participation changes. Recapture existing graphs after a rebuild or after replacing model arrays or changing
+        captured host scalars: old graphs retain their recorded array pointers and scalar values.
 
         Args:
             flags: Bitmask of :class:`~newton.ModelFlags` or custom ``int`` bits indicating which model properties

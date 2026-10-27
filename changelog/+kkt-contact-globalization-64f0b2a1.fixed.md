@@ -1,0 +1,1 @@
+Improve rigid VBD global-correction convergence by excluding zero-reaction inactive-contact curvature, safeguarding directional step interpolation, and skipping accepted CUDA graph search trials without host readback.

@@ -1,0 +1,1 @@
+Avoid propagating a failed rigid-body 6x6 LDLT factorization into the pose by using a diagonally scaled majorization direction for finite positive-diagonal systems. Healthy solves and authored material parameters are unchanged.

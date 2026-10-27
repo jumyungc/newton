@@ -1404,15 +1404,24 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 self.body_particle_attachment_indices,
             ) = self._compute_body_particle_attachment_adjacency(model)
 
-            # Six force/torque scalars and three 3x3 contact blocks share one reset.
-            n = model.body_count
-            self._rigid_contact_accumulators = wp.zeros(33 * n, dtype=float, device=self.device)
-            scratch = self._rigid_contact_accumulators
-            self.body_forces = scratch[: 3 * n].reshape((n, 3)).view(wp.vec3)
-            self.body_torques = scratch[3 * n : 6 * n].reshape((n, 3)).view(wp.vec3)
-            self.body_hessian_ll = scratch[6 * n : 15 * n].reshape((n, 3, 3)).view(wp.mat33)
-            self.body_hessian_al = scratch[15 * n : 24 * n].reshape((n, 3, 3)).view(wp.mat33)
-            self.body_hessian_aa = scratch[24 * n :].reshape((n, 3, 3)).view(wp.mat33)
+            self._rigid_contact_accumulators = None
+            if self.rigid_joint_global_iterations > 0:
+                # Reserve pooled resets for explicitly requested global solves.
+                n = model.body_count
+                self._rigid_contact_accumulators = wp.zeros(33 * n, dtype=float, device=self.device)
+                scratch = self._rigid_contact_accumulators
+                self.body_forces = scratch[: 3 * n].reshape((n, 3)).view(wp.vec3)
+                self.body_torques = scratch[3 * n : 6 * n].reshape((n, 3)).view(wp.vec3)
+                self.body_hessian_ll = scratch[6 * n : 15 * n].reshape((n, 3, 3)).view(wp.mat33)
+                self.body_hessian_al = scratch[15 * n : 24 * n].reshape((n, 3, 3)).view(wp.mat33)
+                self.body_hessian_aa = scratch[24 * n :].reshape((n, 3, 3)).view(wp.mat33)
+            else:
+                # Preserve main's local-only storage and reset behavior.
+                self.body_torques = wp.zeros(model.body_count, dtype=wp.vec3, device=self.device)
+                self.body_forces = wp.zeros(model.body_count, dtype=wp.vec3, device=self.device)
+                self.body_hessian_aa = wp.zeros(model.body_count, dtype=wp.mat33, device=self.device)
+                self.body_hessian_al = wp.zeros(model.body_count, dtype=wp.mat33, device=self.device)
+                self.body_hessian_ll = wp.zeros(model.body_count, dtype=wp.mat33, device=self.device)
 
             # Persistent scratch for joint_f accumulation
             self._body_f_for_integration = wp.zeros(model.body_count, dtype=wp.spatial_vector, device=self.device)
@@ -4893,8 +4902,14 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 )
             return
 
-        # Zero out forces and hessians in a single memset
-        self._rigid_contact_accumulators.zero_()
+        if self._rigid_contact_accumulators is not None:
+            self._rigid_contact_accumulators.zero_()
+        else:
+            self.body_torques.zero_()
+            self.body_forces.zero_()
+            self.body_hessian_aa.zero_()
+            self.body_hessian_al.zero_()
+            self.body_hessian_ll.zero_()
 
         self._update_tendon_routing(state_in, dt, False)
 

@@ -217,7 +217,7 @@ def _build_chains(device, segment_counts, *, stiffness=1.0e7):
     return model
 
 
-def _build_y_tree(device, *, segments_per_branch=6, stiffness=1.0e9):
+def _build_y_tree(device, *, segments_per_branch=6, stiffness=1.0e9, interior_pins=()):
     builder = newton.ModelBuilder()
     positions = [wp.vec3(0.0, 0.0, 1.0)]
     edges = []
@@ -243,6 +243,8 @@ def _build_y_tree(device, *, segments_per_branch=6, stiffness=1.0e9):
         body_frame_origin="com",
     )
     _pin_body(builder, int(bodies[segments_per_branch - 1]))
+    for index in interior_pins:
+        _pin_body(builder, int(bodies[index]))
     builder.color(balance_colors=False)
     model = builder.finalize(device=device)
     model.set_gravity((0.0, 0.0, -9.81))
@@ -925,9 +927,10 @@ def _equilibrated_kkt_residual(matrix, rhs, physical_solution, scales):
     )
 
 
-def _path_float64_oracle_metrics(device, stiffness, *, segments=16):
+def _path_float64_oracle_metrics(device, stiffness, *, segments=16, model=None):
     """Compare one production path Schur solve with independent float64 assembly."""
-    model, _, _ = _build_chain(device, segments=segments, stiffness=stiffness)
+    if model is None:
+        model, _, _ = _build_chain(device, segments=segments, stiffness=stiffness)
     solver = newton.solvers.SolverVBD(
         model,
         iterations=1,
@@ -965,6 +968,16 @@ def _path_float64_oracle_metrics(device, stiffness, *, segments=16):
         captured["multiplier"] = bucket.solution[0].numpy().copy().astype(np.float64)
 
     bucket.solve_rows = capture_and_solve_rows
+    solve = backend.solve
+
+    def capture_solve(**kwargs):
+        solve(**kwargs)
+        if not kwargs.get("translation_only", False):
+            # The later translation reconciliation reuses this scratch even
+            # when every currently enabled boundary row blocks translation.
+            captured["body_correction"] = backend.body_correction.numpy().astype(np.float64)
+
+    backend.solve = capture_solve
     _simulate(model, solver, 1, 1.0 / 600.0)
 
     row_count = bucket.size
@@ -1012,7 +1025,7 @@ def _path_float64_oracle_metrics(device, stiffness, *, segments=16):
             reference_correction[body_slot] -= (
                 captured["body_inverse"][body_slot] @ jacobian.T @ reference_multiplier[row]
             )
-    production_correction = backend.body_correction.numpy().astype(np.float64)
+    production_correction = captured["body_correction"]
 
     return {
         "condition": float(np.linalg.cond(matrix)),
@@ -1830,6 +1843,23 @@ def _structural_kkt_bounds_material_frame_rod_stress(test, device):
             for expected, actual in zip(before, (jp.numpy(), jc.numpy(), C.numpy()), strict=True):
                 np.testing.assert_array_equal(actual, expected)
 
+            # Rod rows are diagonal before whitening, including anisotropic materials.
+            # Check force preservation against a float64 diagonal solve, not the old inverse.
+            for diagonal in ([1.0e-6, 0.03, 1.0e3, 1, 1, 1], [0.2, 7, 1.0e-4, 1, 1, 1]):
+                original_compliance = np.diag(diagonal).astype(np.float32)
+                original_residual = (np.asarray(diagonal) * before_residual).astype(np.float32)
+                jp.assign([parent_jacobian])
+                jc.assign([child_jacobian])
+                C.assign([original_compliance])
+                c.assign([original_residual])
+                wp.launch(add_joint_stress_majorizer, 1, inputs=inputs, outputs=[row_stress], device=device)
+                after_jacobian = np.hstack([jp.numpy()[0], jc.numpy()[0]]).astype(np.float64)
+                expected_force = before_jacobian.T @ (
+                    original_residual.astype(np.float64) / np.diag(original_compliance).astype(np.float64)
+                )
+                actual_force = after_jacobian.T @ np.linalg.solve(C.numpy()[0].astype(np.float64), c.numpy()[0])
+                np.testing.assert_allclose(actual_force, expected_force, rtol=2.0e-6, atol=1.0e-7)
+
 
 def _structural_kkt_inactive_limit_adds_curvature_without_force(test, device):
     """A finite, currently open limit adds a metric, never a ghost force."""
@@ -2228,6 +2258,79 @@ def _cable_kkt_closed_cycle_bounds_multiplier_history(test, device):
     test.assertTrue(np.isfinite(body_q).all())
     test.assertLess(maximum_velocity_component, 1.0e-2)
     test.assertLess(_max_joint_gap(model, body_q, joints), 1.0e-5)
+
+
+def _structural_kkt_retains_interior_supported_branches(test, device):
+    """Prescribed interior supports must not disable the branched global path."""
+    for kinematic in (False, True):
+        with test.subTest(kinematic=kinematic):
+            support_indices = (1, 5, 9)
+            model, bodies, joints = _build_y_tree(
+                device,
+                segments_per_branch=4,
+                stiffness=1.0e7,
+                interior_pins=() if kinematic else support_indices,
+            )
+            supports = bodies[list(support_indices)]
+            if kinematic:
+                flags = model.body_flags.numpy()
+                flags[supports] |= int(newton.BodyFlags.KINEMATIC)
+                model.body_flags.assign(flags)
+            solver = newton.solvers.SolverVBD(
+                model,
+                iterations=2,
+                rigid_compliant_alm=True,
+                rigid_joint_global_iterations=1,
+            )
+            backend = solver._structural_graph_kkt
+            test.assertIsNotNone(backend)
+            np.testing.assert_array_equal(np.sort(backend.graph_joint_ids.numpy()), np.sort(joints))
+            test.assertEqual(len(np.unique(backend.graph_body_ids.numpy())), backend.graph_body_count)
+            test.assertFalse(set(supports) & set(backend.graph_body_ids.numpy()))
+            initial = model.body_q.numpy()
+            state_in, state_out = model.state(), model.state()
+            control = model.control()
+            dt = 1.0 / 600.0
+
+            def pair(state_in=state_in, state_out=state_out, solver=solver, control=control, dt=dt):
+                state_in.clear_forces()
+                solver.step(state_in, state_out, control, None, dt)
+                state_out.clear_forces()
+                solver.step(state_out, state_in, control, None, dt)
+
+            pair()
+            if device.is_cuda:
+                with wp.ScopedCapture(device) as capture:
+                    pair()
+                for _ in range(4):
+                    wp.capture_launch(capture.graph)
+            else:
+                for _ in range(4):
+                    pair()
+            wp.synchronize_device(device)
+            pose = state_in.body_q.numpy()
+            test.assertTrue(np.isfinite(pose).all())
+            fixed = solver.body_inv_mass_effective.numpy() == 0
+            np.testing.assert_array_equal(pose[fixed], initial[fixed])
+            test.assertLess(_max_joint_gap(model, pose, joints), 1.0e-4)
+            if kinematic:
+                flags[supports] &= ~int(newton.BodyFlags.KINEMATIC)
+                model.body_flags.assign(flags)
+                solver.notify_model_changed(newton.ModelFlags.BODY_PROPERTIES)
+                test.assertTrue(set(supports) <= set(solver._structural_graph_kkt.graph_body_ids.numpy()))
+
+
+def _structural_kkt_prescribed_split_matches_float64_oracle(test, device):
+    """Check independent boundary-row assembly after a prescribed-body cut."""
+    model, _, _ = _build_y_tree(device, segments_per_branch=4, stiffness=1.0e7, interior_pins=(0,))
+    metrics = _path_float64_oracle_metrics(device, 1.0e7, model=model)
+    message = str(metrics)
+    test.assertTrue(all(np.isfinite(value) for value in metrics.values()), message)
+    test.assertLess(metrics["formula_matrix_error"], 1.0e-5, message)
+    test.assertLess(metrics["formula_rhs_error"], 1.0e-5, message)
+    test.assertLess(metrics["residual"], 1.0e-2, message)
+    test.assertLess(metrics["multiplier_error"], 1.0e-3, message)
+    test.assertLess(metrics["correction_error"], 1.0e-3, message)
 
 
 def _cable_kkt_tree_handles_stiff_y_junction(test, device):
@@ -3803,6 +3906,57 @@ def _structural_kkt_paired_coarse_lanes_match_serial_schedule(test, device):
     test.assertFalse(cpu_solver._structural_graph_kkt.closed_tree_buckets[0].use_lane_split_coarse)
 
 
+def _structural_kkt_zero_correction_preserves_pose(test, device):
+    """Preserve zero-step poses exactly, including offset COMs and captured trials."""
+    rotation = np.array([np.sqrt(0.5), 0.0, 0.0, np.sqrt(0.5)], dtype=np.float32)
+    host = np.array([[0.25, -0.5, 0.75, *rotation]] * 2 + [[0, 0, 0, 0, 0, 0, 1]], dtype=np.float32)
+    original = wp.array(host, dtype=wp.transform, device=device)
+    pose = wp.clone(original)
+    ids = wp.array([0, 1, 2], dtype=int, device=device)
+    state = wp.ones(3, dtype=int, device=device)
+    scale = wp.array([1.0, 0.0, 1.0], dtype=float, device=device)
+    com = wp.array([[0.43, -0.17, 0.81]] * 2 + [[0, 0, 0]], dtype=wp.vec3, device=device)
+    correction = wp.array(
+        [[0, 0, 0, 0, 0, 0], [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], [1.0e-24, 0, 0, 0, 0, 0]],
+        dtype=wp.spatial_vector,
+        device=device,
+    )
+    pending = wp.zeros(1, dtype=int, device=device)
+
+    for trial in (False, True):
+
+        def apply(trial=trial):
+            wp.copy(pose, original)
+            if trial:
+                wp.launch(
+                    rigid_vbd_kkt._apply_trial_correction,
+                    3,
+                    inputs=[ids, ids, correction, scale, com, original],
+                    outputs=[pose, pending],
+                    device=device,
+                )
+            else:
+                wp.launch(
+                    apply_global_correction,
+                    3,
+                    inputs=[ids, ids, state, correction, scale, com],
+                    outputs=[pose],
+                    device=device,
+                )
+
+        apply()
+        results = [pose.numpy()]
+        if device.is_cuda:
+            with wp.ScopedCapture(device) as capture:
+                apply()
+            wp.capture_launch(capture.graph)
+            results.append(pose.numpy())
+        for result in results:
+            np.testing.assert_array_equal(result[:2].view(np.uint32), host[:2].view(np.uint32))
+            # A squared-norm zero test would incorrectly discard this normal float32 increment.
+            test.assertEqual(result[2, 0], np.float32(1.0e-24))
+
+
 def _structural_kkt_suppresses_nonfinite_correction(test, device):
     """A non-finite correction must retire its whole island, not corrupt poses.
 
@@ -4109,6 +4263,19 @@ def _structural_kkt_uses_explicit_iteration_budget(test, device):
 
     disabled = newton.solvers.SolverVBD(model, iterations=5, rigid_compliant_alm=True)
     test.assertIsNone(disabled._structural_graph_kkt)
+    test.assertIsNone(disabled._rigid_contact_accumulators)
+    explicit_zero = newton.solvers.SolverVBD(model, iterations=5, rigid_joint_global_iterations=0)
+    test.assertIsNone(explicit_zero._rigid_contact_accumulators)
+    # Exercise the restored local reset with nonzero scratch, not just its layout.
+    disabled.body_forces.fill_(wp.vec3(1.0))
+    disabled.body_torques.fill_(wp.vec3(1.0))
+    disabled.body_hessian_ll.fill_(wp.mat33(1.0))
+    disabled.body_hessian_al.fill_(wp.mat33(1.0))
+    disabled.body_hessian_aa.fill_(wp.mat33(1.0))
+    local_state = _simulate(model, disabled, 2, 1.0 / 600.0)
+    zero_state = _simulate(model, explicit_zero, 2, 1.0 / 600.0)
+    np.testing.assert_array_equal(local_state.body_q.numpy(), zero_state.body_q.numpy())
+    np.testing.assert_array_equal(local_state.body_qd.numpy(), zero_state.body_qd.numpy())
 
     with test.assertRaisesRegex(ValueError, "rigid_joint_global_iterations"):
         newton.solvers.SolverVBD(
@@ -4145,6 +4312,7 @@ def _structural_kkt_uses_explicit_iteration_budget(test, device):
     test.assertIsNotNone(solver._structural_graph_kkt)
 
     events = []
+    test.assertIsNotNone(solver._rigid_contact_accumulators)
     local_solve = solver._solve_rigid_body_iteration
     global_solve = solver._solve_structural_graph_kkt
 
@@ -4966,6 +5134,30 @@ class TestVBDRigidKKT(unittest.TestCase):
     """Validate the optional rigid VBD structural KKT backend."""
 
     pass
+
+
+add_function_test(
+    TestVBDRigidKKT,
+    "test_structural_kkt_retains_interior_supported_branches",
+    _structural_kkt_retains_interior_supported_branches,
+    devices=get_test_devices(),
+)
+
+
+add_function_test(
+    TestVBDRigidKKT,
+    "test_structural_kkt_prescribed_split_matches_float64_oracle",
+    _structural_kkt_prescribed_split_matches_float64_oracle,
+    devices=get_test_devices(),
+)
+
+
+add_function_test(
+    TestVBDRigidKKT,
+    "test_structural_kkt_zero_correction_preserves_pose",
+    _structural_kkt_zero_correction_preserves_pose,
+    devices=get_test_devices(),
+)
 
 
 for _test in (

@@ -3388,6 +3388,16 @@ def _corrected_pose(
     com_local: wp.vec3,
     alpha: float,
 ):
+    # Preserve represented fixed/unchanged poses, including offset COMs, exactly.
+    if alpha == 0.0 or (
+        correction[0] == 0.0
+        and correction[1] == 0.0
+        and correction[2] == 0.0
+        and correction[3] == 0.0
+        and correction[4] == 0.0
+        and correction[5] == 0.0
+    ):
+        return pose
     linear = alpha * wp.spatial_top(correction)
     angular = alpha * wp.spatial_bottom(correction)
     rotation = wp.transform_get_rotation(pose)
@@ -5025,49 +5035,59 @@ def _build_paths(
             # drive, or another joint that the KKT system did not assemble.
             continue
 
-        if any(len(neighbors[joint] & component) > 2 for joint in component):
-            continue
-        edge_count = sum(len(neighbors[joint] & component) for joint in component) // 2
-        if edge_count != len(component) - 1:
-            continue
-
-        starts = [joint for joint in component if len(neighbors[joint] & component) <= 1]
-        if not starts:
-            continue
-        start = min(starts, key=lambda joint: (parent[joint] >= 0, joint))
-        ordered: list[int] = []
-        previous = -1
-        current = start
-        while current >= 0:
-            ordered.append(current)
-            following = sorted((neighbors[current] & component) - {previous})
-            previous, current = current, (following[0] if following else -1)
-        if len(ordered) != len(component):
-            continue
-
-        valid = True
-        for left, right in pairwise(ordered):
-            left_bodies = {int(parent[left]), int(child[left])} - {-1}
-            right_bodies = {int(parent[right]), int(child[right])} - {-1}
-            shared = left_bodies & right_bodies
-            if len(shared) != 1:
-                valid = False
-                break
-        if not valid:
-            continue
-
-        # Preserve first-encounter body order and ascending incident row/side
-        # order without scanning every joint again for each body.
-        rows_by_body: dict[int, list[tuple[int, int]]] = {}
-        for row, joint in enumerate(ordered):
-            for side, body in enumerate((int(parent[joint]), int(child[joint]))):
-                if body >= 0:
-                    rows_by_body.setdefault(body, []).append((row, side))
-        bodies = list(rows_by_body)
-        body_rows = list(rows_by_body.values())
-        if all(len(incident) <= 2 for incident in body_rows):
-            paths.append(_Path(ordered, bodies, body_rows))
+        path = _make_path(component, parent, child)
+        if path is not None:
+            paths.append(path)
     return paths
+
+
+def _make_path(
+    joints: set[int],
+    parent: np.ndarray,
+    child: np.ndarray,
+    *,
+    dynamic_body_mask: np.ndarray | None = None,
+) -> _Path | None:
+    """Order a Schur path, optionally omitting prescribed body unknowns."""
+    incident: dict[int, set[int]] = defaultdict(set)
+    for joint in joints:
+        for body in (int(parent[joint]), int(child[joint])):
+            if body >= 0 and (dynamic_body_mask is None or dynamic_body_mask[body]):
+                incident[body].add(joint)
+    neighbors = {joint: set() for joint in joints}
+    for rows in incident.values():
+        for joint in rows:
+            neighbors[joint].update(rows - {joint})
+    if any(len(rows) > 2 for rows in neighbors.values()):
+        return None
+    if sum(map(len, neighbors.values())) // 2 != len(joints) - 1:
+        return None
+    starts = [joint for joint in joints if len(neighbors[joint]) <= 1]
+    if not starts:
+        return None
+    ordered: list[int] = []
+    previous = -1
+    current = min(starts, key=lambda joint: (parent[joint] >= 0, joint))
+    while current >= 0:
+        ordered.append(current)
+        following = sorted(neighbors[current] - {previous})
+        previous, current = current, (following[0] if following else -1)
+    if len(ordered) != len(joints):
+        return None
+    for left, right in pairwise(ordered):
+        left_bodies = {int(parent[left]), int(child[left])} & incident.keys()
+        right_bodies = {int(parent[right]), int(child[right])} & incident.keys()
+        if len(left_bodies & right_bodies) != 1:
+            return None
+    # Keep first-encounter body order and ascending incident row/side order.
+    rows_by_body: dict[int, list[tuple[int, int]]] = {}
+    for row, joint in enumerate(ordered):
+        for side, body in enumerate((int(parent[joint]), int(child[joint]))):
+            if body in incident:
+                rows_by_body.setdefault(body, []).append((row, side))
+    if any(len(rows) > 2 for rows in rows_by_body.values()):
+        return None
+    return _Path(ordered, list(rows_by_body), list(rows_by_body.values()))
 
 
 def _make_tree(
@@ -5256,10 +5276,44 @@ def _build_trees(
         if any(all_body_to_joints[body] - component for body in component_bodies):
             continue
 
-        tree = _make_tree(sorted(component), parent, child, body_inv_mass)
-        if tree is not None:
-            trees.append(tree)
+        for dynamic_component in _dynamic_joint_components(component, parent, child, body_inv_mass):
+            tree = _make_tree(dynamic_component, parent, child, body_inv_mass)
+            if tree is not None:
+                trees.append(tree)
     return trees
+
+
+def _dynamic_joint_components(
+    joints: set[int],
+    parent: np.ndarray,
+    child: np.ndarray,
+    body_inv_mass: np.ndarray,
+) -> list[list[int]]:
+    """Split at prescribed bodies, retaining every dynamic boundary row.
+
+    Static/kinematic poses are known data, not shared KKT unknowns. Their
+    incident rows therefore do not couple otherwise disconnected dynamic
+    systems. Rows with two prescribed endpoints have no body correction.
+    """
+    representative = {
+        body: body
+        for joint in joints
+        for body in (int(parent[joint]), int(child[joint]))
+        if body >= 0 and body_inv_mass[body] > 0.0
+    }
+    for joint in sorted(joints):
+        p, c = int(parent[joint]), int(child[joint])
+        if p in representative and c in representative:
+            p_root = _union_find_root(representative, p)
+            c_root = _union_find_root(representative, c)
+            representative[max(p_root, c_root)] = min(p_root, c_root)
+    components: dict[int, list[int]] = defaultdict(list)
+    for joint in sorted(joints):
+        p, c = int(parent[joint]), int(child[joint])
+        endpoint = p if p in representative else c
+        if endpoint in representative:
+            components[_union_find_root(representative, endpoint)].append(joint)
+    return sorted(components.values(), key=lambda component: component[0])
 
 
 def _build_closed_trees(
@@ -5322,32 +5376,38 @@ def _build_closed_trees(
         }
         if any(all_body_to_joints[body] - component for body in component_bodies):
             continue
-        dynamic_bodies = {body for body in component_bodies if body_inv_mass[body] > 0.0}
-
-        representative = {body: body for body in dynamic_bodies}
-
-        base_joints: list[int] = []
-        closure_joints: list[int] = []
-        for joint in sorted(component):
-            parent_body = int(parent[joint])
-            child_body = int(child[joint])
-            if parent_body not in dynamic_bodies or child_body not in dynamic_bodies:
-                # Static/world attachments are leaves of the bipartite KKT tree.
-                base_joints.append(joint)
+        for dynamic_component in _dynamic_joint_components(component, parent, child, body_inv_mass):
+            if frozenset(dynamic_component) in handled_joint_sets:
                 continue
-            parent_root = _union_find_root(representative, parent_body)
-            child_root = _union_find_root(representative, child_body)
-            if parent_root != child_root:
-                representative[child_root] = parent_root
-                base_joints.append(joint)
-            else:
-                closure_joints.append(joint)
+            dynamic_bodies = {
+                body
+                for joint in dynamic_component
+                for body in (int(parent[joint]), int(child[joint]))
+                if body >= 0 and body_inv_mass[body] > 0.0
+            }
+            representative = {body: body for body in dynamic_bodies}
+            base_joints: list[int] = []
+            closure_joints: list[int] = []
+            for joint in dynamic_component:
+                parent_body = int(parent[joint])
+                child_body = int(child[joint])
+                if parent_body not in dynamic_bodies or child_body not in dynamic_bodies:
+                    # Static/world attachments remain rows in their dynamic component.
+                    base_joints.append(joint)
+                    continue
+                parent_root = _union_find_root(representative, parent_body)
+                child_root = _union_find_root(representative, child_body)
+                if parent_root != child_root:
+                    representative[child_root] = parent_root
+                    base_joints.append(joint)
+                else:
+                    closure_joints.append(joint)
 
-        if not closure_joints:
-            continue
-        base = _make_tree(base_joints, parent, child, body_inv_mass)
-        if base is not None and set(base.bodies) == dynamic_bodies:
-            closed_trees.append(_ClosedTree(base, closure_joints, sorted(component), base.bodies))
+            if not closure_joints:
+                continue
+            base = _make_tree(base_joints, parent, child, body_inv_mass)
+            if base is not None and set(base.bodies) == dynamic_bodies:
+                closed_trees.append(_ClosedTree(base, closure_joints, dynamic_component, base.bodies))
     return closed_trees
 
 
@@ -8162,6 +8222,22 @@ class StructuralGraphKKT:
             supported_joint_types=supported_joint_types,
             ignore_free_completion_joints=ignore_free_completion_joints,
         )
+        joint_type = np.asarray(model.joint_type.numpy(), dtype=np.int64)
+        parent = np.asarray(model.joint_parent.numpy(), dtype=np.int32)
+        child = np.asarray(model.joint_child.numpy(), dtype=np.int32)
+        remaining_trees = []
+        for tree in trees:
+            path = None
+            if all(joint_type[joint] == int(JointType.ROD) for joint in tree.joints):
+                # Interior prescribed supports can cut a branched cable into
+                # serial systems. Batch those with the existing rod paths;
+                # their boundary poses stay in the rows, not the unknowns.
+                path = _make_path(set(tree.joints), parent, child, dynamic_body_mask=self.dynamic_body_mask_host)
+            if path is not None:
+                paths.append(path)
+            else:
+                remaining_trees.append(tree)
+        trees = remaining_trees
         handled_joint_sets = {frozenset(component.joints) for component in [*paths, *trees]}
         closed_trees = _build_closed_trees(
             model,
@@ -8171,10 +8247,6 @@ class StructuralGraphKKT:
             ignore_free_completion_joints=ignore_free_completion_joints,
         )
         all_components = [*paths, *trees, *closed_trees]
-        joint_type = np.asarray(model.joint_type.numpy(), dtype=np.int64)
-        parent = np.asarray(model.joint_parent.numpy(), dtype=np.int32)
-        child = np.asarray(model.joint_child.numpy(), dtype=np.int32)
-
         grouped_trees: dict[tuple, list[_Tree]] = defaultdict(list)
         for tree in trees:
             grouped_trees[_tree_topology_signature(tree)].append(tree)

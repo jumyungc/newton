@@ -1,0 +1,1 @@
+Keep supported global joint corrections active when interior static or kinematic bodies split a branched structure into independent dynamic components. Preserve their boundary constraint rows and batch resulting rod chains through the existing cyclic-reduction path.

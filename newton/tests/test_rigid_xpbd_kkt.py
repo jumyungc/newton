@@ -259,6 +259,23 @@ def test_global_joint_iteration_validation(test, device):
     model, _ = _build_fixed_chain(device, link_count=4)
     newton.solvers.SolverXPBD(model, iterations=0)
 
+    default_solver = newton.solvers.SolverXPBD(model, deterministic=wp.DeterministicMode.RUN_TO_RUN)
+    local_solver = newton.solvers.SolverXPBD(
+        model, rigid_joint_global_iterations=0, deterministic=wp.DeterministicMode.RUN_TO_RUN
+    )
+    test.assertIsNone(default_solver._rigid_joint_global_solver)
+    test.assertIsNone(local_solver._rigid_joint_global_solver)
+    test.assertEqual(local_solver._rigid_joint_global_iteration_indices, frozenset())
+    test.assertTrue(local_solver.coupling_supports_inertial_property_refresh())
+    states = [(model.state(), model.state()) for _ in range(2)]
+    pose = model.body_q.numpy()
+    pose[-1, 1] += 0.02
+    for solver, (state_in, state_out) in zip((default_solver, local_solver), states, strict=True):
+        state_in.body_q.assign(pose)
+        solver.step(state_in, state_out, None, None, 1.0 / 120.0)
+    np.testing.assert_array_equal(states[0][1].body_q.numpy(), states[1][1].body_q.numpy())
+    np.testing.assert_array_equal(states[0][1].body_qd.numpy(), states[1][1].body_qd.numpy())
+
     with test.assertRaisesRegex(TypeError, "must be an integer"):
         newton.solvers.SolverXPBD(model, rigid_joint_global_iterations=True)
     with test.assertRaisesRegex(ValueError, "non-negative"):
@@ -390,6 +407,11 @@ def test_global_joint_cuda_graph_capture(test, device):
     state_1 = model.state()
     solver.step(state_0, state_1, None, None, 1.0 / 120.0)
     with wp.ScopedCapture(device) as capture:
+        with test.assertRaisesRegex(RuntimeError, "constructed before CUDA graph capture"):
+            newton.solvers.SolverXPBD(model, iterations=2, rigid_joint_global_iterations=1)
+        for flags in (newton.ModelFlags.JOINT_PROPERTIES, newton.ModelFlags.BODY_INERTIAL_PROPERTIES):
+            with test.assertRaisesRegex(RuntimeError, "cannot be rebuilt during CUDA graph capture"):
+                solver.notify_model_changed(flags)
         solver.step(state_1, state_0, None, None, 1.0 / 120.0)
         solver.step(state_0, state_1, None, None, 1.0 / 120.0)
     wp.capture_launch(capture.graph)

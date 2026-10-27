@@ -1,0 +1,1 @@
+Skip repeated rigid VBD KKT translation evaluations in captured default CUDA execution when every structural island is ineligible for translation. Keep the original local/global schedule and all evaluations whenever any island is eligible; CPU and deterministic-mode stopping rules are unchanged.

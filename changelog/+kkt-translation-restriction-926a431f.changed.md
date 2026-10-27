@@ -1,0 +1,1 @@
+Assemble compliance-KKT translation-only contact systems directly in FP64, omit internal pair forces that cancel in this subspace, and avoid unused rotational scratch while preserving the contact evaluation budget. Floating-point trajectories can differ.

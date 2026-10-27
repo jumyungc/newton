@@ -1,0 +1,1 @@
+Reduce compliance-KKT line-search and common-translation scratch work, and skip zero contact-lane atomics, without changing material parameters or iteration budgets; existing settings require no migration.

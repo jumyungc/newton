@@ -1,0 +1,1 @@
+Reject construction of the experimental XPBD global-joint backend during CUDA graph capture with an actionable error. Document its iteration, differentiation, and notification/recapture requirements while preserving the default local XPBD path.
