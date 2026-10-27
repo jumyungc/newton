@@ -21,8 +21,6 @@ from newton._src.solvers.vbd.rigid_vbd_kernels import (
 from newton._src.solvers.xpbd import kernels as xpbd_kernels
 from newton.tests.unittest_utils import add_function_test, get_selected_cuda_test_devices, get_test_devices
 
-newton.use_coord_layout_targets = True
-
 
 def _make_pipeline(model, capacity):
     return newton.CollisionPipeline(
@@ -1475,7 +1473,7 @@ def test_mixed_world_force_query_keeps_each_contact_law(test, device):
     state_in, state_out = model.state(), model.state()
     previous = wp.clone(state_in.body_q)
     pipeline.collide(state_in, contacts)
-    observables = solver.observables({newton.solvers.SolverObservableFlags.CONTACT_F})
+    observables = solver.observables(contacts=contacts, kinds={newton.solvers.SolverBase.ObservableKind.CONTACT_F})
     solver.step(state_in, state_out, None, contacts, 1.0 / 600.0, observables=observables)
     test.assertTrue(solver._pair_contacts_enabled_this_step)
     count = int(contacts.rigid_contact_count.numpy()[0])
@@ -2350,6 +2348,91 @@ add_function_test(
     TestVBDRigidPairContact,
     "test_body_contact_reservations_preserve_sorted_rows",
     test_body_contact_reservations_preserve_sorted_rows,
+    devices=devices,
+)
+
+
+def test_tendon_contact_partition_preserves_authored_schedule(test, device):
+    """Keep tendon forces and endpoint independence under every contact policy."""
+    builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+    anchor = builder.add_body(
+        xform=wp.transform(wp.vec3(0.0, 0.0, 0.04), wp.quat_identity()),
+        mass=0.0,
+        is_kinematic=True,
+    )
+    body = builder.add_body(xform=wp.transform(wp.vec3(1.0, 0.0, 0.04), wp.quat_identity()), mass=1.0)
+    builder.add_shape_sphere(body, radius=0.05)
+    builder.add_ground_plane()
+    builder.add_tendon(
+        [
+            newton.TendonGuide(body=anchor, guide_type=int(newton.TendonGuideType.ANCHOR)),
+            newton.TendonGuide(
+                body=body,
+                guide_type=int(newton.TendonGuideType.ANCHOR),
+                compliance=1.0e-5,
+                damping=0.0,
+                rest_length=0.5,
+            ),
+        ]
+    )
+    builder.color()
+    model = builder.finalize(device=device)
+    for history in (False, True):
+        reference = None
+        for policy in ("model", "auto", "refined"):
+            with test.subTest(history=history, policy=policy):
+                solver = newton.solvers.SolverVBD(
+                    model,
+                    iterations=6,
+                    rigid_compliant_alm=True,
+                    rigid_contact_history=history,
+                    rigid_contact_coloring=policy,
+                    deterministic=wp.DeterministicMode.RUN_TO_RUN,
+                )
+                test.assertEqual(solver._rigid_pair_body_count, 0)
+                test.assertFalse(solver._rigid_body_refinement_supported)
+                state_in, state_out = model.state(), model.state()
+                pipeline = _make_pipeline(model, 64)
+                contacts = pipeline.contacts()
+                control = model.control()
+
+                def advance(
+                    pipeline=pipeline,
+                    solver=solver,
+                    state_in=state_in,
+                    state_out=state_out,
+                    contacts=contacts,
+                    control=control,
+                ):
+                    pipeline.collide(state_in, contacts)
+                    solver.step(state_in, state_out, control, contacts, 1.0 / 120.0)
+                    pipeline.collide(state_out, contacts)
+                    solver.step(state_out, state_in, control, contacts, 1.0 / 120.0)
+
+                advance()
+                test.assertGreater(int(contacts.rigid_contact_count.numpy()[0]), 0)
+                if device.is_cuda:
+                    with wp.ScopedCapture(device=device) as capture:
+                        advance()
+                    for _ in range(3):
+                        wp.capture_launch(capture.graph)
+                else:
+                    for _ in range(3):
+                        advance()
+                result = (state_in.body_q.numpy(), state_in.body_qd.numpy())
+                test.assertTrue(np.isfinite(result[0]).all())
+                test.assertLess(result[0][body, 0], 0.99)
+                if reference is None:
+                    reference = result
+                else:
+                    for actual, expected in zip(result, reference, strict=True):
+                        np.testing.assert_array_equal(actual, expected)
+
+
+add_function_test(
+    TestVBDRigidPairContact,
+    "test_tendon_contact_partition_preserves_authored_schedule",
+    test_tendon_contact_partition_preserves_authored_schedule,
     devices=devices,
 )
 

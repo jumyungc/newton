@@ -19,7 +19,9 @@ import warp as wp
 import newton
 from newton.utils import compute_world_offsets, solidify_mesh
 
+from ..core.host_transform import transform_add_translation, transform_from_array, transform_multiply
 from ..core.types import MAXVAL, Axis
+from ..exceptions import NewtonWarning
 from .kernels import (
     build_active_particle_mask,
     compact,
@@ -31,7 +33,6 @@ from .kernels import (
     repack_shape_opacities,
     transform_points,
 )
-from .transform import transform_add_translation, transform_from_array, transform_multiply
 from .utils import OPAQUE_OPACITY_THRESHOLD
 
 MAX_TRIANGLE_OPACITY_GROUPS = 32
@@ -1027,17 +1028,19 @@ class ViewerBase(ABC):
         """Adapt contact-visualization scales to the current model.
 
         Sets the relative ``contact_viz_scale`` default and adapts
-        ``contact_force_scale`` to the aggregate model weight.
+        ``contact_force_scale`` to the mean dynamic mass of populated local
+        worlds plus shared global dynamic mass, multiplied by the first
+        gravity vector's magnitude.
 
-        Falls back to the literal defaults if the relevant model data is
-        unavailable (e.g. no shapes / no dynamic bodies / zero gravity).
+        Uses nominal gravity when gravity is zero or unavailable, and a unit
+        characteristic force when no dynamic mass is available.
         """
         # Save the previous defaults so we can detect user overrides set
         # before the model was attached (rare but possible).
         prev_default_scale = self._contact_viz_scale_default
         prev_default_force_scale = self._contact_force_scale_default
 
-        # Characteristic force F_char = sum(dynamic body mass) * |gravity|.
+        # Replicating identical worlds must not change force-arrow lengths.
         F_char = 0.0
         if (
             self.model is not None
@@ -1048,7 +1051,14 @@ class ViewerBase(ABC):
             mass_np = self.model.body_mass.numpy()
             inv_mass_np = self.model.body_inv_mass.numpy()
             dyn_mask = np.isfinite(mass_np) & (inv_mass_np > 0.0)
-            total_mass = float(mass_np[dyn_mask].sum()) if dyn_mask.any() else 0.0
+            dynamic_mass = mass_np[dyn_mask]
+            mean_mass = float(dynamic_mass.sum())
+            if self.model.body_world is not None:
+                worlds = self.model.body_world.numpy()[dyn_mask]
+                local_mask = worlds >= 0
+                # Global bodies are shared by local worlds, not another replica.
+                mean_mass = float(dynamic_mass[~local_mask].sum())
+                mean_mass += float(dynamic_mass[local_mask].sum()) / max(1, len(np.unique(worlds[local_mask])))
             g_mag = 9.81
             if self.model.gravity is not None:
                 g_np = self.model.gravity.numpy()
@@ -1057,7 +1067,7 @@ class ViewerBase(ABC):
                     g_mag = float(np.linalg.norm(g0))
                     if not np.isfinite(g_mag) or g_mag <= 0.0:
                         g_mag = 9.81
-            F_char = total_mass * g_mag
+            F_char = mean_mass * g_mag
         if not np.isfinite(F_char) or F_char <= 0.0:
             F_char = 1.0
 
@@ -1139,7 +1149,7 @@ class ViewerBase(ABC):
             materials = shapes.materials if self.model_changed else None
 
             # Capsules may be rendered via a specialized path by the concrete viewer/backend
-            # (e.g., instanced cylinder body + instanced sphere end caps for better batching).
+            # (e.g., deforming a shared capsule prototype to batch different dimensions).
             # The base implementation of log_capsules() falls back to log_instances().
             if shapes.geo_type == newton.GeoType.CAPSULE:
                 self.log_capsules(
@@ -1291,7 +1301,7 @@ class ViewerBase(ABC):
         contacts: newton.Contacts,
         state: newton.State,
         *,
-        observables: newton.solvers.SolverObservables | None = None,
+        observables: newton.solvers.SolverBase.Observables | None = None,
     ):
         """Render contact visualizations.
 
@@ -1302,7 +1312,7 @@ class ViewerBase(ABC):
           (gated on :attr:`show_contact_normals`).
         * ``"/contacts/modes"`` — thin oriented disks at each contact, color
           coded by inferred contact mode (open / stick / slip) when contact
-          force output is available, else by a uniform default color
+          force output is available, else amber to indicate an unknown mode
           (gated on :attr:`show_contact_disks`).
         * ``"/contacts/forces"`` — arrows along the linear part of
           the contact-force output (gated on :attr:`show_contact_forces`;
@@ -1322,8 +1332,9 @@ class ViewerBase(ABC):
                 velocities at the contact points.
             observables: Optional solver observables containing ``contact_f``. If
                 omitted, the deprecated ``contacts.force`` array is used.
-                Binds compatible contact storage on first use; newly allocated forces
-                are zero until the solver updates them.
+                ``contacts`` must be the buffer that produced ``contact_f``
+                (``observables.contacts``); newly allocated forces are zero until the
+                solver updates them. See :ref:`solver_observables`.
 
                 .. experimental::
                     The solver observable API may change without prior notice.
@@ -1342,8 +1353,11 @@ class ViewerBase(ABC):
         if observables is not None:
             if observables.model is not self.model:
                 raise ValueError("Solver observables must belong to the viewer's model.")
-            if contact_f is not None:
-                observables.bind_contacts(contacts)
+            if contact_f is not None and observables.contacts is not contacts:
+                raise ValueError(
+                    "Contact solver observables were produced with a different Contacts instance; "
+                    "pass the Contacts used by the step that produced them."
+                )
 
         # Get contact count, clamped to buffer size (counter may exceed max on overflow)
         max_contacts = contacts.rigid_contact_max
@@ -1435,6 +1449,7 @@ class ViewerBase(ABC):
                     self.model.shape_world,
                     self.model.shape_collision_radius,
                     self.world_offsets,
+                    self.layer.xform,
                     self._visible_worlds_mask,
                     contacts.rigid_contact_count,
                     contacts.rigid_contact_shape0,
@@ -1442,8 +1457,9 @@ class ViewerBase(ABC):
                     contacts.rigid_contact_point0,
                     contacts.rigid_contact_point1,
                     contacts.rigid_contact_offset0,
+                    contacts.rigid_contact_offset1,
                     contacts.rigid_contact_normal,
-                    contact_f,  # may be None — kernel falls back to default color
+                    contact_f,  # may be None — kernel uses the unknown-mode color
                     contact_scale * 0.2,
                     contact_scale * 0.004,  # cylinder half-height
                     float(self.contact_mode_eps_force),
@@ -1451,6 +1467,7 @@ class ViewerBase(ABC):
                     wp.vec3(0.1, 0.1, 0.1),  # open: black
                     wp.vec3(0.6, 0.6, 0.6),  # stick: light gray
                     wp.vec3(0.2, 0.2, 0.9),  # slip: blue
+                    wp.vec3(0.95, 0.7, 0.3),  # unknown: amber
                 ],
                 outputs=[self._contact_disk_xforms, self._contact_disk_scales, self._contact_disk_colors],
                 device=self.device,
@@ -1487,6 +1504,7 @@ class ViewerBase(ABC):
                     self.model.shape_world,
                     self.model.shape_collision_radius,
                     self.world_offsets,
+                    self.layer.xform,
                     self._visible_worlds_mask,
                     contacts.rigid_contact_count,
                     contacts.rigid_contact_shape0,
@@ -3258,12 +3276,14 @@ class ViewerBase(ABC):
                 warnings.warn(
                     f"Model.tri_color has {len(colors)} values for {tri_count} triangles; "
                     "rendering all triangles with the default color.",
+                    NewtonWarning,
                     stacklevel=2,
                 )
                 colors = np.broadcast_to(default_color, (tri_count, 3)).copy()
             elif not np.all(np.isfinite(colors)):
                 warnings.warn(
                     "Model.tri_color contains non-finite values; replacing them with display-safe values.",
+                    NewtonWarning,
                     stacklevel=2,
                 )
                 colors = np.nan_to_num(colors, nan=0.0, posinf=1.0, neginf=0.0)
@@ -3279,12 +3299,14 @@ class ViewerBase(ABC):
                 warnings.warn(
                     f"Model.tri_opacity has {len(opacities)} values for {tri_count} triangles; "
                     "rendering all triangles as opaque.",
+                    NewtonWarning,
                     stacklevel=2,
                 )
                 opacities = np.ones(tri_count, dtype=np.float32)
             elif not np.all(np.isfinite(opacities)):
                 warnings.warn(
                     "Model.tri_opacity contains non-finite values; replacing them with display-safe values.",
+                    NewtonWarning,
                     stacklevel=2,
                 )
                 opacities = np.nan_to_num(opacities, nan=1.0, posinf=1.0, neginf=0.0)
@@ -3294,6 +3316,7 @@ class ViewerBase(ABC):
             warnings.warn(
                 f"Model.tri_opacity contains {len(unique_opacities)} unique values; quantizing to at most "
                 f"{MAX_TRIANGLE_OPACITY_GROUPS} display-opacity groups.",
+                NewtonWarning,
                 stacklevel=2,
             )
             opacities = (
@@ -3306,6 +3329,7 @@ class ViewerBase(ABC):
             warnings.warn(
                 f"Model triangle appearance contains {unique_appearance_count} unique values; quantizing to at most "
                 f"{MAX_TRIANGLE_APPEARANCE_GROUPS} display groups.",
+                NewtonWarning,
                 stacklevel=2,
             )
             active_channels = np.flatnonzero(np.ptp(appearances, axis=0) > 0.0)
