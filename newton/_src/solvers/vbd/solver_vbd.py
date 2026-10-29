@@ -553,9 +553,11 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 support only rigid-only models without tendons integrated directly by ``SolverVBD``.
                 An active global backend also enables numerical recovery for failed local
                 factorizations; the default local-only path keeps the baseline arithmetic.
-                Corrections start after the first local sweep and are distributed over the
-                local budget, regardless of whether a contact buffer is supplied. Joint duals
-                are updated after the paired local/global correction. With contact, a
+                Corrections are distributed over the local budget. Without a contact buffer,
+                each selected correction precedes its local sweep, starting at the inertial
+                prediction; local sweeps retain joint-dual ownership. With contact, corrections
+                follow selected local sweeps and joint duals update after the paired correction,
+                except that a correction in the last iteration precedes its local sweep. A
                 directional search checks the current joint and contact forces. Eligible
                 unanchored rod islands also receive a six-dimensional collective rigid-motion
                 correction before acceptance; anchored or dynamically coupled islands do not.
@@ -563,9 +565,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 witnesses must be valid; the global solve cannot repair collision detection or
                 guarantee nonlinear convergence at a fixed iteration budget. Strongly nonlinear
                 graphs may need multiple global corrections; extra local sweeps alone can converge
-                slowly. If every iteration includes a correction, contact mode places the last
-                correction before the last local sweep to preserve the configured local budget;
-                without a contact buffer, one final local sweep reconciles the corrected pose.
+                slowly. Both schedules perform exactly ``iterations`` local sweeps; no extra
+                local sweep is added when every iteration includes a global correction.
             particle_global_iterations: Experimental number of additional tetrahedral primal
                 Newton--Krylov stages per step. ``0`` disables the backend; positive counts must
                 be smaller than ``iterations`` so a local sweep follows the final correction.
@@ -3016,9 +3017,10 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 state_in, state_out, contacts, dt, rigid_due=rigid_due, soft_due=soft_due, preserve_history=True
             )
             global_iteration = use_global and iter_num in self._rigid_joint_global_iteration_indices
-            if global_iteration and iter_num == self.iterations - 1 and contacts is not None:
-                # Keep a final local reconciliation at the configured budget,
-                # including I1/G1 and G == iterations.
+            if global_iteration and (contacts is None or iter_num == self.iterations - 1):
+                # Resolve contact-free structural coupling before local sweeps
+                # distort the inertial prediction. Contact keeps its established
+                # order, with a final local reconciliation at the configured budget.
                 self._solve_structural_graph_kkt(state_in, control, contacts, dt)
                 global_iteration = False
             # Material can redistribute between fixed guides even without any rigid bodies.
@@ -3034,9 +3036,6 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             self._solve_particle_iteration(state_in, state_out, contacts, dt)
             if iter_num in self._particle_global_iteration_indices:
                 self._solve_particle_global_vbd(state_in, state_out, contacts, dt)
-
-        if use_global and self.rigid_joint_global_iterations == self.iterations and contacts is None:
-            self._solve_rigid_body_iteration(state_in, state_out, control, contacts, dt)
 
         if backend is not None and backend.has_free_translation and not self._has_joint_mimics:
             if backend.has_switchable_translation and self.device.is_capturing and wp.is_conditional_graph_supported():

@@ -949,6 +949,112 @@ def build_body_surrogate(
         body_rhs_out[slot] = rhs
 
 
+@wp.func
+def _stress_majorized_row(
+    joint: int,
+    joint_stress_slot: wp.array[wp.vec2i],
+    joint_parent: wp.array[int],
+    joint_child: wp.array[int],
+    joint_X_p: wp.array[wp.transform],
+    joint_X_c: wp.array[wp.transform],
+    body_q: wp.array[wp.transform],
+    body_com: wp.array[wp.vec3],
+    body_inv_mass: wp.array[float],
+    body_slot: wp.array[int],
+    jacobian_parent: wp.spatial_matrix,
+    jacobian_child: wp.spatial_matrix,
+    compliance: wp.spatial_matrix,
+    residual: wp.spatial_vector,
+    body_stress: wp.array[wp.mat33],
+):
+    """Apply a parented rod row's stress metric and write its uniquely owned body-stress slots.
+
+    Graphs whose rows are all parented rods call this before storing rows; the arithmetic is
+    :func:`add_joint_stress_majorizer`'s rod branch. Whitening preserves the current force in
+    exact arithmetic. The local curvature bound is not a descent proof.
+    """
+    out_jp = jacobian_parent
+    out_jc = jacobian_child
+    out_compliance = compliance
+    out_residual = residual
+    parent, child = joint_parent[joint], joint_child[joint]
+    destinations = joint_stress_slot[joint]
+    # Each destination is written exactly once below, zero where the row adds no stress.
+    stress_parent = wp.mat33(0.0)
+    stress_child = wp.mat33(0.0)
+    reaction = _inverse_spatial_robust(compliance) * residual
+    anchor = wp.transform_point(body_q[child], wp.transform_get_translation(joint_X_c[joint]))
+    rp = anchor - wp.transform_point(body_q[parent], body_com[parent])
+    rc = anchor - wp.transform_point(body_q[child], body_com[child])
+    lp, lc = wp.length(rp), wp.length(rc)
+    length = lp + lc
+    force_norm = wp.length(wp.spatial_top(wp.transpose(jacobian_parent) * reaction))
+    if length > 0.0 and force_norm > 0.0:
+        # Let d = vc-vp-Wp*rp+Wc*rc be the relative anchor increment.
+        # Material-frame stress is f dot (-Wp^2*rp - 2*Wp*d + Wc^2*rc).
+        # Since f dot (Wp*d) ignores d parallel to f, Young's inequality
+        # needs only |f|/length * |(I-n*n^T)*d|^2, n = f/|f|, plus
+        # rotational self blocks. This preserves common translation and
+        # avoids fictitious axial stiffness in a loaded straight rod.
+        added = force_norm / length
+        metric_compliance = wp.spatial_matrix(compliance)
+        metric_residual = residual + wp.spatial_vector()
+        jp = wp.spatial_matrix(jacobian_parent)
+        jc = wp.spatial_matrix(jacobian_child)
+        material_from_world = wp.quat_to_matrix(
+            wp.quat_inverse(wp.transform_get_rotation(body_q[parent] * joint_X_p[joint]))
+        )
+        normal = wp.normalize(wp.vec3d(wp.spatial_top(reaction)))
+        metric = wp.mat33d(0.0)
+        for axis in range(3):
+            enabled = wp.length_sq(wp.vec3(jc[axis, 0], jc[axis, 1], jc[axis, 2])) > 0.0
+            tangent = 1.0 / metric_compliance[axis, axis] if enabled else 0.0
+            for column in range(3):
+                metric[axis, column] = -wp.float64(added) * wp.float64(normal[axis]) * wp.float64(normal[column])
+            metric[axis, axis] += wp.float64(tangent) + wp.float64(added)
+        # Whiten the three linear rows: M = L*L^T, J_new = L^T*J,
+        # c_new = L^-1*f, C_new = I. Thus J_new^T*c_new = J^T*f.
+        # A dense float32 inverse compliance loses this force identity
+        # when material and stress eigenvalues differ substantially.
+        lower = wp.mat33d(0.0)
+        normalized_force = wp.vec3d(0.0)
+        for axis in range(3):
+            for column in range(axis + 1):
+                value = metric[axis, column]
+                for k in range(column):
+                    value -= lower[axis, k] * lower[column, k]
+                lower[axis, column] = wp.sqrt(value) if column == axis else value / lower[column, column]
+            value = wp.float64(reaction[axis])
+            for column in range(axis):
+                value -= lower[axis, column] * normalized_force[column]
+            normalized_force[axis] = value / lower[axis, axis]
+            metric_residual[axis] = float(normalized_force[axis])
+            for column in range(3):
+                metric_compliance[axis, column] = 1.0 if axis == column else 0.0
+        weighted_frame = wp.mat33(wp.transpose(lower)) * material_from_world
+        jp = _set_spatial_block(jp, 0, 0, -weighted_frame)
+        jp = _set_spatial_block(jp, 0, 1, weighted_frame * wp.skew(rp))
+        jc = _set_spatial_block(jc, 0, 0, weighted_frame)
+        jc = _set_spatial_block(jc, 0, 1, -weighted_frame * wp.skew(rc))
+        out_jp = jp
+        out_jc = jc
+        out_compliance = metric_compliance
+        out_residual = metric_residual
+        for side in range(2):
+            body = parent if side == 0 else child
+            slot = body_slot[body]
+            if slot >= 0 and body_inv_mass[body] > 0.0:
+                if side == 0:
+                    stress_parent = (force_norm * (lp + length)) * wp.identity(3, float)
+                else:
+                    stress_child = (force_norm * lc) * wp.identity(3, float)
+    if destinations[0] >= 0:
+        body_stress[destinations[0]] = stress_parent
+    if destinations[1] >= 0:
+        body_stress[destinations[1]] = stress_child
+    return out_jp, out_jc, out_compliance, out_residual
+
+
 @wp.kernel
 def add_joint_stress_majorizer(
     joint_stress_slot: wp.array[wp.vec2i],
@@ -978,6 +1084,10 @@ def add_joint_stress_majorizer(
     contiguous range of slots in ascending joint order, which ``build_body_surrogate`` sums. The body
     metric therefore depends neither on thread scheduling nor on how components are grouped into
     buckets, and needs no atomics.
+
+    Graphs whose rows are all parented rods apply the same rod arithmetic in
+    :func:`_stress_majorized_row` during linearization and skip this pass; a test
+    requires both paths to produce identical bytes.
     """
     row = wp.tid()
     joint = joint_ids[row]
@@ -1136,548 +1246,497 @@ def _accumulate_joint_slope(
     wp.atomic_add(merit, body_island[slot], linear)
 
 
-@wp.kernel
-def linearize_joint_path_rows(
-    joint_ids: wp.array[wp.int32],
-    joint_type: wp.array[int],
-    joint_enabled: wp.array[bool],
-    joint_parent: wp.array[int],
-    joint_child: wp.array[int],
-    joint_X_p: wp.array[wp.transform],
-    joint_X_c: wp.array[wp.transform],
-    joint_axis: wp.array[wp.vec3],
-    joint_rod_rest_kb_local: wp.array[wp.vec3],
-    joint_rod_rest_twist: wp.array[float],
-    joint_qd_start: wp.array[int],
-    joint_target_q_start: wp.array[int],
-    joint_dof_dim: wp.array2d[int],
-    joint_constraint_start: wp.array[int],
-    joint_material_k: wp.array[float],
-    joint_rho: wp.array[float],
-    joint_penalty_kd: wp.array[float],
-    joint_lambda_lin: wp.array[wp.vec3],
-    joint_lambda_ang: wp.array[wp.vec3],
-    joint_C0_lin: wp.array[wp.vec3],
-    joint_C0_ang: wp.array[wp.vec3],
-    joint_sigma_start: wp.array[wp.vec3],
-    joint_C_fric: wp.array[wp.vec3],
-    joint_target_ke: wp.array[float],
-    joint_target_kd: wp.array[float],
-    joint_target_q: wp.array[float],
-    joint_target_qd: wp.array[float],
-    joint_limit_lower: wp.array[float],
-    joint_limit_upper: wp.array[float],
-    joint_limit_ke: wp.array[float],
-    joint_limit_kd: wp.array[float],
-    joint_rest_angle: wp.array[float],
-    joint_angle_prev: wp.array[float],
-    joint_drive_limit_support: wp.array[float],
-    joint_drive_lambda: wp.array[float],
-    joint_limit_lambda: wp.array[float],
-    stab_alpha: float,
-    body_q: wp.array[wp.transform],
-    body_q_prev: wp.array[wp.transform],
-    body_q_rest: wp.array[wp.transform],
-    body_com: wp.array[wp.vec3],
-    dt: float,
-    slope_only: bool,
-    body_slot: wp.array[int],
-    body_island: wp.array[int],
-    correction: wp.array[wp.spatial_vector],
-    merit: wp.array[wp.float64],
-    jacobian_parent: wp.array[wp.spatial_matrix],
-    jacobian_child: wp.array[wp.spatial_matrix],
-    compliance: wp.array[wp.spatial_matrix],
-    residual: wp.array[wp.spatial_vector],
-    row_active: wp.array[wp.int32],
-):
-    """Linearize a joint or accumulate its slope without storing unused rows."""
-    row = wp.tid()
-    joint = joint_ids[row]
-    zero_matrix = wp.spatial_matrix(0.0)
-    jt = joint_type[joint]
-    supported = (
-        jt == JointType.ROD
-        or jt == JointType.BALL
-        or jt == JointType.FIXED
-        or jt == JointType.REVOLUTE
-        or jt == JointType.PRISMATIC
-        or jt == JointType.D6
-    )
-    if not supported or not joint_enabled[joint]:
-        if slope_only:
+def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
+    """Build the general or the all-parented-rod linearization kernel.
+
+    The variants share one source; ``wp.static`` removes the fused stress code from the
+    general kernel and the unreachable non-rod code from the all-rod kernel, so neither
+    pays registers for the other's work.
+    """
+
+    def linearize_joint_path_rows(
+        joint_ids: wp.array[wp.int32],
+        joint_type: wp.array[int],
+        joint_enabled: wp.array[bool],
+        joint_parent: wp.array[int],
+        joint_child: wp.array[int],
+        joint_X_p: wp.array[wp.transform],
+        joint_X_c: wp.array[wp.transform],
+        joint_axis: wp.array[wp.vec3],
+        joint_rod_rest_kb_local: wp.array[wp.vec3],
+        joint_rod_rest_twist: wp.array[float],
+        joint_qd_start: wp.array[int],
+        joint_target_q_start: wp.array[int],
+        joint_dof_dim: wp.array2d[int],
+        joint_constraint_start: wp.array[int],
+        joint_material_k: wp.array[float],
+        joint_rho: wp.array[float],
+        joint_penalty_kd: wp.array[float],
+        joint_lambda_lin: wp.array[wp.vec3],
+        joint_lambda_ang: wp.array[wp.vec3],
+        joint_C0_lin: wp.array[wp.vec3],
+        joint_C0_ang: wp.array[wp.vec3],
+        joint_sigma_start: wp.array[wp.vec3],
+        joint_C_fric: wp.array[wp.vec3],
+        joint_target_ke: wp.array[float],
+        joint_target_kd: wp.array[float],
+        joint_target_q: wp.array[float],
+        joint_target_qd: wp.array[float],
+        joint_limit_lower: wp.array[float],
+        joint_limit_upper: wp.array[float],
+        joint_limit_ke: wp.array[float],
+        joint_limit_kd: wp.array[float],
+        joint_rest_angle: wp.array[float],
+        joint_angle_prev: wp.array[float],
+        joint_drive_limit_support: wp.array[float],
+        joint_drive_lambda: wp.array[float],
+        joint_limit_lambda: wp.array[float],
+        stab_alpha: float,
+        body_q: wp.array[wp.transform],
+        body_q_prev: wp.array[wp.transform],
+        body_q_rest: wp.array[wp.transform],
+        body_com: wp.array[wp.vec3],
+        dt: float,
+        slope_only: bool,
+        body_slot: wp.array[int],
+        body_island: wp.array[int],
+        correction: wp.array[wp.spatial_vector],
+        merit: wp.array[wp.float64],
+        jacobian_parent: wp.array[wp.spatial_matrix],
+        jacobian_child: wp.array[wp.spatial_matrix],
+        compliance: wp.array[wp.spatial_matrix],
+        residual: wp.array[wp.spatial_vector],
+        row_active: wp.array[wp.int32],
+        build_majorizer: bool,
+        joint_stress_slot: wp.array[wp.vec2i],
+        body_inv_mass: wp.array[float],
+        body_stress: wp.array[wp.mat33],
+    ):
+        """Linearize a joint or accumulate its slope without storing unused rows.
+
+        In the all-rod variant, ``build_majorizer`` applies :func:`_stress_majorized_row`
+        to each parented rod row before it is stored, and the caller omits
+        :func:`add_joint_stress_majorizer`. The general variant contains no fused code;
+        its graphs use that separate pass.
+        """
+        row = wp.tid()
+        joint = joint_ids[row]
+        zero_matrix = wp.spatial_matrix(0.0)
+        jt = joint_type[joint]
+        supported = (
+            jt == JointType.ROD
+            or jt == JointType.BALL
+            or jt == JointType.FIXED
+            or jt == JointType.REVOLUTE
+            or jt == JointType.PRISMATIC
+            or jt == JointType.D6
+        )
+        if not supported or not joint_enabled[joint]:
+            if slope_only:
+                return
+            if wp.static(fuse_rod_stress):
+                if build_majorizer:
+                    # A disabled row must not retain the preceding step's stress.
+                    destinations = joint_stress_slot[joint]
+                    for side in range(2):
+                        if destinations[side] >= 0:
+                            body_stress[destinations[side]] = wp.mat33(0.0)
+            jacobian_parent[row] = zero_matrix
+            jacobian_child[row] = zero_matrix
+            compliance[row] = wp.identity(6, float)
+            residual[row] = wp.spatial_vector()
+            row_active[row] = 0
             return
-        jacobian_parent[row] = zero_matrix
-        jacobian_child[row] = zero_matrix
-        compliance[row] = wp.identity(6, float)
-        residual[row] = wp.spatial_vector()
-        row_active[row] = 0
-        return
 
-    parent = joint_parent[joint]
-    child = joint_child[joint]
-    parent_pose = wp.transform_identity()
-    parent_pose_prev = parent_pose
-    parent_pose_rest = parent_pose
-    if parent >= 0:
-        parent_pose = body_q[parent]
-        parent_pose_prev = body_q_prev[parent]
-        parent_pose_rest = body_q_rest[parent]
-    child_pose = body_q[child]
-    child_pose_prev = body_q_prev[child]
-    child_pose_rest = body_q_rest[child]
-
-    X_wp = parent_pose * joint_X_p[joint]
-    X_wc = child_pose * joint_X_c[joint]
-    X_wp_prev = parent_pose_prev * joint_X_p[joint]
-    X_wc_prev = child_pose_prev * joint_X_c[joint]
-    X_wp_rest = parent_pose_rest * joint_X_p[joint]
-    X_wc_rest = child_pose_rest * joint_X_c[joint]
-
-    x_p = wp.transform_get_translation(X_wp)
-    x_c = wp.transform_get_translation(X_wc)
-    x_p_prev = wp.transform_get_translation(X_wp_prev)
-    x_c_prev = wp.transform_get_translation(X_wc_prev)
-    q_wp = wp.transform_get_rotation(X_wp)
-    q_wc = wp.transform_get_rotation(X_wc)
-    q_wp_prev = wp.transform_get_rotation(X_wp_prev)
-    q_wc_prev = wp.transform_get_rotation(X_wc_prev)
-    q_wp_rest = wp.transform_get_rotation(X_wp_rest)
-    q_wc_rest = wp.transform_get_rotation(X_wc_rest)
-
-    c_start = joint_constraint_start[joint]
-    if jt == JointType.ROD:
-        # Rod rows live in their material frame:
-        # [shear_x, shear_y, stretch_z, bend_x, bend_y, twist_z].
-        stretch_idx = c_start
-        shear_idx = c_start + 1
-        bend_idx = c_start + 2
-        twist_idx = c_start + 3
-
-        q_wp_inv = wp.quat_inverse(q_wp)
-        material_from_world = wp.quat_to_matrix(q_wp_inv)
-        u = wp.quat_rotate(q_wp_inv, x_c - x_p)
-        u_prev = wp.quat_rotate(wp.quat_inverse(q_wp_prev), x_c_prev - x_p_prev)
-        C0_lin = joint_C0_lin[joint]
-        lambda_lin = joint_lambda_lin[joint]
-
-        shear_tangent, shear_defect_x = _normalized_cable_row(
-            u[0] - stab_alpha * C0_lin[0],
-            u_prev[0] - stab_alpha * C0_lin[0],
-            joint_material_k[shear_idx],
-            joint_rho[shear_idx],
-            joint_penalty_kd[shear_idx],
-            lambda_lin[0],
-            0.0,
-            0.0,
-            dt,
-        )
-        shear_tangent_y, shear_defect_y = _normalized_cable_row(
-            u[1] - stab_alpha * C0_lin[1],
-            u_prev[1] - stab_alpha * C0_lin[1],
-            joint_material_k[shear_idx],
-            joint_rho[shear_idx],
-            joint_penalty_kd[shear_idx],
-            lambda_lin[1],
-            0.0,
-            0.0,
-            dt,
-        )
-        stretch_tangent, stretch_defect = _normalized_cable_row(
-            u[2] - stab_alpha * C0_lin[2],
-            u_prev[2] - stab_alpha * C0_lin[2],
-            joint_material_k[stretch_idx],
-            joint_rho[stretch_idx],
-            joint_penalty_kd[stretch_idx],
-            lambda_lin[2],
-            0.0,
-            0.0,
-            dt,
-        )
-        linear_mask = wp.mat33(0.0)
-        linear_compliance = wp.mat33(0.0)
-        if shear_tangent > 0.0:
-            linear_mask[0, 0] = 1.0
-            linear_compliance[0, 0] = 1.0 / shear_tangent
-        else:
-            linear_compliance[0, 0] = 1.0
-        if shear_tangent_y > 0.0:
-            linear_mask[1, 1] = 1.0
-            linear_compliance[1, 1] = 1.0 / shear_tangent_y
-        else:
-            linear_compliance[1, 1] = 1.0
-        if stretch_tangent > 0.0:
-            linear_mask[2, 2] = 1.0
-            linear_compliance[2, 2] = 1.0 / stretch_tangent
-        else:
-            linear_compliance[2, 2] = 1.0
-
-        jp = wp.spatial_matrix(0.0)
-        jc = wp.spatial_matrix(0.0)
-        linear_jacobian = linear_mask * material_from_world
-        parent_com_world = wp.vec3(0.0)
+        parent = joint_parent[joint]
+        child = joint_child[joint]
+        parent_pose = wp.transform_identity()
+        parent_pose_prev = parent_pose
+        parent_pose_rest = parent_pose
         if parent >= 0:
-            parent_com_world = wp.transform_point(parent_pose, body_com[parent])
-        child_com_world = wp.transform_point(child_pose, body_com[child])
-        # Parent material rotation makes its effective lever arm end at the
-        # child anchor, matching the local cable Gauss-Newton Hessian.
-        jp = _set_spatial_block(jp, 0, 0, -linear_jacobian)
-        jp = _set_spatial_block(jp, 0, 1, linear_jacobian * wp.skew(x_c - parent_com_world))
-        jc = _set_spatial_block(jc, 0, 0, linear_jacobian)
-        jc = _set_spatial_block(jc, 0, 1, -(linear_jacobian * wp.skew(x_c - child_com_world)))
+            parent_pose = body_q[parent]
+            parent_pose_prev = body_q_prev[parent]
+            parent_pose_rest = body_q_rest[parent]
+        child_pose = body_q[child]
+        child_pose_prev = body_q_prev[child]
+        child_pose_rest = body_q_rest[child]
 
-        measure = _measure_rod_bend_twist_z(q_wp, q_wc)
-        kappa = _assemble_geometric_rod_kappa_z(
-            q_wp,
-            measure.kb_world,
-            measure.twist,
-            joint_rod_rest_kb_local[joint],
-            joint_rod_rest_twist[joint],
-        )
-        previous_measure = _measure_rod_bend_twist_z(q_wp_prev, q_wc_prev)
-        kappa_prev = _assemble_geometric_rod_kappa_z(
-            q_wp_prev,
-            previous_measure.kb_world,
-            previous_measure.twist,
-            joint_rod_rest_kb_local[joint],
-            joint_rod_rest_twist[joint],
-        )
-        delta_kappa = _rod_bend_twist_delta(kappa, kappa_prev)
-        C0_ang = joint_C0_ang[joint]
-        lambda_ang = joint_lambda_ang[joint]
-        sigma = joint_sigma_start[joint]
-        friction_tangent = joint_C_fric[joint]
+        X_wp = parent_pose * joint_X_p[joint]
+        X_wc = child_pose * joint_X_c[joint]
+        X_wp_prev = parent_pose_prev * joint_X_p[joint]
+        X_wc_prev = child_pose_prev * joint_X_c[joint]
+        X_wp_rest = parent_pose_rest * joint_X_p[joint]
+        X_wc_rest = child_pose_rest * joint_X_c[joint]
 
-        bend_error_x = kappa[0] - stab_alpha * C0_ang[0]
-        bend_error_y = kappa[1] - stab_alpha * C0_ang[1]
-        twist_error = kappa[2] - stab_alpha * C0_ang[2]
-        bend_tangent, bend_defect_x = _normalized_cable_row(
-            bend_error_x,
-            bend_error_x - delta_kappa[0],
-            joint_material_k[bend_idx],
-            joint_rho[bend_idx],
-            joint_penalty_kd[bend_idx],
-            lambda_ang[0],
-            sigma[0],
-            friction_tangent[0],
-            dt,
-        )
-        bend_tangent_y, bend_defect_y = _normalized_cable_row(
-            bend_error_y,
-            bend_error_y - delta_kappa[1],
-            joint_material_k[bend_idx],
-            joint_rho[bend_idx],
-            joint_penalty_kd[bend_idx],
-            lambda_ang[1],
-            sigma[1],
-            friction_tangent[1],
-            dt,
-        )
-        twist_tangent, twist_defect = _normalized_cable_row(
-            twist_error,
-            twist_error - delta_kappa[2],
-            joint_material_k[twist_idx],
-            joint_rho[twist_idx],
-            joint_penalty_kd[twist_idx],
-            lambda_ang[2],
-            sigma[2],
-            friction_tangent[2],
-            dt,
-        )
-        angular_mask = wp.mat33(0.0)
-        angular_compliance = wp.mat33(0.0)
-        if bend_tangent > 0.0:
-            angular_mask[0, 0] = 1.0
-            angular_compliance[0, 0] = 1.0 / bend_tangent
-        else:
-            angular_compliance[0, 0] = 1.0
-        if bend_tangent_y > 0.0:
-            angular_mask[1, 1] = 1.0
-            angular_compliance[1, 1] = 1.0 / bend_tangent_y
-        else:
-            angular_compliance[1, 1] = 1.0
-        if twist_tangent > 0.0:
-            angular_mask[2, 2] = 1.0
-            angular_compliance[2, 2] = 1.0 / twist_tangent
-        else:
-            angular_compliance[2, 2] = 1.0
+        x_p = wp.transform_get_translation(X_wp)
+        x_c = wp.transform_get_translation(X_wc)
+        x_p_prev = wp.transform_get_translation(X_wp_prev)
+        x_c_prev = wp.transform_get_translation(X_wc_prev)
+        q_wp = wp.transform_get_rotation(X_wp)
+        q_wc = wp.transform_get_rotation(X_wc)
+        q_wp_prev = wp.transform_get_rotation(X_wp_prev)
+        q_wc_prev = wp.transform_get_rotation(X_wc_prev)
+        q_wp_rest = wp.transform_get_rotation(X_wp_rest)
+        q_wc_rest = wp.transform_get_rotation(X_wc_rest)
 
-        parent_angular_jacobian = _rod_bend_twist_jacobian_z_global(q_wp, measure, True)
-        child_angular_jacobian = _rod_bend_twist_jacobian_z_global(q_wp, measure, False)
-        jp = _set_spatial_block(jp, 1, 1, angular_mask * parent_angular_jacobian)
-        jc = _set_spatial_block(jc, 1, 1, angular_mask * child_angular_jacobian)
+        c_start = joint_constraint_start[joint]
+        if jt == JointType.ROD:
+            # Rod rows live in their material frame:
+            # [shear_x, shear_y, stretch_z, bend_x, bend_y, twist_z].
+            stretch_idx = c_start
+            shear_idx = c_start + 1
+            bend_idx = c_start + 2
+            twist_idx = c_start + 3
 
-        material_compliance = wp.spatial_matrix(0.0)
-        material_compliance = _set_spatial_block(material_compliance, 0, 0, linear_compliance)
-        material_compliance = _set_spatial_block(material_compliance, 1, 1, angular_compliance)
-        defect = wp.spatial_vector(
-            wp.vec3(shear_defect_x, shear_defect_y, stretch_defect),
-            wp.vec3(bend_defect_x, bend_defect_y, twist_defect),
-        )
-        if slope_only:
-            _accumulate_joint_slope(
-                parent,
-                child,
-                body_slot,
-                body_island,
-                jp,
-                jc,
-                material_compliance,
-                defect,
-                wp.spatial_vector(),
-                True,
-                correction,
-                merit,
+            q_wp_inv = wp.quat_inverse(q_wp)
+            material_from_world = wp.quat_to_matrix(q_wp_inv)
+            u = wp.quat_rotate(q_wp_inv, x_c - x_p)
+            u_prev = wp.quat_rotate(wp.quat_inverse(q_wp_prev), x_c_prev - x_p_prev)
+            C0_lin = joint_C0_lin[joint]
+            lambda_lin = joint_lambda_lin[joint]
+
+            shear_tangent, shear_defect_x = _normalized_cable_row(
+                u[0] - stab_alpha * C0_lin[0],
+                u_prev[0] - stab_alpha * C0_lin[0],
+                joint_material_k[shear_idx],
+                joint_rho[shear_idx],
+                joint_penalty_kd[shear_idx],
+                lambda_lin[0],
+                0.0,
+                0.0,
+                dt,
+            )
+            shear_tangent_y, shear_defect_y = _normalized_cable_row(
+                u[1] - stab_alpha * C0_lin[1],
+                u_prev[1] - stab_alpha * C0_lin[1],
+                joint_material_k[shear_idx],
+                joint_rho[shear_idx],
+                joint_penalty_kd[shear_idx],
+                lambda_lin[1],
+                0.0,
+                0.0,
+                dt,
+            )
+            stretch_tangent, stretch_defect = _normalized_cable_row(
+                u[2] - stab_alpha * C0_lin[2],
+                u_prev[2] - stab_alpha * C0_lin[2],
+                joint_material_k[stretch_idx],
+                joint_rho[stretch_idx],
+                joint_penalty_kd[stretch_idx],
+                lambda_lin[2],
+                0.0,
+                0.0,
+                dt,
+            )
+            linear_mask = wp.mat33(0.0)
+            linear_compliance = wp.mat33(0.0)
+            if shear_tangent > 0.0:
+                linear_mask[0, 0] = 1.0
+                linear_compliance[0, 0] = 1.0 / shear_tangent
+            else:
+                linear_compliance[0, 0] = 1.0
+            if shear_tangent_y > 0.0:
+                linear_mask[1, 1] = 1.0
+                linear_compliance[1, 1] = 1.0 / shear_tangent_y
+            else:
+                linear_compliance[1, 1] = 1.0
+            if stretch_tangent > 0.0:
+                linear_mask[2, 2] = 1.0
+                linear_compliance[2, 2] = 1.0 / stretch_tangent
+            else:
+                linear_compliance[2, 2] = 1.0
+
+            jp = wp.spatial_matrix(0.0)
+            jc = wp.spatial_matrix(0.0)
+            linear_jacobian = linear_mask * material_from_world
+            parent_com_world = wp.vec3(0.0)
+            if parent >= 0:
+                parent_com_world = wp.transform_point(parent_pose, body_com[parent])
+            child_com_world = wp.transform_point(child_pose, body_com[child])
+            # Parent material rotation makes its effective lever arm end at the
+            # child anchor, matching the local cable Gauss-Newton Hessian.
+            jp = _set_spatial_block(jp, 0, 0, -linear_jacobian)
+            jp = _set_spatial_block(jp, 0, 1, linear_jacobian * wp.skew(x_c - parent_com_world))
+            jc = _set_spatial_block(jc, 0, 0, linear_jacobian)
+            jc = _set_spatial_block(jc, 0, 1, -(linear_jacobian * wp.skew(x_c - child_com_world)))
+
+            measure = _measure_rod_bend_twist_z(q_wp, q_wc)
+            kappa = _assemble_geometric_rod_kappa_z(
+                q_wp,
+                measure.kb_world,
+                measure.twist,
+                joint_rod_rest_kb_local[joint],
+                joint_rod_rest_twist[joint],
+            )
+            previous_measure = _measure_rod_bend_twist_z(q_wp_prev, q_wc_prev)
+            kappa_prev = _assemble_geometric_rod_kappa_z(
+                q_wp_prev,
+                previous_measure.kb_world,
+                previous_measure.twist,
+                joint_rod_rest_kb_local[joint],
+                joint_rod_rest_twist[joint],
+            )
+            delta_kappa = _rod_bend_twist_delta(kappa, kappa_prev)
+            C0_ang = joint_C0_ang[joint]
+            lambda_ang = joint_lambda_ang[joint]
+            sigma = joint_sigma_start[joint]
+            friction_tangent = joint_C_fric[joint]
+
+            bend_error_x = kappa[0] - stab_alpha * C0_ang[0]
+            bend_error_y = kappa[1] - stab_alpha * C0_ang[1]
+            twist_error = kappa[2] - stab_alpha * C0_ang[2]
+            bend_tangent, bend_defect_x = _normalized_cable_row(
+                bend_error_x,
+                bend_error_x - delta_kappa[0],
+                joint_material_k[bend_idx],
+                joint_rho[bend_idx],
+                joint_penalty_kd[bend_idx],
+                lambda_ang[0],
+                sigma[0],
+                friction_tangent[0],
+                dt,
+            )
+            bend_tangent_y, bend_defect_y = _normalized_cable_row(
+                bend_error_y,
+                bend_error_y - delta_kappa[1],
+                joint_material_k[bend_idx],
+                joint_rho[bend_idx],
+                joint_penalty_kd[bend_idx],
+                lambda_ang[1],
+                sigma[1],
+                friction_tangent[1],
+                dt,
+            )
+            twist_tangent, twist_defect = _normalized_cable_row(
+                twist_error,
+                twist_error - delta_kappa[2],
+                joint_material_k[twist_idx],
+                joint_rho[twist_idx],
+                joint_penalty_kd[twist_idx],
+                lambda_ang[2],
+                sigma[2],
+                friction_tangent[2],
+                dt,
+            )
+            angular_mask = wp.mat33(0.0)
+            angular_compliance = wp.mat33(0.0)
+            if bend_tangent > 0.0:
+                angular_mask[0, 0] = 1.0
+                angular_compliance[0, 0] = 1.0 / bend_tangent
+            else:
+                angular_compliance[0, 0] = 1.0
+            if bend_tangent_y > 0.0:
+                angular_mask[1, 1] = 1.0
+                angular_compliance[1, 1] = 1.0 / bend_tangent_y
+            else:
+                angular_compliance[1, 1] = 1.0
+            if twist_tangent > 0.0:
+                angular_mask[2, 2] = 1.0
+                angular_compliance[2, 2] = 1.0 / twist_tangent
+            else:
+                angular_compliance[2, 2] = 1.0
+
+            parent_angular_jacobian = _rod_bend_twist_jacobian_z_global(q_wp, measure, True)
+            child_angular_jacobian = _rod_bend_twist_jacobian_z_global(q_wp, measure, False)
+            jp = _set_spatial_block(jp, 1, 1, angular_mask * parent_angular_jacobian)
+            jc = _set_spatial_block(jc, 1, 1, angular_mask * child_angular_jacobian)
+
+            material_compliance = wp.spatial_matrix(0.0)
+            material_compliance = _set_spatial_block(material_compliance, 0, 0, linear_compliance)
+            material_compliance = _set_spatial_block(material_compliance, 1, 1, angular_compliance)
+            defect = wp.spatial_vector(
+                wp.vec3(shear_defect_x, shear_defect_y, stretch_defect),
+                wp.vec3(bend_defect_x, bend_defect_y, twist_defect),
+            )
+            if slope_only:
+                _accumulate_joint_slope(
+                    parent,
+                    child,
+                    body_slot,
+                    body_island,
+                    jp,
+                    jc,
+                    material_compliance,
+                    defect,
+                    wp.spatial_vector(),
+                    True,
+                    correction,
+                    merit,
+                )
+                return
+            if wp.static(fuse_rod_stress):
+                if build_majorizer and parent >= 0:
+                    jp, jc, material_compliance, defect = _stress_majorized_row(
+                        joint,
+                        joint_stress_slot,
+                        joint_parent,
+                        joint_child,
+                        joint_X_p,
+                        joint_X_c,
+                        body_q,
+                        body_com,
+                        body_inv_mass,
+                        body_slot,
+                        jp,
+                        jc,
+                        material_compliance,
+                        defect,
+                        body_stress,
+                    )
+            jacobian_parent[row] = jp
+            jacobian_child[row] = jc
+            compliance[row] = material_compliance
+            residual[row] = defect
+            row_active[row] = (
+                1
+                if shear_tangent > 0.0
+                or shear_tangent_y > 0.0
+                or stretch_tangent > 0.0
+                or bend_tangent > 0.0
+                or bend_tangent_y > 0.0
+                or twist_tangent > 0.0
+                else 0
             )
             return
-        jacobian_parent[row] = jp
-        jacobian_child[row] = jc
-        compliance[row] = material_compliance
-        residual[row] = defect
-        row_active[row] = (
-            1
-            if shear_tangent > 0.0
-            or shear_tangent_y > 0.0
-            or stretch_tangent > 0.0
-            or bend_tangent > 0.0
-            or bend_tangent_y > 0.0
-            or twist_tangent > 0.0
-            else 0
+
+        if wp.static(fuse_rod_stress):
+            # Fused graphs contain only parented rods, which returned above.
+            return
+
+        lin_count = 0
+        ang_count = 0
+        qd_start = joint_qd_start[joint]
+        if jt == JointType.PRISMATIC:
+            lin_count = 1
+        elif jt == JointType.REVOLUTE:
+            ang_count = 1
+        elif jt == JointType.D6:
+            lin_count = joint_dof_dim[joint, 0]
+            ang_count = joint_dof_dim[joint, 1]
+        kappa, angular_jacobian_world = compute_joint_kappa_and_jacobian(
+            joint_axis, qd_start + lin_count, ang_count, q_wp, q_wc, q_wp_rest, q_wc_rest
         )
-        return
+        p_linear, p_angular = build_joint_projectors(jt, joint_axis, qd_start, lin_count, ang_count, q_wp)
+        if jt == JointType.BALL:
+            p_angular = wp.mat33(0.0)
 
-    lin_count = 0
-    ang_count = 0
-    qd_start = joint_qd_start[joint]
-    if jt == JointType.PRISMATIC:
-        lin_count = 1
-    elif jt == JointType.REVOLUTE:
-        ang_count = 1
-    elif jt == JointType.D6:
-        lin_count = joint_dof_dim[joint, 0]
-        ang_count = joint_dof_dim[joint, 1]
-    kappa, angular_jacobian_world = compute_joint_kappa_and_jacobian(
-        joint_axis, qd_start + lin_count, ang_count, q_wp, q_wc, q_wp_rest, q_wc_rest
-    )
-    p_linear, p_angular = build_joint_projectors(jt, joint_axis, qd_start, lin_count, ang_count, q_wp)
-    if jt == JointType.BALL:
-        p_angular = wp.mat33(0.0)
+        stretch_k = wp.max(joint_material_k[c_start], 0.0)
+        stretch_rho = wp.max(joint_rho[c_start], 0.0)
+        stretch_s, stretch_primal_k, _stretch_a = _compliant_alm_coefficients(stretch_k, stretch_rho)
+        stretch_d = wp.max(joint_penalty_kd[c_start], 0.0) / dt
+        bend_k = 0.0
+        bend_s = 0.0
+        bend_primal_k = 0.0
+        bend_d = 0.0
+        if jt != JointType.BALL:
+            bend_k = wp.max(joint_material_k[c_start + 1], 0.0)
+            bend_rho = wp.max(joint_rho[c_start + 1], 0.0)
+            bend_s, bend_primal_k, _bend_a = _compliant_alm_coefficients(bend_k, bend_rho)
+            bend_d = wp.max(joint_penalty_kd[c_start + 1], 0.0) / dt
+        stretch_scale = stretch_primal_k + stretch_d
+        bend_offset = bend_s * (p_angular * joint_lambda_ang[joint])
+        stretch_enabled = stretch_scale > 0.0 and wp.trace(p_linear) > 1.0e-6
+        bend_enabled = wp.trace(p_angular) > 1.0e-6 and bend_primal_k + bend_d > 0.0
+        jp = wp.spatial_matrix(0.0)
+        jc = wp.spatial_matrix(0.0)
+        material_compliance = wp.spatial_matrix(0.0)
+        c_linear = wp.vec3(0.0)
+        c_angular = wp.vec3(0.0)
 
-    stretch_k = wp.max(joint_material_k[c_start], 0.0)
-    stretch_rho = wp.max(joint_rho[c_start], 0.0)
-    stretch_s, stretch_primal_k, _stretch_a = _compliant_alm_coefficients(stretch_k, stretch_rho)
-    stretch_d = wp.max(joint_penalty_kd[c_start], 0.0) / dt
-    bend_k = 0.0
-    bend_s = 0.0
-    bend_primal_k = 0.0
-    bend_d = 0.0
-    if jt != JointType.BALL:
-        bend_k = wp.max(joint_material_k[c_start + 1], 0.0)
-        bend_rho = wp.max(joint_rho[c_start + 1], 0.0)
-        bend_s, bend_primal_k, _bend_a = _compliant_alm_coefficients(bend_k, bend_rho)
-        bend_d = wp.max(joint_penalty_kd[c_start + 1], 0.0) / dt
-    stretch_scale = stretch_primal_k + stretch_d
-    bend_offset = bend_s * (p_angular * joint_lambda_ang[joint])
-    stretch_enabled = stretch_scale > 0.0 and wp.trace(p_linear) > 1.0e-6
-    bend_enabled = wp.trace(p_angular) > 1.0e-6 and bend_primal_k + bend_d > 0.0
-    jp = wp.spatial_matrix(0.0)
-    jc = wp.spatial_matrix(0.0)
-    material_compliance = wp.spatial_matrix(0.0)
-    c_linear = wp.vec3(0.0)
-    c_angular = wp.vec3(0.0)
+        if stretch_enabled:
+            parent_com_world = wp.vec3(0.0)
+            if parent >= 0:
+                parent_com_world = wp.transform_point(parent_pose, body_com[parent])
+            child_com_world = wp.transform_point(child_pose, body_com[child])
+            r_parent = x_p - parent_com_world
+            r_child = x_c - child_com_world
 
-    if stretch_enabled:
+            jp = _set_spatial_block(jp, 0, 0, -p_linear)
+            jp = _set_spatial_block(jp, 0, 1, p_linear * wp.skew(r_parent))
+            jc = _set_spatial_block(jc, 0, 0, p_linear)
+            jc = _set_spatial_block(jc, 0, 1, -(p_linear * wp.skew(r_child)))
+            stretch_compliance = 1.0 / stretch_scale
+            linear_compliance = stretch_compliance * p_linear + (wp.identity(3, float) - p_linear)
+            material_compliance = _set_spatial_block(material_compliance, 0, 0, linear_compliance)
+            linear_error = p_linear * (x_c - x_p - stab_alpha * joint_C0_lin[joint])
+            linear_previous = p_linear * (x_c_prev - x_p_prev)
+            # Form the normalized compliant-ALM defect by bounded ratios. This is
+            # exactly the force/tangent row used by local VBD, including damping
+            # and the current multiplier.
+            c_linear = (
+                (stretch_primal_k / stretch_scale) * linear_error
+                + (stretch_s / stretch_scale) * (p_linear * joint_lambda_lin[joint])
+                + (stretch_d / stretch_scale) * (p_linear * (x_c - x_p) - linear_previous)
+            )
+        else:
+            for axis in range(3):
+                material_compliance[axis, axis] = 1.0
+
+        if bend_enabled:
+            angular_jacobian = p_angular * wp.transpose(angular_jacobian_world)
+            jp = _set_spatial_block(jp, 1, 1, -angular_jacobian)
+            jc = _set_spatial_block(jc, 1, 1, angular_jacobian)
+            angular_error = p_angular * (kappa - stab_alpha * joint_C0_ang[joint])
+            # Match local VBD's current-Jacobian angular-velocity damping.
+            omega_parent = quat_velocity(q_wp, q_wp_prev, dt)
+            omega_child = quat_velocity(q_wc, q_wc_prev, dt)
+            angular_rate = dt * (p_angular * compute_kappa_dot(angular_jacobian_world, omega_parent, omega_child))
+            bend_scale = bend_primal_k + bend_d
+            angular_compliance = (1.0 / bend_scale) * p_angular + (wp.identity(3, float) - p_angular)
+            material_compliance = _set_spatial_block(material_compliance, 1, 1, angular_compliance)
+            c_angular = (
+                (bend_primal_k / bend_scale) * angular_error
+                + (bend_d / bend_scale) * angular_rate
+                + bend_offset / bend_scale
+            )
+        else:
+            for axis in range(3):
+                material_compliance[axis + 3, axis + 3] = 1.0
+
+        # Recover the projected force before adding free-axis drive/limit rows.
+        # These separate coefficients avoid inverting a rotated FP32 compliance
+        # whose small eigenvalues can be lost at large stiffness ratios.
+        objective_linear = stretch_scale * c_linear
+        objective_angular = (bend_primal_k + bend_d) * c_angular
+
+        # Free-axis compliance is filled directly below.  Keeping the temporary
+        # unit eigenvalue and later applying ``I + (1/tangent - 1) aa^T`` loses
+        # ``1/tangent`` to float32 cancellation for near-rigid drives.  Start from
+        # only the constrained projector so every active free-axis eigenvalue is
+        # written as a positive quantity without subtraction.
+        if lin_count > 0:
+            constrained_linear_compliance = p_linear
+            if stretch_enabled:
+                constrained_linear_compliance = (1.0 / stretch_scale) * p_linear
+            material_compliance = _set_spatial_block(material_compliance, 0, 0, constrained_linear_compliance)
+        if ang_count > 0:
+            constrained_angular_compliance = p_angular
+            if bend_enabled:
+                constrained_angular_compliance = (1.0 / (bend_primal_k + bend_d)) * p_angular
+            material_compliance = _set_spatial_block(material_compliance, 1, 1, constrained_angular_compliance)
+
+        # The six-dimensional joint row already has one component for every free
+        # joint axis.  Populate those otherwise-neutral components with finite
+        # drive or active-limit rows.  This supplies their cross-body tangent to
+        # the same KKT solve without adding graph rows or a second solver path.
+        target_q_base = joint_target_q_start[joint]
         parent_com_world = wp.vec3(0.0)
         if parent >= 0:
             parent_com_world = wp.transform_point(parent_pose, body_com[parent])
         child_com_world = wp.transform_point(child_pose, body_com[child])
         r_parent = x_p - parent_com_world
         r_child = x_c - child_com_world
+        relative_linear = x_c - x_p
+        relative_linear_previous = x_c_prev - x_p_prev
+        drive_limit_enabled = False
 
-        jp = _set_spatial_block(jp, 0, 0, -p_linear)
-        jp = _set_spatial_block(jp, 0, 1, p_linear * wp.skew(r_parent))
-        jc = _set_spatial_block(jc, 0, 0, p_linear)
-        jc = _set_spatial_block(jc, 0, 1, -(p_linear * wp.skew(r_child)))
-        stretch_compliance = 1.0 / stretch_scale
-        linear_compliance = stretch_compliance * p_linear + (wp.identity(3, float) - p_linear)
-        material_compliance = _set_spatial_block(material_compliance, 0, 0, linear_compliance)
-        linear_error = p_linear * (x_c - x_p - stab_alpha * joint_C0_lin[joint])
-        linear_previous = p_linear * (x_c_prev - x_p_prev)
-        # Form the normalized compliant-ALM defect by bounded ratios. This is
-        # exactly the force/tangent row used by local VBD, including damping
-        # and the current multiplier.
-        c_linear = (
-            (stretch_primal_k / stretch_scale) * linear_error
-            + (stretch_s / stretch_scale) * (p_linear * joint_lambda_lin[joint])
-            + (stretch_d / stretch_scale) * (p_linear * (x_c - x_p) - linear_previous)
-        )
-    else:
-        for axis in range(3):
-            material_compliance[axis, axis] = 1.0
-
-    if bend_enabled:
-        angular_jacobian = p_angular * wp.transpose(angular_jacobian_world)
-        jp = _set_spatial_block(jp, 1, 1, -angular_jacobian)
-        jc = _set_spatial_block(jc, 1, 1, angular_jacobian)
-        angular_error = p_angular * (kappa - stab_alpha * joint_C0_ang[joint])
-        # Match local VBD's current-Jacobian angular-velocity damping.
-        omega_parent = quat_velocity(q_wp, q_wp_prev, dt)
-        omega_child = quat_velocity(q_wc, q_wc_prev, dt)
-        angular_rate = dt * (p_angular * compute_kappa_dot(angular_jacobian_world, omega_parent, omega_child))
-        bend_scale = bend_primal_k + bend_d
-        angular_compliance = (1.0 / bend_scale) * p_angular + (wp.identity(3, float) - p_angular)
-        material_compliance = _set_spatial_block(material_compliance, 1, 1, angular_compliance)
-        c_angular = (
-            (bend_primal_k / bend_scale) * angular_error
-            + (bend_d / bend_scale) * angular_rate
-            + bend_offset / bend_scale
-        )
-    else:
-        for axis in range(3):
-            material_compliance[axis + 3, axis + 3] = 1.0
-
-    # Recover the projected force before adding free-axis drive/limit rows.
-    # These separate coefficients avoid inverting a rotated FP32 compliance
-    # whose small eigenvalues can be lost at large stiffness ratios.
-    objective_linear = stretch_scale * c_linear
-    objective_angular = (bend_primal_k + bend_d) * c_angular
-
-    # Free-axis compliance is filled directly below.  Keeping the temporary
-    # unit eigenvalue and later applying ``I + (1/tangent - 1) aa^T`` loses
-    # ``1/tangent`` to float32 cancellation for near-rigid drives.  Start from
-    # only the constrained projector so every active free-axis eigenvalue is
-    # written as a positive quantity without subtraction.
-    if lin_count > 0:
-        constrained_linear_compliance = p_linear
-        if stretch_enabled:
-            constrained_linear_compliance = (1.0 / stretch_scale) * p_linear
-        material_compliance = _set_spatial_block(material_compliance, 0, 0, constrained_linear_compliance)
-    if ang_count > 0:
-        constrained_angular_compliance = p_angular
-        if bend_enabled:
-            constrained_angular_compliance = (1.0 / (bend_primal_k + bend_d)) * p_angular
-        material_compliance = _set_spatial_block(material_compliance, 1, 1, constrained_angular_compliance)
-
-    # The six-dimensional joint row already has one component for every free
-    # joint axis.  Populate those otherwise-neutral components with finite
-    # drive or active-limit rows.  This supplies their cross-body tangent to
-    # the same KKT solve without adding graph rows or a second solver path.
-    target_q_base = joint_target_q_start[joint]
-    parent_com_world = wp.vec3(0.0)
-    if parent >= 0:
-        parent_com_world = wp.transform_point(parent_pose, body_com[parent])
-    child_com_world = wp.transform_point(child_pose, body_com[child])
-    r_parent = x_p - parent_com_world
-    r_child = x_c - child_com_world
-    relative_linear = x_c - x_p
-    relative_linear_previous = x_c_prev - x_p_prev
-    drive_limit_enabled = False
-
-    for free_linear_axis in range(3):
-        if free_linear_axis < lin_count:
-            dof = qd_start + free_linear_axis
-            target_index = target_q_base + free_linear_axis
-            axis_world = wp.normalize(wp.quat_rotate(q_wp, joint_axis[dof]))
-            coordinate = wp.dot(relative_linear, axis_world)
-            coordinate_previous = wp.dot(relative_linear_previous, axis_world)
-            target_position = joint_target_q[target_index]
-            target_velocity = joint_target_qd[dof]
-            drive_k = joint_target_ke[dof]
-            drive_d = joint_target_kd[dof]
-            lower = joint_limit_lower[dof]
-            upper = joint_limit_upper[dof]
-            has_drive = drive_k > 0.0 or drive_d > 0.0
-            has_limit = joint_limit_ke[dof] > 0.0 and (lower > -MAXVAL or upper < MAXVAL)
-            mode, drive_error = _resolve_active_drive_row(
-                coordinate,
-                target_position,
-                lower,
-                upper,
-                has_drive,
-                has_limit,
-                1,
-            )
-            inv_dt = 1.0 / dt
-            rate = (coordinate - coordinate_previous) * inv_dt
-            force, tangent = _evaluate_drive_axis(
-                drive_error,
-                rate,
-                target_velocity,
-                mode,
-                drive_k,
-                drive_d,
-                joint_drive_limit_support[dof],
-                joint_drive_lambda[dof],
-                inv_dt,
-            )
-            limit_force, limit_tangent = _evaluate_limit_axis(
-                coordinate,
-                lower,
-                upper,
-                has_limit,
-                joint_limit_ke[dof],
-                joint_limit_kd[dof],
-                rate,
-                joint_drive_limit_support[dof],
-                joint_limit_lambda[dof],
-                inv_dt,
-            )
-            if has_limit and limit_tangent == 0.0:
-                # The squared distance to an interval has this curvature bound
-                # even inside the interval. Anticipate activation without
-                # adding a limit force or replacing finite compliance by a gate.
-                _, limit_tangent, _ = _compliant_alm_coefficients(
-                    joint_limit_ke[dof] + joint_limit_kd[dof] * inv_dt,
-                    joint_drive_limit_support[dof],
-                )
-            force = force + limit_force
-            tangent = tangent + limit_tangent
-            normalized_defect = force / tangent if tangent > 0.0 else 0.0
-            if tangent > 0.0:
-                drive_limit_enabled = True
-                axis_projector = wp.outer(axis_world, axis_world)
-                jp = _set_spatial_block(jp, 0, 0, _spatial_block(jp, 0, 0) - axis_projector)
-                jp = _set_spatial_block(
-                    jp,
-                    0,
-                    1,
-                    _spatial_block(jp, 0, 1) + axis_projector * wp.skew(r_parent),
-                )
-                jc = _set_spatial_block(jc, 0, 0, _spatial_block(jc, 0, 0) + axis_projector)
-                jc = _set_spatial_block(
-                    jc,
-                    0,
-                    1,
-                    _spatial_block(jc, 0, 1) - axis_projector * wp.skew(r_child),
-                )
-                linear_compliance = _spatial_block(material_compliance, 0, 0)
-                linear_compliance = linear_compliance + (1.0 / tangent) * axis_projector
-                material_compliance = _set_spatial_block(material_compliance, 0, 0, linear_compliance)
-                c_linear = c_linear + normalized_defect * axis_world
-                objective_linear = objective_linear + force * axis_world
-            else:
-                linear_compliance = _spatial_block(material_compliance, 0, 0)
-                material_compliance = _set_spatial_block(
-                    material_compliance,
-                    0,
-                    0,
-                    linear_compliance + wp.outer(axis_world, axis_world),
-                )
-
-    if ang_count > 0:
-        omega_parent = wp.vec3(0.0)
-        if parent >= 0:
-            omega_parent = quat_velocity(q_wp, q_wp_prev, dt)
-        omega_child = quat_velocity(q_wc, q_wc_prev, dt)
-        kappa_rate = compute_kappa_dot(angular_jacobian_world, omega_parent, omega_child)
-        for free_angular_axis in range(3):
-            if free_angular_axis < ang_count:
-                dof = qd_start + lin_count + free_angular_axis
-                target_index = target_q_base + lin_count + free_angular_axis
-                axis_local = wp.normalize(joint_axis[dof])
-                coordinate = wp.dot(kappa, axis_local) + joint_rest_angle[dof]
-                if jt == JointType.REVOLUTE or (jt == JointType.D6 and ang_count == 1):
-                    coordinate = _unwrap_hinge_angle(coordinate, joint_angle_prev[dof])
+        for free_linear_axis in range(3):
+            if free_linear_axis < lin_count:
+                dof = qd_start + free_linear_axis
+                target_index = target_q_base + free_linear_axis
+                axis_world = wp.normalize(wp.quat_rotate(q_wp, joint_axis[dof]))
+                coordinate = wp.dot(relative_linear, axis_world)
+                coordinate_previous = wp.dot(relative_linear_previous, axis_world)
                 target_position = joint_target_q[target_index]
                 target_velocity = joint_target_qd[dof]
                 drive_k = joint_target_ke[dof]
@@ -1696,7 +1755,7 @@ def linearize_joint_path_rows(
                     1,
                 )
                 inv_dt = 1.0 / dt
-                rate = wp.dot(kappa_rate, axis_local)
+                rate = (coordinate - coordinate_previous) * inv_dt
                 force, tangent = _evaluate_drive_axis(
                     drive_error,
                     rate,
@@ -1721,6 +1780,9 @@ def linearize_joint_path_rows(
                     inv_dt,
                 )
                 if has_limit and limit_tangent == 0.0:
+                    # The squared distance to an interval has this curvature bound
+                    # even inside the interval. Anticipate activation without
+                    # adding a limit force or replacing finite compliance by a gate.
                     _, limit_tangent, _ = _compliant_alm_coefficients(
                         joint_limit_ke[dof] + joint_limit_kd[dof] * inv_dt,
                         joint_drive_limit_support[dof],
@@ -1730,45 +1792,248 @@ def linearize_joint_path_rows(
                 normalized_defect = force / tangent if tangent > 0.0 else 0.0
                 if tangent > 0.0:
                     drive_limit_enabled = True
-                    axis_projector = wp.outer(axis_local, axis_local)
-                    angular_jacobian = axis_projector * wp.transpose(angular_jacobian_world)
-                    jp = _set_spatial_block(jp, 1, 1, _spatial_block(jp, 1, 1) - angular_jacobian)
-                    jc = _set_spatial_block(jc, 1, 1, _spatial_block(jc, 1, 1) + angular_jacobian)
-                    angular_compliance = _spatial_block(material_compliance, 1, 1)
-                    angular_compliance = angular_compliance + (1.0 / tangent) * axis_projector
-                    material_compliance = _set_spatial_block(material_compliance, 1, 1, angular_compliance)
-                    c_angular = c_angular + normalized_defect * axis_local
-                    objective_angular = objective_angular + force * axis_local
+                    axis_projector = wp.outer(axis_world, axis_world)
+                    jp = _set_spatial_block(jp, 0, 0, _spatial_block(jp, 0, 0) - axis_projector)
+                    jp = _set_spatial_block(
+                        jp,
+                        0,
+                        1,
+                        _spatial_block(jp, 0, 1) + axis_projector * wp.skew(r_parent),
+                    )
+                    jc = _set_spatial_block(jc, 0, 0, _spatial_block(jc, 0, 0) + axis_projector)
+                    jc = _set_spatial_block(
+                        jc,
+                        0,
+                        1,
+                        _spatial_block(jc, 0, 1) - axis_projector * wp.skew(r_child),
+                    )
+                    linear_compliance = _spatial_block(material_compliance, 0, 0)
+                    linear_compliance = linear_compliance + (1.0 / tangent) * axis_projector
+                    material_compliance = _set_spatial_block(material_compliance, 0, 0, linear_compliance)
+                    c_linear = c_linear + normalized_defect * axis_world
+                    objective_linear = objective_linear + force * axis_world
                 else:
-                    angular_compliance = _spatial_block(material_compliance, 1, 1)
+                    linear_compliance = _spatial_block(material_compliance, 0, 0)
                     material_compliance = _set_spatial_block(
                         material_compliance,
-                        1,
-                        1,
-                        angular_compliance + wp.outer(axis_local, axis_local),
+                        0,
+                        0,
+                        linear_compliance + wp.outer(axis_world, axis_world),
                     )
 
-    if slope_only:
-        _accumulate_joint_slope(
-            parent,
-            child,
-            body_slot,
-            body_island,
-            jp,
-            jc,
-            material_compliance,
-            wp.spatial_vector(c_linear, c_angular),
-            wp.spatial_vector(objective_linear, objective_angular),
-            jt == JointType.BALL or jt == JointType.FIXED,
-            correction,
-            merit,
-        )
-        return
-    jacobian_parent[row] = jp
-    jacobian_child[row] = jc
-    compliance[row] = material_compliance
-    residual[row] = wp.spatial_vector(c_linear, c_angular)
-    row_active[row] = 1 if stretch_enabled or bend_enabled or drive_limit_enabled else 0
+        if ang_count > 0:
+            omega_parent = wp.vec3(0.0)
+            if parent >= 0:
+                omega_parent = quat_velocity(q_wp, q_wp_prev, dt)
+            omega_child = quat_velocity(q_wc, q_wc_prev, dt)
+            kappa_rate = compute_kappa_dot(angular_jacobian_world, omega_parent, omega_child)
+            for free_angular_axis in range(3):
+                if free_angular_axis < ang_count:
+                    dof = qd_start + lin_count + free_angular_axis
+                    target_index = target_q_base + lin_count + free_angular_axis
+                    axis_local = wp.normalize(joint_axis[dof])
+                    coordinate = wp.dot(kappa, axis_local) + joint_rest_angle[dof]
+                    if jt == JointType.REVOLUTE or (jt == JointType.D6 and ang_count == 1):
+                        coordinate = _unwrap_hinge_angle(coordinate, joint_angle_prev[dof])
+                    target_position = joint_target_q[target_index]
+                    target_velocity = joint_target_qd[dof]
+                    drive_k = joint_target_ke[dof]
+                    drive_d = joint_target_kd[dof]
+                    lower = joint_limit_lower[dof]
+                    upper = joint_limit_upper[dof]
+                    has_drive = drive_k > 0.0 or drive_d > 0.0
+                    has_limit = joint_limit_ke[dof] > 0.0 and (lower > -MAXVAL or upper < MAXVAL)
+                    mode, drive_error = _resolve_active_drive_row(
+                        coordinate,
+                        target_position,
+                        lower,
+                        upper,
+                        has_drive,
+                        has_limit,
+                        1,
+                    )
+                    inv_dt = 1.0 / dt
+                    rate = wp.dot(kappa_rate, axis_local)
+                    force, tangent = _evaluate_drive_axis(
+                        drive_error,
+                        rate,
+                        target_velocity,
+                        mode,
+                        drive_k,
+                        drive_d,
+                        joint_drive_limit_support[dof],
+                        joint_drive_lambda[dof],
+                        inv_dt,
+                    )
+                    limit_force, limit_tangent = _evaluate_limit_axis(
+                        coordinate,
+                        lower,
+                        upper,
+                        has_limit,
+                        joint_limit_ke[dof],
+                        joint_limit_kd[dof],
+                        rate,
+                        joint_drive_limit_support[dof],
+                        joint_limit_lambda[dof],
+                        inv_dt,
+                    )
+                    if has_limit and limit_tangent == 0.0:
+                        _, limit_tangent, _ = _compliant_alm_coefficients(
+                            joint_limit_ke[dof] + joint_limit_kd[dof] * inv_dt,
+                            joint_drive_limit_support[dof],
+                        )
+                    force = force + limit_force
+                    tangent = tangent + limit_tangent
+                    normalized_defect = force / tangent if tangent > 0.0 else 0.0
+                    if tangent > 0.0:
+                        drive_limit_enabled = True
+                        axis_projector = wp.outer(axis_local, axis_local)
+                        angular_jacobian = axis_projector * wp.transpose(angular_jacobian_world)
+                        jp = _set_spatial_block(jp, 1, 1, _spatial_block(jp, 1, 1) - angular_jacobian)
+                        jc = _set_spatial_block(jc, 1, 1, _spatial_block(jc, 1, 1) + angular_jacobian)
+                        angular_compliance = _spatial_block(material_compliance, 1, 1)
+                        angular_compliance = angular_compliance + (1.0 / tangent) * axis_projector
+                        material_compliance = _set_spatial_block(material_compliance, 1, 1, angular_compliance)
+                        c_angular = c_angular + normalized_defect * axis_local
+                        objective_angular = objective_angular + force * axis_local
+                    else:
+                        angular_compliance = _spatial_block(material_compliance, 1, 1)
+                        material_compliance = _set_spatial_block(
+                            material_compliance,
+                            1,
+                            1,
+                            angular_compliance + wp.outer(axis_local, axis_local),
+                        )
+
+        if slope_only:
+            _accumulate_joint_slope(
+                parent,
+                child,
+                body_slot,
+                body_island,
+                jp,
+                jc,
+                material_compliance,
+                wp.spatial_vector(c_linear, c_angular),
+                wp.spatial_vector(objective_linear, objective_angular),
+                jt == JointType.BALL or jt == JointType.FIXED,
+                correction,
+                merit,
+            )
+            return
+        jacobian_parent[row] = jp
+        jacobian_child[row] = jc
+        compliance[row] = material_compliance
+        residual[row] = wp.spatial_vector(c_linear, c_angular)
+        row_active[row] = 1 if stretch_enabled or bend_enabled or drive_limit_enabled else 0
+
+    return wp.kernel(linearize_joint_path_rows)
+
+
+linearize_joint_path_rows = _make_linearize_joint_path_rows(False)
+_linearize_fused_rod_rows = _make_linearize_joint_path_rows(True)
+
+
+_SpatialRowMatrix = wp.types.matrix(shape=(1, 6), dtype=float)
+
+
+@wp.func_native("return fmaf(a, b, c);")
+def _path_matrix_fma(a: float, b: float, c: float) -> float:
+    pass
+
+
+@wp.func
+def _path_matrix_vector_row(J: wp.array3d[float], row: int, r: int, free: wp.array2d[float], body: int):
+    matrix = _SpatialRowMatrix(0.0)
+    for c in range(6):
+        matrix[0, c] = J[row, r, c]
+    value = wp.spatial_vector(free[body, 0], free[body, 1], free[body, 2], free[body, 3], free[body, 4], free[body, 5])
+    return (matrix * value)[0]
+
+
+@wp.func
+def _path_row_product(J: wp.array3d[float], row: int, r: int, M: wp.array3d[float], body: int):
+    result = wp.spatial_vector()
+    for c in range(6):
+        value = float(0.0)
+        for t in range(6):
+            value = _path_matrix_fma(J[row, r, t], M[body, t, c], value)
+        result[c] = value
+    return result
+
+
+@wp.func
+def _path_row_dot(v: wp.spatial_vector, J: wp.array3d[float], row: int, c: int):
+    value = float(0.0)
+    for t in range(6):
+        value = _path_matrix_fma(v[t], J[row, c, t], value)
+    return value
+
+
+@wp.kernel
+def assemble_joint_path_system_rows(
+    bounds: wp.array[wp.vec2i],
+    bodies: wp.array[wp.vec2i],
+    inverse: wp.array3d[float],
+    free: wp.array2d[float],
+    jp: wp.array3d[float],
+    jc: wp.array3d[float],
+    compliance: wp.array3d[float],
+    residual: wp.array2d[float],
+    lower: wp.array3d[float],
+    diagonal: wp.array3d[float],
+    upper: wp.array3d[float],
+    rhs: wp.array2d[float],
+):
+    """Assemble one scalar row per thread without changing the block equations.
+
+    Native matrix-vector evaluation and explicit matrix FMA match the reference
+    arithmetic order. Each thread owns disjoint output entries, including when
+    compliance/diagonal and residual/rhs reuse the same storage.
+    """
+    row, r = wp.tid()
+    p, c = bodies[row][0], bodies[row][1]
+    ap, ac = wp.spatial_vector(), wp.spatial_vector()
+    value = residual[row, r]
+    if p >= 0:
+        ap = _path_row_product(jp, row, r, inverse, p)
+        f = _path_matrix_vector_row(jp, row, r, free, p)
+        value += f
+    if c >= 0:
+        ac = _path_row_product(jc, row, r, inverse, c)
+        f = _path_matrix_vector_row(jc, row, r, free, c)
+        value += f
+    rhs[row, r] = value
+    for col in range(6):
+        d = compliance[row, r, col]
+        if p >= 0:
+            d += _path_row_dot(ap, jp, row, col)
+        if c >= 0:
+            d += _path_row_dot(ac, jc, row, col)
+        diagonal[row, r, col] = d
+        lo, up = float(0.0), float(0.0)
+        if row > bounds[row][0]:
+            previous = bodies[row - 1]
+            shared = p
+            if shared < 0 or (shared != previous[0] and shared != previous[1]):
+                shared = c
+            a = ap if p == shared else ac
+            if previous[0] == shared:
+                lo = _path_row_dot(a, jp, row - 1, col)
+            else:
+                lo = _path_row_dot(a, jc, row - 1, col)
+        if row + 1 < bounds[row][1]:
+            following = bodies[row + 1]
+            shared = p
+            if shared < 0 or (shared != following[0] and shared != following[1]):
+                shared = c
+            a = ap if p == shared else ac
+            if following[0] == shared:
+                up = _path_row_dot(a, jp, row + 1, col)
+            else:
+                up = _path_row_dot(a, jc, row + 1, col)
+        lower[row, r, col] = lo
+        upper[row, r, col] = up
 
 
 @wp.kernel
@@ -3629,6 +3894,14 @@ def correct_free_translation(
             correction[slot] = value
 
 
+@wp.kernel
+def _finish_translation_iteration(remaining: wp.array[int], pending: wp.array[int]):
+    """Bound a captured reconciliation loop without changing its numerical stop."""
+    remaining[0] -= 1
+    if remaining[0] == 0:
+        pending[0] = 0
+
+
 @wp.func
 def _free_rigid_basis(offset: wp.vec3d):
     basis = wp.spatial_matrixd(0.0)
@@ -4859,6 +5132,8 @@ def _shared_structural_payload_bytes(
     graph_body_count: int,
     island_count: int,
     joint_count: int,
+    *,
+    is_cuda: bool,
 ) -> int:
     """Count arrays owned once by an active ``StructuralGraphKKT``."""
     return (
@@ -4869,7 +5144,7 @@ def _shared_structural_payload_bytes(
         + _array_payload_bytes(model_body_count, wp.transform)
         + _array_payload_bytes(island_count, wp.bool)
         + 2 * _array_payload_bytes(island_count, wp.float64)
-        + _array_payload_bytes(1, wp.int32)
+        + _array_payload_bytes(1 + int(is_cuda), wp.int32)
         + _array_payload_bytes(graph_body_count, wp.spatial_vector)
         + _array_payload_bytes(island_count, wp.int32)
         + _array_payload_bytes(island_count, wp.mat44d)
@@ -6714,11 +6989,24 @@ class _PathBucket:
             (stride, device_array(eliminated, wp.vec3i), device_array(survivors, wp.vec3i))
             for stride, eliminated, survivors in self.cr_schedule.levels
         ]
+        # Each path takes exactly one route and owns its rows, so CUDA may run
+        # the persistent route beside the level route without changing arithmetic.
+        long_route = bool(self.cr_levels) or self.tail_paths is not None
+        self.cr_side_stream = (
+            wp.Stream(self.device) if fused and self.persistent_paths is not None and long_route else None
+        )
 
     def solve_rows(self):
         """Solve every block-tridiagonal path in four in-place row buffers."""
         buffers = [self.lower[0], self.diagonal[0], self.upper[0], self.rhs[0]]
         invert_limit = _CR_TAIL_MAX_ROWS if self.cr_fused else _CR_SERIAL_TERMINAL_SIZE
+        side = self.cr_side_stream
+        if side is not None:
+            # The level route is the longer dependent chain: start it first, join before recovery.
+            main = wp.get_stream(self.device)
+            side.wait_stream(main)
+            with wp.ScopedStream(side, sync_enter=False):
+                self._solve_long_rows(buffers, invert_limit)
         if self.persistent_paths is not None:
             wp.launch(
                 solve_cr_persistent,
@@ -6728,6 +7016,13 @@ class _PathBucket:
                 device=self.device,
                 block_dim=self.spatial_block_dim,
             )
+        if side is not None:
+            main.wait_stream(side)
+        else:
+            self._solve_long_rows(buffers, invert_limit)
+
+    def _solve_long_rows(self, buffers, invert_limit):
+        """Reduce paths too long for one block level by level, then finish their tails."""
         for level_idx, (stride, eliminated, survivors) in enumerate(self.cr_levels):
             if level_idx == 0:
                 wp.launch(
@@ -8203,6 +8498,7 @@ class StructuralGraphKKT:
         self._payload_budget_bytes = _structural_payload_budget(self.device)
         self._estimated_bytes = 0
         self.graph_body_count = 0
+        self._fuse_rod_stress = False
         self.use_fused_solve_reset = True
         self.use_fused_contact_classification = True
 
@@ -8373,6 +8669,7 @@ class StructuralGraphKKT:
                     len(prospective_body_ids),
                     selected_island_count + middle,
                     len(prospective_joint_ids),
+                    is_cuda=self.device.is_cuda,
                 )
                 if _within_structural_payload_budget(prospective_total, self._payload_budget_bytes):
                     lower = middle
@@ -8435,6 +8732,11 @@ class StructuralGraphKKT:
         graph_body_ids = sorted(selected_body_ids)
         graph_body_island = body_structural_island[graph_body_ids]
         graph_joint_ids = sorted(selected_joint_ids)
+        # Fuse only when every selected row can own its full stress update.
+        # Mixed/world-anchored graphs retain the separate row-metric pass.
+        self._fuse_rod_stress = all(
+            joint_type[joint] == int(JointType.ROD) and parent[joint] >= 0 for joint in graph_joint_ids
+        )
         body_slot = {body: slot for slot, body in enumerate(graph_body_ids)}
 
         for plan in selected_plans:
@@ -8545,6 +8847,9 @@ class StructuralGraphKKT:
         self.line_search_slope = wp.zeros(len(components), dtype=wp.float64, device=self.device)
         self.line_search_initial_slope = wp.empty_like(self.line_search_slope)
         self.line_search_pending = wp.ones(1, dtype=int, device=self.device)
+        self.translation_iterations_remaining = (
+            wp.empty(1, dtype=int, device=self.device) if self.device.is_cuda else None
+        )
         self.body_correction = wp.zeros(self.graph_body_count, dtype=wp.spatial_vector, device=self.device)
         self.island_step_scale = wp.ones(len(components), dtype=float, device=self.device)
         self.body_matrix = wp.zeros(self.graph_body_count, dtype=wp.spatial_matrix, device=self.device)
@@ -8565,6 +8870,7 @@ class StructuralGraphKKT:
             self.graph_body_count,
             len(components),
             len(graph_joint_ids),
+            is_cuda=self.device.is_cuda,
         )
 
     def _plan_stress_incidence(
@@ -8739,7 +9045,7 @@ class StructuralGraphKKT:
                     row_active,
                 ) in linearizations:
                     wp.launch(
-                        linearize_joint_path_rows,
+                        _linearize_fused_rod_rows if self._fuse_rod_stress else linearize_joint_path_rows,
                         linearization_size,
                         inputs=[
                             linearization_joint_ids,
@@ -8796,11 +9102,15 @@ class StructuralGraphKKT:
                             compliance,
                             residual,
                             row_active,
+                            build_majorizer and self._fuse_rod_stress,
+                            self.joint_stress_slot,
+                            body_inv_mass,
+                            self.body_stress,
                         ],
                         device=self.device,
                         block_dim=self.spatial_block_dim,
                     )
-                    if build_majorizer:
+                    if build_majorizer and not self._fuse_rod_stress:
                         wp.launch(
                             add_joint_stress_majorizer,
                             linearization_size,
@@ -9002,7 +9312,23 @@ class StructuralGraphKKT:
             # Eligible islands retain all sixteen evaluations. Only reproducible
             # modes may additionally stop at float32 position roundoff.
             evaluations = 1 if contacts is None else 16
-            if track_pending and not stop_at_roundoff:
+            if self.device.is_cuda and track_pending and stop_at_roundoff and evaluations > 1:
+                # Keep the same first evaluation and at most fifteen refreshes,
+                # without replicating every conditional body into the graph.
+                translate(refresh=False)
+                self.translation_iterations_remaining.fill_(evaluations - 1)
+
+                def repeat_translation():
+                    translate()
+                    wp.launch(
+                        _finish_translation_iteration,
+                        1,
+                        inputs=[self.translation_iterations_remaining, self.line_search_pending],
+                        device=self.device,
+                    )
+
+                wp.capture_while(self.line_search_pending, repeat_translation)
+            elif track_pending and not stop_at_roundoff:
                 translate(refresh=False)
 
                 def finish_translation():
@@ -9037,27 +9363,33 @@ class StructuralGraphKKT:
             bucket.solve_tree(self.body_matrix, self.body_rhs, self.body_scale, self.body_correction)
 
         for bucket in self.path_buckets:
+            # Scalar-row CUDA assembly exposes the six independent output rows
+            # without changing Schur equations or adding temporary buffers.
+            row_parallel = self.device.is_cuda
             wp.launch(
-                assemble_joint_path_system,
-                bucket.size,
+                assemble_joint_path_system_rows if row_parallel else assemble_joint_path_system,
+                (bucket.size, 6) if row_parallel else bucket.size,
                 inputs=[
                     bucket.row_bounds,
                     bucket.row_body,
-                    self.body_inverse,
-                    self.body_free,
-                    bucket.jacobian_parent,
-                    bucket.jacobian_child,
-                    bucket.compliance,
-                    bucket.residual,
+                    *[
+                        array.view(float) if row_parallel else array
+                        for array in (
+                            self.body_inverse,
+                            self.body_free,
+                            bucket.jacobian_parent,
+                            bucket.jacobian_child,
+                            bucket.compliance,
+                            bucket.residual,
+                        )
+                    ],
                 ],
                 outputs=[
-                    bucket.lower[0],
-                    bucket.diagonal[0],
-                    bucket.upper[0],
-                    bucket.rhs[0],
+                    array.view(float) if row_parallel else array
+                    for array in (bucket.lower[0], bucket.diagonal[0], bucket.upper[0], bucket.rhs[0])
                 ],
                 device=self.device,
-                block_dim=self.spatial_block_dim,
+                block_dim=128 if row_parallel else self.spatial_block_dim,
             )
             bucket.solve_rows()
             wp.launch(

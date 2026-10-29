@@ -597,6 +597,7 @@ def _closed_prefix_payload_budget(model, count):
         len(body_ids),
         count,
         len(joint_ids),
+        is_cuda=model.device.is_cuda,
     )
 
 
@@ -1324,6 +1325,10 @@ def _linearize_bucket(model, solver, bucket, body_q, dt):
             bucket.compliance,
             bucket.residual,
             bucket.row_active,
+            False,
+            backend.joint_stress_slot,
+            model.body_inv_mass,
+            backend.body_stress,
         ],
         device=model.device,
     )
@@ -1852,7 +1857,13 @@ def _structural_kkt_bounds_material_frame_rod_stress(test, device):
                 jc.assign([child_jacobian])
                 C.assign([original_compliance])
                 c.assign([original_residual])
-                wp.launch(add_joint_stress_majorizer, 1, inputs=inputs, outputs=[row_stress], device=device)
+                wp.launch(
+                    add_joint_stress_majorizer,
+                    1,
+                    inputs=inputs,
+                    outputs=[row_stress],
+                    device=device,
+                )
                 after_jacobian = np.hstack([jp.numpy()[0], jc.numpy()[0]]).astype(np.float64)
                 expected_force = before_jacobian.T @ (
                     original_residual.astype(np.float64) / np.diag(original_compliance).astype(np.float64)
@@ -2792,6 +2803,7 @@ def _structural_kkt_estimates_allocation_payloads_exactly(test, device):
     """Match path, tree, and batched closure estimates to intercepted allocations."""
     cases = (
         ("path", lambda: _build_chain(device, segments=8)[0]),
+        ("path_unanchored", lambda: _build_chain(device, segments=8, pinned=False)[0]),
         ("path_ragged", lambda: _build_chains(device, (3, 9, 140))),
         ("tree_ragged", lambda: _build_y_trees(device, ((12, 12, 12), (16, 9, 14)))),
         ("tree", lambda: _build_y_tree(device, segments_per_branch=3)[0]),
@@ -2831,7 +2843,11 @@ def _structural_kkt_estimates_allocation_payloads_exactly(test, device):
             )
             diagnostics = backend._bucket_diagnostics
             test.assertEqual(len(diagnostics), 1)
-            expected_kind = "closed_tree" if kind.startswith("closed_tree") else kind.removesuffix("_ragged")
+            expected_kind = (
+                "closed_tree"
+                if kind.startswith("closed_tree")
+                else kind.removesuffix("_ragged").removesuffix("_unanchored")
+            )
             test.assertEqual(diagnostics[0].kind, expected_kind)
             test.assertIsNone(diagnostics[0].fallback_reason)
             if kind.startswith("closed_tree"):
@@ -3069,6 +3085,7 @@ def _structural_kkt_partial_fallback_preserves_healthy_island(test, device):
         healthy_diagnostics.body_count_total,
         healthy_diagnostics.batch_count,
         healthy_diagnostics.row_count_total,
+        is_cuda=reference_model.device.is_cuda,
     )
 
     partial_model, partial_healthy_bodies = _build_mixed_fixed_topologies(device)
@@ -4257,6 +4274,121 @@ def _structural_kkt_joint_linearizations_match_finite_difference(test, device):
                 )
 
 
+def _structural_kkt_fused_stress_clears_disabled_rows(test, device):
+    """Omit a fully fused pass without retaining disabled-row curvature."""
+    model, bodies, joints = _build_chain(device, segments=8)
+    enabled = model.joint_enabled.numpy().copy()
+    disabled_joint = int(joints[len(joints) // 2])
+    initial_pose = model.body_q.numpy().copy()
+    initial_pose[bodies[-1], 2] += 0.02
+    results = []
+    for fused in (False, True):
+        model.joint_enabled.assign(enabled)
+        solver = newton.solvers.SolverVBD(
+            model,
+            iterations=2,
+            rigid_compliant_alm=True,
+            rigid_joint_global_iterations=1,
+            deterministic=wp.DeterministicMode.RUN_TO_RUN,
+        )
+        backend = solver._structural_graph_kkt
+        test.assertTrue(backend._fuse_rod_stress)
+        backend._fuse_rod_stress = fused
+        state_a, state_b, control = model.state(), model.state(), model.control()
+        state_a.body_q.assign(initial_pose)
+
+        def advance(state_a=state_a, state_b=state_b, solver=solver, control=control):
+            state_a.clear_forces()
+            solver.step(state_a, state_b, control, None, 1.0 / 600.0)
+            state_b.clear_forces()
+            solver.step(state_b, state_a, control, None, 1.0 / 600.0)
+
+        advance()
+        if device.is_cuda:
+            with wp.ScopedCapture(device) as capture:
+                advance()
+        slots = backend.joint_stress_slot.numpy()[disabled_joint]
+        test.assertTrue(np.any(slots >= 0))
+        phases = []
+        for active in (True, False, True, False):
+            current_enabled = enabled.copy()
+            current_enabled[disabled_joint] = active
+            model.joint_enabled.assign(current_enabled)
+            # Poison old scratch so this detects stale data even at zero load.
+            backend.body_stress.fill_(wp.mat33(7.0))
+            if device.is_cuda:
+                wp.capture_launch(capture.graph)
+            else:
+                advance()
+            stress = backend.body_stress.numpy().copy()
+            if not active:
+                np.testing.assert_array_equal(stress[slots[slots >= 0]], 0.0)
+            phase = (state_a.body_q.numpy().copy(), state_a.body_qd.numpy().copy(), stress)
+            for value in phase:
+                test.assertTrue(np.isfinite(value).all())
+            phases.append(phase)
+        results.append(phases)
+    model.joint_enabled.assign(enabled)
+    for actual, expected in zip(results[1], results[0], strict=True):
+        for a, b in zip(actual, expected, strict=True):
+            test.assertEqual(a.tobytes(), b.tobytes())
+
+    # A world-anchor or a general joint still requires the separate pass.
+    for other in (_build_fixed_chain(device, link_count=4)[0], _build_loop_with_branch(device, ring_segments=8)[0]):
+        solver = newton.solvers.SolverVBD(
+            other, iterations=2, rigid_compliant_alm=True, rigid_joint_global_iterations=1
+        )
+        test.assertFalse(solver._structural_graph_kkt._fuse_rod_stress)
+
+
+def _structural_kkt_row_assembly_matches_block_equations(test, device):
+    """Row-parallel assembly preserves matrix order and in-place buffer reuse."""
+    count = 65
+    for reversed_endpoints in (False, True):
+        rng = np.random.default_rng(4381)
+        bounds = np.tile([0, count], (count, 1)).astype(np.int32)
+        bounds[:17, 1] = 17
+        bounds[17:, 0] = 17
+        bodies = np.column_stack((np.arange(count), np.arange(1, count + 1))).astype(np.int32)
+        bodies[0, 0] = -1
+        bodies[16, 1] = -1
+        if reversed_endpoints:
+            bodies = bodies[:, ::-1].copy()
+        inverse = rng.normal(size=(count + 1, 6, 6)).astype(np.float32)
+        inverse = inverse @ inverse.transpose(0, 2, 1) + np.eye(6, dtype=np.float32)
+        compliance = np.tile(np.eye(6, dtype=np.float32), (count, 1, 1))
+        residual = rng.normal(size=(count, 6)).astype(np.float32)
+        with wp.ScopedDevice(device):
+            inputs = [
+                wp.array(bounds, dtype=wp.vec2i),
+                wp.array(bodies, dtype=wp.vec2i),
+                wp.array(inverse, dtype=wp.spatial_matrix),
+                wp.array(rng.normal(size=(count + 1, 6)), dtype=wp.spatial_vector),
+                wp.array(rng.normal(size=(count, 6, 6)), dtype=wp.spatial_matrix),
+                wp.array(rng.normal(size=(count, 6, 6)), dtype=wp.spatial_matrix),
+                wp.array(compliance, dtype=wp.spatial_matrix),
+                wp.array(residual, dtype=wp.spatial_vector),
+            ]
+            output_types = (wp.spatial_matrix,) * 3 + (wp.spatial_vector,)
+            reference = [wp.empty(count, dtype=dtype) for dtype in output_types]
+            wp.launch(rigid_vbd_kkt.assemble_joint_path_system, count, inputs=inputs, outputs=reference)
+            for alias in (False, True):
+                inputs[-2].assign(compliance)
+                inputs[-1].assign(residual)
+                actual = [wp.empty(count, dtype=dtype) for dtype in output_types]
+                if alias:
+                    actual[1], actual[3] = inputs[-2], inputs[-1]
+                wp.launch(
+                    rigid_vbd_kkt.assemble_joint_path_system_rows,
+                    (count, 6),
+                    inputs=inputs[:2] + [array.view(float) for array in inputs[2:]],
+                    outputs=[array.view(float) for array in actual],
+                    block_dim=128,
+                )
+                for expected, result in zip(reference, actual, strict=True):
+                    np.testing.assert_array_equal(result.numpy().view(np.uint32), expected.numpy().view(np.uint32))
+
+
 def _structural_kkt_uses_explicit_iteration_budget(test, device):
     """Distribute the requested global passes over the local iteration budget."""
     model, _, _ = _build_chain(device, segments=4)
@@ -4330,7 +4462,7 @@ def _structural_kkt_uses_explicit_iteration_budget(test, device):
 
     test.assertEqual(
         events,
-        ["local", "global", "local", "local", "global", "local", "local"],
+        ["global", "local", "local", "global", "local", "local", "local"],
     )
 
     all_global_solver = newton.solvers.SolverVBD(
@@ -4354,7 +4486,20 @@ def _structural_kkt_uses_explicit_iteration_budget(test, device):
     all_global_solver._solve_rigid_body_iteration = record_all_global_local
     all_global_solver._solve_structural_graph_kkt = record_all_global
     _simulate(model, all_global_solver, 1, 1.0 / 600.0)
-    test.assertEqual(all_global_events, ["local", "global", "local", "global", "local"])
+    test.assertEqual(all_global_events, ["global", "local", "global", "local"])
+
+
+def _structural_kkt_prelocal_stage_bounds_coarse_chain_error(test, device):
+    """Reconcile a coarse inertial prediction before a local sweep bends the chain."""
+    model, bodies, joints = _build_chain(device, segments=8, stiffness=1.0e7)
+    solver = newton.solvers.SolverVBD(model, iterations=1, rigid_compliant_alm=True, rigid_joint_global_iterations=1)
+    state = _simulate(model, solver, 30, 1.0 / 60.0)
+    pose = state.body_q.numpy()
+    test.assertTrue(np.isfinite(pose).all())
+    test.assertTrue(np.isfinite(state.body_qd.numpy()).all())
+    np.testing.assert_array_equal(pose[bodies[0]], model.body_q.numpy()[bodies[0]])
+    # This is a bounded coarse-step regression, not a general accuracy theorem.
+    test.assertLess(_max_joint_gap(model, pose, joints), 4.0e-7)
 
 
 def _structural_kkt_all_memory_fallback_uses_local_schedule(test, device):
@@ -5103,6 +5248,9 @@ def _structural_kkt_captured_contact_shortcut_preserves_state(test, device):
     for actual, expected in zip(results[1], results[0], strict=True):
         np.testing.assert_array_equal(actual, expected)
     test.assertLess(refresh_counts[1][0], refresh_counts[0][0])
+    # Translation reconciliation has one initial evaluation and at most
+    # fifteen refreshed evaluations, also when represented by a graph loop.
+    test.assertLessEqual(refresh_counts[1][1], 15)
 
     # Default atomic reductions may skip a wholly blocked translation group,
     # but must not stop eligible translation iterates at float32 roundoff.
@@ -5491,8 +5639,26 @@ add_function_test(
 )
 add_function_test(
     TestVBDRigidKKT,
+    "test_structural_kkt_prelocal_stage_bounds_coarse_chain_error",
+    _structural_kkt_prelocal_stage_bounds_coarse_chain_error,
+    devices=get_test_devices(),
+)
+add_function_test(
+    TestVBDRigidKKT,
+    "test_structural_kkt_fused_stress_clears_disabled_rows",
+    _structural_kkt_fused_stress_clears_disabled_rows,
+    devices=get_test_devices(),
+)
+add_function_test(
+    TestVBDRigidKKT,
     "test_structural_kkt_uses_explicit_iteration_budget",
     _structural_kkt_uses_explicit_iteration_budget,
+    devices=get_test_devices(),
+)
+add_function_test(
+    TestVBDRigidKKT,
+    "test_structural_kkt_row_assembly_matches_block_equations",
+    _structural_kkt_row_assembly_matches_block_equations,
     devices=get_test_devices(),
 )
 add_function_test(
