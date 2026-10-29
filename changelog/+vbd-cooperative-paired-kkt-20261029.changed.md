@@ -1,0 +1,1 @@
+Parallelize FP64 paired-backbone factorization and closure-response solves for CUDA multi-loop structural KKT islands. Preserve local VBD and existing global-stage controls, and include cooperative scratch in deterministic memory preflight.

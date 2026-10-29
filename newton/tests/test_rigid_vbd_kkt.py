@@ -3877,6 +3877,18 @@ def _structural_kkt_paired_coarse_lanes_match_serial_schedule(test, device):
         test.assertTrue(bucket.use_lane_split_coarse)
         test.assertFalse(bucket.tree.use_fused_tree_levels)
         test.assertGreaterEqual(bucket.closure_count, _PAIRED_COARSE_MIN_CLOSURES)
+        # Keep this legacy comparison independent of the new default route.
+        bucket.use_cooperative_paired = False
+        bucket.paired_cr_levels = []
+        stride = 1
+        active = bucket.paired_backbone_count
+        while active > rigid_vbd_kkt._CR_SERIAL_TERMINAL_SIZE:
+            eliminated = len(range(stride, bucket.paired_backbone_count, 2 * stride))
+            survivors = len(range(0, bucket.paired_backbone_count, 2 * stride))
+            bucket.paired_cr_levels.append((stride, eliminated, survivors))
+            stride *= 2
+            active = survivors
+        bucket.paired_terminal_stride = stride
         bucket.use_lane_split_coarse = use_lanes
         state_in = model.state()
         state_out = model.state()
@@ -5278,6 +5290,116 @@ def _structural_kkt_captured_contact_shortcut_preserves_state(test, device):
         test.assertTrue(np.isfinite(state_out.body_q.numpy()).all())
 
 
+def _structural_kkt_cooperative_paired_matches_serial(test, device):
+    """Compare captured physical states, including batches and narrow fallback."""
+
+    def run(model, cooperative):
+        solver = newton.solvers.SolverVBD(
+            model,
+            iterations=2,
+            rigid_compliant_alm=True,
+            rigid_joint_global_iterations=1,
+            deterministic=wp.DeterministicMode.RUN_TO_RUN,
+        )
+        bucket = solver._structural_graph_kkt.closed_tree_buckets[0]
+        selected = device.is_cuda and bucket.closure_count >= 2
+        test.assertEqual(bucket.use_cooperative_paired, selected)
+        test.assertEqual(hasattr(bucket, "cooperative_work"), selected)
+        if selected and not cooperative:
+            bucket.use_cooperative_paired = False
+            bucket.paired_cr_levels = []
+            stride = 1
+            active = bucket.paired_backbone_count
+            while active > rigid_vbd_kkt._CR_SERIAL_TERMINAL_SIZE:
+                eliminated = len(range(stride, bucket.paired_backbone_count, 2 * stride))
+                survivors = len(range(0, bucket.paired_backbone_count, 2 * stride))
+                bucket.paired_cr_levels.append((stride, eliminated, survivors))
+                stride *= 2
+                active = survivors
+            bucket.paired_terminal_stride = stride
+        state_in, state_out = model.state(), model.state()
+        control = model.control()
+        solver.step(state_in, state_out, control, None, 1.0 / 600.0)
+
+        def steps():
+            solver.step(state_out, state_in, control, None, 1.0 / 600.0)
+            solver.step(state_in, state_out, control, None, 1.0 / 600.0)
+
+        if device.is_cuda:
+            with wp.ScopedCapture(device) as capture:
+                steps()
+            for _ in range(8):
+                wp.capture_launch(capture.graph)
+        else:
+            for _ in range(8):
+                steps()
+        return state_out.body_q.numpy(), state_out.body_qd.numpy()
+
+    for closures, worlds, length in ((1, 1, 10), (2, 1, 10), (2, 4, 34), (6, 4, 34)):
+        model = _build_replicated_fixed_topology(
+            device,
+            closed=True,
+            worlds=worlds,
+            link_count=length,
+            closure_count=closures,
+        )
+        model.set_gravity((0.0, 0.0, -9.81))
+        reference = run(model, False)
+        candidate = run(model, True)
+        repeated = run(model, True)
+        for actual, expected, repeat in zip(candidate, reference, repeated, strict=True):
+            test.assertTrue(np.isfinite(actual).all())
+            np.testing.assert_allclose(actual, expected, rtol=2.0e-6, atol=1.0e-7)
+            np.testing.assert_array_equal(actual.view(np.uint8), repeat.view(np.uint8))
+
+
+def _structural_kkt_cooperative_paired_reuses_factors(test, device):
+    """Frozen factor reuse gives the same RHS/closure solution under capture."""
+    model, _, _ = _build_loop_with_branch(
+        device,
+        ring_segments=32,
+        stiffness=1.0e12,
+        bend_stiffness=1.0e4,
+        add_chord=True,
+    )
+    solver = newton.solvers.SolverVBD(
+        model,
+        iterations=1,
+        rigid_compliant_alm=True,
+        rigid_joint_global_iterations=1,
+    )
+    bucket = solver._structural_graph_kkt.closed_tree_buckets[0]
+    test.assertTrue(bucket.use_cooperative_paired)
+    original = bucket._solve_paired_backbone_system
+    exercised = []
+
+    def compare(factorize, rhs, response):
+        test.assertTrue(factorize)
+        saved_rhs, saved_response = wp.clone(rhs), wp.clone(response)
+        original(True, rhs, response)
+        expected_rhs = rhs.numpy().copy()
+        expected_response = response.numpy().copy()
+        with wp.ScopedCapture(device) as capture:
+            wp.copy(rhs, saved_rhs)
+            wp.copy(response, saved_response)
+            original(False, rhs, response)
+        for _ in range(3):
+            wp.capture_launch(capture.graph)
+            for actual, expected in ((rhs.numpy(), expected_rhs), (response.numpy(), expected_response)):
+                # Structured arrays are homogeneous packed FP64; compare every scalar.
+                np.testing.assert_allclose(
+                    actual.view(np.float64),
+                    expected.view(np.float64),
+                    rtol=2.0e-11,
+                    atol=2.0e-11,
+                )
+        exercised.append(True)
+
+    bucket._solve_paired_backbone_system = compare
+    _simulate(model, solver, 1, 1.0 / 600.0)
+    test.assertTrue(exercised)
+
+
 class TestVBDRigidKKT(unittest.TestCase):
     """Validate the optional rigid VBD structural KKT backend."""
 
@@ -5780,6 +5902,20 @@ add_function_test(
     TestVBDRigidKKT,
     "test_structural_kkt_captured_contact_shortcut_preserves_state",
     _structural_kkt_captured_contact_shortcut_preserves_state,
+    devices=get_cuda_test_devices(),
+)
+
+
+add_function_test(
+    TestVBDRigidKKT,
+    "test_structural_kkt_cooperative_paired_matches_serial",
+    _structural_kkt_cooperative_paired_matches_serial,
+    devices=get_test_devices(),
+)
+add_function_test(
+    TestVBDRigidKKT,
+    "test_structural_kkt_cooperative_paired_reuses_factors",
+    _structural_kkt_cooperative_paired_reuses_factors,
     devices=get_cuda_test_devices(),
 )
 

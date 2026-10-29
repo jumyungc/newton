@@ -157,6 +157,12 @@ def _closure_back_substitute_lanes(closure_count: int, device) -> bool:
     return bool(device.is_cuda) and closure_count >= _CLOSURE_BACK_SUBSTITUTE_MIN_BLOCKS
 
 
+_PAIRED_COOPERATIVE_MIN_CLOSURES = 2
+"""Use cooperative FP64 pivots only for CUDA multi-closure paired backbones."""
+
+_PAIRED_COOPERATIVE_WORK_WORDS = 360
+"""Ten 6x6 matrices per pair, allocated and budgeted before capture."""
+
 _PAIRED_COARSE_MIN_CLOSURES = 5
 """Smallest closure count whose coarse solve repays a lane-split block.
 
@@ -5103,6 +5109,9 @@ def _closed_tree_bucket_diagnostics(
         )
         estimated_bytes += paired_response_bytes
         closure_response_bytes += paired_response_bytes
+        if device.is_cuda and closure_count >= _PAIRED_COOPERATIVE_MIN_CLOSURES:
+            estimated_bytes += _array_payload_bytes(paired_backbone_size * _PAIRED_COOPERATIVE_WORK_WORDS, wp.float64)
+            estimated_bytes += _array_payload_bytes(paired_backbone_size, wp.int32)
         route = "closed_tree_paired_backbone_cr"
     else:
         route = "closed_tree_cpu_float64" if device.is_cpu else "closed_tree_serial_float64"
@@ -7781,6 +7790,334 @@ class _TreeBucket:
             )
 
 
+@wp.func
+def _inverse_spatial_cooperative(
+    work: wp.array[wp.float64], value: int, result: int, pivots: wp.array[wp.int32], pair: int, lane: int
+):
+    """Use the serial FP64 partial-pivot algebra with block-uniform barriers."""
+    row = lane // 6
+    col = lane % 6
+    if lane < 36:
+        work[result + lane] = wp.float64(1.0) if row == col else wp.float64(0.0)
+    _synchronize_cr_block()
+    for k in range(6):
+        if lane == 0:
+            chosen = k
+            mag = wp.abs(work[value + k * 6 + k])
+            for r in range(k + 1, 6):
+                candidate = wp.abs(work[value + r * 6 + k])
+                if candidate > mag:
+                    chosen = r
+                    mag = candidate
+            pivots[pair] = chosen
+        _synchronize_cr_block()
+        chosen = pivots[pair]
+        if lane < 6 and chosen != k:
+            a = work[value + k * 6 + lane]
+            b = work[value + chosen * 6 + lane]
+            ia = work[result + k * 6 + lane]
+            ib = work[result + chosen * 6 + lane]
+            work[value + k * 6 + lane] = b
+            work[value + chosen * 6 + lane] = a
+            work[result + k * 6 + lane] = ib
+            work[result + chosen * 6 + lane] = ia
+        _synchronize_cr_block()
+        reciprocal = wp.float64(1.0) / work[value + k * 6 + k]
+        _synchronize_cr_block()
+        if lane < 6:
+            work[value + k * 6 + lane] = reciprocal * work[value + k * 6 + lane]
+            work[result + k * 6 + lane] = reciprocal * work[result + k * 6 + lane]
+        _synchronize_cr_block()
+        factor = wp.float64(0.0)
+        pv = wp.float64(0.0)
+        pi = wp.float64(0.0)
+        if lane < 36:
+            factor = work[value + row * 6 + k]
+            pv = work[value + k * 6 + col]
+            pi = work[result + k * 6 + col]
+        _synchronize_cr_block()
+        if lane < 36 and row != k:
+            work[value + lane] = work[value + lane] - factor * pv
+            work[result + lane] = work[result + lane] - factor * pi
+        _synchronize_cr_block()
+
+
+@wp.func
+def _cooperative_matrix_product(a: wp.array[wp.float64], ao: int, b: wp.array[wp.float64], bo: int, row: int, col: int):
+    value = wp.float64(0.0)
+    for k in range(6):
+        value = value + a[ao + row * 6 + k] * b[bo + k * 6 + col]
+    return value
+
+
+@wp.kernel(module="unique", enable_backward=False)
+def invert_paired_tree_backbone_cooperative(
+    stride: int,
+    pair_count: int,
+    selected_count: int,
+    row_offset: int,
+    write_factors: int,
+    lower: wp.array[wp.float64],
+    diagonal: wp.array[wp.float64],
+    upper: wp.array[wp.float64],
+    factors: wp.array[wp.float64],
+    work: wp.array[wp.float64],
+    pivots: wp.array[wp.int32],
+):
+    tid = wp.tid()
+    width = wp.block_dim()
+    lane = tid % width
+    index = tid // width
+    batch = index // selected_count
+    local = index % selected_count
+    local_row = row_offset + 2 * stride * local
+    pair = batch * pair_count + local_row
+    if local_row >= pair_count:
+        return
+    row = lane // 6
+    col = lane % 6
+    d = pair * 144
+    s = pair * 360
+    # B^-1, X=B^-1*Jt, S=C-J*X; all original blocks remain read-only.
+    if lane < 36:
+        work[s + lane] = diagonal[d + lane]
+    _synchronize_cr_block()
+    _inverse_spatial_cooperative(work, s, s + 36, pivots, pair, lane)
+    if lane < 36:
+        work[s + 72 + lane] = _cooperative_matrix_product(work, s + 36, diagonal, d + 36, row, col)
+    _synchronize_cr_block()
+    if lane < 36:
+        work[s + 108 + lane] = diagonal[d + 108 + lane] - _cooperative_matrix_product(
+            diagonal, d + 72, work, s + 72, row, col
+        )
+    _synchronize_cr_block()
+    _inverse_spatial_cooperative(work, s + 108, s + 144, pivots, pair, lane)
+    # Preserve the native left-associated matrix-product expressions.
+    if lane < 36:
+        work[s + 180 + lane] = _cooperative_matrix_product(work, s + 72, work, s + 144, row, col)
+        work[s + 216 + lane] = _cooperative_matrix_product(work, s + 144, diagonal, d + 72, row, col)
+    _synchronize_cr_block()
+    if lane < 36:
+        work[s + 252 + lane] = _cooperative_matrix_product(work, s + 216, work, s + 36, row, col)
+        work[s + 288 + lane] = _cooperative_matrix_product(work, s + 180, diagonal, d + 72, row, col)
+    _synchronize_cr_block()
+    if lane < 36:
+        work[s + 324 + lane] = _cooperative_matrix_product(work, s + 288, work, s + 36, row, col)
+    _synchronize_cr_block()
+    if lane < 36:
+        diagonal[d + lane] = work[s + 36 + lane] + work[s + 324 + lane]
+        diagonal[d + 36 + lane] = -work[s + 180 + lane]
+        diagonal[d + 72 + lane] = -work[s + 252 + lane]
+        diagonal[d + 108 + lane] = work[s + 144 + lane]
+    _synchronize_cr_block()
+    if write_factors != 0 and lane < 36:
+        left0 = wp.float64(0.0)
+        left1 = wp.float64(0.0)
+        right0 = wp.float64(0.0)
+        right1 = wp.float64(0.0)
+        if local_row >= stride:
+            coupling = (pair - stride) * 144 + 72
+            left0 = _cooperative_matrix_product(upper, coupling, diagonal, d, row, col)
+            left1 = _cooperative_matrix_product(upper, coupling, diagonal, d + 36, row, col)
+        if local_row + stride < pair_count:
+            coupling = (pair + stride) * 144 + 36
+            right0 = _cooperative_matrix_product(lower, coupling, diagonal, d + 72, row, col)
+            right1 = _cooperative_matrix_product(lower, coupling, diagonal, d + 108, row, col)
+        factors[d + lane] = left0
+        factors[d + 36 + lane] = left1
+        factors[d + 72 + lane] = right0
+        factors[d + 108 + lane] = right1
+
+
+@wp.func
+def _load_paired_response_column(values: wp.array[wp.float64], entry: int, part: int, column: int):
+    result = wp.spatial_vectord()
+    for r in range(6):
+        result[r] = values[entry * 72 + part * 36 + r * 6 + column]
+    return result
+
+
+@wp.func
+def _store_paired_response_column(
+    values: wp.array[wp.float64], entry: int, part: int, column: int, value: wp.spatial_vectord
+):
+    for r in range(6):
+        values[entry * 72 + part * 36 + r * 6 + column] = value[r]
+
+
+@wp.kernel(module="unique", enable_backward=False)
+def reduce_paired_tree_backbone_columns(
+    stride: int,
+    pair_count: int,
+    survivor_count: int,
+    closure_count: int,
+    factorize: int,
+    lower: wp.array[Any],
+    diagonal: wp.array[Any],
+    upper: wp.array[Any],
+    factors: wp.array[Any],
+    rhs: wp.array[Any],
+    responses: wp.array[wp.float64],
+):
+    tid = wp.tid()
+    width = wp.block_dim()
+    lane = tid % width
+    index = tid // width
+    batch = index // survivor_count
+    local = index % survivor_count
+    local_row = 2 * stride * local
+    base = batch * pair_count
+    row = base + local_row
+    if local_row >= pair_count:
+        return
+    if lane == 0:
+        low = type(lower[0])()
+        diag = diagonal[row]
+        up = type(upper[0])()
+        value = rhs[row]
+        if local_row >= stride:
+            eliminated = row - stride
+            factor = factors[eliminated]
+            if factorize != 0:
+                low.m01 = -(factor.to_right0 * lower[eliminated].m01)
+                diag.m00 = diag.m00 - factor.to_right1 * upper[eliminated].m10
+            e = rhs[eliminated]
+            value.v0 = value.v0 - (factor.to_right0 * e.v0 + factor.to_right1 * e.v1)
+        if local_row + stride < pair_count:
+            eliminated = row + stride
+            factor = factors[eliminated]
+            if factorize != 0:
+                diag.m11 = diag.m11 - factor.to_left0 * lower[eliminated].m01
+            e = rhs[eliminated]
+            value.v1 = value.v1 - (factor.to_left0 * e.v0 + factor.to_left1 * e.v1)
+            if factorize != 0 and local_row + 2 * stride < pair_count:
+                up.m10 = -(factor.to_left1 * upper[eliminated].m10)
+        if factorize != 0:
+            lower[row] = low
+            diagonal[row] = diag
+            upper[row] = up
+        rhs[row] = value
+    work = int(lane)
+    while work < closure_count * 6:
+        closure = work // 6
+        column = work % 6
+        entry = row * closure_count + closure
+        v0 = _load_paired_response_column(responses, entry, 0, column)
+        v1 = _load_paired_response_column(responses, entry, 1, column)
+        if local_row >= stride:
+            eliminated = row - stride
+            factor = factors[eliminated]
+            other = eliminated * closure_count + closure
+            v0 = v0 - (
+                factor.to_right0 * _load_paired_response_column(responses, other, 0, column)
+                + factor.to_right1 * _load_paired_response_column(responses, other, 1, column)
+            )
+        if local_row + stride < pair_count:
+            eliminated = row + stride
+            factor = factors[eliminated]
+            other = eliminated * closure_count + closure
+            v1 = v1 - (
+                factor.to_left0 * _load_paired_response_column(responses, other, 0, column)
+                + factor.to_left1 * _load_paired_response_column(responses, other, 1, column)
+            )
+        _store_paired_response_column(responses, entry, 0, column, v0)
+        _store_paired_response_column(responses, entry, 1, column, v1)
+        work += width
+
+
+@wp.kernel(module="unique", enable_backward=False)
+def back_substitute_paired_tree_backbone_columns(
+    stride: int,
+    pair_count: int,
+    eliminated_count: int,
+    closure_count: int,
+    lower: wp.array[Any],
+    diagonal: wp.array[Any],
+    upper: wp.array[Any],
+    rhs: wp.array[Any],
+    responses: wp.array[wp.float64],
+):
+    tid = wp.tid()
+    width = wp.block_dim()
+    lane = tid % width
+    index = tid // width
+    batch = index // eliminated_count
+    local = index % eliminated_count
+    local_row = stride + 2 * stride * local
+    row = batch * pair_count + local_row
+    if local_row >= pair_count:
+        return
+    if lane == 0:
+        value = rhs[row]
+        value.v0 = value.v0 - lower[row].m01 * rhs[row - stride].v1
+        if local_row + stride < pair_count:
+            value.v1 = value.v1 - upper[row].m10 * rhs[row + stride].v0
+        rhs[row] = _spatial_pair_matrix_vector_multiply(diagonal[row], value)
+    work = int(lane)
+    while work < closure_count * 6:
+        closure = work // 6
+        column = work % 6
+        entry = row * closure_count + closure
+        v0 = _load_paired_response_column(responses, entry, 0, column)
+        v1 = _load_paired_response_column(responses, entry, 1, column)
+        v0 = v0 - lower[row].m01 * _load_paired_response_column(
+            responses, (row - stride) * closure_count + closure, 1, column
+        )
+        if local_row + stride < pair_count:
+            v1 = v1 - upper[row].m10 * _load_paired_response_column(
+                responses, (row + stride) * closure_count + closure, 0, column
+            )
+        diag = diagonal[row]
+        result0 = diag.m00 * v0 + diag.m01 * v1
+        result1 = diag.m10 * v0 + diag.m11 * v1
+        _store_paired_response_column(responses, entry, 0, column, result0)
+        _store_paired_response_column(responses, entry, 1, column, result1)
+        work += width
+
+
+@wp.kernel(module="unique", enable_backward=False)
+def solve_paired_tree_backbone_single(
+    pair_count: int,
+    closure_count: int,
+    diagonal: wp.array[_SpatialPairMatrixD],
+    rhs: wp.array[_SpatialPairVectorD],
+    responses: wp.array[wp.float64],
+):
+    """Apply the final paired inverse to independent physical/closure RHS."""
+    tid = wp.tid()
+    width = wp.block_dim()
+    lane = tid % width
+    row = (tid // width) * pair_count
+    if lane == 0:
+        rhs[row] = _spatial_pair_matrix_vector_multiply(diagonal[row], rhs[row])
+    column_index = int(lane)
+    while column_index < closure_count * 6:
+        closure = column_index // 6
+        column = column_index % 6
+        entry = row * closure_count + closure
+        value0 = _load_paired_response_column(responses, entry, 0, column)
+        value1 = _load_paired_response_column(responses, entry, 1, column)
+        matrix = diagonal[row]
+        result0 = matrix.m00 * value0 + matrix.m01 * value1
+        result1 = matrix.m10 * value0 + matrix.m11 * value1
+        _store_paired_response_column(responses, entry, 0, column, result0)
+        _store_paired_response_column(responses, entry, 1, column, result1)
+        column_index += width
+
+
+def _paired_float64_view(array, words: int):
+    """Alias the private packed FP64 layout without allocating device memory."""
+    if np.dtype(array.dtype.numpy_dtype()).itemsize != words * 8:
+        raise ValueError("Unexpected paired KKT buffer layout")
+    return wp.array(
+        ptr=array.ptr,
+        dtype=wp.float64,
+        shape=array.size * words,
+        device=array.device,
+        copy=False,
+    )
+
+
 class _ClosedTreeBucket:
     """Batched exact backbone-CR solves completed by closure Schur systems."""
 
@@ -7902,6 +8239,9 @@ class _ClosedTreeBucket:
         # are independent. Give the block that width only when there are enough
         # columns to repay the barriers; one column measurably regresses.
         self.use_lane_split_coarse = self.device.is_cuda and self.closure_count >= _PAIRED_COARSE_MIN_CLOSURES
+        self.use_cooperative_paired = (
+            self.use_paired_backbone and device.is_cuda and self.closure_count >= _PAIRED_COOPERATIVE_MIN_CLOSURES
+        )
         if self.use_paired_backbone:
             self.paired_lower = wp.zeros(self.paired_backbone_size, dtype=_SpatialPairMatrixD, device=self.device)
             self.paired_diagonal = wp.zeros_like(self.paired_lower)
@@ -7917,10 +8257,23 @@ class _ClosedTreeBucket:
                 dtype=_SpatialPairResponseD,
                 device=self.device,
             )
+            if self.use_cooperative_paired:
+                self.cooperative_lower = _paired_float64_view(self.paired_lower, 144)
+                self.cooperative_diagonal = _paired_float64_view(self.paired_diagonal, 144)
+                self.cooperative_upper = _paired_float64_view(self.paired_upper, 144)
+                self.cooperative_factors = _paired_float64_view(self.paired_elimination_factor, 144)
+                self.cooperative_response = _paired_float64_view(self.paired_response, 72)
+                self.cooperative_work = wp.empty(
+                    self.paired_backbone_size * _PAIRED_COOPERATIVE_WORK_WORDS,
+                    dtype=wp.float64,
+                    device=device,
+                )
+                self.cooperative_pivots = wp.empty(self.paired_backbone_size, dtype=wp.int32, device=device)
             self.paired_cr_levels: list[tuple[int, int, int]] = []
             stride = 1
             active_count = self.paired_backbone_count
-            while active_count > _CR_SERIAL_TERMINAL_SIZE:
+            terminal_size = 1 if self.use_cooperative_paired else _CR_SERIAL_TERMINAL_SIZE
+            while active_count > terminal_size:
                 eliminated_count = len(range(stride, self.paired_backbone_count, 2 * stride))
                 survivor_count = len(range(0, self.paired_backbone_count, 2 * stride))
                 self.paired_cr_levels.append((stride, eliminated_count, survivor_count))
@@ -7939,6 +8292,10 @@ class _ClosedTreeBucket:
 
     def _solve_paired_backbone_system(self, factorize: bool, rhs, response_rhs):
         """Solve packed right-hand sides, building or reusing the pair factor."""
+        # Open FP32 tree buckets also borrow this method; they keep their route.
+        if getattr(self, "use_cooperative_paired", False):
+            self._solve_cooperative_paired_backbone(factorize, rhs, response_rhs)
+            return
         for stride, eliminated_count, survivor_count in self.paired_cr_levels:
             if factorize:
                 wp.launch(
@@ -8029,6 +8386,80 @@ class _ClosedTreeBucket:
                 device=self.device,
                 block_dim=self.spatial_block_dim,
             )
+
+    def _solve_cooperative_paired_backbone(self, factorize: bool, rhs, response_rhs):
+        """Same FP64 body-first KKT, with one CUDA block per pair/response row.
+
+        Partial pivoting does not require SPD blocks. Each block owns its
+        scratch and all barriers are block-uniform. Factor-reuse calls retain
+        the identical level schedule and never refactor or allocate.
+        """
+        if response_rhs is not self.paired_response:
+            raise ValueError("Unexpected paired closure-response buffer")
+        width = self.spatial_block_dim
+        for stride, eliminated_count, survivor_count in self.paired_cr_levels:
+            if factorize:
+                self._invert_cooperative_pairs(stride, eliminated_count, stride, True)
+            wp.launch(
+                reduce_paired_tree_backbone_columns,
+                self.batch_count * survivor_count * width,
+                inputs=[stride, self.paired_backbone_count, survivor_count, self.closure_count, int(factorize)],
+                outputs=[
+                    self.paired_lower,
+                    self.paired_diagonal,
+                    self.paired_upper,
+                    self.paired_elimination_factor,
+                    rhs,
+                    self.cooperative_response,
+                ],
+                device=self.device,
+                block_dim=width,
+            )
+        if factorize:
+            self._invert_cooperative_pairs(self.paired_terminal_stride, 1, 0, False)
+        wp.launch(
+            solve_paired_tree_backbone_single,
+            self.batch_count * width,
+            inputs=[self.paired_backbone_count, self.closure_count, self.paired_diagonal],
+            outputs=[rhs, self.cooperative_response],
+            device=self.device,
+            block_dim=width,
+        )
+        for stride, eliminated_count, _ in reversed(self.paired_cr_levels):
+            wp.launch(
+                back_substitute_paired_tree_backbone_columns,
+                self.batch_count * eliminated_count * width,
+                inputs=[
+                    stride,
+                    self.paired_backbone_count,
+                    eliminated_count,
+                    self.closure_count,
+                    self.paired_lower,
+                    self.paired_diagonal,
+                    self.paired_upper,
+                ],
+                outputs=[rhs, self.cooperative_response],
+                device=self.device,
+                block_dim=width,
+            )
+
+    def _invert_cooperative_pairs(self, stride: int, count: int, offset: int, write_factors: bool):
+        """Launch whole 64-thread blocks: 36 matrix entries plus idle lanes."""
+        wp.launch(
+            invert_paired_tree_backbone_cooperative,
+            self.batch_count * count * 64,
+            inputs=[stride, self.paired_backbone_count, count, offset, int(write_factors)],
+            outputs=[
+                self.cooperative_lower,
+                self.cooperative_diagonal,
+                self.cooperative_upper,
+                self.cooperative_factors,
+                self.cooperative_work,
+                self.cooperative_pivots,
+            ],
+            device=self.device,
+            block_dim=64,
+        )
 
     def solve_paired_backbone(self):
         """Solve the precise cyclic base with body-first pair pivots."""
