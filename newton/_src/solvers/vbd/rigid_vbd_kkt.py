@@ -157,8 +157,30 @@ def _closure_back_substitute_lanes(closure_count: int, device) -> bool:
     return bool(device.is_cuda) and closure_count >= _CLOSURE_BACK_SUBSTITUTE_MIN_BLOCKS
 
 
-_PAIRED_COOPERATIVE_MIN_CLOSURES = 2
-"""Use cooperative FP64 pivots only for CUDA multi-closure paired backbones."""
+_PAIRED_COOPERATIVE_MIN_CLOSURES = 1
+"""Use cooperative FP64 pivots for every CUDA paired backbone.
+
+One 64-thread block owns each survivor. Lanes 0-35 form the four 6x6
+products, and another lane applies the physical right-hand side over the
+same interval. A single closure used to stay on the serial paired schedule.
+"""
+
+_PAIRED_COOPERATIVE_BLOCK_DIM = 64
+"""Threads launched for each cooperative survivor or eliminated pair."""
+
+_PAIRED_COOPERATIVE_MATRIX_LANES = wp.constant(36)
+"""Lanes that each own one entry of a 6x6 block product."""
+
+_PAIRED_COOPERATIVE_RHS_LANE = wp.constant(36)
+"""Lane that updates the physical right-hand side during a cooperative reduction."""
+
+_PAIRED_COOPERATIVE_PHYSICAL_LANE = wp.constant(32)
+"""Second-warp lane that applies the physical right-hand side in the triangular kernels.
+
+Response columns 0-31 stay in the first warp, so this lane's spatial products
+overlap them. The lane also owns response column 32 when that column exists;
+those writes touch a different buffer.
+"""
 
 _PAIRED_COOPERATIVE_WORK_WORDS = 360
 """Ten 6x6 matrices per pair, allocated and budgeted before capture."""
@@ -4216,6 +4238,7 @@ class _BucketDiagnostics:
     closure_response_bytes: int = 0
     closure_schur_bytes: int = 0
     fallback_reason: str | None = None
+    cooperative_paired: bool = False
 
 
 @dataclass
@@ -5036,6 +5059,13 @@ def _closed_tree_body_closure_row_count(
     return count
 
 
+def _paired_cooperative_payload_bytes(pair_count: int) -> int:
+    """Exact optional work/pivot payload, shared by preflight and upgrades."""
+    return _array_payload_bytes(pair_count * _PAIRED_COOPERATIVE_WORK_WORDS, wp.float64) + _array_payload_bytes(
+        pair_count, wp.int32
+    )
+
+
 def _closed_tree_bucket_diagnostics(
     components: list[_ClosedTree],
     parent: np.ndarray,
@@ -5043,6 +5073,7 @@ def _closed_tree_bucket_diagnostics(
     device,
     *,
     tree_symbolics: _TreeBucketSymbolics | None = None,
+    cooperative_paired: bool = True,
 ) -> _BucketDiagnostics:
     """Plan every tree, response, dense-Schur, and paired payload before allocation."""
     component = components[0]
@@ -5097,6 +5128,12 @@ def _closed_tree_bucket_diagnostics(
         component.tree.node_body[node] >= 0 if index % 2 == 0 else component.tree.node_row[node] >= 0
         for index, node in enumerate(local_backbone)
     )
+    cooperative_paired = (
+        cooperative_paired
+        and use_paired_backbone
+        and device.is_cuda
+        and closure_count >= _PAIRED_COOPERATIVE_MIN_CLOSURES
+    )
     if use_paired_backbone:
         paired_backbone_count = (len(local_backbone) + 1) // 2
         paired_backbone_size = batch_count * paired_backbone_count
@@ -5109,9 +5146,8 @@ def _closed_tree_bucket_diagnostics(
         )
         estimated_bytes += paired_response_bytes
         closure_response_bytes += paired_response_bytes
-        if device.is_cuda and closure_count >= _PAIRED_COOPERATIVE_MIN_CLOSURES:
-            estimated_bytes += _array_payload_bytes(paired_backbone_size * _PAIRED_COOPERATIVE_WORK_WORDS, wp.float64)
-            estimated_bytes += _array_payload_bytes(paired_backbone_size, wp.int32)
+        if cooperative_paired:
+            estimated_bytes += _paired_cooperative_payload_bytes(paired_backbone_size)
         route = "closed_tree_paired_backbone_cr"
     else:
         route = "closed_tree_cpu_float64" if device.is_cpu else "closed_tree_serial_float64"
@@ -5132,6 +5168,7 @@ def _closed_tree_bucket_diagnostics(
         estimated_bytes=estimated_bytes,
         closure_response_bytes=closure_response_bytes,
         closure_schur_bytes=closure_schur_bytes,
+        cooperative_paired=cooperative_paired,
     )
 
 
@@ -5195,6 +5232,7 @@ def _bucket_plan_diagnostics(
         child,
         device,
         tree_symbolics=plan.tree_symbolics,
+        cooperative_paired=plan.diagnostics.cooperative_paired,
     )
 
 
@@ -7850,6 +7888,27 @@ def _cooperative_matrix_product(a: wp.array[wp.float64], ao: int, b: wp.array[wp
     return value
 
 
+@wp.func_native("""
+#if defined(__CUDA_ARCH__)
+return fma(a, b, c);
+#else
+return a * b + c;
+#endif
+""")
+def _fma_f64(a: wp.float64, b: wp.float64, c: wp.float64) -> wp.float64: ...
+
+
+@wp.func
+def _cooperative_matrix_product_fma(
+    a: wp.array[wp.float64], ao: int, b: wp.array[wp.float64], bo: int, row: int, col: int
+):
+    """Left-associated fused multiply-add, matching a spatial-matrix product."""
+    value = wp.float64(0.0)
+    for k in range(6):
+        value = _fma_f64(a[ao + row * 6 + k], b[bo + k * 6 + col], value)
+    return value
+
+
 @wp.kernel(module="unique", enable_backward=False)
 def invert_paired_tree_backbone_cooperative(
     stride: int,
@@ -7952,13 +8011,21 @@ def reduce_paired_tree_backbone_columns(
     survivor_count: int,
     closure_count: int,
     factorize: int,
-    lower: wp.array[Any],
-    diagonal: wp.array[Any],
-    upper: wp.array[Any],
-    factors: wp.array[Any],
-    rhs: wp.array[Any],
+    lower: wp.array[wp.float64],
+    diagonal: wp.array[wp.float64],
+    upper: wp.array[wp.float64],
+    factors: wp.array[wp.float64],
+    factors_struct: wp.array[_SpatialPairEliminationFactorD],
+    rhs: wp.array[_SpatialPairVectorD],
     responses: wp.array[wp.float64],
 ):
+    """Reduce one survivor with a 64-thread block.
+
+    Lanes 0-35 write the four 6x6 block updates with the same left-associated
+    fma as a spatial-matrix product. The physical right-hand side and the
+    closure responses stay on the struct product so the packed solution matches
+    the serial schedule. Requires ``block_dim`` of 64.
+    """
     tid = wp.tid()
     width = wp.block_dim()
     lane = tid % width
@@ -7970,43 +8037,63 @@ def reduce_paired_tree_backbone_columns(
     row = base + local_row
     if local_row >= pair_count:
         return
-    if lane == 0:
-        low = type(lower[0])()
-        diag = diagonal[row]
-        up = type(upper[0])()
+    block = lane // 6
+    entry = lane % 6
+    packed = row * 144
+
+    if factorize != 0 and lane < _PAIRED_COOPERATIVE_MATRIX_LANES:
+        low_01 = wp.float64(0.0)
+        diag_00 = diagonal[packed + lane]
+        diag_11 = diagonal[packed + 108 + lane]
+        up_10 = wp.float64(0.0)
+        if local_row >= stride:
+            eliminated = (row - stride) * 144
+            low_01 = -_cooperative_matrix_product_fma(factors, eliminated + 72, lower, eliminated + 36, block, entry)
+            diag_00 = diag_00 - _cooperative_matrix_product_fma(
+                factors, eliminated + 108, upper, eliminated + 72, block, entry
+            )
+        if local_row + stride < pair_count:
+            eliminated = (row + stride) * 144
+            diag_11 = diag_11 - _cooperative_matrix_product_fma(
+                factors, eliminated, lower, eliminated + 36, block, entry
+            )
+            if local_row + 2 * stride < pair_count:
+                up_10 = -_cooperative_matrix_product_fma(factors, eliminated + 36, upper, eliminated + 72, block, entry)
+        lower[packed + lane] = wp.float64(0.0)
+        lower[packed + 36 + lane] = low_01
+        lower[packed + 72 + lane] = wp.float64(0.0)
+        lower[packed + 108 + lane] = wp.float64(0.0)
+        diagonal[packed + lane] = diag_00
+        diagonal[packed + 108 + lane] = diag_11
+        upper[packed + lane] = wp.float64(0.0)
+        upper[packed + 36 + lane] = wp.float64(0.0)
+        upper[packed + 72 + lane] = up_10
+        upper[packed + 108 + lane] = wp.float64(0.0)
+
+    if lane == _PAIRED_COOPERATIVE_RHS_LANE:
         value = rhs[row]
         if local_row >= stride:
             eliminated = row - stride
-            factor = factors[eliminated]
-            if factorize != 0:
-                low.m01 = -(factor.to_right0 * lower[eliminated].m01)
-                diag.m00 = diag.m00 - factor.to_right1 * upper[eliminated].m10
+            factor = factors_struct[eliminated]
             e = rhs[eliminated]
             value.v0 = value.v0 - (factor.to_right0 * e.v0 + factor.to_right1 * e.v1)
         if local_row + stride < pair_count:
             eliminated = row + stride
-            factor = factors[eliminated]
-            if factorize != 0:
-                diag.m11 = diag.m11 - factor.to_left0 * lower[eliminated].m01
+            factor = factors_struct[eliminated]
             e = rhs[eliminated]
             value.v1 = value.v1 - (factor.to_left0 * e.v0 + factor.to_left1 * e.v1)
-            if factorize != 0 and local_row + 2 * stride < pair_count:
-                up.m10 = -(factor.to_left1 * upper[eliminated].m10)
-        if factorize != 0:
-            lower[row] = low
-            diagonal[row] = diag
-            upper[row] = up
         rhs[row] = value
+
     work = int(lane)
     while work < closure_count * 6:
         closure = work // 6
         column = work % 6
-        entry = row * closure_count + closure
-        v0 = _load_paired_response_column(responses, entry, 0, column)
-        v1 = _load_paired_response_column(responses, entry, 1, column)
+        response_entry = row * closure_count + closure
+        v0 = _load_paired_response_column(responses, response_entry, 0, column)
+        v1 = _load_paired_response_column(responses, response_entry, 1, column)
         if local_row >= stride:
             eliminated = row - stride
-            factor = factors[eliminated]
+            factor = factors_struct[eliminated]
             other = eliminated * closure_count + closure
             v0 = v0 - (
                 factor.to_right0 * _load_paired_response_column(responses, other, 0, column)
@@ -8014,14 +8101,14 @@ def reduce_paired_tree_backbone_columns(
             )
         if local_row + stride < pair_count:
             eliminated = row + stride
-            factor = factors[eliminated]
+            factor = factors_struct[eliminated]
             other = eliminated * closure_count + closure
             v1 = v1 - (
                 factor.to_left0 * _load_paired_response_column(responses, other, 0, column)
                 + factor.to_left1 * _load_paired_response_column(responses, other, 1, column)
             )
-        _store_paired_response_column(responses, entry, 0, column, v0)
-        _store_paired_response_column(responses, entry, 1, column, v1)
+        _store_paired_response_column(responses, response_entry, 0, column, v0)
+        _store_paired_response_column(responses, response_entry, 1, column, v1)
         work += width
 
 
@@ -8047,7 +8134,7 @@ def back_substitute_paired_tree_backbone_columns(
     row = batch * pair_count + local_row
     if local_row >= pair_count:
         return
-    if lane == 0:
+    if lane == _PAIRED_COOPERATIVE_PHYSICAL_LANE:
         value = rhs[row]
         value.v0 = value.v0 - lower[row].m01 * rhs[row - stride].v1
         if local_row + stride < pair_count:
@@ -8083,12 +8170,16 @@ def solve_paired_tree_backbone_single(
     rhs: wp.array[_SpatialPairVectorD],
     responses: wp.array[wp.float64],
 ):
-    """Apply the final paired inverse to independent physical/closure RHS."""
+    """Apply the final paired inverse to independent physical/closure RHS.
+
+    Requires ``block_dim`` of 64. The physical product runs on the second warp
+    so it overlaps the first 32 response columns.
+    """
     tid = wp.tid()
     width = wp.block_dim()
     lane = tid % width
     row = (tid // width) * pair_count
-    if lane == 0:
+    if lane == _PAIRED_COOPERATIVE_PHYSICAL_LANE:
         rhs[row] = _spatial_pair_matrix_vector_multiply(diagonal[row], rhs[row])
     column_index = int(lane)
     while column_index < closure_count * 6:
@@ -8130,6 +8221,7 @@ class _ClosedTreeBucket:
         device,
         *,
         tree_symbolics: _TreeBucketSymbolics | None = None,
+        cooperative_paired: bool = True,
     ):
         if isinstance(components, _ClosedTree):
             components = [components]
@@ -8240,7 +8332,10 @@ class _ClosedTreeBucket:
         # columns to repay the barriers; one column measurably regresses.
         self.use_lane_split_coarse = self.device.is_cuda and self.closure_count >= _PAIRED_COARSE_MIN_CLOSURES
         self.use_cooperative_paired = (
-            self.use_paired_backbone and device.is_cuda and self.closure_count >= _PAIRED_COOPERATIVE_MIN_CLOSURES
+            cooperative_paired
+            and self.use_paired_backbone
+            and device.is_cuda
+            and self.closure_count >= _PAIRED_COOPERATIVE_MIN_CLOSURES
         )
         if self.use_paired_backbone:
             self.paired_lower = wp.zeros(self.paired_backbone_size, dtype=_SpatialPairMatrixD, device=self.device)
@@ -8396,7 +8491,7 @@ class _ClosedTreeBucket:
         """
         if response_rhs is not self.paired_response:
             raise ValueError("Unexpected paired closure-response buffer")
-        width = self.spatial_block_dim
+        width = _PAIRED_COOPERATIVE_BLOCK_DIM
         for stride, eliminated_count, survivor_count in self.paired_cr_levels:
             if factorize:
                 self._invert_cooperative_pairs(stride, eliminated_count, stride, True)
@@ -8405,9 +8500,10 @@ class _ClosedTreeBucket:
                 self.batch_count * survivor_count * width,
                 inputs=[stride, self.paired_backbone_count, survivor_count, self.closure_count, int(factorize)],
                 outputs=[
-                    self.paired_lower,
-                    self.paired_diagonal,
-                    self.paired_upper,
+                    self.cooperative_lower,
+                    self.cooperative_diagonal,
+                    self.cooperative_upper,
+                    self.cooperative_factors,
                     self.paired_elimination_factor,
                     rhs,
                     self.cooperative_response,
@@ -9039,6 +9135,10 @@ class StructuralGraphKKT:
                         child,
                         self.device,
                         tree_symbolics=symbolics,
+                        # Preserve the established multi-closure admission cost.
+                        # Single-loop scratch is offered only after all islands
+                        # have retained their previous place within the cap.
+                        cooperative_paired=len(ordered[0].closure_joints) > 1,
                     ),
                     symbolics,
                 )
@@ -9151,7 +9251,41 @@ class StructuralGraphKKT:
                         fallback_reason="payload_budget",
                     )
                 )
-        self._bucket_diagnostics = tuple(diagnostics)
+        # Spend remaining capacity on newly eligible single-loop scratch only
+        # after preserving the established island admission decisions. Falling
+        # back to the serial paired schedule retains its global correction.
+        upgraded_diagnostics = {}
+        if self.device.is_cuda and selected_plans:
+            shared_bytes = _shared_structural_payload_bytes(
+                model.body_count,
+                model.joint_count,
+                len(selected_body_ids),
+                selected_island_count,
+                len(selected_joint_ids),
+                is_cuda=True,
+            )
+            for plan in selected_plans:
+                if (
+                    plan.kind != "closed_tree"
+                    or plan.diagnostics.cooperative_paired
+                    or plan.diagnostics.planned_route != "closed_tree_paired_backbone_cr"
+                    or plan.diagnostics.closure_count_per_island < _PAIRED_COOPERATIVE_MIN_CLOSURES
+                ):
+                    continue
+                pair_count = plan.diagnostics.batch_count * ((len(plan.tree_symbolics.backbone) + 1) // 2)
+                extra_bytes = _paired_cooperative_payload_bytes(pair_count)
+                if _within_structural_payload_budget(
+                    selected_bucket_bytes + shared_bytes + extra_bytes, self._payload_budget_bytes
+                ):
+                    upgraded = replace(
+                        plan.diagnostics,
+                        estimated_bytes=plan.diagnostics.estimated_bytes + extra_bytes,
+                        cooperative_paired=True,
+                    )
+                    upgraded_diagnostics[id(plan.diagnostics)] = upgraded
+                    plan.diagnostics = upgraded
+                    selected_bucket_bytes += extra_bytes
+        self._bucket_diagnostics = tuple(upgraded_diagnostics.get(id(item), item) for item in diagnostics)
 
         components = [component for component in all_components if id(component) in selected_component_ids]
         if not components:
@@ -9190,6 +9324,7 @@ class StructuralGraphKKT:
                     body_slot,
                     self.device,
                     tree_symbolics=plan.tree_symbolics,
+                    cooperative_paired=plan.diagnostics.cooperative_paired,
                 )
                 self.closed_tree_buckets.append(bucket)
             bucket._diagnostics = plan.diagnostics

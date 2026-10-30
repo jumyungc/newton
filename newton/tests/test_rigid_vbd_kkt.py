@@ -5302,7 +5302,11 @@ def _structural_kkt_cooperative_paired_matches_serial(test, device):
             deterministic=wp.DeterministicMode.RUN_TO_RUN,
         )
         bucket = solver._structural_graph_kkt.closed_tree_buckets[0]
-        selected = device.is_cuda and bucket.closure_count >= 2
+        selected = (
+            bucket.use_paired_backbone
+            and device.is_cuda
+            and bucket.closure_count >= rigid_vbd_kkt._PAIRED_COOPERATIVE_MIN_CLOSURES
+        )
         test.assertEqual(bucket.use_cooperative_paired, selected)
         test.assertEqual(hasattr(bucket, "cooperative_work"), selected)
         if selected and not cooperative:
@@ -5335,7 +5339,16 @@ def _structural_kkt_cooperative_paired_matches_serial(test, device):
                 steps()
         return state_out.body_q.numpy(), state_out.body_qd.numpy()
 
-    for closures, worlds, length in ((1, 1, 10), (2, 1, 10), (2, 4, 34), (6, 4, 34)):
+    for closures, worlds, length in (
+        (1, 1, 2),
+        (1, 2, 3),
+        (1, 1, 10),
+        (2, 1, 10),
+        (2, 4, 34),
+        (6, 4, 34),
+        (11, 2, 34),
+        (17, 2, 34),
+    ):
         model = _build_replicated_fixed_topology(
             device,
             closed=True,
@@ -5400,10 +5413,58 @@ def _structural_kkt_cooperative_paired_reuses_factors(test, device):
     test.assertTrue(exercised)
 
 
+def _structural_kkt_single_loop_scratch_preserves_coverage(test, device):
+    """Optional parallel scratch must not displace previously admitted islands."""
+    models = [
+        _build_replicated_fixed_topology(device, closed=True, worlds=4, link_count=10, closure_count=1),
+    ]
+    for components in (((20, 1), (6, 0)), ((20, 2), (20, 1), (6, 0))):
+        mixed = newton.ModelBuilder(gravity=(0.0, 0.0, -9.81))
+        for length, closures in components:
+            template, _ = _build_fixed_topology_template(link_count=length, closure_count=closures)
+            mixed.add_builder(template, xform=wp.transform((0.0, float(closures), 0.0), wp.quat_identity()))
+        mixed.color(balance_colors=False)
+        models.append(mixed.finalize(device=device))
+    for model in models:
+        # This is the established single-loop allocation/schedule, not G0.
+        with mock.patch.object(rigid_vbd_kkt, "_PAIRED_COOPERATIVE_MIN_CLOSURES", 2):
+            serial, serial_bytes = _build_structural_backend_with_intercepted_bytes(model)
+        expected_ids = serial.graph_body_ids.numpy()
+        full, full_bytes = _build_structural_backend_with_intercepted_bytes(model)
+        np.testing.assert_array_equal(full.graph_body_ids.numpy(), expected_ids)
+        for budget in sorted({serial_bytes - 1, serial_bytes, full_bytes - 1, full_bytes}):
+            with test.subTest(bodies=model.body_count, budget=budget):
+                with mock.patch.object(rigid_vbd_kkt, "_structural_payload_budget", return_value=budget):
+                    selected, allocated = _build_structural_backend_with_intercepted_bytes(model)
+                test.assertEqual(selected._estimated_bytes, allocated)
+                test.assertLessEqual(allocated, budget)
+                if budget >= serial_bytes:
+                    np.testing.assert_array_equal(selected.graph_body_ids.numpy(), expected_ids)
+                if budget == serial_bytes:
+                    test.assertTrue(
+                        all(
+                            not bucket.use_cooperative_paired
+                            for bucket in selected.closed_tree_buckets
+                            if bucket.closure_count == 1
+                        )
+                    )
+                for bucket in selected.closed_tree_buckets:
+                    test.assertEqual(bucket.use_cooperative_paired, bucket._diagnostics.cooperative_paired)
+                    test.assertEqual(hasattr(bucket, "cooperative_work"), bucket.use_cooperative_paired)
+
+
 class TestVBDRigidKKT(unittest.TestCase):
     """Validate the optional rigid VBD structural KKT backend."""
 
     pass
+
+
+add_function_test(
+    TestVBDRigidKKT,
+    "test_structural_kkt_single_loop_scratch_preserves_coverage",
+    _structural_kkt_single_loop_scratch_preserves_coverage,
+    devices=get_test_devices(),
+)
 
 
 add_function_test(
