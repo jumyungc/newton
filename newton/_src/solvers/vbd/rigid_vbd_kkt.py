@@ -35,6 +35,7 @@ This module is private; the only public control is the global-iteration count G.
 
 from __future__ import annotations
 
+import contextlib
 from collections import defaultdict
 from dataclasses import dataclass, replace
 from itertools import pairwise
@@ -72,6 +73,11 @@ from .rigid_vbd_kernels import (
 )
 
 wp.set_module_options({"enable_backward": False})
+
+
+def _stream_scope(stream):
+    """Launch on ``stream`` when given, else on the current stream."""
+    return wp.ScopedStream(stream, sync_enter=False) if stream is not None else contextlib.nullcontext()
 
 
 @wp.func
@@ -182,9 +188,6 @@ overlap them. The lane also owns response column 32 when that column exists;
 those writes touch a different buffer.
 """
 
-_PAIRED_COOPERATIVE_WORK_WORDS = 360
-"""Ten 6x6 matrices per pair, allocated and budgeted before capture."""
-
 _PAIRED_COARSE_MIN_CLOSURES = 5
 """Smallest closure count whose coarse solve repays a lane-split block.
 
@@ -231,6 +234,32 @@ __syncthreads();
 #endif
 """)
 def _synchronize_cr_block(): ...
+
+
+@wp.func_native("""
+#if defined(__CUDA_ARCH__)
+__shared__ double words[360];
+return wp::array_t<wp::float64>(words, 360);
+#else
+return wp::array_t<wp::float64>();
+#endif
+""")
+def _block_shared_words() -> wp.array[wp.float64]:
+    """Return this block's FP64 cooperative scratch (CUDA only)."""
+    ...
+
+
+@wp.func_native("""
+#if defined(__CUDA_ARCH__)
+__shared__ int pivot[1];
+return wp::array_t<wp::int32>(pivot, 1);
+#else
+return wp::array_t<wp::int32>();
+#endif
+""")
+def _block_shared_pivot() -> wp.array[wp.int32]:
+    """Return this block's cooperative pivot slot (CUDA only)."""
+    ...
 
 
 @wp.func
@@ -5059,13 +5088,6 @@ def _closed_tree_body_closure_row_count(
     return count
 
 
-def _paired_cooperative_payload_bytes(pair_count: int) -> int:
-    """Exact optional work/pivot payload, shared by preflight and upgrades."""
-    return _array_payload_bytes(pair_count * _PAIRED_COOPERATIVE_WORK_WORDS, wp.float64) + _array_payload_bytes(
-        pair_count, wp.int32
-    )
-
-
 def _closed_tree_bucket_diagnostics(
     components: list[_ClosedTree],
     parent: np.ndarray,
@@ -5146,8 +5168,6 @@ def _closed_tree_bucket_diagnostics(
         )
         estimated_bytes += paired_response_bytes
         closure_response_bytes += paired_response_bytes
-        if cooperative_paired:
-            estimated_bytes += _paired_cooperative_payload_bytes(paired_backbone_size)
         route = "closed_tree_paired_backbone_cr"
     else:
         route = "closed_tree_cpu_float64" if device.is_cpu else "closed_tree_serial_float64"
@@ -5190,7 +5210,7 @@ def _shared_structural_payload_bytes(
         + _array_payload_bytes(model_body_count, wp.transform)
         + _array_payload_bytes(island_count, wp.bool)
         + 2 * _array_payload_bytes(island_count, wp.float64)
-        + _array_payload_bytes(1 + int(is_cuda), wp.int32)
+        + _array_payload_bytes(1 + 2 * int(is_cuda), wp.int32)
         + _array_payload_bytes(graph_body_count, wp.spatial_vector)
         + _array_payload_bytes(island_count, wp.int32)
         + _array_payload_bytes(island_count, wp.mat44d)
@@ -7231,6 +7251,7 @@ class _TreeBucket:
         self.row_scale = wp.zeros(self.row_count, dtype=wp.spatial_vector, device=device)
         self.residual = wp.zeros(self.row_count, dtype=wp.spatial_vector, device=device)
         self.row_active = wp.zeros(self.row_count, dtype=wp.int32, device=device)
+        self.row_slices = None
         self.rhs = wp.zeros(self.node_count, dtype=vector_dtype, device=device)
         self.coupling = wp.zeros(self.node_count, dtype=matrix_dtype, device=device)
         # Eliminated node blocks and rhs values are dead in the forward pass;
@@ -7590,6 +7611,39 @@ class _TreeBucket:
                 block_dim=self.spatial_block_dim,
             )
 
+    def group_rows_by_joint_type(self, joint_type: np.ndarray):
+        """Order rows by joint type so each type can linearize in its own launch.
+
+        Only precise closed trees call this: their row Jacobians do not alias
+        numeric factors. Rows are reached through ``joint_ids``, ``node_row`` and
+        ``body_rows`` alone, so per-row arithmetic and per-body sum orders hold.
+        """
+        types = joint_type[self.joint_ids_host]
+        order = np.argsort(types, kind="stable")
+        bounds = (np.flatnonzero(np.diff(types[order])) + 1).tolist()
+        if self.batch_count != 1 or not bounds:
+            return
+        inverse = np.empty_like(order)
+        inverse[order] = np.arange(order.shape[0])
+        self.joint_ids_host = self.joint_ids_host[order]
+        self.joint_ids.assign(self.joint_ids_host)
+        node_row = self.node_row.numpy()
+        node_row[node_row >= 0] = inverse[node_row[node_row >= 0]]
+        self.node_row.assign(node_row)
+        self.body_rows.assign(inverse[self.body_rows.numpy()])
+        self.row_slices = [
+            (
+                self.joint_ids[start:end],
+                end - start,
+                self.jacobian_parent[start:end],
+                self.jacobian_child[start:end],
+                self.compliance[start:end],
+                self.residual[start:end],
+                self.row_active[start:end],
+            )
+            for start, end in zip([0, *bounds], [*bounds, self.row_count], strict=True)
+        ]
+
     def solve_tree_contraction(self):
         """Solve an arbitrary acyclic island by exact rake-and-compress."""
         for (
@@ -7910,6 +7964,56 @@ def _cooperative_matrix_product_fma(
 
 
 @wp.kernel(module="unique", enable_backward=False)
+def eliminate_tree_unique_leaves_cooperative(
+    leaves: wp.array[wp.int32],
+    parent_node: wp.array[wp.int32],
+    diagonal: wp.array[wp.float64],
+    rhs: wp.array[wp.float64],
+    coupling: wp.array[wp.float64],
+):
+    """Eliminate unique-recipient FP64 leaves with one 64-thread block each.
+
+    The arithmetic of :func:`eliminate_tree_unique_leaves`: the serial partial-pivot
+    inverse, the left-associated fused products of ``transpose(a) * inverse * a`` and
+    the column-ordered ``* rhs`` product. The inverse overwrites the eliminated
+    diagonal, which the tree's saved-inverse buffer aliases. Requires ``block_dim`` 64.
+    """
+    tid = wp.tid()
+    width = wp.block_dim()
+    lane = tid % width
+    index = tid // width
+    node = leaves[index]
+    parent = parent_node[node]
+    row = lane // 6
+    col = lane % 6
+    s = 0
+    scratch = _block_shared_words()
+    pivot_slot = _block_shared_pivot()
+    d = node * 36
+    if lane < 36:
+        scratch[s + lane] = diagonal[d + lane]
+    _synchronize_cr_block()
+    _inverse_spatial_cooperative(scratch, s, s + 36, pivot_slot, 0, lane)
+    if lane < 36:
+        value = wp.float64(0.0)
+        for k in range(6):
+            value = _fma_f64(coupling[d + k * 6 + row], scratch[s + 36 + k * 6 + col], value)
+        scratch[s + 72 + lane] = value
+        diagonal[d + lane] = scratch[s + 36 + lane]
+    _synchronize_cr_block()
+    if lane < 36:
+        value = wp.float64(0.0)
+        for k in range(6):
+            value = _fma_f64(scratch[s + 72 + row * 6 + k], coupling[d + k * 6 + col], value)
+        diagonal[parent * 36 + lane] = diagonal[parent * 36 + lane] - value
+    if lane < 6:
+        value = scratch[s + 72 + lane * 6] * rhs[node * 6]
+        for k in range(1, 6):
+            value = value + scratch[s + 72 + lane * 6 + k] * rhs[node * 6 + k]
+        rhs[parent * 6 + lane] = rhs[parent * 6 + lane] - value
+
+
+@wp.kernel(module="unique", enable_backward=False)
 def invert_paired_tree_backbone_cooperative(
     stride: int,
     pair_count: int,
@@ -7920,9 +8024,8 @@ def invert_paired_tree_backbone_cooperative(
     diagonal: wp.array[wp.float64],
     upper: wp.array[wp.float64],
     factors: wp.array[wp.float64],
-    work: wp.array[wp.float64],
-    pivots: wp.array[wp.int32],
 ):
+    """Invert body-first paired pivots using block-shared work and pivot storage."""
     tid = wp.tid()
     width = wp.block_dim()
     lane = tid % width
@@ -7936,38 +8039,40 @@ def invert_paired_tree_backbone_cooperative(
     row = lane // 6
     col = lane % 6
     d = pair * 144
-    s = pair * 360
+    s = 0
+    scratch = _block_shared_words()
+    pivot_slot = _block_shared_pivot()
     # B^-1, X=B^-1*Jt, S=C-J*X; all original blocks remain read-only.
     if lane < 36:
-        work[s + lane] = diagonal[d + lane]
+        scratch[s + lane] = diagonal[d + lane]
     _synchronize_cr_block()
-    _inverse_spatial_cooperative(work, s, s + 36, pivots, pair, lane)
+    _inverse_spatial_cooperative(scratch, s, s + 36, pivot_slot, 0, lane)
     if lane < 36:
-        work[s + 72 + lane] = _cooperative_matrix_product(work, s + 36, diagonal, d + 36, row, col)
+        scratch[s + 72 + lane] = _cooperative_matrix_product(scratch, s + 36, diagonal, d + 36, row, col)
     _synchronize_cr_block()
     if lane < 36:
-        work[s + 108 + lane] = diagonal[d + 108 + lane] - _cooperative_matrix_product(
-            diagonal, d + 72, work, s + 72, row, col
+        scratch[s + 108 + lane] = diagonal[d + 108 + lane] - _cooperative_matrix_product(
+            diagonal, d + 72, scratch, s + 72, row, col
         )
     _synchronize_cr_block()
-    _inverse_spatial_cooperative(work, s + 108, s + 144, pivots, pair, lane)
+    _inverse_spatial_cooperative(scratch, s + 108, s + 144, pivot_slot, 0, lane)
     # Preserve the native left-associated matrix-product expressions.
     if lane < 36:
-        work[s + 180 + lane] = _cooperative_matrix_product(work, s + 72, work, s + 144, row, col)
-        work[s + 216 + lane] = _cooperative_matrix_product(work, s + 144, diagonal, d + 72, row, col)
+        scratch[s + 180 + lane] = _cooperative_matrix_product(scratch, s + 72, scratch, s + 144, row, col)
+        scratch[s + 216 + lane] = _cooperative_matrix_product(scratch, s + 144, diagonal, d + 72, row, col)
     _synchronize_cr_block()
     if lane < 36:
-        work[s + 252 + lane] = _cooperative_matrix_product(work, s + 216, work, s + 36, row, col)
-        work[s + 288 + lane] = _cooperative_matrix_product(work, s + 180, diagonal, d + 72, row, col)
+        scratch[s + 252 + lane] = _cooperative_matrix_product(scratch, s + 216, scratch, s + 36, row, col)
+        scratch[s + 288 + lane] = _cooperative_matrix_product(scratch, s + 180, diagonal, d + 72, row, col)
     _synchronize_cr_block()
     if lane < 36:
-        work[s + 324 + lane] = _cooperative_matrix_product(work, s + 288, work, s + 36, row, col)
+        scratch[s + 324 + lane] = _cooperative_matrix_product(scratch, s + 288, scratch, s + 36, row, col)
     _synchronize_cr_block()
     if lane < 36:
-        diagonal[d + lane] = work[s + 36 + lane] + work[s + 324 + lane]
-        diagonal[d + 36 + lane] = -work[s + 180 + lane]
-        diagonal[d + 72 + lane] = -work[s + 252 + lane]
-        diagonal[d + 108 + lane] = work[s + 144 + lane]
+        diagonal[d + lane] = scratch[s + 36 + lane] + scratch[s + 324 + lane]
+        diagonal[d + 36 + lane] = -scratch[s + 180 + lane]
+        diagonal[d + 72 + lane] = -scratch[s + 252 + lane]
+        diagonal[d + 108 + lane] = scratch[s + 144 + lane]
     _synchronize_cr_block()
     if write_factors != 0 and lane < 36:
         left0 = wp.float64(0.0)
@@ -8196,6 +8301,13 @@ def solve_paired_tree_backbone_single(
         column_index += width
 
 
+def _float64_words_view(array, words: int):
+    """Alias an FP64 matrix or vector array as flat words without allocating."""
+    if wp.types.type_size_in_bytes(array.dtype) != words * 8:
+        raise ValueError("Unexpected FP64 block layout")
+    return wp.array(ptr=array.ptr, dtype=wp.float64, shape=array.shape[0] * words, device=array.device, copy=False)
+
+
 def _paired_float64_view(array, words: int):
     """Alias the private packed FP64 layout without allocating device memory."""
     if np.dtype(array.dtype.numpy_dtype()).itemsize != words * 8:
@@ -8233,6 +8345,7 @@ class _ClosedTreeBucket:
         if tree_symbolics is None:
             tree_symbolics = _tree_bucket_symbolics(component.tree, include_contraction=False)
         self.device = device
+        self.side_streams = None
         self.tree = _TreeBucket(
             [candidate.tree for candidate in components],
             body_slot,
@@ -8337,6 +8450,7 @@ class _ClosedTreeBucket:
             and device.is_cuda
             and self.closure_count >= _PAIRED_COOPERATIVE_MIN_CLOSURES
         )
+        self.cooperative_leaf_levels = [False] * len(self.branch_levels)
         if self.use_paired_backbone:
             self.paired_lower = wp.zeros(self.paired_backbone_size, dtype=_SpatialPairMatrixD, device=self.device)
             self.paired_diagonal = wp.zeros_like(self.paired_lower)
@@ -8358,12 +8472,17 @@ class _ClosedTreeBucket:
                 self.cooperative_upper = _paired_float64_view(self.paired_upper, 144)
                 self.cooperative_factors = _paired_float64_view(self.paired_elimination_factor, 144)
                 self.cooperative_response = _paired_float64_view(self.paired_response, 72)
-                self.cooperative_work = wp.empty(
-                    self.paired_backbone_size * _PAIRED_COOPERATIVE_WORK_WORDS,
-                    dtype=wp.float64,
-                    device=device,
-                )
-                self.cooperative_pivots = wp.empty(self.paired_backbone_size, dtype=wp.int32, device=device)
+                # Retain the established leaf scheduling envelope; scratch is block-local.
+                leaf_capacity = self.paired_backbone_size
+                self.cooperative_leaf_levels = [
+                    unique and leaves.shape[0] <= leaf_capacity for leaves, _, _, _, unique in self.branch_levels
+                ]
+                if self.tree.saved_inverse is self.tree.diagonal and self.tree.saved_rhs is self.tree.rhs:
+                    self.cooperative_tree_diagonal = _float64_words_view(self.tree.diagonal, 36)
+                    self.cooperative_tree_rhs = _float64_words_view(self.tree.rhs, 6)
+                    self.cooperative_tree_coupling = _float64_words_view(self.tree.coupling, 36)
+                else:
+                    self.cooperative_leaf_levels = [False] * len(self.branch_levels)
             self.paired_cr_levels: list[tuple[int, int, int]] = []
             stride = 1
             active_count = self.paired_backbone_count
@@ -8550,14 +8669,12 @@ class _ClosedTreeBucket:
                 self.cooperative_diagonal,
                 self.cooperative_upper,
                 self.cooperative_factors,
-                self.cooperative_work,
-                self.cooperative_pivots,
             ],
             device=self.device,
             block_dim=64,
         )
 
-    def solve_paired_backbone(self):
+    def solve_paired_backbone(self, response_stream=None):
         """Solve the precise cyclic base with body-first pair pivots."""
         wp.launch(
             initialize_paired_tree_backbone,
@@ -8581,20 +8698,23 @@ class _ClosedTreeBucket:
             device=self.device,
             block_dim=self.spatial_block_dim,
         )
-        wp.launch(
-            initialize_paired_tree_backbone_response,
-            self.paired_backbone_size * self.closure_count,
-            inputs=[
-                self.paired_backbone_count,
-                self.backbone_node_count,
-                self.closure_count,
-                self.backbone_nodes,
-                self.response_rhs,
-            ],
-            outputs=[self.paired_response],
-            device=self.device,
-            block_dim=self.spatial_block_dim,
-        )
+        with _stream_scope(response_stream):
+            wp.launch(
+                initialize_paired_tree_backbone_response,
+                self.paired_backbone_size * self.closure_count,
+                inputs=[
+                    self.paired_backbone_count,
+                    self.backbone_node_count,
+                    self.closure_count,
+                    self.backbone_nodes,
+                    self.response_rhs,
+                ],
+                outputs=[self.paired_response],
+                device=self.device,
+                block_dim=self.spatial_block_dim,
+            )
+        if response_stream is not None:
+            wp.get_stream(self.device).wait_stream(response_stream)
         self._solve_paired_backbone_system(True, self.paired_rhs, self.paired_response)
         wp.launch(
             scatter_paired_tree_backbone_solution,
@@ -8703,9 +8823,16 @@ class _ClosedTreeBucket:
             )
 
     def solve_tree(self, body_matrix, body_rhs, body_scale, body_correction):
-        """Solve a closed island without rounding its closure response or recovery."""
+        """Solve a closed island without rounding its closure response or recovery.
+
+        With side streams, the closure-response chain and the coupling setup run beside the
+        factor chain; every kernel keeps its inputs and arithmetic.
+        """
         tree = self.tree
         device = self.device
+        streams = self.side_streams if device.is_cuda and self.use_paired_backbone else None
+        response_stream, coupling_stream = streams[:2] if streams is not None else (None, None)
+        main = wp.get_stream(device) if streams is not None else None
         wp.launch(
             equilibrate_tree_bodies,
             tree.body_count,
@@ -8720,6 +8847,51 @@ class _ClosedTreeBucket:
             outputs=[tree.row_scale],
             device=device,
         )
+        wp.launch(
+            equilibrate_tree_rows,
+            self.closure_size,
+            inputs=[self.closure_compliance],
+            outputs=[self.closure_row_scale],
+            device=device,
+        )
+        if streams is not None:
+            response_stream.wait_stream(main)
+            coupling_stream.wait_stream(main)
+        with _stream_scope(coupling_stream):
+            wp.launch(
+                _initialize_tree_couplings_fp64,
+                tree.node_count,
+                inputs=[
+                    tree.node_body,
+                    tree.node_row,
+                    tree.parent_node,
+                    tree.coupling_side,
+                    body_scale,
+                    tree.row_scale,
+                    tree.jacobian_parent,
+                    tree.jacobian_child,
+                ],
+                outputs=[self.factor_coupling],
+                device=device,
+            )
+        with _stream_scope(response_stream):
+            wp.launch(
+                _initialize_closure_response_fp64,
+                tree.node_count * self.closure_count,
+                inputs=[
+                    tree.node_body,
+                    tree.tree_node_count,
+                    self.closure_count,
+                    self.closure_parent_node,
+                    self.closure_child_node,
+                    body_scale,
+                    self.closure_row_scale,
+                    self.closure_jacobian_parent,
+                    self.closure_jacobian_child,
+                ],
+                outputs=[self.response_rhs],
+                device=device,
+            )
         wp.launch(
             _initialize_tree_nodes_fp64,
             tree.node_count,
@@ -8736,48 +8908,10 @@ class _ClosedTreeBucket:
             outputs=[self.factor_diagonal, tree.solution],
             device=device,
         )
-        wp.launch(
-            _initialize_tree_couplings_fp64,
-            tree.node_count,
-            inputs=[
-                tree.node_body,
-                tree.node_row,
-                tree.parent_node,
-                tree.coupling_side,
-                body_scale,
-                tree.row_scale,
-                tree.jacobian_parent,
-                tree.jacobian_child,
-            ],
-            outputs=[self.factor_coupling],
-            device=device,
-        )
-        wp.launch(
-            equilibrate_tree_rows,
-            self.closure_size,
-            inputs=[self.closure_compliance],
-            outputs=[self.closure_row_scale],
-            device=device,
-        )
-        wp.launch(
-            _initialize_closure_response_fp64,
-            tree.node_count * self.closure_count,
-            inputs=[
-                tree.node_body,
-                tree.tree_node_count,
-                self.closure_count,
-                self.closure_parent_node,
-                self.closure_child_node,
-                body_scale,
-                self.closure_row_scale,
-                self.closure_jacobian_parent,
-                self.closure_jacobian_child,
-            ],
-            outputs=[self.response_rhs],
-            device=device,
-        )
+        if streams is not None:
+            main.wait_stream(coupling_stream)
         if self.device.is_cuda and self.use_paired_backbone:
-            self._solve_tree_gpu()
+            self._solve_tree_gpu(response_stream)
         else:
             wp.launch(
                 _eliminate_tree_nodes_fp64,
@@ -8812,6 +8946,25 @@ class _ClosedTreeBucket:
                 outputs=[self.factor_diagonal, tree.solution, self.response_rhs],
                 device=device,
             )
+        with _stream_scope(response_stream):
+            wp.launch(
+                _assemble_closure_schur_fp64,
+                self.batch_count * self.closure_count * self.closure_count,
+                inputs=[
+                    self.closure_count,
+                    tree.node_body,
+                    self.closure_parent_node,
+                    self.closure_child_node,
+                    body_scale,
+                    self.closure_row_scale,
+                    self.closure_jacobian_parent,
+                    self.closure_jacobian_child,
+                    self.closure_compliance,
+                    self.response_solution,
+                ],
+                outputs=[self.closure_schur],
+                device=device,
+            )
         wp.launch(
             _assemble_closure_rhs_fp64,
             self.closure_size,
@@ -8829,24 +8982,8 @@ class _ClosedTreeBucket:
             outputs=[self.closure_rhs],
             device=device,
         )
-        wp.launch(
-            _assemble_closure_schur_fp64,
-            self.batch_count * self.closure_count * self.closure_count,
-            inputs=[
-                self.closure_count,
-                tree.node_body,
-                self.closure_parent_node,
-                self.closure_child_node,
-                body_scale,
-                self.closure_row_scale,
-                self.closure_jacobian_parent,
-                self.closure_jacobian_child,
-                self.closure_compliance,
-                self.response_solution,
-            ],
-            outputs=[self.closure_schur],
-            device=device,
-        )
+        if streams is not None:
+            main.wait_stream(response_stream)
         self.solve_closure_schur()
         wp.launch(
             _scatter_closed_tree_body_correction_fp64,
@@ -8871,15 +9008,31 @@ class _ClosedTreeBucket:
             device=device,
         )
 
-    def _solve_tree_gpu(self):
-        for (
+    def _solve_tree_gpu(self, response_stream=None):
+        # The response chain needs only each level's saved inverses: it trails
+        # the factor chain by one level on its own stream.
+        main = wp.get_stream(self.device) if response_stream is not None else None
+        for level, (
             leaves,
             recipients,
             recipient_offsets,
             message_nodes,
             recipients_are_unique,
-        ) in self.branch_levels:
-            if recipients_are_unique:
+        ) in enumerate(self.branch_levels):
+            if self.cooperative_leaf_levels[level]:
+                wp.launch(
+                    eliminate_tree_unique_leaves_cooperative,
+                    leaves.shape[0] * _PAIRED_COOPERATIVE_BLOCK_DIM,
+                    inputs=[leaves, self.tree.parent_node],
+                    outputs=[
+                        self.cooperative_tree_diagonal,
+                        self.cooperative_tree_rhs,
+                        self.cooperative_tree_coupling,
+                    ],
+                    device=self.device,
+                    block_dim=_PAIRED_COOPERATIVE_BLOCK_DIM,
+                )
+            elif recipients_are_unique:
                 wp.launch(
                     eliminate_tree_unique_leaves,
                     leaves.shape[0],
@@ -8918,37 +9071,40 @@ class _ClosedTreeBucket:
                     device=self.device,
                     block_dim=self.spatial_block_dim,
                 )
-            if recipients_are_unique:
-                wp.launch(
-                    eliminate_tree_response_unique_leaves,
-                    leaves.shape[0] * self.closure_count,
-                    inputs=[
-                        leaves,
-                        self.closure_count,
-                        self.tree.parent_node,
-                        self.tree.coupling,
-                        self.tree.saved_inverse,
-                    ],
-                    outputs=[self.response_rhs],
-                    device=self.device,
-                    block_dim=self.spatial_block_dim,
-                )
-            else:
-                wp.launch(
-                    accumulate_tree_response_messages,
-                    recipients.shape[0] * self.closure_count,
-                    inputs=[
-                        recipients,
-                        recipient_offsets,
-                        message_nodes,
-                        self.closure_count,
-                        self.tree.coupling,
-                        self.tree.saved_inverse,
-                    ],
-                    outputs=[self.response_rhs],
-                    device=self.device,
-                    block_dim=self.spatial_block_dim,
-                )
+            if response_stream is not None:
+                response_stream.wait_stream(main)
+            with _stream_scope(response_stream):
+                if recipients_are_unique:
+                    wp.launch(
+                        eliminate_tree_response_unique_leaves,
+                        leaves.shape[0] * self.closure_count,
+                        inputs=[
+                            leaves,
+                            self.closure_count,
+                            self.tree.parent_node,
+                            self.tree.coupling,
+                            self.tree.saved_inverse,
+                        ],
+                        outputs=[self.response_rhs],
+                        device=self.device,
+                        block_dim=self.spatial_block_dim,
+                    )
+                else:
+                    wp.launch(
+                        accumulate_tree_response_messages,
+                        recipients.shape[0] * self.closure_count,
+                        inputs=[
+                            recipients,
+                            recipient_offsets,
+                            message_nodes,
+                            self.closure_count,
+                            self.tree.coupling,
+                            self.tree.saved_inverse,
+                        ],
+                        outputs=[self.response_rhs],
+                        device=self.device,
+                        block_dim=self.spatial_block_dim,
+                    )
 
         wp.launch(
             initialize_tree_backbone_edges,
@@ -8963,7 +9119,9 @@ class _ClosedTreeBucket:
             device=self.device,
             block_dim=self.spatial_block_dim,
         )
-        self.solve_paired_backbone()
+        self.solve_paired_backbone(response_stream)
+        if response_stream is not None:
+            response_stream.wait_stream(main)
 
         for leaves, _, _, _, _ in reversed(self.branch_levels):
             wp.launch(
@@ -8980,21 +9138,22 @@ class _ClosedTreeBucket:
                 device=self.device,
                 block_dim=self.spatial_block_dim,
             )
-            wp.launch(
-                back_substitute_tree_response_level,
-                leaves.shape[0] * self.closure_count,
-                inputs=[
-                    leaves,
-                    self.closure_count,
-                    self.tree.parent_node,
-                    self.tree.coupling,
-                    self.tree.saved_inverse,
-                    self.response_rhs,
-                ],
-                outputs=[self.response_solution],
-                device=self.device,
-                block_dim=self.spatial_block_dim,
-            )
+            with _stream_scope(response_stream):
+                wp.launch(
+                    back_substitute_tree_response_level,
+                    leaves.shape[0] * self.closure_count,
+                    inputs=[
+                        leaves,
+                        self.closure_count,
+                        self.tree.parent_node,
+                        self.tree.coupling,
+                        self.tree.saved_inverse,
+                        self.response_rhs,
+                    ],
+                    outputs=[self.response_solution],
+                    device=self.device,
+                    block_dim=self.spatial_block_dim,
+                )
 
 
 class StructuralGraphKKT:
@@ -9010,8 +9169,19 @@ class StructuralGraphKKT:
         allow_general_joint_paths=False,
         supported_joint_types: set[int] | None = None,
         ignore_free_completion_joints=False,
+        enable_stream_concurrency=False,
     ):
         self.device = model.device
+        # Independent row, contact and closed-tree work may overlap on CUDA.
+        # Reproducible modes keep one stream and therefore one reduction order.
+        self.side_streams = (
+            tuple(wp.Stream(self.device) for _ in range(5))
+            if enable_stream_concurrency and self.device.is_cuda
+            else None
+        )
+        # Row launches use the current stream and every side stream except the
+        # contact stream, which may refresh the contact objective meanwhile.
+        self.row_lanes = (None, self.side_streams[0], *self.side_streams[2:]) if self.side_streams is not None else None
         # Translation refinement may accumulate rounded shifts on each pass.
         # Its early exit is restricted to reproducible reductions. A completed
         # directional search, in contrast, needs no further trial evaluation.
@@ -9135,10 +9305,8 @@ class StructuralGraphKKT:
                         child,
                         self.device,
                         tree_symbolics=symbolics,
-                        # Preserve the established multi-closure admission cost.
-                        # Single-loop scratch is offered only after all islands
-                        # have retained their previous place within the cap.
-                        cooperative_paired=len(ordered[0].closure_joints) > 1,
+                        # Block-shared cooperative scratch adds no global payload.
+                        cooperative_paired=True,
                     ),
                     symbolics,
                 )
@@ -9251,41 +9419,7 @@ class StructuralGraphKKT:
                         fallback_reason="payload_budget",
                     )
                 )
-        # Spend remaining capacity on newly eligible single-loop scratch only
-        # after preserving the established island admission decisions. Falling
-        # back to the serial paired schedule retains its global correction.
-        upgraded_diagnostics = {}
-        if self.device.is_cuda and selected_plans:
-            shared_bytes = _shared_structural_payload_bytes(
-                model.body_count,
-                model.joint_count,
-                len(selected_body_ids),
-                selected_island_count,
-                len(selected_joint_ids),
-                is_cuda=True,
-            )
-            for plan in selected_plans:
-                if (
-                    plan.kind != "closed_tree"
-                    or plan.diagnostics.cooperative_paired
-                    or plan.diagnostics.planned_route != "closed_tree_paired_backbone_cr"
-                    or plan.diagnostics.closure_count_per_island < _PAIRED_COOPERATIVE_MIN_CLOSURES
-                ):
-                    continue
-                pair_count = plan.diagnostics.batch_count * ((len(plan.tree_symbolics.backbone) + 1) // 2)
-                extra_bytes = _paired_cooperative_payload_bytes(pair_count)
-                if _within_structural_payload_budget(
-                    selected_bucket_bytes + shared_bytes + extra_bytes, self._payload_budget_bytes
-                ):
-                    upgraded = replace(
-                        plan.diagnostics,
-                        estimated_bytes=plan.diagnostics.estimated_bytes + extra_bytes,
-                        cooperative_paired=True,
-                    )
-                    upgraded_diagnostics[id(plan.diagnostics)] = upgraded
-                    plan.diagnostics = upgraded
-                    selected_bucket_bytes += extra_bytes
-        self._bucket_diagnostics = tuple(upgraded_diagnostics.get(id(item), item) for item in diagnostics)
+        self._bucket_diagnostics = tuple(diagnostics)
 
         components = [component for component in all_components if id(component) in selected_component_ids]
         if not components:
@@ -9337,6 +9471,10 @@ class StructuralGraphKKT:
         ]
         for bucket in self.path_buckets:
             bucket.bind_body_endpoints(parent, child, body_slot)
+        for bucket in self.closed_tree_buckets:
+            bucket.side_streams = self.side_streams
+            if self.side_streams is not None:
+                bucket.tree.group_rows_by_joint_type(model.joint_type.numpy())
 
         self.graph_body_count = len(graph_body_ids)
         self.graph_body_ids = wp.array(graph_body_ids, dtype=wp.int32, device=self.device)
@@ -9413,6 +9551,7 @@ class StructuralGraphKKT:
         self.line_search_slope = wp.zeros(len(components), dtype=wp.float64, device=self.device)
         self.line_search_initial_slope = wp.empty_like(self.line_search_slope)
         self.line_search_pending = wp.ones(1, dtype=int, device=self.device)
+        self.line_search_trial = wp.zeros(1, dtype=int, device=self.device) if self.device.is_cuda else None
         self.translation_iterations_remaining = (
             wp.empty(1, dtype=int, device=self.device) if self.device.is_cuda else None
         )
@@ -9562,10 +9701,28 @@ class StructuralGraphKKT:
         body_contact_indices,
         refresh_contacts=None,
         translation_only=False,
+        contact_stream=None,
     ):
-        def linearize(*, build_majorizer=True, build_body=True, slope_only=False):
+        def linearizations_closure(bucket):
+            return (
+                bucket.closure_joint_ids,
+                bucket.closure_size,
+                bucket.closure_jacobian_parent,
+                bucket.closure_jacobian_child,
+                bucket.closure_compliance,
+                bucket.closure_residual,
+                bucket.closure_row_active,
+            )
+
+        def linearize(*, build_majorizer=True, build_body=True, slope_only=False, contact_stream=None):
             # Rows are linearized first: the stress majorizer writes per-row
             # blocks that the body surrogate then sums in fixed order.
+            # Independent row groups (joint types, closures) overlap on the row
+            # lanes; each launch writes only its own rows.
+            lanes = self.row_lanes
+            main = wp.get_stream(self.device) if lanes is not None else None
+            forked = []
+            launch_index = 0
             for bucket in self.buckets:
                 linearizations = (
                     (
@@ -9588,6 +9745,8 @@ class StructuralGraphKKT:
                             bucket.closure_row_active,
                         ),
                     )
+                    if isinstance(bucket, _ClosedTreeBucket) and bucket.tree.row_slices is None
+                    else (*bucket.tree.row_slices, linearizations_closure(bucket))
                     if isinstance(bucket, _ClosedTreeBucket)
                     else (
                         (
@@ -9610,97 +9769,108 @@ class StructuralGraphKKT:
                     residual,
                     row_active,
                 ) in linearizations:
-                    wp.launch(
-                        _linearize_fused_rod_rows if self._fuse_rod_stress else linearize_joint_path_rows,
-                        linearization_size,
-                        inputs=[
-                            linearization_joint_ids,
-                            joint_type,
-                            joint_enabled,
-                            joint_parent,
-                            joint_child,
-                            joint_X_p,
-                            joint_X_c,
-                            joint_axis,
-                            joint_rod_rest_kb_local,
-                            joint_rod_rest_twist,
-                            joint_qd_start,
-                            joint_target_q_start,
-                            joint_dof_dim,
-                            joint_constraint_start,
-                            joint_material_k,
-                            joint_rho,
-                            joint_penalty_kd,
-                            joint_lambda_lin,
-                            joint_lambda_ang,
-                            joint_C0_lin,
-                            joint_C0_ang,
-                            joint_sigma_start,
-                            joint_C_fric,
-                            joint_target_ke,
-                            joint_target_kd,
-                            joint_target_q,
-                            joint_target_qd,
-                            joint_limit_lower,
-                            joint_limit_upper,
-                            joint_limit_ke,
-                            joint_limit_kd,
-                            joint_rest_angle,
-                            joint_angle_prev,
-                            joint_drive_limit_support,
-                            joint_drive_lambda,
-                            joint_limit_lambda,
-                            stab_alpha,
-                            body_q,
-                            body_q_prev,
-                            body_q_rest,
-                            body_com,
-                            dt,
-                            slope_only,
-                            self.body_slot_by_id,
-                            self.graph_body_island,
-                            self.body_correction,
-                            self.line_search_slope,
-                        ],
-                        outputs=[
-                            jacobian_parent,
-                            jacobian_child,
-                            compliance,
-                            residual,
-                            row_active,
-                            build_majorizer and self._fuse_rod_stress,
-                            self.joint_stress_slot,
-                            body_inv_mass,
-                            self.body_stress,
-                        ],
-                        device=self.device,
-                        block_dim=self.spatial_block_dim,
-                    )
-                    if build_majorizer and not self._fuse_rod_stress:
+                    stream = lanes[launch_index % len(lanes)] if lanes is not None else None
+                    launch_index += 1
+                    if stream is not None and all(stream is not lane for lane in forked):
+                        stream.wait_stream(main)
+                        forked.append(stream)
+                    with _stream_scope(stream):
                         wp.launch(
-                            add_joint_stress_majorizer,
+                            _linearize_fused_rod_rows if self._fuse_rod_stress else linearize_joint_path_rows,
                             linearization_size,
                             inputs=[
-                                self.joint_stress_slot,
                                 linearization_joint_ids,
                                 joint_type,
+                                joint_enabled,
                                 joint_parent,
                                 joint_child,
                                 joint_X_p,
                                 joint_X_c,
+                                joint_axis,
+                                joint_rod_rest_kb_local,
+                                joint_rod_rest_twist,
+                                joint_qd_start,
+                                joint_target_q_start,
+                                joint_dof_dim,
+                                joint_constraint_start,
+                                joint_material_k,
+                                joint_rho,
+                                joint_penalty_kd,
+                                joint_lambda_lin,
+                                joint_lambda_ang,
+                                joint_C0_lin,
+                                joint_C0_ang,
+                                joint_sigma_start,
+                                joint_C_fric,
+                                joint_target_ke,
+                                joint_target_kd,
+                                joint_target_q,
+                                joint_target_qd,
+                                joint_limit_lower,
+                                joint_limit_upper,
+                                joint_limit_ke,
+                                joint_limit_kd,
+                                joint_rest_angle,
+                                joint_angle_prev,
+                                joint_drive_limit_support,
+                                joint_drive_lambda,
+                                joint_limit_lambda,
+                                stab_alpha,
                                 body_q,
+                                body_q_prev,
+                                body_q_rest,
                                 body_com,
-                                body_inv_mass,
+                                dt,
+                                slope_only,
                                 self.body_slot_by_id,
+                                self.graph_body_island,
+                                self.body_correction,
+                                self.line_search_slope,
+                            ],
+                            outputs=[
                                 jacobian_parent,
                                 jacobian_child,
                                 compliance,
                                 residual,
+                                row_active,
+                                build_majorizer and self._fuse_rod_stress,
+                                self.joint_stress_slot,
+                                body_inv_mass,
+                                self.body_stress,
                             ],
-                            outputs=[self.body_stress],
                             device=self.device,
                             block_dim=self.spatial_block_dim,
                         )
+                        if build_majorizer and not self._fuse_rod_stress:
+                            wp.launch(
+                                add_joint_stress_majorizer,
+                                linearization_size,
+                                inputs=[
+                                    self.joint_stress_slot,
+                                    linearization_joint_ids,
+                                    joint_type,
+                                    joint_parent,
+                                    joint_child,
+                                    joint_X_p,
+                                    joint_X_c,
+                                    body_q,
+                                    body_com,
+                                    body_inv_mass,
+                                    self.body_slot_by_id,
+                                    jacobian_parent,
+                                    jacobian_child,
+                                    compliance,
+                                    residual,
+                                ],
+                                outputs=[self.body_stress],
+                                device=self.device,
+                                block_dim=self.spatial_block_dim,
+                            )
+            for stream in forked:
+                main.wait_stream(stream)
+            if contact_stream is not None:
+                # The surrogate is the first consumer of the contact objective.
+                main.wait_stream(contact_stream)
             if build_body:
                 wp.launch(
                     build_body_surrogate,
@@ -9763,31 +9933,41 @@ class StructuralGraphKKT:
             refresh_contacts(translation)
 
         def directional_derivative(*, refresh=True):
-            if refresh:
+            contact_side = self.side_streams[1] if self.side_streams is not None else None
+            if contact_side is None and refresh:
                 refresh_contact_objective(forces_only=True)
             self.line_search_slope.zero_()
-            wp.launch(
-                accumulate_body_directional_derivative,
-                self.graph_body_count,
-                inputs=[
-                    self.graph_body_ids,
-                    self.graph_body_island,
-                    self.line_search_enabled,
-                    body_q,
-                    body_inertia_q,
-                    body_mass,
-                    body_inv_mass,
-                    body_inertia,
-                    body_com,
-                    contact_forces,
-                    contact_torques,
-                    dt,
-                    self.body_correction,
-                ],
-                outputs=[self.line_search_slope],
-                device=self.device,
-            )
+            if contact_side is not None:
+                # Body contact and joint rows add independent slope terms.
+                main = wp.get_stream(self.device)
+                contact_side.wait_stream(main)
+            with _stream_scope(contact_side):
+                if contact_side is not None and refresh:
+                    refresh_contact_objective(forces_only=True)
+                wp.launch(
+                    accumulate_body_directional_derivative,
+                    self.graph_body_count,
+                    inputs=[
+                        self.graph_body_ids,
+                        self.graph_body_island,
+                        self.line_search_enabled,
+                        body_q,
+                        body_inertia_q,
+                        body_mass,
+                        body_inv_mass,
+                        body_inertia,
+                        body_com,
+                        contact_forces,
+                        contact_torques,
+                        dt,
+                        self.body_correction,
+                    ],
+                    outputs=[self.line_search_slope],
+                    device=self.device,
+                )
             linearize(build_majorizer=False, build_body=False, slope_only=True)
+            if contact_side is not None:
+                main.wait_stream(contact_side)
 
         def balance_translation(
             *, apply_translation=False, track_pending=False, stop_at_roundoff=True, restricted_ready=False
@@ -9911,7 +10091,7 @@ class StructuralGraphKKT:
                         translate(refresh=iteration > 0)
             return
 
-        linearize()
+        linearize(contact_stream=contact_stream)
 
         # Trees consume the body metric directly. Path Schur systems consume
         # its inverse, which the surrogate build already wrote for path bodies.
@@ -9983,7 +10163,11 @@ class StructuralGraphKKT:
         # relaxation; static/kinematic contact remains in the local VBD solve.
         if not self.use_fused_solve_reset:
             self.island_step_scale.fill_(1.0)
-        if contacts is not None and contacts.rigid_contact_max > 0:
+        # The surrogate majorizes each represented dynamic contact edge with
+        # H_static + 2 H_dynamic, which is block Jacobi's half relaxation.
+        # The directional search below evaluates the step on the true merit;
+        # without it, keep the additional island limit.
+        if contacts is not None and contacts.rigid_contact_max > 0 and refresh_contacts is None:
             wp.launch(
                 limit_dynamic_contact_jacobi_step,
                 self.graph_body_count,
@@ -10114,7 +10298,7 @@ class StructuralGraphKKT:
                 device=self.device,
             )
 
-            def apply_trial(trial):
+            def apply_trial(trial=None):
                 wp.launch(
                     _apply_trial_correction,
                     self.graph_body_count,
@@ -10130,6 +10314,21 @@ class StructuralGraphKKT:
                     device=self.device,
                 )
                 directional_derivative()
+                if trial is None:
+                    wp.launch(
+                        _update_counted_directional_search,
+                        self.island_count,
+                        inputs=[
+                            self.line_search_enabled,
+                            self.line_search_slope,
+                            self.line_search_initial_slope,
+                            self.line_search_trial,
+                        ],
+                        outputs=[self.island_step_scale, self.line_search_pending],
+                        device=self.device,
+                    )
+                    wp.launch(_advance_directional_trial, 1, outputs=[self.line_search_trial], device=self.device)
+                    return
                 wp.launch(
                     _update_directional_search,
                     self.island_count,
@@ -10143,13 +10342,19 @@ class StructuralGraphKKT:
                     device=self.device,
                 )
 
-            for trial in range(5):
-                if self.device.is_cpu or (self.device.is_capturing and wp.is_conditional_graph_supported()):
-                    # Captured CUDA conditionals read the predicate on device.
-                    # Eager CUDA retains its fixed schedule without readback.
-                    wp.capture_if(self.line_search_pending, apply_trial, trial=trial)
-                else:
-                    apply_trial(trial)
+            if self.device.is_cuda and self.device.is_capturing and wp.is_conditional_graph_supported():
+                # Captured CUDA conditionals read the predicate on device. One loop
+                # runs the same trials as five conditionals; an idle conditional
+                # node still costs a graph launch.
+                self.line_search_trial.zero_()
+                wp.capture_while(self.line_search_pending, apply_trial)
+            else:
+                for trial in range(5):
+                    if self.device.is_cpu:
+                        wp.capture_if(self.line_search_pending, apply_trial, trial=trial)
+                    else:
+                        # Eager CUDA retains its fixed schedule without readback.
+                        apply_trial(trial)
             wp.launch(
                 _apply_trial_correction,
                 self.graph_body_count,
@@ -10202,8 +10407,9 @@ def _begin_directional_search(
         scale[island] = 0.0
 
 
-@wp.kernel
-def _update_directional_search(
+@wp.func
+def _directional_search_step(
+    island: int,
     enabled: wp.array[bool],
     merit: wp.array[wp.float64],
     initial_slope: wp.array[wp.float64],
@@ -10211,7 +10417,6 @@ def _update_directional_search(
     scale: wp.array[float],
     pending: wp.array[int],
 ):
-    island = wp.tid()
     slope = merit[island]
     if enabled[island] and (not wp.isfinite(slope) or slope > wp.float64(0.0)):
         # Interpolate the directional residual, whose value at zero is negative.
@@ -10226,6 +10431,36 @@ def _update_directional_search(
             wp.atomic_max(pending, 0, 1)
     # Keep previously acceptable islands enabled: another island's shortened
     # trial can change a shared contact. Recheck all coupled endpoints together.
+
+
+@wp.kernel
+def _update_directional_search(
+    enabled: wp.array[bool],
+    merit: wp.array[wp.float64],
+    initial_slope: wp.array[wp.float64],
+    last_trial: bool,
+    scale: wp.array[float],
+    pending: wp.array[int],
+):
+    _directional_search_step(wp.tid(), enabled, merit, initial_slope, last_trial, scale, pending)
+
+
+@wp.kernel
+def _update_counted_directional_search(
+    enabled: wp.array[bool],
+    merit: wp.array[wp.float64],
+    initial_slope: wp.array[wp.float64],
+    trial: wp.array[int],
+    scale: wp.array[float],
+    pending: wp.array[int],
+):
+    """:func:`_update_directional_search` with the trial index read on device."""
+    _directional_search_step(wp.tid(), enabled, merit, initial_slope, trial[0] == 4, scale, pending)
+
+
+@wp.kernel
+def _advance_directional_trial(trial: wp.array[int]):
+    trial[0] = trial[0] + 1
 
 
 @wp.kernel

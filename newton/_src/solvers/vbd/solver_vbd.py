@@ -1742,6 +1742,9 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             enable_captured_contact_shortcuts=(
                 self._rigid_module_options["deterministic"] != wp.DeterministicMode.NOT_GUARANTEED
             ),
+            enable_stream_concurrency=(
+                self._rigid_module_options["deterministic"] == wp.DeterministicMode.NOT_GUARANTEED
+            ),
         )
         self._structural_graph_kkt_bucket_diagnostics = backend._bucket_diagnostics
         self._structural_graph_kkt_payload_budget_bytes = backend._payload_budget_bytes
@@ -4669,9 +4672,19 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 outputs=[backend.island_contact_state],
                 device=self.device,
             )
+        contact_stream = None
         if translation_only:
             backend.translation_system.zero_()
-        self._refresh_structural_contact_objective(state_in, contacts, dt, translation_only=translation_only)
+        elif backend.side_streams is not None and contacts is not None and contacts.rigid_contact_max > 0:
+            # Joint linearization does not read the contact objective; the
+            # backend joins this stream before assembling its body surrogate.
+            contact_stream = backend.side_streams[1]
+            contact_stream.wait_stream(wp.get_stream(self.device))
+        if contact_stream is not None:
+            with wp.ScopedStream(contact_stream, sync_enter=False):
+                self._refresh_structural_contact_objective(state_in, contacts, dt)
+        else:
+            self._refresh_structural_contact_objective(state_in, contacts, dt, translation_only=translation_only)
         backend.solve(
             dt=dt,
             contacts=contacts,
@@ -4733,6 +4746,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 state_in, contacts, dt, translation_only=translation, forces_only=forces
             ),
             translation_only=translation_only,
+            contact_stream=contact_stream,
         )
 
     def _update_tendon_routing(self, state_in: State, dt: float, report_unsupported_wrap: bool) -> None:

@@ -533,7 +533,7 @@ def _build_mixed_fixed_topologies(device):
     return builder.finalize(device=device), healthy_bodies
 
 
-def _build_structural_backend_with_intercepted_bytes(model):
+def _build_structural_backend_with_intercepted_bytes(model, **backend_options):
     """Construct one backend while summing unique Warp allocation payloads."""
     allocations = []
     allocation_functions = (
@@ -558,6 +558,7 @@ def _build_structural_backend_with_intercepted_bytes(model):
             model,
             model.body_inv_mass,
             ignore_free_completion_joints=True,
+            **backend_options,
         )
     target_device = str(model.device)
     unique_allocations = {
@@ -5308,7 +5309,8 @@ def _structural_kkt_cooperative_paired_matches_serial(test, device):
             and bucket.closure_count >= rigid_vbd_kkt._PAIRED_COOPERATIVE_MIN_CLOSURES
         )
         test.assertEqual(bucket.use_cooperative_paired, selected)
-        test.assertEqual(hasattr(bucket, "cooperative_work"), selected)
+        test.assertEqual(hasattr(bucket, "cooperative_diagonal"), selected)
+        test.assertFalse(hasattr(bucket, "cooperative_work"))
         if selected and not cooperative:
             bucket.use_cooperative_paired = False
             bucket.paired_cr_levels = []
@@ -5414,7 +5416,7 @@ def _structural_kkt_cooperative_paired_reuses_factors(test, device):
 
 
 def _structural_kkt_single_loop_scratch_preserves_coverage(test, device):
-    """Optional parallel scratch must not displace previously admitted islands."""
+    """Block-shared cooperative work must not consume global payload or displace islands."""
     models = [
         _build_replicated_fixed_topology(device, closed=True, worlds=4, link_count=10, closure_count=1),
     ]
@@ -5431,6 +5433,7 @@ def _structural_kkt_single_loop_scratch_preserves_coverage(test, device):
             serial, serial_bytes = _build_structural_backend_with_intercepted_bytes(model)
         expected_ids = serial.graph_body_ids.numpy()
         full, full_bytes = _build_structural_backend_with_intercepted_bytes(model)
+        test.assertEqual(full_bytes, serial_bytes)
         np.testing.assert_array_equal(full.graph_body_ids.numpy(), expected_ids)
         for budget in sorted({serial_bytes - 1, serial_bytes, full_bytes - 1, full_bytes}):
             with test.subTest(bodies=model.body_count, budget=budget):
@@ -5440,23 +5443,54 @@ def _structural_kkt_single_loop_scratch_preserves_coverage(test, device):
                 test.assertLessEqual(allocated, budget)
                 if budget >= serial_bytes:
                     np.testing.assert_array_equal(selected.graph_body_ids.numpy(), expected_ids)
-                if budget == serial_bytes:
-                    test.assertTrue(
-                        all(
-                            not bucket.use_cooperative_paired
-                            for bucket in selected.closed_tree_buckets
-                            if bucket.closure_count == 1
-                        )
-                    )
                 for bucket in selected.closed_tree_buckets:
                     test.assertEqual(bucket.use_cooperative_paired, bucket._diagnostics.cooperative_paired)
-                    test.assertEqual(hasattr(bucket, "cooperative_work"), bucket.use_cooperative_paired)
+                    test.assertEqual(hasattr(bucket, "cooperative_diagonal"), bucket.use_cooperative_paired)
+                    test.assertFalse(hasattr(bucket, "cooperative_work"))
+                    test.assertFalse(hasattr(bucket, "cooperative_pivots"))
+
+
+def _structural_kkt_grouped_rows_preserve_storage_and_mapping(test, device):
+    """Stream row scheduling reuses metadata storage and preserves graph incidence."""
+    builder, _ = _build_fixed_topology_template(link_count=12, closure_count=3)
+    for joint in range(0, builder.joint_count, 2):
+        builder.joint_type[joint] = newton.JointType.BALL
+    builder.color(balance_colors=False)
+    model = builder.finalize(device=device)
+    backend, allocated = _build_structural_backend_with_intercepted_bytes(model)
+    tree = backend.closed_tree_buckets[0].tree
+    arrays = (tree.joint_ids, tree.node_row, tree.body_rows)
+    pointers = tuple(array.ptr for array in arrays)
+    joint_ids = tree.joint_ids_host.copy()
+    node_rows = tree.node_row.numpy().copy()
+    body_rows = tree.body_rows.numpy().copy()
+    tree.group_rows_by_joint_type(model.joint_type.numpy())
+    test.assertEqual(tuple(array.ptr for array in (tree.joint_ids, tree.node_row, tree.body_rows)), pointers)
+    np.testing.assert_array_equal(tree.joint_ids_host[tree.body_rows.numpy()], joint_ids[body_rows])
+    active = node_rows >= 0
+    np.testing.assert_array_equal(tree.joint_ids_host[tree.node_row.numpy()[active]], joint_ids[node_rows[active]])
+    test.assertGreater(len(tree.row_slices), 1)
+    for ids, count, *_ in tree.row_slices:
+        test.assertEqual(len(ids), count)
+        test.assertEqual(len(np.unique(model.joint_type.numpy()[ids.numpy()])), 1)
+    streamed, streamed_bytes = _build_structural_backend_with_intercepted_bytes(model, enable_stream_concurrency=True)
+    test.assertEqual(backend._estimated_bytes, allocated)
+    test.assertEqual(streamed._estimated_bytes, streamed_bytes)
+    test.assertEqual(allocated, streamed_bytes)
 
 
 class TestVBDRigidKKT(unittest.TestCase):
     """Validate the optional rigid VBD structural KKT backend."""
 
     pass
+
+
+add_function_test(
+    TestVBDRigidKKT,
+    "test_structural_kkt_grouped_rows_preserve_storage_and_mapping",
+    _structural_kkt_grouped_rows_preserve_storage_and_mapping,
+    devices=get_test_devices(),
+)
 
 
 add_function_test(
