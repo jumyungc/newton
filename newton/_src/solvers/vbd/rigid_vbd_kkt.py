@@ -225,7 +225,7 @@ model state have already occupied the device.
 """
 
 _INVERSE_RESIDUAL_TOLERANCE = wp.constant(1.0e-2)
-"""Maximum infinity-norm residual accepted from a fast float32 block inverse."""
+"""Maximum absolute entry of the left residual accepted from a fast float32 block inverse."""
 
 
 @wp.func_native("""
@@ -286,23 +286,28 @@ def _normalized_cable_row(
 
 @wp.func
 def _inverse_spatial(matrix: wp.spatial_matrix):
-    """Invert a symmetric positive-definite 6x6 matrix by a 3x3 Schur split."""
+    """Invert a 6x6 matrix by a 3x3 Schur split when both pivots are invertible."""
     a = wp.mat33(0.0)
     b = wp.mat33(0.0)
+    c = wp.mat33(0.0)
     d = wp.mat33(0.0)
+    # Rounded Schur updates need not be symmetric. Invert the represented
+    # lower-left block rather than substituting the upper-right transpose.
     for row in range(3):
         for column in range(3):
             a[row, column] = matrix[row, column]
             b[row, column] = matrix[row, column + 3]
+            c[row, column] = matrix[row + 3, column]
             d[row, column] = matrix[row + 3, column + 3]
 
     a_inverse = wp.inverse(a)
     a_inverse_b = a_inverse * b
-    schur = d - wp.transpose(b) * a_inverse_b
+    c_a_inverse = c * a_inverse
+    schur = d - c_a_inverse * b
     schur_inverse = wp.inverse(schur)
     upper_right = -(a_inverse_b * schur_inverse)
-    lower_left = wp.transpose(upper_right)
-    upper_left = a_inverse + a_inverse_b * schur_inverse * wp.transpose(a_inverse_b)
+    lower_left = -(schur_inverse * c_a_inverse)
+    upper_left = a_inverse - upper_right * c_a_inverse
 
     result = wp.spatial_matrix(0.0)
     for row in range(3):
@@ -386,7 +391,7 @@ def _inverse_spatial_pivoted(matrix: wp.spatial_matrixd):
 
 @wp.func
 def _inverse_spatial_robust(matrix: wp.spatial_matrix):
-    """Use the fast SPD inverse unless its computed inverse fails a residual check."""
+    """Use the fast block inverse unless its computed inverse fails a residual check."""
     inverse = _inverse_spatial(matrix)
     maximum_error = 0.0
     finite = True

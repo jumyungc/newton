@@ -3240,6 +3240,33 @@ def _structural_kkt_robust_block_inverse(test, device):
     test.assertTrue(np.isfinite(inverse).all())
     test.assertLess(residual, 2.0e-2)
 
+    # Schur updates are symmetric in exact arithmetic, but their stored
+    # float32 blocks need not be. Respect the lower-left block rather than
+    # silently replacing it with the transpose of the upper-right block.
+    # One rounded entry is enough to expose the old fast inverse without
+    # crossing its fallback threshold.
+    for direction in (np.inf, -np.inf):
+        with test.subTest(asymmetry_direction=direction):
+            a = np.eye(3, dtype=np.float32)
+            b = 2.0 * a
+            c = b.copy()
+            c[0, 0] = np.nextafter(c[0, 0], np.float32(direction))
+            represented = np.block([[a, b], [c, np.float32(4.0 + 2.0**-10) * a]])
+            matrix_device.assign(represented[None])
+            wp.launch(
+                _invert_spatial_matrix,
+                1,
+                inputs=[matrix_device],
+                outputs=[inverse_device],
+                device=device,
+            )
+            actual = inverse_device.numpy()[0].astype(np.float64)
+            matrix64 = represented.astype(np.float64)
+            reference = np.linalg.inv(matrix64)
+            test.assertLess(np.linalg.norm(actual - reference) / np.linalg.norm(reference), 1.0e-6)
+            np.testing.assert_allclose(matrix64 @ actual, np.eye(6), rtol=0.0, atol=1.0e-6)
+            np.testing.assert_allclose(actual @ matrix64, np.eye(6), rtol=0.0, atol=1.0e-6)
+
     # A well-conditioned, finite matrix can still overflow the determinant
     # arithmetic in the fast Schur split. Its representable inverse must use
     # the pivoted fallback rather than silently retiring a global correction.
