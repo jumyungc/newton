@@ -1279,6 +1279,64 @@ Contact reduction is enabled by default. For scenes with many mesh-mesh interact
 
 To disable reduction, set ``reduce_contacts=False`` when creating the pipeline.
 
+**Body-pair contact reduction (opt-in):**
+
+Bodies built from many colliders (a foot made of several spheres or capsules, a
+hand of boxes) produce one manifold per shape pair, so a single physical patch
+can reach the solver as dozens of near-redundant contacts. Optional body-pair
+reduction reduces primitive and convex contacts per body pair in a group mode
+of the global contact reducer, before they are written. Enable it with
+``body_pair_reduction``:
+
+.. testcode:: body-pair-reduction
+
+    import newton
+
+    builder = newton.ModelBuilder()
+    builder.add_ground_plane()
+    model = builder.finalize()
+
+    pipeline = newton.CollisionPipeline(
+        model,
+        body_pair_reduction=newton.CollisionPipeline.BodyPairReductionConfig(cell_size=0.25),
+    )
+    contacts = pipeline.contacts()
+
+Contacts are grouped by body pair, material class, normal bin and spatial cell.
+Each group keeps one depth representative, up to six sampled footprint extremes
+over all its contacts and up to six more over its touching contacts only, so
+speculative contacts cannot displace the support polygon. Mesh and
+heightfield contacts keep their per-shape-pair reduction. Only the kept
+contacts are written, and if a group cannot be registered in the table, the
+frame keeps every primitive and convex contact. It is an
+approximation: support is sampled, not exact, and keeping
+rim points can strengthen torsional friction. Selection is memoryless, so on
+curved or mesh supports the kept set can change between steps.
+
+Shapes on one body share a group only when their ``shape_material_*`` values
+and their per-shape custom attributes match;
+``BodyPairReductionConfig.material_attributes`` narrows
+the attributes that count. Call
+:meth:`~CollisionPipeline.refresh_body_pair_reduction_groups` after changing
+them at runtime.
+
+Buffers from the pipeline's :meth:`~CollisionPipeline.contacts` are stamped
+:attr:`~Contacts.rigid_contact_body_pair_reduced` when the scene has primitive
+or convex contact pairs; a scene of only meshes and heightfields reduces nothing
+by body pair and keeps unstamped buffers. Only a pipeline that stamps its buffers
+collides into a stamped buffer, and a solver accepts one only
+if it declares :attr:`~solvers.SolverBase.supports_body_pair_reduced_contacts`;
+the others raise in ``step()``, also during CUDA graph capture.
+:class:`~solvers.SolverSteel` supports it, except with ``contact_compliance``.
+Body-pair reduction doesn't support ``contact_matching="sticky"`` or
+hydroelastic contacts. Keep it off when it doesn't reduce the end-to-end step time.
+To check, compare the step time and :attr:`~Contacts.rigid_contact_count` with it
+on and off: a count that stays near its unreduced value means little was reduced,
+or the group table was too small and frames kept every contact (raise
+``BodyPairReductionConfig.hashtable_size_factor``).
+
+This body-pair reduction API is experimental and may change without prior notice.
+
 **Configuring contact reduction (HydroelasticSDF.Config):**
 
 For hydroelastic and SDF-based contacts, use :class:`~geometry.HydroelasticSDF.Config` to tune reduction behavior:
@@ -1660,16 +1718,21 @@ and body positions, including during CUDA graph replay. Selection can change
 without another collision detection; it does not change the contact count,
 row order, or detected geometry. Coupling copies ownership and mesh provenance;
 the consuming solver evaluates eligibility. If the source contact buffer
-has overflowed, VBD accepts all stored rows, including through coupling.
+has overflowed, VBD bypasses geometric selection for stored mesh rows, including
+through coupling. A mesh row still needs a resolved inside/outside sign and at
+least one active soft participant to contribute forces.
 Rigid-soft division-plane constraints consume the detected rows independently
 of force selection.
 
 Reverse rigid-vertex/soft-triangle contacts test the soft target's neighbors
 and retain one eligible owner for a shared soft edge or vertex. They remain
 separate force contributions from soft-vertex/rigid-triangle queries.
-Preserving returned rows does not guarantee complete contact topology:
-mesh detection may use SDF-selected rigid edges, and edge penetration-recovery
-records are not ordinary edge-edge quadrature samples.
+Full-surface mesh detection includes all rigid triangle edges, independently of
+SDF-selected edges. If the narrow vertex sign query fails, an expanded query
+supplies the sign for nearby vertex-triangle rows and, for an interior point, a
+recovery contact. Pairs whose sign remains unresolved are retained for DAT but
+do not contribute VBD forces until a subsequent detection resolves their sign.
+Edge penetration-recovery records are not ordinary edge-edge quadrature samples.
 
 .. _full-surface-mesh-contact-costs:
 
@@ -1845,6 +1908,13 @@ and is consumed by the solver :meth:`~solvers.SolverBase.step` method for contac
      - Total number of soft contacts (single element). With full-surface contact off, this equals the per-particle contact count and is unchanged from earlier releases.
    * - ``soft_contact_indices``
      - Soft-side particle ids per contact, a ``vec3i`` with ``-1`` padding: ``(p, -1, -1)`` particle, ``(v0, v1, -1)`` edge, ``(v0, v1, v2)`` face. The number of non-negative slots gives the feature kind; pair with ``soft_contact_barycentric`` to recover the contact point.
+   * - ``soft_contact_rigid_indices``
+     - Rigid mesh primitive corners per contact, a ``vec3i`` of offsets into the
+       rigid mesh's triangle index buffer: ``(i0, i1, i2)`` for a triangle (VT),
+       ``(i0, -1, -1)`` for a vertex (TV), and ``(i0, i1, -1)`` for an edge (EE).
+       The shape is identified by ``soft_contact_shape``; ``-1`` pads unused
+       slots. Analytic, particle-only, and penetration-recovery point records
+       use ``(-1, -1, -1)``.
    * - ``soft_contact_particle``
      - Particle id for particle contacts (``-1`` for edge/face records) — the particle-only view of ``soft_contact_indices``, for solvers that consume particle contacts exclusively.
    * - ``soft_contact_barycentric``
@@ -2505,6 +2575,9 @@ in contact-buffer order when constructed with
 
     pipeline = newton.CollisionPipeline(model, deterministic=True)
     solver = newton.solvers.SolverSteel(model, deterministic=wp.DeterministicMode.RUN_TO_RUN)
+
+See :doc:`determinism` for which solvers support deterministic mode and
+what it costs.
 
 .. note::
 

@@ -2167,6 +2167,8 @@ def test_particle_attachments_follow_refined_contact_schedule(test, device):
     solver = newton.solvers.SolverVBD(model, iterations=1, rigid_contact_history=True, rigid_contact_coloring="refined")
     # Even a disabled attachment may be enabled during graph replay.
     np.testing.assert_array_equal(solver.body_uses_pair_contacts.numpy(), [0, 0, 0, 1])
+    # With zero multiplier and k = rho = 10, the ALM effective stiffness is 5.
+    solver._attachment_particle_body_rho.fill_(10.0)
     ids = wp.array([2, 0, 1], dtype=int, device=device)
     starts = wp.array([0, 1, 3], dtype=int, device=device)
     outputs = [
@@ -2197,6 +2199,8 @@ def test_particle_attachments_follow_refined_contact_schedule(test, device):
                 model.attachment_particle_body_stiffness,
                 model.attachment_particle_body_damping,
                 model.attachment_particle_body_enabled,
+                solver._attachment_particle_body_rho,
+                solver._attachment_particle_body_lambda,
                 solver.body_particle_attachment_offsets,
                 solver.body_particle_attachment_indices,
             ],
@@ -2219,7 +2223,7 @@ def test_particle_attachments_follow_refined_contact_schedule(test, device):
             expected = np.zeros((4, 3), dtype=np.float32)
             for body in order[:end]:
                 if body != 2 or enabled:
-                    expected[body, 0] = 10.0 * (body + 1)
+                    expected[body, 0] = 5.0 * (body + 1)
             np.testing.assert_array_equal(outputs[0].numpy(), expected)
     # Exercise the complete host launch path as well as the adversarial packed slices.
     state_in, state_out = model.state(), model.state()
