@@ -15,8 +15,12 @@ import newton
 from newton._src.solvers.vbd import rigid_pair_contact, rigid_vbd_kernels
 from newton._src.solvers.vbd.rigid_pair_contact import RigidPairContact
 from newton._src.solvers.vbd.rigid_vbd_kernels import (
+    _RIGID_KEMPE_COMPONENT_LIMIT,
+    _RIGID_KEMPE_STEP_LIMIT,
     accumulate_body_body_contacts_per_body,
     color_rigid_bodies_from_contacts,
+    retain_rigid_body_colors,
+    rigid_kempe_scratch_size,
 )
 from newton._src.solvers.xpbd import kernels as xpbd_kernels
 from newton.tests.unittest_utils import add_function_test, get_selected_cuda_test_devices, get_test_devices
@@ -76,6 +80,22 @@ def test_pair_preparation_refreshes_material_and_previous_pose(test, device):
         wp.copy(pose, seed)
         multiplier.zero_()
         pair.solve(pose, previous_pose, contacts, dt, stiffness, damping, friction, multiplier, 0, True)
+        # Later sweeps reuse constants, but must still solve from the current pose.
+        wp.copy(pose, seed)
+        multiplier.zero_()
+        pair.solve(
+            pose,
+            previous_pose,
+            contacts,
+            dt,
+            stiffness,
+            damping,
+            friction,
+            multiplier,
+            0,
+            True,
+            refresh_constants=False,
+        )
 
     sweep()
     graph = None
@@ -352,11 +372,14 @@ def test_pair_warmstart_respects_normal_and_tangent_moment_arms(test, device):
         lambda_seed = wp.array(multipliers, dtype=wp.vec3, device=device)
 
         def primal(seed=lambda_seed):
+            # Every accumulator must be initialized before the retained forces are gathered.
+            solver._body_contact_scratch.fill_(float("nan"))
             wp.copy(state_in.body_q, q_seed)
             wp.copy(solver.body_body_contact_lambda, seed)
             solver._solve_rigid_body_iteration(state_in, state_out, control, contacts, dt)
 
         primal()
+        test.assertTrue(np.isfinite(solver._body_contact_scratch.numpy()).all())
         np.testing.assert_allclose(solver.body_forces.numpy()[body], force, rtol=1.0e-6, atol=1.0e-6)
         np.testing.assert_allclose(solver.body_torques.numpy()[body], np.cross(arm, tangent), atol=1.0e-6)
         if device.is_cuda:
@@ -364,7 +387,106 @@ def test_pair_warmstart_respects_normal_and_tangent_moment_arms(test, device):
                 primal()
             for _ in range(3):
                 wp.capture_launch(capture.graph)
+                test.assertTrue(np.isfinite(solver._body_contact_scratch.numpy()).all())
+                np.testing.assert_allclose(solver.body_forces.numpy()[body], force, rtol=1.0e-6, atol=1.0e-6)
                 np.testing.assert_allclose(solver.body_torques.numpy()[body], np.cross(arm, tangent), atol=1.0e-6)
+
+
+def test_pair_warmstart_keeps_reactions_when_body_list_overflows(test, device):
+    """Preserve all retained reactions through list overflow and CUDA capture."""
+
+    def array(values, dtype):
+        return wp.array(values, dtype=dtype, device=device)
+
+    poses = array([[0, 0, 0, 0, 0, 0, 1], [3, 0, 0, 0, 0, 0, 1]], wp.transform)
+    com = np.array([[0.1, -0.2, 0.3], [-0.2, 0.3, 0.1]], dtype=np.float32)
+    shape_bodies = np.array([-1, 0, 1], dtype=np.int32)
+    shape0 = np.array([0, 1, 0, 1, 1], dtype=np.int32)
+    shape1 = np.array([1, 2, 2, 0, 2], dtype=np.int32)
+    point0 = np.array([[0.2, 0.3, 0.4]] * 5, dtype=np.float32)
+    point1 = np.array([[-0.3, 0.1, 0.2]] * 5, dtype=np.float32)
+    offset0 = np.array([[0.1, 0.2, 0.3]] * 5, dtype=np.float32)
+    offset1 = -offset0
+    normal = np.array([[0, 0, 1]] * 5, dtype=np.float32)
+    reactions = np.array([[1, 2, 3], [4, -2, 1], [-1, 2, 5], [2, 3, -4], [1000, 1000, 1000]], dtype=np.float32)
+    initial_force = np.array([[1, -2, 3], [-1, 2, -3]], dtype=np.float32)
+    initial_torque = -initial_force
+    body_forces = array(initial_force, wp.vec3)
+    body_torques = array(initial_torque, wp.vec3)
+    force_seed, torque_seed = wp.clone(body_forces), wp.clone(body_torques)
+    empty = wp.empty(0, dtype=int, device=device)
+    prefix = [
+        array([0, 1], int),
+        empty,
+        empty,
+        -1,
+        poses,
+        array(com, wp.vec3),
+        array([1, 1], float),
+        array([1, 1], int),
+    ]
+    geometry = [
+        array(shape0, int),
+        array(shape1, int),
+        array(point0, wp.vec3),
+        array(point1, wp.vec3),
+        array(offset0, wp.vec3),
+        array(offset1, wp.vec3),
+        array(normal, wp.vec3),
+        array(shape_bodies, int),
+        array(reactions, wp.vec3),
+    ]
+    for active in (0, 1, 4):
+        lists = [
+            [c for c in range(active) if body in (shape_bodies[shape0[c]], shape_bodies[shape1[c]])]
+            for body in range(2)
+        ]
+        expected_force, expected_torque = initial_force.copy(), initial_torque.copy()
+        for body in range(2):
+            for c in lists[body]:
+                first = body == shape_bodies[shape0[c]]
+                force = -reactions[c] if first else reactions[c]
+                point = point0[c] if first else point1[c]
+                offset = offset0[c] if first else offset1[c]
+                expected_force[body] += force
+                expected_torque[body] += np.cross(point + offset - com[body], force) - np.cross(
+                    offset, normal[c] * np.dot(normal[c], force)
+                )
+        for capacity in (1, 2, 3):
+            packed = np.full((2, capacity), -1, dtype=np.int32)
+            for body in range(2):
+                packed[body, : min(len(lists[body]), capacity)] = lists[body][:capacity]
+            inputs = [
+                *prefix,
+                array([active], int),
+                *geometry,
+                capacity,
+                array([len(v) for v in lists], int),
+                array(packed.ravel(), int),
+            ]
+
+            def run(inputs=inputs):
+                wp.copy(body_forces, force_seed)
+                wp.copy(body_torques, torque_seed)
+                wp.launch(
+                    rigid_pair_contact.accumulate_constraint_contact_forces_per_body,
+                    dim=2,
+                    inputs=inputs,
+                    outputs=[body_forces, body_torques],
+                    device=device,
+                )
+
+            run()
+            np.testing.assert_allclose(body_forces.numpy(), expected_force, rtol=0, atol=1e-6)
+            np.testing.assert_allclose(body_torques.numpy(), expected_torque, rtol=0, atol=2e-6)
+            baseline = (body_forces.numpy(), body_torques.numpy())
+            if device.is_cuda:
+                with wp.ScopedCapture(device=device) as capture:
+                    run()
+                for _ in range(3):
+                    wp.capture_launch(capture.graph)
+                    np.testing.assert_array_equal(body_forces.numpy(), baseline[0])
+                    np.testing.assert_array_equal(body_torques.numpy(), baseline[1])
 
 
 def test_pair_primal_is_seeded_only_for_retained_multipliers(test, device):
@@ -389,15 +511,6 @@ def test_pair_primal_is_seeded_only_for_retained_multipliers(test, device):
 
     include_pair_primal = []
     pair_build_count = 0
-    scratch_clear_count = 0
-    launch_kernel = wp.launch
-
-    def record_launch(*args, **kwargs):
-        nonlocal scratch_clear_count
-        if kwargs.get("kernel") is rigid_vbd_kernels.clear_rigid_body_contact_scratch:
-            scratch_clear_count += 1
-        return launch_kernel(*args, **kwargs)
-
     solve_iteration = solver._solve_rigid_body_iteration
     pair_build = solver._rigid_pair_contacts.build
 
@@ -413,7 +526,7 @@ def test_pair_primal_is_seeded_only_for_retained_multipliers(test, device):
     solver._solve_rigid_body_iteration = record_iteration
     solver._rigid_pair_contacts.build = record_pair_build
     pipeline.collide(state_in, contacts)
-    with patch.object(wp, "launch", side_effect=record_launch) as launch:
+    with patch.object(wp, "launch", wraps=wp.launch) as launch:
         solver.step(state_in, state_out, model.control(), contacts, 1.0 / 120.0)
     test.assertFalse(
         any(call.kwargs.get("kernel") is rigid_vbd_kernels.update_duals_joint for call in launch.call_args_list)
@@ -427,23 +540,18 @@ def test_pair_primal_is_seeded_only_for_retained_multipliers(test, device):
         )
     test.assertEqual(include_pair_primal, [False, False, False])
     test.assertEqual(pair_build_count, 1)
-    test.assertEqual(scratch_clear_count, 0)
 
     include_pair_primal.clear()
     solver.set_rigid_history_update(False)
-    with patch.object(wp, "launch", side_effect=record_launch):
-        solver.step(state_out, state_in, model.control(), contacts, 1.0 / 120.0)
+    solver.step(state_out, state_in, model.control(), contacts, 1.0 / 120.0)
     test.assertEqual(include_pair_primal, [True, False, False])
     test.assertEqual(pair_build_count, 1)
-    test.assertEqual(scratch_clear_count, 1)
 
     include_pair_primal.clear()
     pipeline.collide(state_in, contacts)
-    with patch.object(wp, "launch", side_effect=record_launch):
-        solver.step(state_in, state_out, model.control(), contacts, 1.0 / 120.0)
+    solver.step(state_in, state_out, model.control(), contacts, 1.0 / 120.0)
     test.assertEqual(include_pair_primal, [False, False, False])
     test.assertEqual(pair_build_count, 2)
-    test.assertEqual(scratch_clear_count, 1)
 
 
 def _parallel_chain_snapshot(device):
@@ -816,10 +924,85 @@ def test_body_contact_tile_matches_serial_accumulation(test, device):
 
 
 def test_jointed_color_mask_matches_greedy_reference(test, device):
-    """Match CPU/CUDA greedy repair, including exhausted mandatory-joint colors."""
-    budget = 32
+    """Match CPU/CUDA greedy repair and its Kempe pass, including exhausted mandatory-joint colors."""
 
-    def reference(seed, active, authored, contacts, joints):
+    def empty_created_top_colors(colors, retained, active, contacts, joints, resume):
+        # The repair's Kempe pass, step for step, on the simple neighbor graph; returns the color to resume.
+        scheduled = [body for body in range(len(colors)) if active[body]]
+
+        def top_key():
+            return max((2 * int(colors[body]) + int(colors[body] == retained[body]) for body in scheduled), default=-1)
+
+        key = top_key()
+        top = key // 2
+        if top < 2:
+            return resume
+        if key % 2 and (resume != top or all(retained[body] >= 0 for body in scheduled)):
+            return resume
+        steps, v = 0, -1
+        made_progress = False
+        while steps < _RIGID_KEMPE_STEP_LIMIT:
+            if steps + 3 > _RIGID_KEMPE_STEP_LIMIT:
+                steps = _RIGID_KEMPE_STEP_LIMIT
+                break
+            following = [body for body in scheduled if body > v and colors[body] == top]
+            if not following:
+                key = top_key()
+                top = key // 2
+                steps += 1
+                if top < 2 or key % 2:
+                    return 0
+                v = -1
+                continue
+            v = following[0]
+            near = {other for other in contacts[v] | joints[v] if active[other]}
+            screened = {
+                (min(colors[u], colors[w]), max(colors[u], colors[w]))
+                for u in near
+                for w in contacts[u] | joints[u]
+                if w in near
+            }
+            if len(near) > _RIGID_KEMPE_COMPONENT_LIMIT:
+                screened.clear()
+            steps += 3
+            moved = False
+            for a, b in [(low, high) for low in range(top - 2, -1, -1) for high in range(top - 1, low, -1)]:
+                if (a, b) in screened or steps >= _RIGID_KEMPE_STEP_LIMIT:
+                    continue
+                component = {other for other in near if colors[other] == a}
+                frontier, blocked = set(component), False
+                steps += 1
+                while frontier and not blocked and len(component) <= _RIGID_KEMPE_COMPONENT_LIMIT:
+                    if steps >= _RIGID_KEMPE_STEP_LIMIT:
+                        break
+                    reached = {
+                        other
+                        for body in frontier
+                        for other in contacts[body] | joints[body]
+                        if active[other] and colors[other] in (a, b)
+                    } - component
+                    blocked = any(colors[other] == b and other in near for other in reached)
+                    component |= reached
+                    frontier = reached
+                    steps += 1
+                if (
+                    not frontier
+                    and not blocked
+                    and len(component) <= _RIGID_KEMPE_COMPONENT_LIMIT
+                    and steps < _RIGID_KEMPE_STEP_LIMIT
+                ):
+                    for body in component:
+                        colors[body] = b if colors[body] == a else a
+                    colors[v] = a
+                    steps += 1
+                    moved = True
+                    made_progress = True
+                    break
+            if not moved:
+                break
+        return top if steps >= _RIGID_KEMPE_STEP_LIMIT and made_progress else 0
+
+    def reference(seed, active, authored, contacts, joints, resume):
         colors = np.full(len(seed), -1, dtype=np.int32)
         for body, color in enumerate(seed):
             if active[body] and 0 <= color < budget:
@@ -827,6 +1010,7 @@ def test_jointed_color_mask_matches_greedy_reference(test, device):
                     other < body and active[other] and seed[other] == color for other in contacts[body] | joints[body]
                 ):
                     colors[body] = color
+        retained = colors.copy()
         overflow, joint_overflow = 0, 0
         for body in range(len(seed)):
             if not active[body] or colors[body] >= 0:
@@ -843,17 +1027,45 @@ def test_jointed_color_mask_matches_greedy_reference(test, device):
             colors[body] = choices[0]
         if joint_overflow:
             colors = np.where(active, authored, -1).astype(np.int32)
-        return colors, overflow, joint_overflow
+        elif not overflow:
+            resume = empty_created_top_colors(colors, retained, active, contacts, joints, resume)
+        return colors, overflow, joint_overflow, resume
 
-    for body_count, kind in (
-        (40, "clique"),
-        (64, "grid"),
-        (513, "grid"),
-        (769, "grid"),
-        (33, "joint-star"),
-        (0, "empty"),
-        (1, "empty"),
-        (17, "inactive"),
+    def refresh(inputs, outputs):
+        # The solver retains the colors the fresh graph still allows, then repairs.
+        if device.is_cuda:
+            wp.launch(
+                retain_rigid_body_colors,
+                dim=inputs[0],
+                inputs=[inputs[1], *inputs[3:12], *inputs[13:18], outputs[0]],
+                outputs=[inputs[18], outputs[5]],
+                device=device,
+            )
+        wp.launch(
+            color_rigid_bodies_from_contacts,
+            dim=512 if device.is_cuda else 1,
+            block_dim=512 if device.is_cuda else 1,
+            max_blocks=1,
+            inputs=inputs,
+            outputs=outputs,
+            device=device,
+        )
+
+    # Odd budgets leave trailing CUDA lanes idle; preserve exact color-major packing.
+    for body_count, kind, budget in (
+        (40, "clique", 32),
+        (64, "grid", 32),
+        (513, "grid", 5),
+        (769, "grid", 17),
+        (33, "joint-star", 32),
+        (0, "empty", 7),
+        (1, "empty", 1),
+        (17, "inactive", 3),
+        (67, "palette", 31),
+        (16, "crown", 32),
+        (243, "crowns", 32),
+        (146, "stalled-kempe", 32),
+        (82, "wide-screen", 32),
     ):
         if kind == "clique":
             edges = [(a, b) for a in range(body_count) for b in range(a + 1, body_count)]
@@ -869,9 +1081,44 @@ def test_jointed_color_mask_matches_greedy_reference(test, device):
         elif kind == "joint-star":
             edges = []
             joint_edges = [(b, body_count - 1) for b in range(body_count - 1)]
+        elif kind == "crown":
+            # Bipartite, yet greedy in index order needs body_count // 2 colors; the pass empties the last.
+            edges = [(a, b) for a in range(0, body_count, 2) for b in range(1, body_count, 2) if b != a + 1]
+            joint_edges = []
+        elif kind == "wide-screen":
+            # More distinct neighbors than the temporary queue: skip the screen safely.
+            edges = [(a, body_count - 2) for a in range(body_count - 2)] + [(0, 1)]
+            joint_edges = []
+        elif kind == "stalled-kempe":
+            # Each lower-color pair is connected through a three-edge path. The first
+            # top body exhausts the search budget without moving; do not keep retrying it.
+            edges, joint_edges = [], []
+            stalled_seed = list(range(12))
+            for a in range(12):
+                for b in range(a + 1, 12):
+                    x = len(stalled_seed)
+                    stalled_seed.extend([b, a])
+                    edges.extend(((a, x), (x, x + 1), (x + 1, b)))
+            edges.extend((a, len(stalled_seed)) for a in range(12))
+            stalled_seed.extend([0, -1])
+        elif kind == "crowns":
+            # Six-body crowns whose third color can move, then a triangle that needs it: the pass
+            # stops at its step limit and resumes when a later repair recolors a body.
+            edges = [
+                (6 * crown + a, 6 * crown + b)
+                for crown in range(body_count // 6)
+                for a in (0, 2, 4)
+                for b in (1, 3, 5)
+                if b != a + 1
+            ]
+            edges += [(body_count - 3, body_count - 2), (body_count - 3, body_count - 1)]
+            edges += [(body_count - 2, body_count - 1)]
+            joint_edges = []
         else:
             edges, joint_edges = [], []
-        rows = np.repeat(np.asarray(edges, dtype=np.int32).reshape(-1, 2), 3, axis=0)
+        # Unequal contact multiplicities: only the simple neighbor graph may matter.
+        rows = np.asarray(edges, dtype=np.int32).reshape(-1, 2)
+        rows = np.repeat(rows, 1 + np.arange(len(rows)) % 3, axis=0)
         contacts = [set() for _ in range(body_count)]
         joints = [set() for _ in range(body_count)]
         contact_rows = [[] for _ in range(body_count)]
@@ -899,6 +1146,8 @@ def test_jointed_color_mask_matches_greedy_reference(test, device):
         authored = np.arange(body_count, dtype=np.int32) % 2 if kind == "grid" else np.zeros(body_count, dtype=np.int32)
         if kind == "joint-star":
             authored[-1] = 1
+        elif kind == "palette":
+            authored = np.arange(body_count, dtype=np.int32) % budget
 
         def array(value):
             return wp.array(np.asarray(value, dtype=np.int32), device=device)
@@ -923,31 +1172,31 @@ def test_jointed_color_mask_matches_greedy_reference(test, device):
             array(endpoints[:, 0]),
             array(endpoints[:, 1]),
             array([int(newton.JointType.FIXED)] * len(joint_edges)),
+            wp.empty(body_count, dtype=wp.int32, device=device),  # retained colors
             False,  # These cold probes replace colors independently of the packed schedule.
         ]
         colors = wp.full(body_count, -1, dtype=wp.int32, device=device)
         ids = wp.full(body_count, -1, dtype=wp.int32, device=device)
         starts = wp.zeros(max(body_count, budget) + 1, dtype=wp.int32, device=device)
-        counters = [wp.zeros(1, dtype=wp.int32, device=device) for _ in range(6)]
-        outputs = [colors, ids, starts, *counters]
+        counters = [wp.zeros(1, dtype=wp.int32, device=device) for _ in range(3)]
+        exceeds = wp.zeros(budget, dtype=wp.int32, device=device)
+        kempe = wp.zeros(rigid_kempe_scratch_size(body_count), dtype=wp.int32, device=device)
+        outputs = [colors, ids, starts, *counters, exceeds, kempe]
         seeds = [np.full(body_count, -1, dtype=np.int32), authored.copy()]
+        resume = 0  # the Kempe pass's resume color, kept in the scratch across calls
         if kind == "joint-star":
             seeds.append(np.append(np.arange(32, dtype=np.int32), -1))
+        if kind == "stalled-kempe":
+            seeds.append(np.asarray(stalled_seed, dtype=np.int32))
         for seed in seeds:
-            expected, expected_overflow, expected_joint_overflow = reference(seed, active, authored, contacts, joints)
+            expected, expected_overflow, expected_joint_overflow, resume = reference(
+                seed, active, authored, contacts, joints, resume
+            )
             seed_array = array(seed)
 
             def run(colors, seed_array, inputs, outputs):
                 wp.copy(colors, seed_array)
-                wp.launch(
-                    color_rigid_bodies_from_contacts,
-                    dim=512 if device.is_cuda else 1,
-                    block_dim=512 if device.is_cuda else 1,
-                    max_blocks=1,
-                    inputs=inputs,
-                    outputs=outputs,
-                    device=device,
-                )
+                refresh(inputs, outputs)
 
             run(colors, seed_array, inputs, outputs)
             graph = None
@@ -963,10 +1212,10 @@ def test_jointed_color_mask_matches_greedy_reference(test, device):
                 np.testing.assert_array_equal(colors.numpy(), expected)
                 expected_count = int(expected.max()) + 1 if expected.size else 0
                 test.assertEqual(int(counters[0].numpy()[0]), expected_count)
-                for counter, threshold in zip(counters[3:], (4, 8, 16), strict=True):
-                    test.assertEqual(int(counter.numpy()[0]), int(expected_count > threshold))
+                np.testing.assert_array_equal(exceeds.numpy(), expected_count > np.arange(budget))
                 test.assertEqual(int(counters[1].numpy()[0]), expected_overflow)
                 test.assertEqual(int(counters[2].numpy()[0]), expected_joint_overflow)
+                test.assertEqual(int(kempe.numpy()[-1]), resume)
                 expected_ids = np.asarray(
                     [body for color in range(budget) for body in range(body_count) if expected[body] == color],
                     dtype=np.int32,
@@ -977,22 +1226,15 @@ def test_jointed_color_mask_matches_greedy_reference(test, device):
                 for a, b in joint_edges:
                     if active[a] and active[b]:
                         test.assertNotEqual(expected[a], expected[b])
+                if expected_overflow == 0 and expected_joint_overflow == 0:
+                    for a, b in edges:
+                        if active[a] and active[b]:
+                            test.assertNotEqual(expected[a], expected[b])
                 if kind == "joint-star" and np.array_equal(seed[:-1], np.arange(32)):
                     test.assertEqual(expected_joint_overflow, 1)
 
         # Reuse the packed schedule while replaying changed graph/active inputs.
         inputs[-1] = True
-
-        def refresh(inputs, outputs):
-            wp.launch(
-                color_rigid_bodies_from_contacts,
-                dim=512 if device.is_cuda else 1,
-                block_dim=512 if device.is_cuda else 1,
-                max_blocks=1,
-                inputs=inputs,
-                outputs=outputs,
-                device=device,
-            )
 
         reuse_graph = None
         if device.is_cuda:
@@ -1014,14 +1256,21 @@ def test_jointed_color_mask_matches_greedy_reference(test, device):
                 if mutation == "no-contacts"
                 else np.asarray(list(map(len, contact_rows)), dtype=np.int32)
             )
-            expected, expected_overflow, expected_joint_overflow = reference(
-                colors.numpy(), current_active & (current_mass > 0.0), authored, current_contacts, joints
+            expected, expected_overflow, expected_joint_overflow, resume = reference(
+                colors.numpy(), current_active & (current_mass > 0.0), authored, current_contacts, joints, resume
             )
             if reuse_graph is None:
                 refresh(inputs, outputs)
             else:
                 wp.capture_launch(reuse_graph)
             np.testing.assert_array_equal(colors.numpy(), expected)
+            test.assertEqual(int(kempe.numpy()[-1]), resume)
+            if expected_overflow == 0 and expected_joint_overflow == 0:
+                scheduled = current_active & (current_mass > 0.0)
+                for a in range(body_count):
+                    for b in current_contacts[a] | joints[a]:
+                        if scheduled[a] and scheduled[b]:
+                            test.assertNotEqual(expected[a], expected[b])
             expected_ids = np.full(body_count, -1, dtype=np.int32)
             packed = [body for color in range(budget) for body in range(body_count) if expected[body] == color]
             expected_ids[: len(packed)] = packed
@@ -1029,16 +1278,10 @@ def test_jointed_color_mask_matches_greedy_reference(test, device):
             expected_starts = np.cumsum([0] + [np.count_nonzero(expected == color) for color in range(budget)])
             np.testing.assert_array_equal(starts.numpy()[: budget + 1], expected_starts)
             expected_count = int(expected.max()) + 1 if expected.size else 0
-            expected_counters = (
-                expected_count,
-                expected_overflow,
-                expected_joint_overflow,
-                int(expected_count > 4),
-                int(expected_count > 8),
-                int(expected_count > 16),
-            )
+            expected_counters = (expected_count, expected_overflow, expected_joint_overflow)
             for counter, value in zip(counters, expected_counters, strict=True):
                 test.assertEqual(int(counter.numpy()[0]), value)
+            np.testing.assert_array_equal(exceeds.numpy(), expected_count > np.arange(budget))
 
 
 def test_pair_coloring_clamps_overreported_contact_count(test, device):
@@ -1162,6 +1405,8 @@ def test_parallel_pair_completion_replays_changed_graphs(test, device):
         }
     )
     star = [(0, body) for body in range(1, body_count)]
+    reversed_dense = sorted((b, a) for a, b in dense)
+    mixed = sorted([(-1, 0), (-1, 17), (0, 17), (17, 1), (1, 2), (2, 3)])
     capacity = len(dense) * 4
     contacts = SimpleNamespace(
         rigid_contact_max=capacity,
@@ -1182,13 +1427,14 @@ def test_parallel_pair_completion_replays_changed_graphs(test, device):
 
     def snapshot(edges):
         colors = pair.group_color.numpy()
+        body0, body1 = pair.group_body0.numpy(), pair.group_body1.numpy()
         leaders = np.flatnonzero(colors >= -1)
         endpoints = np.stack(
-            (pair.group_body0.numpy()[leaders], pair.group_body1.numpy()[leaders]),
+            (body0[leaders], body1[leaders]),
             axis=1,
         )
         expected = np.asarray(
-            [edge for edge in edges if any(inverse[body] > 0.0 for body in edge)],
+            [edge for edge in edges if any(body >= 0 and inverse[body] > 0.0 for body in edge)],
             dtype=np.int32,
         ).reshape(-1, 2)
         np.testing.assert_array_equal(endpoints, expected)
@@ -1206,8 +1452,17 @@ def test_parallel_pair_completion_replays_changed_graphs(test, device):
                 groups,
             )
             bodies = endpoints[colors[leaders] == color].ravel()
+            bodies = bodies[bodies >= 0]
             dynamic = bodies[inverse[bodies] > 0.0]
             test.assertEqual(len(np.unique(dynamic)), len(dynamic))
+        partners = np.full((body_count, rigid_pair_contact._COLOR_COUNT), -2, dtype=np.int32)
+        for group in np.flatnonzero(colors >= 0):
+            a, b = int(body0[group]), int(body1[group])
+            if a >= 0 and inverse[a] > 0.0:
+                partners[a, colors[group]] = b
+            if b >= 0 and inverse[b] > 0.0:
+                partners[b, colors[group]] = a
+        np.testing.assert_array_equal(pair.pair_partner.numpy().reshape(partners.shape), partners)
         return colors
 
     for conditional in (False, True):
@@ -1218,15 +1473,135 @@ def test_parallel_pair_completion_replays_changed_graphs(test, device):
         with patch.object(wp, "is_conditional_graph_supported", return_value=conditional):
             with wp.ScopedCapture(device=device) as capture:
                 pair.build(contacts)
-        for edges in (dense, [], star, dense):
-            assign(edges)
-            pair.build(contacts)
-            expected = snapshot(edges)
-            for _ in range(3):
-                wp.capture_launch(capture.graph)
-                np.testing.assert_array_equal(snapshot(edges), expected)
-            if edges is star:
-                test.assertGreater(int(pair.overflow_count.numpy()[0]), 0)
+        # Previous pair classes are scheduling state. Compare eager and captured
+        # execution from identical history, and repeat an evolving graph sequence.
+        initial_partners = wp.clone(pair.pair_partner)
+        initial_build = wp.clone(pair.build_index)
+        sequence = []
+        for replay in range(2):
+            wp.copy(pair.pair_partner, initial_partners)
+            wp.copy(pair.build_index, initial_build)
+            for index, edges in enumerate((dense, [], mixed, reversed_dense, star, dense)):
+                assign(edges)
+                previous_partners = wp.clone(pair.pair_partner)
+                previous_build = wp.clone(pair.build_index)
+                pair.build(contacts)
+                expected = snapshot(edges)
+                expected_build = pair.build_index.numpy().copy()
+                if replay == 0:
+                    sequence.append(expected.copy())
+                else:
+                    np.testing.assert_array_equal(expected, sequence[index])
+                for _ in range(3):
+                    wp.copy(pair.pair_partner, previous_partners)
+                    wp.copy(pair.build_index, previous_build)
+                    wp.capture_launch(capture.graph)
+                    np.testing.assert_array_equal(snapshot(edges), expected)
+                    np.testing.assert_array_equal(pair.build_index.numpy(), expected_build)
+                if edges is star:
+                    test.assertGreater(int(pair.overflow_count.numpy()[0]), 0)
+
+    # Completion must retain descending greedy order, even when pending leaders
+    # straddle tile boundaries or are sparse among already completed contacts.
+    palette = rigid_pair_contact._COLOR_COUNT
+    active_count = capacity - 7
+    sparse = [0, 31, 32, 63, 64, 127, 128, 255, 256, active_count - 1]
+
+    def restore_tail(colors, body0, body1, masks, counts, group_count):
+        pair.group_color.assign(colors)
+        pair.group_body0.assign(body0)
+        pair.group_body1.assign(body1)
+        pair.body_color_mask.assign(masks)
+        pair.color_counts.assign(counts)
+        pair.group_count.fill_(group_count)
+        contacts.rigid_contact_count.fill_(active_count)
+        pair.build_index.fill_(19)
+
+    def complete_tail():
+        wp.launch(
+            rigid_pair_contact.color_pair_tail_serial,
+            dim=rigid_pair_contact._TAIL_SCAN_THREADS,
+            block_dim=rigid_pair_contact._TAIL_SCAN_THREADS,
+            inputs=[
+                palette,
+                palette,
+                contacts.rigid_contact_count,
+                pair.group_count,
+                pair.group_color,
+                pair.group_body0,
+                pair.group_body1,
+                inverse_array,
+            ],
+            outputs=[
+                pair.body_color_mask,
+                pair.color_counts,
+                pair.overflow_count,
+                pair.color_offsets,
+                pair.color_cursors,
+                pair.group_list,
+                pair.parallel_tail,
+                pair.build_index,
+            ],
+            device=device,
+        )
+
+    for pending in ([], sparse, sorted(set(sparse + list(range(1, 81))))):
+        colors = np.full(capacity, -2, dtype=np.int32)
+        body0 = np.full(capacity, -1, dtype=np.int32)
+        body1 = np.full(capacity, -1, dtype=np.int32)
+        masks = np.zeros(body_count, dtype=np.int32)
+        counts = np.zeros(palette, dtype=np.int32)
+        precolored = [(0, 1, 0), (2, 3, 0)] + [(4, 5 + color, color) for color in range(palette)]
+        for index, (a, b, color) in enumerate(precolored):
+            group = 1000 + 4 * index
+            body0[group], body1[group], colors[group] = a, b, color
+            for body in (a, b):
+                if inverse[body] > 0.0:
+                    masks[body] |= 1 << color
+            counts[color] += 1
+        edges = [(0, 2), (1, 3), (0, 3), (1, 2), (-1, 0), (17, 2), (4, 35), (4, 36)]
+        for index, group in enumerate(pending):
+            body0[group], body1[group] = edges[index % len(edges)]
+            colors[group] = -1
+        # Inactive capacity may contain stale data, which must not be consumed.
+        colors[-1], body0[-1], body1[-1] = -1, 0, 1
+        expected = colors.copy()
+        expected_masks, expected_counts = masks.copy(), counts.copy()
+        overflow = []
+        for group in reversed(pending):
+            dynamic = [body for body in (body0[group], body1[group]) if body >= 0 and inverse[body] > 0.0]
+            used = 0
+            for body in dynamic:
+                used |= int(expected_masks[body])
+            color = next((c for c in range(palette) if used & (1 << c) == 0), -1)
+            expected[group] = color
+            if color < 0:
+                overflow.append(group)
+            else:
+                expected_counts[color] += 1
+                for body in dynamic:
+                    expected_masks[body] |= 1 << color
+        expected_offsets = np.concatenate(([0], np.cumsum(expected_counts)))
+
+        restore_tail(colors, body0, body1, masks, counts, len(precolored) + len(pending))
+        complete_tail()
+        with wp.ScopedCapture(device=device) as tail_capture:
+            complete_tail()
+        for captured in (False, True, True):
+            restore_tail(colors, body0, body1, masks, counts, len(precolored) + len(pending))
+            if captured:
+                wp.capture_launch(tail_capture.graph)
+            else:
+                complete_tail()
+            np.testing.assert_array_equal(pair.group_color.numpy(), expected)
+            np.testing.assert_array_equal(pair.body_color_mask.numpy(), expected_masks)
+            np.testing.assert_array_equal(pair.color_counts.numpy(), expected_counts)
+            np.testing.assert_array_equal(pair.color_offsets.numpy(), expected_offsets)
+            np.testing.assert_array_equal(pair.color_cursors.numpy(), expected_offsets[:-1])
+            test.assertEqual(int(pair.overflow_count.numpy()[0]), len(overflow))
+            np.testing.assert_array_equal(pair.group_list.numpy()[capacity - len(overflow) :], sorted(overflow))
+            test.assertEqual(int(pair.build_index.numpy()[0]), 20)
+            test.assertEqual(int(pair.parallel_tail.numpy()[0]), 0)
 
 
 def test_rigid_determinism_survives_particle_module_reuse(test, device):
@@ -1376,14 +1751,15 @@ def test_contact_color_growth_replays_every_body(test, device):
     """Solve newly required high colors on the first replay after graph growth."""
     builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
     cfg = newton.ModelBuilder.ShapeConfig(ke=1.0e5, kd=100.0, mu=0.5)
-    for i in range(6):
+    body_count = 32
+    for i in range(body_count):
         position = wp.vec3(0.1 * math.cos(i), 0.1 * math.sin(i), 0.01 * i)
         body = builder.add_link(xform=wp.transform(position, wp.quat_identity()))
         builder.add_shape_sphere(body, radius=0.5, cfg=cfg)
         builder.add_joint_fixed(parent=-1, child=body, parent_xform=wp.transform(position, wp.quat_identity()))
     builder.color()
     model = builder.finalize(device=device)
-    pipeline = _make_pipeline(model, 128)
+    pipeline = _make_pipeline(model, 1024)
     contacts = pipeline.contacts()
     solver = newton.solvers.SolverVBD(
         model,
@@ -1397,11 +1773,24 @@ def test_contact_color_growth_replays_every_body(test, device):
     control = model.control()
     pipeline.collide(state_in, contacts)
     dense_count = int(contacts.rigid_contact_count.numpy()[0])
-    test.assertEqual(dense_count, 15)
+    test.assertEqual(dense_count, body_count * (body_count - 1) // 2)
+    # Prefixes then describe cliques of increasing size without recolliding or recapturing.
+    shape0 = contacts.rigid_contact_shape0.numpy()[:dense_count]
+    shape1 = contacts.rigid_contact_shape1.numpy()[:dense_count]
+    order = np.argsort(np.maximum(shape0, shape1), kind="stable")
+    for name, value in vars(contacts).items():
+        if (
+            name.startswith("rigid_contact_")
+            and isinstance(value, wp.array)
+            and value.shape[0] == contacts.rigid_contact_max
+        ):
+            data = value.numpy()
+            data[:dense_count] = data[:dense_count][order]
+            value.assign(data)
     # Warm allocation with an empty graph, whose valid schedule needs one color.
     contacts.rigid_contact_count.zero_()
     solver.step(state_in, state_out, control, contacts, 1.0 / 600.0)
-    test.assertEqual(int(solver._rigid_body_refinement_gt4.numpy()[0]), 0)
+    test.assertEqual(int(solver._rigid_body_color_count_exceeds.numpy()[4]), 0)
     arrays = []
     seen = set()
     for obj in (solver, state_in, state_out):
@@ -1424,17 +1813,20 @@ def test_contact_color_growth_replays_every_body(test, device):
             with wp.ScopedCapture(device=device) as capture:
                 restore()
                 solver.step(state_in, state_out, control, contacts, 1.0 / 600.0)
-            for count in (dense_count, 0, dense_count):
+            # Exercise both sides of every dispatch threshold, including shrink/regrowth.
+            for active_bodies in (4, 5, 6, 7, 8, 9, 16, 17, 32, 0, 6):
+                count = active_bodies * (active_bodies - 1) // 2
                 contacts.rigid_contact_count.assign(np.asarray([count], dtype=np.int32))
                 restore()
                 # Eager forced refinement executes the complete fixed envelope.
                 solver.rigid_contact_coloring = "refined"
                 solver.step(state_in, state_out, control, contacts, 1.0 / 600.0)
                 expected = (state_out.body_q.numpy(), state_out.body_qd.numpy())
+                test.assertTrue(all(np.isfinite(value).all() for value in expected))
                 solver.rigid_contact_coloring = policy
                 for _ in range(3):
                     wp.capture_launch(capture.graph)
-                    test.assertEqual(int(solver._rigid_body_num_colors.numpy()[0]), 6 if count else 1)
+                    test.assertEqual(int(solver._rigid_body_num_colors.numpy()[0]), active_bodies if count else 1)
                     for actual, reference in zip(
                         (state_out.body_q.numpy(), state_out.body_qd.numpy()), expected, strict=True
                     ):
@@ -1545,7 +1937,7 @@ def test_body_contact_color_budget_is_bounded_and_joint_safe(test, device):
     for invalid in (0, -1, 33, 4.5, True):
         with test.assertRaisesRegex(ValueError, "rigid_body_contact_color_budget"):
             newton.solvers.SolverVBD(model, rigid_compliant_alm=True, rigid_body_contact_color_budget=invalid)
-    for budget in (1, 4, 8, 32):
+    for budget in (1, 4, 5, 7, 8, 17, 32):
         with test.subTest(budget=budget):
             solver = newton.solvers.SolverVBD(
                 model,
@@ -1837,20 +2229,7 @@ def test_particle_attachments_follow_refined_contact_schedule(test, device):
 
 
 class TestVBDRigidPairContact(unittest.TestCase):
-    def test_rigid_block_dim_preserves_launch_policy(self):
-        """Choose the largest supported block meeting the half-SM target."""
-        widths = (4, 8, 16, 32, 64, 128, 256)
-        for sm_count in (1, 2, 3, 16, 71, 142):
-            device = SimpleNamespace(is_cuda=True, sm_count=sm_count)
-            target = (sm_count + 1) // 2
-            for launch_dim in (0, 1, 4, 17, 63, 128, 257, 4096, 1000000):
-                with self.subTest(sm_count=sm_count, launch_dim=launch_dim):
-                    valid = [width for width in widths if (launch_dim + width - 1) // width >= target]
-                    self.assertEqual(
-                        rigid_vbd_kernels.select_rigid_block_dim(launch_dim, device),
-                        max(valid, default=4),
-                    )
-        self.assertEqual(rigid_vbd_kernels.select_rigid_block_dim(0, SimpleNamespace(is_cuda=False)), 256)
+    pass
 
 
 devices = get_test_devices()
@@ -1958,6 +2337,12 @@ add_function_test(
     TestVBDRigidPairContact,
     "test_pair_warmstart_respects_normal_and_tangent_moment_arms",
     test_pair_warmstart_respects_normal_and_tangent_moment_arms,
+    devices=devices,
+)
+add_function_test(
+    TestVBDRigidPairContact,
+    "test_pair_warmstart_keeps_reactions_when_body_list_overflows",
+    test_pair_warmstart_keeps_reactions_when_body_list_overflows,
     devices=devices,
 )
 add_function_test(

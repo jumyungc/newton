@@ -74,6 +74,7 @@ from .rigid_vbd_kernels import (
     RigidForceElementAdjacencyInfo,
     _count_body_particle_attachments_per_body,
     _fill_body_particle_attachments_per_body,
+    _select_rigid_block_dim,
     accumulate_body_body_contacts_per_body,
     accumulate_body_particle_attachments_per_body,
     accumulate_body_particle_contacts_per_body,
@@ -83,7 +84,6 @@ from .rigid_vbd_kernels import (
     build_body_body_contact_lists,
     build_body_particle_contact_lists,
     check_contact_overflow,
-    clear_rigid_body_contact_scratch,
     color_rigid_bodies_from_contacts,
     compute_body_body_contact_forces,
     compute_body_particle_contact_forces,
@@ -98,7 +98,8 @@ from .rigid_vbd_kernels import (
     refresh_body_structural_k,
     refresh_joint_material_params,
     reset_rigid_state,
-    select_rigid_block_dim,
+    retain_rigid_body_colors,
+    rigid_kempe_scratch_size,
     snapshot_body_body_contact_history,
     sort_body_body_contact_lists,
     sort_body_body_contact_lists_tiled,
@@ -129,6 +130,10 @@ __all__ = ["SolverVBD"]
 
 _PARTICLE_CONTACT_GATHER_BLOCK_DIM = 128
 _RIGID_CONTACT_MAX_DYNAMIC_COLORS = 32
+# Color envelopes the refined schedule may sweep, chosen on the device each substep by a binary search
+# of conditional nodes. An empty color costs every sweep, a search level once per substep, so the
+# 5-8 range is exact and the other powers of two are kept.
+_RIGID_CONTACT_COLOR_ENVELOPES = (4, 5, 6, 7, 8, 16, _RIGID_CONTACT_MAX_DYNAMIC_COLORS)
 
 # Reuse the shared equations without scatter reduction only for disjoint writers.
 # A unique module leaves XPBD and other VBD instances' requested options untouched.
@@ -137,25 +142,6 @@ _apply_disjoint_joint_forces = wp.kernel(
     enable_backward=False,
     module_options={"deterministic": wp.DeterministicMode.NOT_GUARANTEED},
 )(apply_joint_forces.func)
-
-
-def _select_rigid_block_dim(launch_dim: int, device: wp.Device) -> int:
-    """Expose more blocks on small rigid launches, allowing sub-warp blocks.
-
-    Target as many blocks as SMs, with a four-thread minimum and a 256-thread
-    maximum. This empirical tradeoff does not guarantee occupancy.
-    """
-    if not device.is_cuda:
-        return 256
-
-    target_blocks = device.sm_count
-    block_dim = 4
-    while block_dim < 256:
-        candidate = 2 * block_dim
-        if (launch_dim + candidate - 1) // candidate < target_blocks:
-            break
-        block_dim = candidate
-    return block_dim
 
 
 def _particle_contact_scatter_worker_count(soft_contact_max: int, particle_count: int, device) -> int:
@@ -2139,7 +2125,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         active_int = schedule_active.astype(np.int32)
 
         colors = np.where(schedule_active, base_colors, -1).astype(np.int32)
-        ids = np.empty(model.body_count, dtype=np.int32)
+        ids = np.full(model.body_count, -1, dtype=np.int32)
         starts = np.zeros(max(model.body_count + 1, self._rigid_body_color_budget + 1), dtype=np.int32)
         cursor = 0
         for color in range(self._rigid_body_color_budget):
@@ -2153,14 +2139,18 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
 
         self._rigid_body_schedule_active = wp.array(active_int, dtype=wp.int32, device=self.device)
         self._rigid_body_colors = wp.array(colors, dtype=wp.int32, device=self.device)
+        self._rigid_body_retained_colors = wp.empty_like(self._rigid_body_colors)
+        self._rigid_body_kempe_scratch = wp.zeros(
+            rigid_kempe_scratch_size(model.body_count), dtype=wp.int32, device=self.device
+        )
         self._rigid_body_ids_by_color = wp.array(ids, dtype=wp.int32, device=self.device)
         self._rigid_body_color_starts = wp.array(starts, dtype=wp.int32, device=self.device)
         initial_num_colors = 0 if cursor == 0 else int(np.max(colors)) + 1
         self._rigid_body_num_colors = wp.array([initial_num_colors], dtype=wp.int32, device=self.device)
         self._rigid_body_refinement_overflow = wp.zeros(1, dtype=wp.int32, device=self.device)
-        self._rigid_body_refinement_gt4 = wp.zeros(1, dtype=wp.int32, device=self.device)
-        self._rigid_body_refinement_gt8 = wp.zeros(1, dtype=wp.int32, device=self.device)
-        self._rigid_body_refinement_gt16 = wp.zeros(1, dtype=wp.int32, device=self.device)
+        self._rigid_body_color_count_exceeds = wp.zeros(
+            self._rigid_body_color_budget, dtype=wp.int32, device=self.device
+        )
         self._rigid_body_joint_color_overflow = wp.zeros(1, dtype=wp.int32, device=self.device)
         self._rigid_body_max_same_color_degree = wp.zeros(1, dtype=wp.int32, device=self.device)
         self._rigid_body_refinement_active = wp.zeros(1, dtype=wp.int32, device=self.device)
@@ -2207,6 +2197,33 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
 
     def _rebuild_rigid_contact_coloring(self, contacts: Contacts) -> None:
         """Build the fixed-capacity joint-preserving schedule on the device."""
+        # Keep the colors the fresh graph still allows, one thread per body. Any change is
+        # recorded as a joint overflow, which makes the one-block kernel repair from them.
+        if self.device.is_cuda:
+            wp.launch(
+                kernel=retain_rigid_body_colors,
+                dim=self.model.body_count,
+                inputs=[
+                    self._rigid_body_color_budget,
+                    self.body_inv_mass_effective,
+                    self.body_uses_pair_contacts,
+                    self._rigid_body_schedule_active,
+                    self.body_body_contact_buffer_pre_alloc,
+                    self.body_body_contact_counts,
+                    self.body_body_contact_indices,
+                    contacts.rigid_contact_shape0,
+                    contacts.rigid_contact_shape1,
+                    self.model.shape_body,
+                    self.rigid_adjacency.body_adj_joints_offsets,
+                    self.rigid_adjacency.body_adj_joints,
+                    self.model.joint_parent,
+                    self.model.joint_child,
+                    self.model.joint_type,
+                    self._rigid_body_colors,
+                ],
+                outputs=[self._rigid_body_retained_colors, self._rigid_body_joint_color_overflow],
+                device=self.device,
+            )
         wp.launch(
             kernel=color_rigid_bodies_from_contacts,
             dim=512 if self.device.is_cuda else 1,
@@ -2229,6 +2246,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 self.model.joint_parent,
                 self.model.joint_child,
                 self.model.joint_type,
+                self._rigid_body_retained_colors,
                 True,  # The existing schedule remains consistent with its body colors.
             ],
             outputs=[
@@ -2238,9 +2256,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 self._rigid_body_num_colors,
                 self._rigid_body_refinement_overflow,
                 self._rigid_body_joint_color_overflow,
-                self._rigid_body_refinement_gt4,
-                self._rigid_body_refinement_gt8,
-                self._rigid_body_refinement_gt16,
+                self._rigid_body_color_count_exceeds,
+                self._rigid_body_kempe_scratch,
             ],
             device=self.device,
             block_dim=512 if self.device.is_cuda else 1,
@@ -3109,6 +3126,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                     use_refined_body_colors=use_refined_body_colors,
                     refined_color_count=refined_color_count,
                     pair_parallel_tail=pair_parallel_tail,
+                    refresh_pair_constants=iter_num == 0 or rigid_due,
                 )
                 self._solve_particle_iteration(state_in, state_out, contacts, dt)
 
@@ -3117,6 +3135,19 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         can_branch_in_capture = (
             not self.device.is_capturing or not self.device.is_cuda or wp.is_conditional_graph_supported()
         )
+
+        def solve_color_envelope(envelopes: list[int]) -> None:
+            # Binary search on the device-side color count for the smallest sufficient envelope.
+            if len(envelopes) == 1:
+                solve_iterations(True, envelopes[0])
+                return
+            half = len(envelopes) // 2
+            bound = envelopes[half - 1]
+            wp.capture_if(
+                self._rigid_body_color_count_exceeds[bound : bound + 1],
+                on_true=lambda: solve_color_envelope(envelopes[half:]),
+                on_false=lambda: solve_color_envelope(envelopes[:half]),
+            )
 
         def solve_refined_iterations() -> None:
             # Build before reading the count flag: a refreshed graph may need
@@ -3129,19 +3160,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 and self.device.is_cuda
                 and wp.is_conditional_graph_supported()
             ):
-                wp.capture_if(
-                    self._rigid_body_refinement_gt4,
-                    on_true=lambda: wp.capture_if(
-                        self._rigid_body_refinement_gt8,
-                        on_true=lambda: wp.capture_if(
-                            self._rigid_body_refinement_gt16,
-                            on_true=lambda: solve_iterations(True, _RIGID_CONTACT_MAX_DYNAMIC_COLORS),
-                            on_false=lambda: solve_iterations(True, 16),
-                        ),
-                        on_false=lambda: solve_iterations(True, 8),
-                    ),
-                    on_false=lambda: solve_iterations(True, 4),
-                )
+                budget = self._rigid_body_color_budget
+                solve_color_envelope([*(n for n in _RIGID_CONTACT_COLOR_ENVELOPES if n < budget), budget])
             else:
                 # Mid-iteration collision can increase the palette after this
                 # choice. Without conditionals, also use the complete envelope.
@@ -4779,6 +4799,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         use_refined_body_colors: bool = False,
         refined_color_count: int = _RIGID_CONTACT_MAX_DYNAMIC_COLORS,
         pair_parallel_tail: bool | None = None,
+        refresh_pair_constants: bool = True,
     ):
         """Solve one rigid-body VBD iteration (per-iteration phase).
 
@@ -4864,18 +4885,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         # Without particle contributions, the contact gather initializes its own
         # scratch, including bodies with empty lists. Pair-only sweeps need none.
         if body_color_groups and (model.particle_count > 0 or not gather_body_contacts):
-            wp.launch(
-                kernel=clear_rigid_body_contact_scratch,
-                dim=model.body_count,
-                outputs=[
-                    self.body_forces,
-                    self.body_torques,
-                    self.body_hessian_ll,
-                    self.body_hessian_al,
-                    self.body_hessian_aa,
-                ],
-                device=self.device,
-            )
+            self._body_contact_scratch.zero_()
 
         # Gauss-Seidel-style per-color updates
         for group in body_color_groups:
@@ -5061,7 +5071,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                     ],
                     outputs=[self.body_forces, self.body_torques],
                     device=self.device,
-                    block_dim=select_rigid_block_dim(color_launch_dim, self.device),
+                    block_dim=_select_rigid_block_dim(color_launch_dim, self.device),
                 )
 
             wp.launch(
@@ -5148,7 +5158,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 ],
                 dim=color_launch_dim,
                 device=self.device,
-                block_dim=select_rigid_block_dim(color_launch_dim, self.device),
+                block_dim=_select_rigid_block_dim(color_launch_dim, self.device),
             )
             # Truncate this color's pose updates before the next color accumulates
             # forces against them; the last color also feeds the dual updates.
@@ -5167,6 +5177,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 self.rigid_contact_hard,
                 self.rigid_compliant_alm,
                 parallel_tail=pair_parallel_tail,
+                refresh_constants=refresh_pair_constants,
             )
             self._rigid_penetration_free_truncation(state_in, contacts)
 

@@ -9,8 +9,8 @@ from newton._src.math import orthonormal_basis
 from newton._src.sim.contacts import contact_surface_point, contact_surface_separation
 from newton._src.solvers.vbd.rigid_vbd_kernels import (
     _body_id_for_color_slot,
+    _select_rigid_block_dim,
     _sync_cuda_block,
-    select_rigid_block_dim,
 )
 
 wp.set_module_options({"enable_backward": False})
@@ -18,6 +18,7 @@ wp.set_module_options({"enable_backward": False})
 _COLOR_COUNT = 30
 _DIRECT_COLOR_COUNT = 8
 _PARALLEL_BUILD_ROUNDS = 10
+_TAIL_SCAN_THREADS = 256
 _FUSED_THREADS = 256
 _CAPTURED_DIRECT_COLOR_MIN_BODIES_PER_SM = 1
 _EAGER_DIRECT_COLOR_MIN_BODIES_PER_SM = 32
@@ -168,6 +169,8 @@ def build_and_color_pair_groups_serial(
 
 @wp.kernel
 def mark_pair_groups_parallel(
+    color_count: int,
+    pair_partner: wp.array[wp.int32],
     contact_count: wp.array[wp.int32],
     contact_shape0: wp.array[wp.int32],
     contact_shape1: wp.array[wp.int32],
@@ -179,9 +182,13 @@ def mark_pair_groups_parallel(
     group_body0: wp.array[wp.int32],
     group_body1: wp.array[wp.int32],
     group_color: wp.array[wp.int32],
+    group_class: wp.array[wp.int32],
     group_count_out: wp.array[wp.int32],
 ):
-    """Mark contiguous body-pair leaders independently on large worlds."""
+    """Mark contiguous body-pair leaders independently on large worlds.
+
+    A group's class is the color its body pair held in the previous build, or -1.
+    """
     contact = wp.tid()
     group_color[contact] = -2
     active_contacts = wp.min(contact_count[0], contact_shape0.shape[0])
@@ -222,87 +229,108 @@ def mark_pair_groups_parallel(
     group_body0[contact] = body0
     group_body1[contact] = body1
     group_color[contact] = -1
+    group_class[contact] = -1
+    body = body0
+    partner = body1
+    if not dynamic0:
+        body = body1
+        partner = body0
+    for color in range(color_count):
+        if pair_partner[body * color_count + color] == partner:
+            group_class[contact] = color
     wp.atomic_add(group_count_out, 0, 1)
+
+
+@wp.func
+def _pair_color_tag(group: int, round_index: int, group_class: int, build_index: int) -> wp.int64:
+    """Order groups by their previous color class, then by a hash that is unique per group.
+
+    Even builds take the highest class first and odd builds a hashed class order, so successive builds are passes of
+    iterated greedy with varying class orders. Groups without a class come last. Later rounds dominate earlier tags.
+    """
+    class_key = wp.int64(0)
+    if group_class >= 0:
+        order = wp.int64(group_class)
+        if build_index % 2 == 1:
+            spread = ((group_class + 7) * wp.int32(1103515245) + build_index * wp.int32(12345)) & wp.int32(0x3FF)
+            order = (wp.int64(spread) << wp.int64(5)) | wp.int64(group_class)
+        class_key = order + wp.int64(1)
+    unique = wp.int64((group * wp.int32(1103515245) + build_index * wp.int32(12345)) & wp.int32(0x7FFFFFFF))
+    return (wp.int64(round_index) << wp.int64(48)) | (class_key << wp.int64(31)) | unique
 
 
 @wp.kernel
 def propose_pair_color_parallel(
-    color_count: int,
     round_index: int,
+    build_index: wp.array[wp.int32],
     group_color: wp.array[wp.int32],
+    group_class: wp.array[wp.int32],
     group_body0: wp.array[wp.int32],
     group_body1: wp.array[wp.int32],
     body_inv_mass: wp.array[float],
-    body_color_mask: wp.array[wp.int32],
-    group_proposal: wp.array[wp.int32],
     body_color_owner: wp.array[wp.int64],
 ):
-    """Propose the lowest free color and elect unique endpoint owners."""
+    """Post each uncolored group's tag to its dynamic bodies; the largest tag at a body may color next."""
     group = wp.tid()
-    group_proposal[group] = -1
     if group_color[group] != -1:
         return
+    tag = _pair_color_tag(group, round_index, group_class[group], build_index[0])
     body0 = group_body0[group]
     body1 = group_body1[group]
-    used_mask = wp.int32(0)
     if body0 >= 0 and body_inv_mass[body0] > 0.0:
-        used_mask |= body_color_mask[body0]
+        wp.atomic_max(body_color_owner, body0, tag)
     if body1 >= 0 and body_inv_mass[body1] > 0.0:
-        used_mask |= body_color_mask[body1]
-
-    available = (~used_mask) & ((wp.int32(1) << color_count) - 1)
-    selected = wp.int32(-1)
-    color = wp.int32(0)
-    while available != 0 and selected < 0:
-        if (available & (wp.int32(1) << color)) != 0:
-            selected = color
-        color += 1
-    if selected < 0:
-        return
-
-    group_proposal[group] = selected
-    priority = (group * wp.int32(1103515245) + round_index * wp.int32(12345)) & wp.int32(0x7FFFFFFF)
-    priority_tag = (wp.int64(round_index) << wp.int64(32)) | wp.int64(priority)
-    if body0 >= 0 and body_inv_mass[body0] > 0.0:
-        wp.atomic_max(body_color_owner, body0 * color_count + selected, priority_tag)
-    if body1 >= 0 and body_inv_mass[body1] > 0.0:
-        wp.atomic_max(body_color_owner, body1 * color_count + selected, priority_tag)
+        wp.atomic_max(body_color_owner, body1, tag)
 
 
 @wp.kernel
 def commit_pair_color_parallel(
     color_count: int,
     round_index: int,
+    build_index: wp.array[wp.int32],
+    group_class: wp.array[wp.int32],
     group_body0: wp.array[wp.int32],
     group_body1: wp.array[wp.int32],
     body_inv_mass: wp.array[float],
     body_color_owner: wp.array[wp.int64],
-    group_proposal: wp.array[wp.int32],
     body_color_mask: wp.array[wp.int32],
     group_color: wp.array[wp.int32],
     color_counts: wp.array[wp.int32],
 ):
-    """Commit an edge only when it won at every dynamic endpoint."""
+    """Color a group holding the largest tag at all its dynamic bodies with the lowest color free there.
+
+    Each body has one such group per round, so commits in a round never share a body.
+    """
     group = wp.tid()
     if group_color[group] != -1:
         return
-    color = group_proposal[group]
-    if color < 0:
-        return
+    tag = _pair_color_tag(group, round_index, group_class[group], build_index[0])
     body0 = group_body0[group]
     body1 = group_body1[group]
-    priority = (group * wp.int32(1103515245) + round_index * wp.int32(12345)) & wp.int32(0x7FFFFFFF)
-    priority_tag = (wp.int64(round_index) << wp.int64(32)) | wp.int64(priority)
-    wins0 = body0 < 0 or body_inv_mass[body0] <= 0.0 or body_color_owner[body0 * color_count + color] == priority_tag
-    wins1 = body1 < 0 or body_inv_mass[body1] <= 0.0 or body_color_owner[body1 * color_count + color] == priority_tag
-    if wins0 and wins1:
-        group_color[group] = color
-        bit = wp.int32(1) << color
-        if body0 >= 0 and body_inv_mass[body0] > 0.0:
-            wp.atomic_or(body_color_mask, body0, bit)
-        if body1 >= 0 and body_inv_mass[body1] > 0.0:
-            wp.atomic_or(body_color_mask, body1, bit)
-        wp.atomic_add(color_counts, color, 1)
+    dynamic0 = body0 >= 0 and body_inv_mass[body0] > 0.0
+    dynamic1 = body1 >= 0 and body_inv_mass[body1] > 0.0
+    if dynamic0 and body_color_owner[body0] != tag:
+        return
+    if dynamic1 and body_color_owner[body1] != tag:
+        return
+    used_mask = wp.int32(0)
+    if dynamic0:
+        used_mask |= body_color_mask[body0]
+    if dynamic1:
+        used_mask |= body_color_mask[body1]
+    available = (~used_mask) & ((wp.int32(1) << color_count) - 1)
+    if available == 0:
+        return
+    selected = wp.int32(0)
+    while (available & (wp.int32(1) << selected)) == 0:
+        selected += 1
+    group_color[group] = selected
+    bit = wp.int32(1) << selected
+    if dynamic0:
+        wp.atomic_or(body_color_mask, body0, bit)
+    if dynamic1:
+        wp.atomic_or(body_color_mask, body1, bit)
+    wp.atomic_add(color_counts, selected, 1)
 
 
 @wp.kernel
@@ -335,53 +363,75 @@ def color_pair_tail_serial(
     color_cursors: wp.array[wp.int32],
     group_list: wp.array[wp.int32],
     parallel_tail: wp.array[wp.int32],
+    build_index: wp.array[wp.int32],
 ):
-    """Color the sparse tail deterministically, then build color offsets."""
-    if wp.tid() != 0:
-        return
-
-    overflow_count[0] = 0
+    """Scan pending groups cooperatively; color in descending order on lane zero."""
+    lane = wp.tid()
+    if lane == 0:
+        build_index[0] = build_index[0] + 1
+        overflow_count[0] = 0
     colored_count = wp.int32(0)
     for color in range(first_color):
         colored_count += color_counts[color]
     if colored_count < group_count[0]:
         remaining = group_count[0] - colored_count
-        group = wp.min(contact_count[0], group_color.shape[0]) - 1
-        while group >= 0 and remaining > 0:
-            if group_color[group] == -1:
-                body0 = group_body0[group]
-                body1 = group_body1[group]
-                used_mask = wp.int32(0)
-                if body0 >= 0 and body_inv_mass[body0] > 0.0:
-                    used_mask |= body_color_mask[body0]
-                if body1 >= 0 and body_inv_mass[body1] > 0.0:
-                    used_mask |= body_color_mask[body1]
+        pending = wp.tile_zeros(shape=(_TAIL_SCAN_THREADS,), dtype=wp.int32, storage="shared")
+        chunk_end = wp.min(contact_count[0], group_color.shape[0]) - 1
+        while chunk_end >= 0 and remaining > 0:
+            candidate = chunk_end - lane
+            active = wp.int32(0)
+            if candidate >= 0:
+                active = wp.int32(group_color[candidate] == -1)
+            offsets = wp.tile_scan_inclusive(wp.tile(active))
+            count = offsets[_TAIL_SCAN_THREADS - 1]
+            prefix = wp.untile(offsets)
+            slot = count + lane - prefix
+            if active != 0:
+                slot = prefix - 1
+            if count > 0:
+                # Tile element assignment synchronizes the block. All lanes
+                # write unique slots: pending IDs first, inactive IDs afterward.
+                pending[slot] = candidate
+                if lane == 0:
+                    for index in range(count):
+                        group = pending[index]
+                        body0 = group_body0[group]
+                        body1 = group_body1[group]
+                        used_mask = wp.int32(0)
+                        if body0 >= 0 and body_inv_mass[body0] > 0.0:
+                            used_mask |= body_color_mask[body0]
+                        if body1 >= 0 and body_inv_mass[body1] > 0.0:
+                            used_mask |= body_color_mask[body1]
 
-                selected = wp.int32(-1)
-                # Parallel rounds may leave a group even when a low color is
-                # reusable.  Search the full palette so used colors remain a
-                # contiguous prefix, which also makes the fused-solve early
-                # exit below valid.
-                color = wp.int32(0)
-                available = (~used_mask) & ((wp.int32(1) << color_count) - 1)
-                while available != 0 and selected < 0:
-                    if (available & (wp.int32(1) << color)) != 0:
-                        selected = color
-                    color += 1
+                        selected = wp.int32(-1)
+                        # Parallel rounds may leave a group even when a low color is
+                        # reusable.  Search the full palette so used colors remain a
+                        # contiguous prefix, which also makes the fused-solve early
+                        # exit below valid.
+                        color = wp.int32(0)
+                        available = (~used_mask) & ((wp.int32(1) << color_count) - 1)
+                        while available != 0 and selected < 0:
+                            if (available & (wp.int32(1) << color)) != 0:
+                                selected = color
+                            color += 1
 
-                group_color[group] = selected
-                if selected >= 0:
-                    bit = wp.int32(1) << selected
-                    if body0 >= 0 and body_inv_mass[body0] > 0.0:
-                        body_color_mask[body0] |= bit
-                    if body1 >= 0 and body_inv_mass[body1] > 0.0:
-                        body_color_mask[body1] |= bit
-                    color_counts[selected] += 1
-                else:
-                    group_list[group_list.shape[0] - 1 - overflow_count[0]] = group
-                    overflow_count[0] += 1
-                remaining -= 1
-            group -= 1
+                        group_color[group] = selected
+                        if selected >= 0:
+                            bit = wp.int32(1) << selected
+                            if body0 >= 0 and body_inv_mass[body0] > 0.0:
+                                body_color_mask[body0] |= bit
+                            if body1 >= 0 and body_inv_mass[body1] > 0.0:
+                                body_color_mask[body1] |= bit
+                            color_counts[selected] += 1
+                        else:
+                            group_list[group_list.shape[0] - 1 - overflow_count[0]] = group
+                            overflow_count[0] += 1
+                _sync_cuda_block()
+                remaining -= count
+            chunk_end -= _TAIL_SCAN_THREADS
+
+    if lane != 0:
+        return
 
     offset = wp.int32(0)
     for color in range(color_count):
@@ -405,16 +455,30 @@ def color_pair_tail_serial(
     module_options={"deterministic": wp.DeterministicMode.NOT_GUARANTEED},
 )
 def scatter_pair_groups_by_color(
+    color_count: int,
     group_color: wp.array[wp.int32],
+    group_body0: wp.array[wp.int32],
+    group_body1: wp.array[wp.int32],
+    body_inv_mass: wp.array[float],
     color_cursors: wp.array[wp.int32],
     group_list: wp.array[wp.int32],
+    pair_partner: wp.array[wp.int32],
 ):
-    """Pack exact-color groups; within-color order is irrelevant."""
+    """Pack exact-color groups; within-color order is irrelevant.
+
+    Also record each dynamic body's partner per color, the next build's classes.
+    """
     group = wp.tid()
     color = group_color[group]
     if color >= 0:
         slot = wp.atomic_add(color_cursors, color, 1)
         group_list[slot] = group
+        body0 = group_body0[group]
+        body1 = group_body1[group]
+        if body0 >= 0 and body_inv_mass[body0] > 0.0:
+            pair_partner[body0 * color_count + color] = body1
+        if body1 >= 0 and body_inv_mass[body1] > 0.0:
+            pair_partner[body1 * color_count + color] = body0
 
 
 @wp.kernel
@@ -452,9 +516,16 @@ def accumulate_constraint_contact_forces_per_body(
     force_sum = wp.vec3(0.0)
     torque_sum = wp.vec3(0.0)
     center = wp.transform_point(body_q[body], body_com[body])
-    count = wp.min(body_contact_counts[body], body_contact_buffer_pre_alloc)
+    count = body_contact_counts[body]
+    overflow = count > body_contact_buffer_pre_alloc
+    if overflow:
+        # Pair multipliers cover all contacts, including those absent from a
+        # truncated body list. Gather them in contact order without atomics.
+        count = wp.min(contact_count[0], contact_lambda.shape[0])
     for slot in range(count):
-        contact = body_contact_indices[body * body_contact_buffer_pre_alloc + slot]
+        contact = slot
+        if not overflow:
+            contact = body_contact_indices[body * body_contact_buffer_pre_alloc + slot]
         if contact >= contact_count[0]:
             continue
         shape0 = contact_shape0[contact]
@@ -536,7 +607,8 @@ def _apply_constraint_pose_increment(
     center = wp.transform_point(pose, body_com[body])
     w = rotation * scale
     half_w = 0.5 * w
-    dq = wp.normalize(wp.quat(half_w[0], half_w[1], half_w[2], 1.0))
+    # Normalizing the product also removes the increment quaternion's scale.
+    dq = wp.quat(half_w[0], half_w[1], half_w[2], 1.0)
     q_new = wp.normalize(wp.mul(dq, q))
     center_new = center + translation * scale
     origin_new = center_new - wp.quat_rotate(q_new, body_com[body])
@@ -593,6 +665,7 @@ def _constraint_direction_response(
 @wp.kernel
 def prepare_constraint_contact_blocks(
     dt: float,
+    refresh_constants: bool,
     legacy_hard_contacts: int,
     contact_compliant_alm: int,
     body_q_prev: wp.array[wp.transform],
@@ -702,6 +775,10 @@ def prepare_constraint_contact_blocks(
     response1_tangent1[contact] = wp.spatial_vector(x1_t1, w1_t1)
     normal_support[contact] = wp.dot(n, relative_n)
     tangent_support[contact] = wp.mat22(W00, W01, W01, W11)
+    # Material and previous anchors stay fixed between collision refreshes
+    # within a step; the current-pose responses above still change each sweep.
+    if not refresh_constants:
+        return
     # Keep the two previous anchors separate to preserve the slip subtraction order.
     constants = ContactConstants()
     anchor0_local = contact_point0[contact] + contact_offset0[contact]
@@ -1187,13 +1264,15 @@ class RigidPairContact:
 
         body_count = model.body_count
         self.body_color_mask = wp.zeros(body_count, dtype=wp.int32, device=self.device)
-        self.body_color_owner = wp.full(body_count * _COLOR_COUNT, -1, dtype=wp.int64, device=self.device)
+        self.body_color_owner = wp.full(body_count, -1, dtype=wp.int64, device=self.device)
+        self.pair_partner = wp.full(body_count * _COLOR_COUNT, -2, dtype=wp.int32, device=self.device)
         self.color_counts = wp.zeros(_COLOR_COUNT, dtype=wp.int32, device=self.device)
         self.color_offsets = wp.zeros(_COLOR_COUNT + 1, dtype=wp.int32, device=self.device)
         self.color_cursors = wp.zeros(_COLOR_COUNT, dtype=wp.int32, device=self.device)
         self.group_count = wp.zeros(1, dtype=wp.int32, device=self.device)
         self.overflow_count = wp.zeros(1, dtype=wp.int32, device=self.device)
         self.parallel_tail = wp.zeros(1, dtype=wp.int32, device=self.device)
+        self.build_index = wp.zeros(1, dtype=wp.int32, device=self.device)
 
     def resize(self, capacity: int) -> None:
         if capacity <= self.capacity:
@@ -1204,7 +1283,7 @@ class RigidPairContact:
         self.group_body0 = wp.full(capacity, -1, dtype=wp.int32, device=self.device)
         self.group_body1 = wp.full(capacity, -1, dtype=wp.int32, device=self.device)
         self.group_color = wp.full(capacity, -2, dtype=wp.int32, device=self.device)
-        self.group_proposal = wp.full(capacity, -1, dtype=wp.int32, device=self.device)
+        self.group_class = wp.full(capacity, -1, dtype=wp.int32, device=self.device)
         self.group_list = wp.zeros(capacity, dtype=wp.int32, device=self.device)
         self.tangent0 = wp.zeros(capacity, dtype=wp.vec3, device=self.device)
         self.tangent1 = wp.zeros(capacity, dtype=wp.vec3, device=self.device)
@@ -1235,6 +1314,8 @@ class RigidPairContact:
                 kernel=mark_pair_groups_parallel,
                 dim=capacity,
                 inputs=[
+                    _COLOR_COUNT,
+                    self.pair_partner,
                     contacts.rigid_contact_count,
                     contacts.rigid_contact_shape0,
                     contacts.rigid_contact_shape1,
@@ -1248,10 +1329,12 @@ class RigidPairContact:
                     self.group_body0,
                     self.group_body1,
                     self.group_color,
+                    self.group_class,
                     self.group_count,
                 ],
                 device=self.device,
             )
+            self.pair_partner.fill_(-2)
             # Round tags invalidate old owners without clearing between rounds.
             # Common graphs finish in the initial rounds; denser graphs can use
             # the remaining palette in parallel before deterministic completion.
@@ -1263,15 +1346,15 @@ class RigidPairContact:
                         kernel=propose_pair_color_parallel,
                         dim=capacity,
                         inputs=[
-                            _COLOR_COUNT,
                             round_index,
+                            self.build_index,
                             self.group_color,
+                            self.group_class,
                             self.group_body0,
                             self.group_body1,
                             self.body_inv_mass,
-                            self.body_color_mask,
                         ],
-                        outputs=[self.group_proposal, self.body_color_owner],
+                        outputs=[self.body_color_owner],
                         device=self.device,
                     )
                     wp.launch(
@@ -1280,11 +1363,12 @@ class RigidPairContact:
                         inputs=[
                             _COLOR_COUNT,
                             round_index,
+                            self.build_index,
+                            self.group_class,
                             self.group_body0,
                             self.group_body1,
                             self.body_inv_mass,
                             self.body_color_owner,
-                            self.group_proposal,
                         ],
                         outputs=[self.body_color_mask, self.group_color, self.color_counts],
                         device=self.device,
@@ -1310,7 +1394,7 @@ class RigidPairContact:
                 color_rounds(_PARALLEL_BUILD_ROUNDS, _COLOR_COUNT)
             wp.launch(
                 kernel=color_pair_tail_serial,
-                dim=1,
+                dim=_TAIL_SCAN_THREADS,
                 inputs=[
                     _COLOR_COUNT,
                     _COLOR_COUNT,
@@ -1329,15 +1413,16 @@ class RigidPairContact:
                     self.color_cursors,
                     self.group_list,
                     self.parallel_tail,
+                    self.build_index,
                 ],
                 device=self.device,
-                block_dim=1,
+                block_dim=_TAIL_SCAN_THREADS,
             )
             wp.launch(
                 kernel=scatter_pair_groups_by_color,
                 dim=capacity,
-                inputs=[self.group_color],
-                outputs=[self.color_cursors, self.group_list],
+                inputs=[_COLOR_COUNT, self.group_color, self.group_body0, self.group_body1, self.body_inv_mass],
+                outputs=[self.color_cursors, self.group_list, self.pair_partner],
                 device=self.device,
             )
         else:
@@ -1386,6 +1471,7 @@ class RigidPairContact:
         legacy_hard_contacts: int,
         contact_compliant_alm: bool,
         parallel_tail: bool | None = None,
+        refresh_constants: bool = True,
     ) -> None:
         """Apply one sweep; an optional enclosing graph branch selects the tail."""
         capacity = contacts.rigid_contact_max
@@ -1397,6 +1483,7 @@ class RigidPairContact:
             dim=capacity,
             inputs=[
                 dt,
+                refresh_constants,
                 legacy_hard_contacts,
                 int(contact_compliant_alm),
                 body_q_prev,
@@ -1433,7 +1520,7 @@ class RigidPairContact:
                 self.constants,
             ],
             device=self.device,
-            block_dim=select_rigid_block_dim(capacity, self.device),
+            block_dim=_select_rigid_block_dim(capacity, self.device),
         )
 
         contact_inputs = [
@@ -1465,7 +1552,7 @@ class RigidPairContact:
         ]
         # One exact color contains at most one group per pair-routed body.
         launch_dim = max(1, min(capacity, max(self.pair_body_count, 128)))
-        block_dim = select_rigid_block_dim(launch_dim, self.device)
+        block_dim = _select_rigid_block_dim(launch_dim, self.device)
         if not self.device.is_cuda:
             wp.launch(
                 kernel=solve_constraint_contacts_serial,

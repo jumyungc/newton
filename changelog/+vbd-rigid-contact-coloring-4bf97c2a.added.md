@@ -10,5 +10,14 @@ Models with tendons retain authored body colors, including dynamic-bypass endpoi
 Require deterministic collision generation and sufficient per-body contact-list capacity
 for repeatable contact results.
 Use warp-cooperative sorting for short CUDA contact lists while retaining ordered long-row and CPU fallbacks.
-Avoid redundant scratch clears before uncoupled tiled body-contact gathering.
+Use cooperative tile stores and avoid redundant scratch clears before uncoupled body-contact gathering.
 Avoid ordered integer-reservation overhead where sorted lists or independent pair colors preserve deterministic results.
+Parallelize color retention and pack only used colors in ascending body-ID order; skip empty refined sweeps.
+Empty a contact color the repair creates by bounded Kempe interchanges where possible; this changes the
+per-body Gauss-Seidel order on scenes where it applies.
+Stop redundant neighbor scans once a retained color conflicts or an unfinished dependency blocks body-color repair.
+Scan pending pair groups cooperatively while preserving descending serial completion order.
+Use previous pair colors to prioritize parallel GPU coloring. This scheduling history changes the finite-iteration
+pair Gauss-Seidel order; replay requires identical solver history as well as identical contact inputs.
+Reuse pair-contact material and step-start anchor constants between collision refreshes within one solver step.
+Avoid redundant quaternion normalization in pair-contact pose updates.

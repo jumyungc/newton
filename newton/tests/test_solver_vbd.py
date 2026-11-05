@@ -48,7 +48,6 @@ from newton._src.solvers.vbd.rigid_vbd_kernels import (
     accumulate_body_particle_attachments_per_body,
     build_body_body_contact_lists,
     build_body_particle_contact_lists,
-    clear_rigid_body_contact_scratch,
     compute_kappa_and_jacobian,
     compute_rigid_contact_forces,
     evaluate_angular_constraint_force_hessian,
@@ -5939,6 +5938,18 @@ class TestSolverVBD(unittest.TestCase):
         device.is_cuda = False
         self.assertEqual(_select_rigid_block_dim(1, device), 256)
 
+        widths = (4, 8, 16, 32, 64, 128, 256)
+        for sm_count in (1, 2, 3, 16, 71, 142):
+            device = SimpleNamespace(is_cuda=True, sm_count=sm_count)
+            target = sm_count
+            for launch_dim in (0, 1, 4, 17, 63, 128, 257, 4096, 1000000):
+                with self.subTest(sm_count=sm_count, launch_dim=launch_dim):
+                    valid = [width for width in widths if (launch_dim + width - 1) // width >= target]
+                    self.assertEqual(
+                        _select_rigid_block_dim(launch_dim, device),
+                        max(valid, default=4),
+                    )
+
 
 add_function_test(TestSolverVBD, "test_rigid_constraint_adjacency", _rigid_constraint_adjacency, devices=devices)
 
@@ -8357,40 +8368,6 @@ add_function_test(
     TestSolverVBD,
     "test_rigid_velocity_correction_preserves_com_and_kinematics",
     test_rigid_velocity_correction_preserves_com_and_kinematics,
-    devices=devices,
-)
-
-
-def test_rigid_contact_scratch_clear(test, device):
-    """Clear every accumulator exactly, including after captured graph replay."""
-    with wp.ScopedDevice(device):
-        for count in (1, 7, 257):
-            with test.subTest(count=count):
-                scratch = [wp.empty(count, dtype=dtype) for dtype in (wp.vec3, wp.vec3, wp.mat33, wp.mat33, wp.mat33)]
-
-                def clear(count, scratch):
-                    wp.launch(clear_rigid_body_contact_scratch, dim=count, outputs=scratch)
-
-                clear(count, scratch)
-                if device.is_cuda:
-                    with wp.ScopedCapture() as capture:
-                        clear(count, scratch)
-                for seed in (float("nan"), -3.0):
-                    for array in scratch:
-                        array.assign(np.full_like(array.numpy(), seed))
-                    if device.is_cuda:
-                        wp.capture_launch(capture.graph)
-                    else:
-                        clear(count, scratch)
-                    for array in scratch:
-                        actual = array.numpy()
-                        test.assertEqual(actual.tobytes(), np.zeros_like(actual).tobytes())
-
-
-add_function_test(
-    TestSolverVBD,
-    "test_rigid_contact_scratch_clear",
-    test_rigid_contact_scratch_clear,
     devices=devices,
 )
 

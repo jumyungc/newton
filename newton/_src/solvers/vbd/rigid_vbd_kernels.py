@@ -233,11 +233,16 @@ def _contact_auto_tangent_rho(
 # ---------------------------------
 
 
-def select_rigid_block_dim(launch_dim: int, device) -> int:
-    """Choose a power-of-two CUDA block width for ordinary rigid kernels."""
+def _select_rigid_block_dim(launch_dim: int, device: wp.Device) -> int:
+    """Expose more blocks on small rigid launches, allowing sub-warp blocks.
+
+    Target as many blocks as SMs, with a four-thread minimum and a 256-thread
+    maximum. This empirical tradeoff does not guarantee occupancy.
+    """
     if not device.is_cuda:
         return 256
-    target_blocks = max(1, (device.sm_count + 1) // 2)
+
+    target_blocks = device.sm_count
     block_dim = 4
     while block_dim < 256:
         candidate = 2 * block_dim
@@ -4364,7 +4369,409 @@ def _rigid_color_neighbor(
     return joint_child[joint] if parent == body else parent
 
 
+@wp.func
+def _retained_rigid_color(
+    body: int,
+    color_budget: int,
+    body_inv_mass: wp.array[float],
+    body_uses_pair_contacts: wp.array[wp.int32],
+    body_schedule_active: wp.array[wp.int32],
+    body_contact_buffer_pre_alloc: int,
+    body_contact_counts: wp.array[wp.int32],
+    body_contact_indices: wp.array[wp.int32],
+    rigid_contact_shape0: wp.array[int],
+    rigid_contact_shape1: wp.array[int],
+    shape_body: wp.array[wp.int32],
+    joint_offsets: wp.array[wp.int32],
+    joint_indices: wp.array[wp.int32],
+    joint_parent: wp.array[int],
+    joint_child: wp.array[int],
+    joint_type: wp.array[int],
+    body_colors: wp.array[wp.int32],
+) -> int:
+    """Return the body's color if no lower-index scheduled neighbor shares it, else -1."""
+    retained = wp.int32(-1)
+    color = body_colors[body]
+    if body_schedule_active[body] != 0 and body_inv_mass[body] > 0.0 and 0 <= color and color < color_budget:
+        retained = color
+        count = wp.min(body_contact_counts[body], body_contact_buffer_pre_alloc)
+        neighbor_count = count + joint_offsets[body + 1] - joint_offsets[body]
+        for slot in range(neighbor_count):
+            other = _rigid_color_neighbor(
+                body,
+                slot,
+                count,
+                body_contact_buffer_pre_alloc,
+                body_contact_indices,
+                rigid_contact_shape0,
+                rigid_contact_shape1,
+                shape_body,
+                body_uses_pair_contacts,
+                joint_offsets,
+                joint_indices,
+                joint_parent,
+                joint_child,
+                joint_type,
+            )
+            if (
+                other >= 0
+                and other < body
+                and body_schedule_active[other] != 0
+                and body_inv_mass[other] > 0.0
+                and body_colors[other] == color
+            ):
+                retained = -1
+                break
+    return retained
+
+
 @wp.kernel(enable_backward=False)
+def retain_rigid_body_colors(
+    color_budget: int,
+    body_inv_mass: wp.array[float],
+    body_uses_pair_contacts: wp.array[wp.int32],
+    body_schedule_active: wp.array[wp.int32],
+    body_contact_buffer_pre_alloc: int,
+    body_contact_counts: wp.array[wp.int32],
+    body_contact_indices: wp.array[wp.int32],
+    rigid_contact_shape0: wp.array[int],
+    rigid_contact_shape1: wp.array[int],
+    shape_body: wp.array[wp.int32],
+    joint_offsets: wp.array[wp.int32],
+    joint_indices: wp.array[wp.int32],
+    joint_parent: wp.array[int],
+    joint_child: wp.array[int],
+    joint_type: wp.array[int],
+    body_colors: wp.array[wp.int32],
+    retained_colors: wp.array[wp.int32],
+    rebuild_schedule: wp.array[wp.int32],
+):
+    """Keep each body's color unless a lower-index scheduled neighbor shares it.
+
+    One thread per body. :func:`color_rigid_bodies_from_contacts` repairs from
+    ``retained_colors``; any body whose color changes, or that stays scheduled
+    without one, flags ``rebuild_schedule`` with an integer atomic.
+    """
+    body = wp.tid()
+    retained = _retained_rigid_color(
+        body,
+        color_budget,
+        body_inv_mass,
+        body_uses_pair_contacts,
+        body_schedule_active,
+        body_contact_buffer_pre_alloc,
+        body_contact_counts,
+        body_contact_indices,
+        rigid_contact_shape0,
+        rigid_contact_shape1,
+        shape_body,
+        joint_offsets,
+        joint_indices,
+        joint_parent,
+        joint_child,
+        joint_type,
+        body_colors,
+    )
+    retained_colors[body] = retained
+    scheduled = body_schedule_active[body] != 0 and body_inv_mass[body] > 0.0
+    if retained != body_colors[body] or (scheduled and retained < 0):
+        wp.atomic_max(rebuild_schedule, 0, 1)
+
+
+_RIGID_KEMPE_COMPONENT_LIMIT = 64
+"""Most bodies one Kempe swap recolors."""
+
+_RIGID_KEMPE_STEP_LIMIT = 256
+"""Maximum counted search rounds; the cost of a round still depends on the graph."""
+
+
+def rigid_kempe_scratch_size(body_count: int) -> int:
+    """Length of the int32 scratch of the Kempe pass in :func:`color_rigid_bodies_from_contacts`."""
+    return _RIGID_KEMPE_STEP_LIMIT + 32 + _RIGID_KEMPE_COMPONENT_LIMIT + body_count + 1
+
+
+@wp.func
+def _rigid_top_color_key(
+    lane: int,
+    body_count: int,
+    block_size: int,
+    body_inv_mass: wp.array[float],
+    body_schedule_active: wp.array[wp.int32],
+    retained_colors: wp.array[wp.int32],
+    body_colors: wp.array[wp.int32],
+) -> int:
+    """Return twice the top color, plus one if a body in it kept its retained color."""
+    key = wp.int32(-1)
+    for body in range(lane, body_count, block_size):
+        if body_schedule_active[body] != 0 and body_inv_mass[body] > 0.0:
+            color = body_colors[body]
+            key = wp.max(key, 2 * color + wp.int32(color == retained_colors[body]))
+    return wp.tile_max(wp.tile(key))[0]
+
+
+@wp.func
+def _empty_created_top_rigid_color(
+    lane: int,
+    body_count: int,
+    block_size: int,
+    body_inv_mass: wp.array[float],
+    body_uses_pair_contacts: wp.array[wp.int32],
+    body_schedule_active: wp.array[wp.int32],
+    body_contact_buffer_pre_alloc: int,
+    body_contact_counts: wp.array[wp.int32],
+    body_contact_indices: wp.array[wp.int32],
+    rigid_contact_shape0: wp.array[int],
+    rigid_contact_shape1: wp.array[int],
+    shape_body: wp.array[wp.int32],
+    joint_offsets: wp.array[wp.int32],
+    joint_indices: wp.array[wp.int32],
+    joint_parent: wp.array[int],
+    joint_child: wp.array[int],
+    joint_type: wp.array[int],
+    retained_colors: wp.array[wp.int32],
+    body_colors: wp.array[wp.int32],
+    kempe: wp.array[wp.int32],
+):
+    """Empty the top colors this repair created (no body in them kept its color) by Kempe swaps.
+
+    Each top-color body v, in ascending order, takes the first color pair a < b below the top, from the highest
+    pair down, whose a/b component reached from v's a-neighbors holds none of v's b-neighbors and at most
+    ``_RIGID_KEMPE_COMPONENT_LIMIT`` bodies: the component swaps a and b, and v takes a. Pairs in which an
+    a-neighbor of v touches a b-neighbor of v are screened out first. Once the top color is empty the pass goes on
+    to the next if this repair created it too, and it stops at the first body that cannot move. Swaps keep the
+    coloring proper, joints included, and repeated contact rows change nothing.
+
+    A pass takes at most ``_RIGID_KEMPE_STEP_LIMIT`` counted search rounds; each may visit many neighbor rows.
+    A pass stopped by this limit resumes on the same top color in a later repair only if it moved a body;
+    an unchanged failed prefix is not retried. ``kempe`` holds per-step claim counts, per-color screen masks,
+    the component queue, per-body visit stamps and the color to resume (:func:`rigid_kempe_scratch_size`). Shared
+    writes are integer atomics or have one owner, and a search grows one breadth-first level per step, so CPU and
+    CUDA get the same colors.
+    """
+    pairs = _RIGID_KEMPE_STEP_LIMIT
+    queue = pairs + 32
+    marks = queue + _RIGID_KEMPE_COMPONENT_LIMIT
+    resume = marks + body_count
+    key = _rigid_top_color_key(
+        lane, body_count, block_size, body_inv_mass, body_schedule_active, retained_colors, body_colors
+    )
+    top = key // 2
+    if top < 2:
+        return
+    if key % 2 != 0:
+        # A kept top color is searched only to resume a pass the step limit stopped, and only when this repair
+        # recolors a body: a repair that changes nothing leaves the colors alone.
+        if kempe[resume] != top:
+            return
+        recolored = wp.int32(0)
+        for body in range(lane, body_count, block_size):
+            if body_schedule_active[body] != 0 and body_inv_mass[body] > 0.0 and retained_colors[body] < 0:
+                recolored = 1
+        if wp.tile_max(wp.tile(recolored))[0] == 0:
+            return
+    for slot in range(lane, pairs, block_size):
+        kempe[slot] = 0
+    for body in range(lane, body_count, block_size):
+        kempe[marks + body] = -1
+    _sync_cuda_block()
+
+    steps = wp.int32(0)
+    stamp = wp.int32(0)
+    v = wp.int32(-1)
+    made_progress = bool(False)
+    while steps < _RIGID_KEMPE_STEP_LIMIT:
+        # Reserve the selection, marking and screen rounds before starting another body.
+        if steps + 3 > _RIGID_KEMPE_STEP_LIMIT:
+            steps = _RIGID_KEMPE_STEP_LIMIT
+            break
+        # Swaps never move a body into the top color, so the next one follows v.
+        for color in range(lane, top, block_size):
+            kempe[pairs + color] = 0
+        first = body_count
+        for body in range(v + 1 + lane, body_count, block_size):
+            if body_colors[body] == top and body_schedule_active[body] != 0 and body_inv_mass[body] > 0.0:
+                first = body
+                break
+        v = wp.tile_min(wp.tile(first))[0]
+        if v == body_count:
+            # The top color is empty: go on to the next if this repair created it too.
+            key = _rigid_top_color_key(
+                lane, body_count, block_size, body_inv_mass, body_schedule_active, retained_colors, body_colors
+            )
+            top = key // 2
+            steps += 1
+            if top < 2 or key % 2 != 0:
+                break
+            v = -1
+            continue
+        stamp += 2
+        near = stamp
+        v_contacts = wp.min(body_contact_counts[v], body_contact_buffer_pre_alloc)
+        v_neighbors = v_contacts + joint_offsets[v + 1] - joint_offsets[v]
+        for slot in range(lane, v_neighbors, block_size):
+            other = _rigid_color_neighbor(
+                v,
+                slot,
+                v_contacts,
+                body_contact_buffer_pre_alloc,
+                body_contact_indices,
+                rigid_contact_shape0,
+                rigid_contact_shape1,
+                shape_body,
+                body_uses_pair_contacts,
+                joint_offsets,
+                joint_indices,
+                joint_parent,
+                joint_child,
+                joint_type,
+            )
+            if other >= 0 and body_schedule_active[other] != 0 and body_inv_mass[other] > 0.0:
+                if wp.atomic_max(kempe, marks + other, near) < near:
+                    position = wp.atomic_add(kempe, steps, 1)
+                    if position < _RIGID_KEMPE_COMPONENT_LIMIT:
+                        kempe[queue + position] = other
+        _sync_cuda_block()
+        # Screen each distinct neighbor once, reusing the component queue. If it does
+        # not fit, omit this optional pruning; the bounded component searches still apply.
+        neighbor_count = kempe[steps]
+        if neighbor_count <= _RIGID_KEMPE_COMPONENT_LIMIT:
+            for item in range(lane, neighbor_count * 32, block_size):
+                u = kempe[queue + item // 32]
+                u_contacts = wp.min(body_contact_counts[u], body_contact_buffer_pre_alloc)
+                u_neighbors = u_contacts + joint_offsets[u + 1] - joint_offsets[u]
+                for slot in range(item % 32, u_neighbors, 32):
+                    w = _rigid_color_neighbor(
+                        u,
+                        slot,
+                        u_contacts,
+                        body_contact_buffer_pre_alloc,
+                        body_contact_indices,
+                        rigid_contact_shape0,
+                        rigid_contact_shape1,
+                        shape_body,
+                        body_uses_pair_contacts,
+                        joint_offsets,
+                        joint_indices,
+                        joint_parent,
+                        joint_child,
+                        joint_type,
+                    )
+                    if w >= 0 and kempe[marks + w] == near:
+                        a = wp.min(body_colors[u], body_colors[w])
+                        b = wp.max(body_colors[u], body_colors[w])
+                        wp.atomic_or(kempe, pairs + a, 1 << b)
+        _sync_cuda_block()
+        steps += 3
+
+        moved = bool(False)
+        for i in range(top - 1):
+            a = top - 2 - i
+            screened = kempe[pairs + a]
+            for j in range(top - 1 - a):
+                b = top - 1 - j
+                if (screened >> b) & 1 != 0 or steps >= _RIGID_KEMPE_STEP_LIMIT:
+                    continue
+                # Seed with v's a-neighbors and stamp its b-neighbors stamp + 1: reaching one fails the pair.
+                stamp += 2
+                for slot in range(lane, v_neighbors, block_size):
+                    other = _rigid_color_neighbor(
+                        v,
+                        slot,
+                        v_contacts,
+                        body_contact_buffer_pre_alloc,
+                        body_contact_indices,
+                        rigid_contact_shape0,
+                        rigid_contact_shape1,
+                        shape_body,
+                        body_uses_pair_contacts,
+                        joint_offsets,
+                        joint_indices,
+                        joint_parent,
+                        joint_child,
+                        joint_type,
+                    )
+                    if other >= 0 and body_schedule_active[other] != 0 and body_inv_mass[other] > 0.0:
+                        color = body_colors[other]
+                        if color == b:
+                            wp.atomic_max(kempe, marks + other, stamp + 1)
+                        elif color == a and wp.atomic_max(kempe, marks + other, stamp) < stamp:
+                            position = wp.atomic_add(kempe, steps, 1)
+                            if position < _RIGID_KEMPE_COMPONENT_LIMIT:
+                                kempe[queue + position] = other
+                _sync_cuda_block()
+                head = wp.int32(0)
+                tail = kempe[steps]
+                steps += 1
+                # Each level counts its claims in its own slot, so one barrier per level suffices.
+                while head < tail and tail <= _RIGID_KEMPE_COMPONENT_LIMIT and steps < _RIGID_KEMPE_STEP_LIMIT:
+                    for item in range(lane, (tail - head) * 32, block_size):
+                        x = kempe[queue + head + item // 32]
+                        x_contacts = wp.min(body_contact_counts[x], body_contact_buffer_pre_alloc)
+                        x_neighbors = x_contacts + joint_offsets[x + 1] - joint_offsets[x]
+                        for slot in range(item % 32, x_neighbors, 32):
+                            other = _rigid_color_neighbor(
+                                x,
+                                slot,
+                                x_contacts,
+                                body_contact_buffer_pre_alloc,
+                                body_contact_indices,
+                                rigid_contact_shape0,
+                                rigid_contact_shape1,
+                                shape_body,
+                                body_uses_pair_contacts,
+                                joint_offsets,
+                                joint_indices,
+                                joint_parent,
+                                joint_child,
+                                joint_type,
+                            )
+                            if other >= 0 and body_schedule_active[other] != 0 and body_inv_mass[other] > 0.0:
+                                color = body_colors[other]
+                                if color == a or color == b:
+                                    previous = wp.atomic_max(kempe, marks + other, stamp)
+                                    if previous == stamp + 1:
+                                        # Overflowing the level's count fails the pair.
+                                        wp.atomic_add(kempe, steps, _RIGID_KEMPE_COMPONENT_LIMIT + 1)
+                                    elif previous < stamp:
+                                        position = tail + wp.atomic_add(kempe, steps, 1)
+                                        if position < _RIGID_KEMPE_COMPONENT_LIMIT:
+                                            kempe[queue + position] = other
+                    _sync_cuda_block()
+                    head = tail
+                    tail += kempe[steps]
+                    steps += 1
+                if head == tail and tail <= _RIGID_KEMPE_COMPONENT_LIMIT and steps < _RIGID_KEMPE_STEP_LIMIT:
+                    for entry in range(lane, tail, block_size):
+                        x = kempe[queue + entry]
+                        if body_colors[x] == a:
+                            body_colors[x] = b
+                        else:
+                            body_colors[x] = a
+                    if lane == 0:
+                        body_colors[v] = a
+                    _sync_cuda_block()
+                    steps += 1
+                    moved = True
+                    made_progress = True
+                    break
+            if moved:
+                break
+        if not moved:
+            break
+    if lane == 0:
+        # Resume useful partial work, never an unchanged search prefix that exhausted the limit.
+        kempe[resume] = 0
+        if steps >= _RIGID_KEMPE_STEP_LIMIT and v < body_count and made_progress:
+            kempe[resume] = top
+
+
+# Its integer atomics and Kempe claims are order-independent; Warp's two-pass counter replay cannot run
+# this block-cooperative kernel, so it keeps a unique module outside deterministic mode.
+@wp.kernel(
+    enable_backward=False,
+    module="unique",
+    module_options={"deterministic": wp.DeterministicMode.NOT_GUARANTEED},
+)
 def color_rigid_bodies_from_contacts(
     body_count: int,
     color_budget: int,
@@ -4384,6 +4791,7 @@ def color_rigid_bodies_from_contacts(
     joint_parent: wp.array[int],
     joint_child: wp.array[int],
     joint_type: wp.array[int],
+    retained_colors: wp.array[wp.int32],
     reuse_packed_schedule: bool,
     body_colors: wp.array[wp.int32],
     body_ids_by_color: wp.array[wp.int32],
@@ -4391,9 +4799,8 @@ def color_rigid_bodies_from_contacts(
     num_colors_out: wp.array[wp.int32],
     overflow_count: wp.array[wp.int32],
     joint_overflow: wp.array[wp.int32],
-    flag_gt4: wp.array[wp.int32],
-    flag_gt8: wp.array[wp.int32],
-    flag_gt16: wp.array[wp.int32],
+    color_count_exceeds: wp.array[wp.int32],
+    kempe: wp.array[wp.int32],
 ):
     """Repair a joint/contact union coloring, with one block (one lane on CPU).
 
@@ -4401,115 +4808,64 @@ def color_rigid_bodies_from_contacts(
     palette, restore the authored coloring for the entire schedule. Never
     resolve joint overflow by assigning an arbitrary conflicting color.
 
-    Reuse requires packed IDs, offsets and counts consistent with the input
-    body colors. Fresh contacts and active bodies are still validated.
+    On CUDA, :func:`retain_rigid_body_colors` must first run on the same colors
+    and fresh graph. CPU computes that retention here to avoid another launch. Reuse
+    requires packed IDs, offsets and counts consistent with those colors.
+
+    ``color_count_exceeds[k]`` is 1 when more than ``k`` colors are in use; the
+    solver branches on it to sweep the smallest envelope that holds them all.
+    Top colors the greedy rounds create are emptied by Kempe swaps where
+    possible (:func:`_empty_created_top_rigid_color`, scratch ``kempe``).
     """
     lane = wp.tid()
-    # The caller supplies a schedule consistent with body_colors. Fresh
-    # graph validation still runs; only unchanged repair/packing is skipped.
+    # The caller supplies a schedule consistent with body_colors and has
+    # flagged fresh graph conflicts in joint_overflow, which forces a repair.
     can_reuse = reuse_packed_schedule and block_size > 1 and overflow_count[0] == 0 and joint_overflow[0] == 0
     # Read the previous result before any lane reuses its counters.
     _sync_cuda_block()
     if can_reuse:
+        for slot in range(color_starts[color_budget] + lane, body_count, block_size):
+            body_ids_by_color[slot] = -1
         if lane == 0:
-            joint_overflow[0] = 0
-        _sync_cuda_block()
-        needs_rebuild = bool(False)
-        for body in range(lane, body_count, block_size):
-            retained = wp.int32(-1)
-            color = body_colors[body]
-            if body_schedule_active[body] != 0 and body_inv_mass[body] > 0.0 and 0 <= color and color < color_budget:
-                retained = color
-                count = wp.min(body_contact_counts[body], body_contact_buffer_pre_alloc)
-                neighbor_count = count + joint_offsets[body + 1] - joint_offsets[body]
-                for slot in range(neighbor_count):
-                    other = _rigid_color_neighbor(
-                        body,
-                        slot,
-                        count,
-                        body_contact_buffer_pre_alloc,
-                        body_contact_indices,
-                        rigid_contact_shape0,
-                        rigid_contact_shape1,
-                        shape_body,
-                        body_uses_pair_contacts,
-                        joint_offsets,
-                        joint_indices,
-                        joint_parent,
-                        joint_child,
-                        joint_type,
-                    )
-                    if (
-                        other >= 0
-                        and other < body
-                        and body_schedule_active[other] != 0
-                        and body_inv_mass[other] > 0.0
-                        and body_colors[other] == color
-                    ):
-                        retained = -1
-            if retained != color or (body_schedule_active[body] != 0 and body_inv_mass[body] > 0.0 and retained < 0):
-                needs_rebuild = True
-        if needs_rebuild:
-            wp.atomic_max(joint_overflow, 0, 1)
-        _sync_cuda_block()
-        unchanged = joint_overflow[0] == 0
-        _sync_cuda_block()
-        if unchanged:
-            for slot in range(color_starts[color_budget] + lane, body_count, block_size):
-                body_ids_by_color[slot] = -1
-            if lane == 0:
-                overflow_count[0] = 0
-                if body_count > color_budget:
-                    color_starts[body_count] = 0
-                count = num_colors_out[0]
-                flag_gt4[0] = wp.int32(count > 4)
-                flag_gt8[0] = wp.int32(count > 8)
-                flag_gt16[0] = wp.int32(count > 16)
-            return
+            overflow_count[0] = 0
+            if body_count > color_budget:
+                color_starts[body_count] = 0
+        for color in range(lane, color_budget, block_size):
+            color_count_exceeds[color] = wp.int32(num_colors_out[0] > color)
+        return
 
     if lane == 0:
         overflow_count[0] = 0
         joint_overflow[0] = 0
+        num_colors_out[0] = 0
         color_starts[body_count] = 0
     _sync_cuda_block()
 
-    for body in range(lane, body_count, block_size):
-        retained = wp.int32(-1)
-        color = body_colors[body]
-        if body_schedule_active[body] != 0 and body_inv_mass[body] > 0.0 and 0 <= color and color < color_budget:
-            retained = color
-            count = wp.min(body_contact_counts[body], body_contact_buffer_pre_alloc)
-            neighbor_count = count + joint_offsets[body + 1] - joint_offsets[body]
-            for slot in range(neighbor_count):
-                other = _rigid_color_neighbor(
-                    body,
-                    slot,
-                    count,
-                    body_contact_buffer_pre_alloc,
-                    body_contact_indices,
-                    rigid_contact_shape0,
-                    rigid_contact_shape1,
-                    shape_body,
-                    body_uses_pair_contacts,
-                    joint_offsets,
-                    joint_indices,
-                    joint_parent,
-                    joint_child,
-                    joint_type,
-                )
-                if (
-                    other >= 0
-                    and other < body
-                    and body_schedule_active[other] != 0
-                    and body_inv_mass[other] > 0.0
-                    and body_colors[other] == color
-                ):
-                    retained = -1
-        body_ids_by_color[body] = retained
-    _sync_cuda_block()
+    # Avoid a separate launch on CPU; all old colors must be read before any are replaced.
+    if block_size == 1:
+        for body in range(body_count):
+            retained_colors[body] = _retained_rigid_color(
+                body,
+                color_budget,
+                body_inv_mass,
+                body_uses_pair_contacts,
+                body_schedule_active,
+                body_contact_buffer_pre_alloc,
+                body_contact_counts,
+                body_contact_indices,
+                rigid_contact_shape0,
+                rigid_contact_shape1,
+                shape_body,
+                joint_offsets,
+                joint_indices,
+                joint_parent,
+                joint_child,
+                joint_type,
+                body_colors,
+            )
 
     for body in range(lane, body_count, block_size):
-        body_colors[body] = body_ids_by_color[body]
+        body_colors[body] = retained_colors[body]
         body_ids_by_color[body] = -1
         if body_schedule_active[body] != 0 and body_inv_mass[body] > 0.0 and body_colors[body] < 0:
             wp.atomic_add(color_starts, body_count, 1)
@@ -4545,6 +4901,7 @@ def color_rigid_bodies_from_contacts(
                         other_color = body_colors[other]
                         if other < body and other_color < 0:
                             ready = False
+                            break  # This round cannot use the partial color masks.
                         if 0 <= other_color and other_color < color_budget:
                             bit = wp.uint32(1) << wp.uint32(other_color)
                             if slot < count:
@@ -4576,6 +4933,30 @@ def color_rigid_bodies_from_contacts(
                 wp.atomic_add(color_starts, body_count, -1)
         _sync_cuda_block()
 
+    if overflow_count[0] == 0 and joint_overflow[0] == 0:
+        _empty_created_top_rigid_color(
+            lane,
+            body_count,
+            block_size,
+            body_inv_mass,
+            body_uses_pair_contacts,
+            body_schedule_active,
+            body_contact_buffer_pre_alloc,
+            body_contact_counts,
+            body_contact_indices,
+            rigid_contact_shape0,
+            rigid_contact_shape1,
+            shape_body,
+            joint_offsets,
+            joint_indices,
+            joint_parent,
+            joint_child,
+            joint_type,
+            retained_colors,
+            body_colors,
+            kempe,
+        )
+
     # Restore mandatory joint separation before packing the schedule.
     if joint_overflow[0] != 0:
         for body in range(lane, body_count, block_size):
@@ -4591,27 +4972,12 @@ def color_rigid_bodies_from_contacts(
             color = body_colors[body]
             if color >= 0:
                 color_starts[color + 1] += 1
-    else:
-        # One CUDA lane owns each color. Local counters avoid serial global
-        # read/modify/write dependencies while retaining ascending body order.
-        for color in range(lane, color_budget, block_size):
-            count = wp.int32(0)
-            for body in range(body_count):
-                if body_colors[body] == color:
-                    count += 1
-            color_starts[color + 1] = count
-    _sync_cuda_block()
-
-    if lane == 0:
         num_colors = wp.int32(0)
         for color in range(color_budget):
             if color_starts[color + 1] > 0:
                 num_colors = color + 1
             color_starts[color + 1] += color_starts[color]
         num_colors_out[0] = num_colors
-    _sync_cuda_block()
-
-    if block_size == 1:
         for body in range(body_count):
             color = body_colors[body]
             if color >= 0:
@@ -4626,18 +4992,40 @@ def color_rigid_bodies_from_contacts(
         for color in range(num_colors_out[0] + 1, color_budget + 1):
             color_starts[color] = previous
     else:
-        for color in range(lane, color_budget, block_size):
-            slot = color_starts[color]
-            for body in range(body_count):
-                if body_colors[body] == color:
-                    body_ids_by_color[slot] = body
-                    slot += 1
+        # Each lane packs one color in use over one contiguous range of bodies. Lanes are
+        # color-major, so the exclusive scan of their counts is each lane's first
+        # slot and bodies stay in ascending order within each color.
+        top = wp.int32(-1)
+        for body in range(lane, body_count, block_size):
+            top = wp.max(top, body_colors[body])
+        color_end = wp.tile_max(wp.tile(top))[0] + 1
+        segments = block_size // wp.max(color_end, 1)
+        lane_color = lane // segments
+        span = (body_count + segments - 1) // segments
+        begin = (lane % segments) * span
+        if lane_color >= color_end:
+            begin = body_count  # lanes past the last color pack nothing
+        end = wp.min(begin + span, body_count)
+        lane_count = wp.int32(0)
+        for body in range(begin, end):
+            if body_colors[body] == lane_color:
+                lane_count += 1
+        slot = wp.untile(wp.tile_scan_exclusive(wp.tile(lane_count)))
+        if lane % segments == 0 and lane_color < color_end:
+            color_starts[lane_color] = slot
+        if lane == block_size - 1:
+            # The last lane's end is the total; colors past the last in use are empty.
+            num_colors_out[0] = color_end
+            for color in range(color_end, color_budget + 1):
+                color_starts[color] = slot + lane_count
+        for body in range(begin, end):
+            if body_colors[body] == lane_color:
+                body_ids_by_color[slot] = body
+                slot += 1
+    _sync_cuda_block()
 
-    if lane == 0:
-        num_colors = num_colors_out[0]
-        flag_gt4[0] = wp.int32(num_colors > 4)
-        flag_gt8[0] = wp.int32(num_colors > 8)
-        flag_gt16[0] = wp.int32(num_colors > 16)
+    for color in range(lane, color_budget, block_size):
+        color_count_exceeds[color] = wp.int32(num_colors_out[0] > color)
 
 
 @wp.kernel
@@ -5761,6 +6149,15 @@ def compute_rod_dahl_parameters(
 # -----------------------------
 # Iteration kernels (per color per iteration)
 # -----------------------------
+@wp.func
+def _store_body_contact_sum(value: Any, output: wp.array[Any], body: int, accumulate: bool):
+    """Reduce a contact contribution and store it without broadcasting the total."""
+    total = wp.tile_sum(wp.tile(value, preserve_type=True))
+    if accumulate:
+        total = wp.tile_load(output, shape=1, offset=body) + total
+    wp.tile_store(output, total, offset=body)
+
+
 @functools.cache
 def create_accumulate_body_body_contacts_per_body():
     """Create the rigid contact accumulation kernel."""
@@ -5968,24 +6365,11 @@ def create_accumulate_body_body_contacts_per_body():
 
             i += threads_per_body
 
-        force_acc = wp.tile_sum(wp.tile(force_acc, preserve_type=True))[0]
-        torque_acc = wp.tile_sum(wp.tile(torque_acc, preserve_type=True))[0]
-        h_ll_acc = wp.tile_sum(wp.tile(h_ll_acc, preserve_type=True))[0]
-        h_al_acc = wp.tile_sum(wp.tile(h_al_acc, preserve_type=True))[0]
-        h_aa_acc = wp.tile_sum(wp.tile(h_aa_acc, preserve_type=True))[0]
-        if lane == 0:
-            if accumulate:
-                force_acc = body_forces[body_id] + force_acc
-                torque_acc = body_torques[body_id] + torque_acc
-                h_ll_acc = body_hessian_ll[body_id] + h_ll_acc
-                h_al_acc = body_hessian_al[body_id] + h_al_acc
-                h_aa_acc = body_hessian_aa[body_id] + h_aa_acc
-            # Explicit assignment avoids lowering an ordered gather to float atomics.
-            body_forces[body_id] = force_acc
-            body_torques[body_id] = torque_acc
-            body_hessian_ll[body_id] = h_ll_acc
-            body_hessian_al[body_id] = h_al_acc
-            body_hessian_aa[body_id] = h_aa_acc
+        _store_body_contact_sum(force_acc, body_forces, body_id, accumulate)
+        _store_body_contact_sum(torque_acc, body_torques, body_id, accumulate)
+        _store_body_contact_sum(h_ll_acc, body_hessian_ll, body_id, accumulate)
+        _store_body_contact_sum(h_al_acc, body_hessian_al, body_id, accumulate)
+        _store_body_contact_sum(h_aa_acc, body_hessian_aa, body_id, accumulate)
 
     # ``module="unique"`` kernels do not inherit this file's module options.
     wp.set_module_options({"enable_backward": False}, module=accumulate_body_body_contacts_per_body.module)
@@ -6645,23 +7029,6 @@ def accumulate_body_particle_contacts_per_body(
     wp.atomic_add(body_hessian_ll, body_id, h_ll_acc)
     wp.atomic_add(body_hessian_al, body_id, h_al_acc)
     wp.atomic_add(body_hessian_aa, body_id, h_aa_acc)
-
-
-@wp.kernel
-def clear_rigid_body_contact_scratch(
-    body_forces: wp.array[wp.vec3],
-    body_torques: wp.array[wp.vec3],
-    body_hessian_ll: wp.array[wp.mat33],
-    body_hessian_al: wp.array[wp.mat33],
-    body_hessian_aa: wp.array[wp.mat33],
-):
-    """Clear the per-body contact accumulators together before a primal sweep."""
-    body = wp.tid()
-    body_forces[body] = wp.vec3(0.0)
-    body_torques[body] = wp.vec3(0.0)
-    body_hessian_ll[body] = wp.mat33(0.0)
-    body_hessian_al[body] = wp.mat33(0.0)
-    body_hessian_aa[body] = wp.mat33(0.0)
 
 
 @wp.kernel
