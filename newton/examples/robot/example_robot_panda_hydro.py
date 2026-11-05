@@ -1,17 +1,29 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025 The Newton Developers
 # SPDX-License-Identifier: Apache-2.0
 
-###########################################################################
-# Example Panda Hydro
-#
-# Shows how to set up a pick-and-place manipulation simulation using a
-# Franka Panda arm with SDF hydroelastic contacts and inverse kinematics.
-# Supports different scene configurations: pen or cube.
-#
-# Command: python -m newton.examples panda_hydro --scene pen --world-count 1
-#          python -m newton.examples panda_hydro --scene cube --kh 1e11
-#
-###########################################################################
+"""Example Panda Hydro
+
+Shows how to set up a pick-and-place manipulation simulation using a
+Franka Panda arm with SDF hydroelastic contacts and inverse kinematics.
+Supports different scene configurations: pen or cube.
+
+Success criteria:
+- Each world shows a Franka arm, a support box, a cup, and the selected grasp object.
+- The arm lifts and transports the object while the cup remains upright.
+
+Runs:
+- `python -m newton.examples robot_panda_hydro --world-count 2 --scene cube`
+  - The arm grasps the cube and releases it on top of the cup.
+  - Two worlds appear.
+- `python -m newton.examples robot_panda_hydro --world-count 2 --scene pen`
+  - The arm grasps the pen, brings it above the cup, loosens its grip to let the pen rotate
+    downward, then drops it inside the cup.
+  - Two worlds appear.
+- `python -m newton.examples robot_panda_hydro --scene pen --world-count 1`
+  - One world appears.
+  - The arm grasps the pen, brings it above the cup, loosens its grip to let the pen rotate
+    downward, then drops it inside the cup.
+"""
 
 import argparse
 import copy
@@ -59,8 +71,6 @@ def broadcast_ik_solution_kernel(
 
 class Example:
     def __init__(self, viewer, args):
-        if not np.isfinite(args.kh) or args.kh <= 0.0:
-            raise ValueError("kh must be finite and positive [N/m^3]")
         self.scene = SceneType(args.scene)
         self.test_mode = args.test
         self.deterministic = args.deterministic
@@ -80,7 +90,7 @@ class Example:
         sdf_narrow_band_range = (-0.01, 0.01)
 
         shape_cfg = newton.ModelBuilder.ShapeConfig(
-            kh=args.kh,
+            kh=1e11,
             gap=0.01,
             mu_torsional=0.0,
             mu_rolling=0.0,
@@ -582,12 +592,6 @@ class Example:
                 "it instruments every atomic scatter in the solver and costs ~7x step time, "
                 "while contact ordering is what varies between runs."
             ),
-        )
-        parser.add_argument(
-            "--kh",
-            type=float,
-            default=1e11,
-            help="Hydroelastic pressure stiffness [N/m^3]; must be finite and positive.",
         )
         parser.add_argument(
             "--scene",

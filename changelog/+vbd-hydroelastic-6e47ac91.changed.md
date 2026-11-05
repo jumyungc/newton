@@ -1,0 +1,1 @@
+Move `SolverVBD` rigid contact points with first-order body motion within each step and damp compliant rigid contacts on the penetration increment instead of the approach velocity. Evaluate strongly damped transitions relative to compression onset to preserve small force increments. Trajectories of rotating and damped contacts (including the default shape `kd`) change.

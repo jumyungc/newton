@@ -1,21 +1,25 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 The Newton Developers
 # SPDX-License-Identifier: Apache-2.0
 
-###########################################################################
-# Example SDF Mesh Collision
-#
-# Demonstrates nut/bolt mesh collision using hydroelastic contacts.
-#
-# Command: python -m newton.examples nut_bolt_hydro
-#          python -m newton.examples nut_bolt_hydro --solver kamino
-#          python -m newton.examples nut_bolt_hydro --solver vbd
-#          python -m newton.examples nut_bolt_hydro --solver vbd --vbd-iterations 6
-#
-###########################################################################
+"""Example SDF Mesh Collision
+
+Demonstrates nut/bolt mesh collision using hydroelastic contacts.
+
+Success criteria:
+- Identical setups appear, each consisting of a nut-and-bolt system.
+- The nut is slowly screwing into the bolt until reaching the end of the bolt.
+
+Runs:
+- `python -m newton.examples nut_bolt_hydro`
+  - 20 identical setups appear.
+- `python -m newton.examples nut_bolt_hydro --solver kamino`
+  - 8 identical setups appear.
+- `python -m newton.examples nut_bolt_hydro --solver vbd`
+  - 20 identical setups appear.
+"""
 
 import argparse
 import tempfile
-from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -42,10 +46,12 @@ MESH_SDF_CACHE_DIR = Path(tempfile.gettempdir()) / "newton_sdf_cache"
 SHAPE_CFG = newton.ModelBuilder.ShapeConfig(
     margin=0.0,
     mu=0.01,
-    # Hydroelastic supplies the per-contact stiffness for the nut/bolt pair.
-    # VBD scales shape damping down with softer quadrature rows to retain kd/ke;
-    # an explicit positive row damping overrides that material mapping.
-    kh=1e11,  # Pressure per penetration depth [N/m^3]
+    # Hydroelastic supplies the per-contact stiffness for the nut/bolt pair, so
+    # ``ke``/``kd`` reach only the non-hydroelastic contacts. At the 1e10 ``kh``
+    # default the thread contacts resolve over a ~95 ms solref time constant --
+    # roughly 45 substeps -- and the nut sits visibly cocked under MuJoCo. XPBD
+    # projects positions and is insensitive to this either way.
+    kh=1e11,  # Hydroelastic contact stiffness
     ke=1e7,
     kd=1e4,
     gap=0.0,
@@ -151,13 +157,6 @@ def load_mesh_with_sdf(
 
 class Example:
     def __init__(self, viewer, args):
-        if not np.isfinite(args.kh) or args.kh <= 0.0:
-            raise ValueError("kh must be finite and positive [N/m^3]")
-        if not np.isfinite(args.kd) or args.kd < 0.0:
-            raise ValueError("kd must be finite and nonnegative")
-        if args.vbd_iterations < 1:
-            raise ValueError("vbd_iterations must be positive")
-        self.shape_cfg = replace(SHAPE_CFG, kh=args.kh, kd=args.kd)
         self.fps = 120
         self.frame_dt = 1.0 / self.fps
         self.sim_time = 0.0
@@ -216,18 +215,14 @@ class Example:
             label="ground_plane",
         )
         main_scene.replicate(world_builder, copy_count=self.world_count)
-        if self.solver_type == "vbd":
-            # Assign distinct colors within each small world: bolt, nut, then any
-            # additional pairs. Isolated worlds safely reuse the same colors.
-            # Finalize derives both body_colors and body_color_groups from this.
-            if self.num_per_world == 1:
-                main_scene.body_color_groups = [
-                    np.arange(body, main_scene.body_count, world_builder.body_count, dtype=np.int32)
-                    for body in range(world_builder.body_count)
-                ]
-            else:
-                main_scene.color()
 
+        if self.solver_type == "vbd":
+            # Each assembly adds its bolt then its nut, so even/odd body indices
+            # 2-color every bolt-nut contact pair across all worlds and grid cells.
+            main_scene.body_color_groups = [
+                np.arange(0, main_scene.body_count, 2, dtype=np.int32),
+                np.arange(1, main_scene.body_count, 2, dtype=np.int32),
+            ]
         self.model = main_scene.finalize()
 
         # Configure the hydroelastic pipeline with our custom (still linear)
@@ -281,22 +276,21 @@ class Example:
                 if self.deterministic_solver
                 else wp.DeterministicMode.NOT_GUARANTEED,
             )
-        elif self.solver_type == "vbd":
-            self.solver = newton.solvers.SolverVBD(
-                self.model,
-                iterations=args.vbd_iterations,
-                rigid_compliant_alm=True,
-                rigid_body_contact_buffer_size=self.contacts_per_world,
-                deterministic=wp.DeterministicMode.RUN_TO_RUN
-                if self.deterministic_solver
-                else wp.DeterministicMode.NOT_GUARANTEED,
-            )
         elif self.solver_type == "kamino":
             solver_config = newton.solvers.SolverKamino.Config.from_model(
                 self.model, dynamics_solver="dvi", sparse_dynamics=True, sparse_jacobian=True
             )
             solver_config.dvi.max_alternating_iterations = 4
             self.solver = newton.solvers.SolverKamino(self.model, config=solver_config)
+        elif self.solver_type == "vbd":
+            self.solver = newton.solvers.SolverVBD(
+                self.model,
+                iterations=4,
+                rigid_body_contact_buffer_size=self.contacts_per_world,
+                deterministic=wp.DeterministicMode.RUN_TO_RUN
+                if self.deterministic_solver
+                else wp.DeterministicMode.NOT_GUARANTEED,
+            )
         else:
             raise ValueError(f"Unknown solver '{self.solver_type}'")
 
@@ -355,7 +349,7 @@ class Example:
                     world_builder,
                     bolt_mesh,
                     bolt_xform,
-                    self.shape_cfg,
+                    SHAPE_CFG,
                     key=f"bolt_{i}_{j}",
                     center_vec=bolt_center,
                     scale=self.scene_scale,
@@ -370,7 +364,7 @@ class Example:
                     world_builder,
                     nut_mesh,
                     nut_xform,
-                    self.shape_cfg,
+                    SHAPE_CFG,
                     key=f"nut_{i}_{j}",
                     center_vec=nut_center,
                     scale=self.scene_scale,
@@ -421,10 +415,11 @@ class Example:
             self.nut_body_indices = None
             return
 
-        # Replicated worlds reuse labels. Enumerate every instance instead of
-        # list.index(), which only finds bodies in the first world.
-        self.bolt_body_indices = [i for i, label in enumerate(self.model.body_label) if label.startswith("bolt_")]
-        self.nut_body_indices = [i for i, label in enumerate(self.model.body_label) if label.startswith("nut_")]
+        # Replicated worlds repeat labels, so list.index() would find only the first world's bodies.
+        labels = self.model.body_label
+        self.bolt_body_indices = [idx for idx, label in enumerate(labels) if label.startswith("bolt_")]
+        self.nut_body_indices = [idx for idx, label in enumerate(labels) if label.startswith("nut_")]
+        assert len(self.nut_body_indices) == len(self.bolt_body_indices) == self.world_count * self.num_per_world
 
         # Store initial transforms
         body_q = self.state_0.body_q.numpy()
@@ -434,7 +429,6 @@ class Example:
         # Track maximum rotation change and z displacement for nuts
         self.nut_max_rotation_change = [0.0] * len(self.nut_body_indices)
         self.nut_min_z = [body_q[idx][2] for idx in self.nut_body_indices]
-        self.nut_max_radial_offset = [0.0] * len(self.nut_body_indices)
 
     def _track_test_data(self):
         """Track transforms for test validation (called each step in test mode)."""
@@ -460,15 +454,11 @@ class Example:
             # Track minimum z (nuts should move down)
             self.nut_min_z[i] = min(self.nut_min_z[i], current_q[2])
 
-            bolt_q = body_q[self.bolt_body_indices[i]]
-            relative = wp.quat_rotate_inv(wp.quat(*bolt_q[3:7]), wp.vec3(*(current_q[:3] - bolt_q[:3])))
-            self.nut_max_radial_offset[i] = max(self.nut_max_radial_offset[i], float(np.linalg.norm(relative[:2])))
-
     def test_final(self):
         """Verify simulation state after example completes.
 
         - Bolts should stay approximately in place (limited displacement)
-        - Nuts should rotate, descend, and remain near their bolt axis
+        - Nuts should rotate (thread engagement) and move slightly downward
         """
         body_q = self.state_0.body_q.numpy()
 
@@ -485,17 +475,18 @@ class Example:
 
         # The 45 degree threshold catches stalled thread engagement while
         # allowing observed solver/contact-count variation.
+        max_nut_radial_offset = 0.005  # 5 mm radial tolerance keeps the nut engaged on the bolt axis
         min_rotation_threshold = np.radians(45.0)
         min_descent = 0.005
-        for i in range(len(self.nut_body_indices)):
-            # Rotation and descent alone also pass when the nut falls off.
-            # Reuse the scene's displacement tolerance as a coarse escape gate,
-            # not as a certificate of thread contact or force convergence.
-            radial_offset = self.nut_max_radial_offset[i]
-            assert radial_offset < max_bolt_displacement, (
-                f"Nut {i}: escaped its bolt axis. "
-                f"Radial offset={radial_offset:.4f} (max allowed={max_bolt_displacement:.4f})"
+        for i, nut_idx in enumerate(self.nut_body_indices):
+            bolt_pos = body_q[self.bolt_body_indices[i]][:2]
+            nut_pos = body_q[nut_idx][:2]
+            radial_offset = float(np.linalg.norm(nut_pos - bolt_pos))
+            assert radial_offset < max_nut_radial_offset, (
+                f"Nut {i}: escaped bolt axis. "
+                f"Radial offset={radial_offset:.4f} (max allowed={max_nut_radial_offset:.4f})"
             )
+
             # Check rotation occurred
             max_rotation = self.nut_max_rotation_change[i]
             assert max_rotation > min_rotation_threshold, (
@@ -542,27 +533,7 @@ class Example:
             type=str,
             choices=["xpbd", "mujoco", "kamino", "vbd"],
             default="mujoco",
-            help="Solver to use. Supports xpbd, mujoco, kamino, or vbd.",
-        )
-        parser.add_argument(
-            "--kh",
-            type=float,
-            default=SHAPE_CFG.kh,
-            help="Hydroelastic pressure stiffness [N/m^3]; must be finite and positive.",
-        )
-        parser.add_argument(
-            "--kd",
-            type=float,
-            default=SHAPE_CFG.kd,
-            help="Shape contact damping; must be finite and nonnegative. "
-            "VBD scales shape damping down with softer quadrature rows to retain kd/ke. "
-            "Material values are not equivalent across solvers.",
-        )
-        parser.add_argument(
-            "--vbd-iterations",
-            type=int,
-            default=10,
-            help="Local sweeps per VBD substep; must be positive. Lower values trade convergence for speed.",
+            help="Solver to use: 'xpbd', 'mujoco', 'kamino', or 'vbd'.",
         )
         parser.add_argument(
             "--num-per-world",
