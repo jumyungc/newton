@@ -2826,5 +2826,96 @@ add_function_test(
 )
 
 
+def test_pair_overflow_waves_preserve_dependencies(test, device):
+    """Pack every group once, preserve shared-body order, replay changed graphs."""
+    capacity = 512
+    body_count = 96
+    inverse_mass = np.ones(body_count, dtype=np.float32)
+    inverse_mass[-1] = 0.0
+    mass = wp.array(inverse_mass, device=device)
+    count = wp.zeros(1, dtype=int, device=device)
+    groups = wp.full(capacity, -1, dtype=int, device=device)
+    body0 = wp.full(capacity, -1, dtype=int, device=device)
+    body1 = wp.full(capacity, -1, dtype=int, device=device)
+    body_level = wp.empty(body_count, dtype=int, device=device)
+    group_level = wp.empty(capacity, dtype=int, device=device)
+    wave_count = wp.empty(1, dtype=int, device=device)
+    offsets = wp.empty(capacity + 1, dtype=int, device=device)
+    packed = wp.empty(capacity, dtype=int, device=device)
+
+    def build():
+        wp.launch(
+            rigid_pair_contact.build_pair_overflow_waves,
+            dim=1,
+            inputs=[count, groups, body0, body1, mass],
+            outputs=[body_level, group_level, wave_count, offsets, packed],
+            block_dim=1,
+            device=device,
+        )
+
+    build()
+    graph = None
+    if device.is_cuda:
+        with wp.ScopedCapture(device=device) as capture:
+            build()
+        graph = capture.graph
+    rng = np.random.default_rng(17)
+    cases = [
+        [],
+        [(0, -1)],
+        [(i, i + 1) for i in range(90)],
+        [(i, 95) for i in range(95)],
+        [(0, i) for i in range(1, 95)],
+        [tuple(pair) for pair in rng.integers(0, 94, size=(capacity, 2))],
+        [(0, 1)] * capacity,
+        [],
+    ]
+    for edges in cases:
+        size = len(edges)
+        order = rng.permutation(size)
+        list_data = np.full(capacity, -1, dtype=np.int32)
+        if size:
+            list_data[-size:] = order
+        endpoints = np.full((capacity, 2), -1, dtype=np.int32)
+        if size:
+            endpoints[:size] = edges
+        count.fill_(size)
+        groups.assign(list_data)
+        body0.assign(endpoints[:, 0].copy())
+        body1.assign(endpoints[:, 1].copy())
+        expected = []
+        previous = {}
+        for group in order:
+            bodies = {int(b) for b in endpoints[group] if b >= 0 and inverse_mass[b] > 0.0}
+            level = max((previous.get(b, -1) + 1 for b in bodies), default=0)
+            while len(expected) <= level:
+                expected.append([])
+            expected[level].append(group)
+            previous.update(dict.fromkeys(bodies, level))
+        for _ in range(3):
+            if graph is None:
+                build()
+            else:
+                wp.capture_launch(graph)
+            actual_count = int(wave_count.numpy()[0])
+            test.assertEqual(actual_count, len(expected))
+            starts = offsets.numpy()
+            packed_data = packed.numpy()
+            for level, group_ids in enumerate(expected):
+                np.testing.assert_array_equal(packed_data[starts[level] : starts[level + 1]], group_ids)
+                endpoints_in_wave = [
+                    int(b) for g in group_ids for b in set(endpoints[g]) if b >= 0 and inverse_mass[b] > 0.0
+                ]
+                test.assertEqual(len(endpoints_in_wave), len(set(endpoints_in_wave)))
+
+
+add_function_test(
+    TestVBDRigidPairContact,
+    "test_pair_overflow_waves_preserve_dependencies",
+    test_pair_overflow_waves_preserve_dependencies,
+    devices=devices,
+)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

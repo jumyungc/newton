@@ -1081,12 +1081,75 @@ def solve_constraint_contact_color(
 
 
 @wp.kernel
+def build_pair_overflow_waves(
+    overflow_count: wp.array[wp.int32],
+    group_list: wp.array[wp.int32],
+    group_body0: wp.array[wp.int32],
+    group_body1: wp.array[wp.int32],
+    body_inv_mass: wp.array[float],
+    body_level: wp.array[wp.int32],
+    group_level: wp.array[wp.int32],
+    wave_count: wp.array[wp.int32],
+    wave_offsets: wp.array[wp.int32],
+    wave_groups: wp.array[wp.int32],
+):
+    """Pack disjoint overflow waves, preserving serial order at every dynamic body."""
+    count = overflow_count[0]
+    wave_count[0] = 0
+    if count == 0:
+        return
+    start = group_list.shape[0] - count
+    for slot in range(count):
+        group = group_list[start + slot]
+        body0 = group_body0[group]
+        body1 = group_body1[group]
+        if body0 >= 0:
+            body_level[body0] = -1
+        if body1 >= 0:
+            body_level[body1] = -1
+        wave_offsets[slot] = 0
+    wave_offsets[count] = 0
+    levels = int(0)
+    for slot in range(count):
+        group = group_list[start + slot]
+        body0 = group_body0[group]
+        body1 = group_body1[group]
+        level = int(0)
+        if body0 >= 0 and body_inv_mass[body0] > 0.0:
+            level = wp.max(level, body_level[body0] + 1)
+        if body1 >= 0 and body_inv_mass[body1] > 0.0:
+            level = wp.max(level, body_level[body1] + 1)
+        if body0 >= 0 and body_inv_mass[body0] > 0.0:
+            body_level[body0] = level
+        if body1 >= 0 and body_inv_mass[body1] > 0.0:
+            body_level[body1] = level
+        group_level[slot] = level
+        wave_offsets[level + 1] += 1
+        levels = wp.max(levels, level + 1)
+    for level in range(levels):
+        wave_offsets[level + 1] += wave_offsets[level]
+    # Reverse stable scatter consumes end offsets into starts. Shift them back
+    # afterwards, avoiding a second cursor array.
+    for index in range(count):
+        slot = count - 1 - index
+        level = group_level[slot]
+        wave_offsets[level + 1] -= 1
+        wave_groups[wave_offsets[level + 1]] = group_list[start + slot]
+    for level in range(levels):
+        wave_offsets[level] = wave_offsets[level + 1]
+    wave_offsets[levels] = count
+    wave_count[0] = levels
+
+
+@wp.kernel
 def solve_constraint_contact_colors_fused(
     first_color: int,
     color_count: int,
     color_counts: wp.array[wp.int32],
     color_offsets: wp.array[wp.int32],
-    overflow_count: wp.array[wp.int32],
+    wave_count: wp.array[wp.int32],
+    wave_offsets: wp.array[wp.int32],
+    wave_groups: wp.array[wp.int32],
     group_list: wp.array[wp.int32],
     group_start: wp.array[wp.int32],
     group_end: wp.array[wp.int32],
@@ -1116,20 +1179,18 @@ def solve_constraint_contact_colors_fused(
     body_q: wp.array[wp.transform],
     contact_lambda: wp.array[wp.vec3],
 ):
-    """Solve colors, then packed serial overflow, with block-local barriers."""
+    """Solve exact colors and dependency-preserving overflow waves on one block."""
     lane = wp.tid()
     color = first_color
-    while color <= color_count:
+    while color < color_count + wave_count[0]:
         count = int(0)
         offset = int(0)
         slot = lane
         stride = _FUSED_THREADS
-        if color == color_count:
-            # The last phase preserves the ascending, single-thread overflow order.
-            count = overflow_count[0]
-            offset = group_list.shape[0] - count
-            slot = 0 if lane == 0 else count
-            stride = 1
+        if color >= color_count:
+            level = color - color_count
+            offset = wave_offsets[level]
+            count = wave_offsets[level + 1] - offset
         else:
             count = color_counts[color]
             # The greedy palette is contiguous; skip empty colors, but not overflow.
@@ -1138,7 +1199,11 @@ def solve_constraint_contact_colors_fused(
                 continue
             offset = color_offsets[color]
         while slot < count:
-            group = group_list[offset + slot]
+            group = int(0)
+            if color >= color_count:
+                group = wave_groups[offset + slot]
+            else:
+                group = group_list[offset + slot]
             _solve_constraint_contact_group(
                 group,
                 group_start,
@@ -1273,6 +1338,8 @@ class RigidPairContact:
         self.overflow_count = wp.zeros(1, dtype=wp.int32, device=self.device)
         self.parallel_tail = wp.zeros(1, dtype=wp.int32, device=self.device)
         self.build_index = wp.zeros(1, dtype=wp.int32, device=self.device)
+        self.overflow_wave_count = wp.zeros(1, dtype=wp.int32, device=self.device)
+        self.overflow_body_level = wp.zeros(body_count, dtype=wp.int32, device=self.device)
 
     def resize(self, capacity: int) -> None:
         if capacity <= self.capacity:
@@ -1285,6 +1352,9 @@ class RigidPairContact:
         self.group_color = wp.full(capacity, -2, dtype=wp.int32, device=self.device)
         self.group_class = wp.full(capacity, -1, dtype=wp.int32, device=self.device)
         self.group_list = wp.zeros(capacity, dtype=wp.int32, device=self.device)
+        self.overflow_group_level = wp.zeros(capacity, dtype=wp.int32, device=self.device)
+        self.overflow_wave_offsets = wp.zeros(capacity + 1, dtype=wp.int32, device=self.device)
+        self.overflow_wave_groups = wp.zeros(capacity, dtype=wp.int32, device=self.device)
         self.tangent0 = wp.zeros(capacity, dtype=wp.vec3, device=self.device)
         self.tangent1 = wp.zeros(capacity, dtype=wp.vec3, device=self.device)
         self.response0_normal = wp.zeros(capacity, dtype=wp.spatial_vector, device=self.device)
@@ -1458,6 +1528,22 @@ class RigidPairContact:
                 block_dim=1,
             )
 
+        if self.device.is_cuda:
+            wp.launch(
+                build_pair_overflow_waves,
+                dim=1,
+                inputs=[self.overflow_count, self.group_list, self.group_body0, self.group_body1, self.body_inv_mass],
+                outputs=[
+                    self.overflow_body_level,
+                    self.overflow_group_level,
+                    self.overflow_wave_count,
+                    self.overflow_wave_offsets,
+                    self.overflow_wave_groups,
+                ],
+                device=self.device,
+                block_dim=1,
+            )
+
     def solve(
         self,
         body_q: wp.array,
@@ -1598,7 +1684,7 @@ class RigidPairContact:
 
         def solve_tail(first_color: int) -> None:
             # Direct passes cover at most 16 of 30 colors. The fused kernel
-            # always handles the remaining colors and the serial overflow.
+            # always handles the remaining colors and the ordered overflow waves.
             wp.launch(
                 kernel=solve_constraint_contact_colors_fused,
                 dim=_FUSED_THREADS,
@@ -1607,7 +1693,9 @@ class RigidPairContact:
                     _COLOR_COUNT,
                     self.color_counts,
                     self.color_offsets,
-                    self.overflow_count,
+                    self.overflow_wave_count,
+                    self.overflow_wave_offsets,
+                    self.overflow_wave_groups,
                     self.group_list,
                     *contact_inputs,
                 ],
