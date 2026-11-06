@@ -13,3 +13,6 @@ preserving every shared body's original update order.
 Repeatable results require deterministic collision generation, sufficient per-body list
 capacity, and identical solver/contact history. Color refinement and previous-color
 priorities can change finite-iteration Gauss-Seidel order.
+Preload rigid pair-manifold body properties and contact inputs before serial pose updates.
+Avoid repeated endpoint scratch clears when building dense pair-overflow schedules.
+Apply the existing `enable_fast_math` option to pair-contact solves as well as body solves.

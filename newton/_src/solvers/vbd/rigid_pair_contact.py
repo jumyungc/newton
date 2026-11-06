@@ -591,27 +591,23 @@ def _constraint_body_response(
 
 @wp.func
 def _apply_constraint_pose_increment(
-    body: int,
+    dynamic: bool,
     pose: wp.transform,
     translation: wp.vec3,
     rotation: wp.vec3,
-    scale: float,
-    body_com: wp.array[wp.vec3],
-    body_inv_mass: wp.array[float],
+    com: wp.vec3,
 ):
-    """Apply one Hessian-metric SE(3) increment to a dynamic body."""
-    if body < 0 or body_inv_mass[body] <= 0.0 or scale == 0.0:
+    """Apply a unit-scale SE(3) increment using preloaded body properties."""
+    if not dynamic:
         return pose
-
     q = wp.transform_get_rotation(pose)
-    center = wp.transform_point(pose, body_com[body])
-    w = rotation * scale
-    half_w = 0.5 * w
+    center = wp.transform_point(pose, com)
+    half_w = 0.5 * rotation
     # Normalizing the product also removes the increment quaternion's scale.
     dq = wp.quat(half_w[0], half_w[1], half_w[2], 1.0)
     q_new = wp.normalize(wp.mul(dq, q))
-    center_new = center + translation * scale
-    origin_new = center_new - wp.quat_rotate(q_new, body_com[body])
+    center_new = center + translation
+    origin_new = center_new - wp.quat_rotate(q_new, com)
     return wp.transform(origin_new, q_new)
 
 
@@ -861,39 +857,70 @@ def _solve_constraint_contact_group(
     Normal compliance is the implicit Kelvin--Voigt relation
     ``lambda = k*C + d*(C-C_prev)/dt``. Tangential force minimizes the local
     two-dimensional quadratic over the Coulomb disk using a bounded root solve.
+
+    The contacts form one serial chain through the two poses, so every contact
+    input is read before the dependent pose arithmetic, and endpoint data once
+    per manifold.
     """
     body0 = group_body0[group]
     body1 = group_body1[group]
-    pose0 = body_q[body0] if body0 >= 0 else wp.transform_identity()
-    pose1 = body_q[body1] if body1 >= 0 else wp.transform_identity()
+    pose0 = wp.transform_identity()
+    pose1 = wp.transform_identity()
+    dynamic0 = False
+    dynamic1 = False
+    com0 = wp.vec3(0.0)
+    com1 = wp.vec3(0.0)
+    if body0 >= 0:
+        pose0 = body_q[body0]
+        dynamic0 = body_inv_mass[body0] > 0.0
+        com0 = body_com[body0]
+    if body1 >= 0:
+        pose1 = body_q[body1]
+        dynamic1 = body_inv_mass[body1] > 0.0
+        com1 = body_com[body1]
 
     for contact in range(group_start[group], group_end[group]):
         n = contact_normal[contact]
-        skeleton0 = wp.transform_point(pose0, contact_point0[contact]) if body0 >= 0 else contact_point0[contact]
-        skeleton1 = wp.transform_point(pose1, contact_point1[contact]) if body1 >= 0 else contact_point1[contact]
+        point0 = contact_point0[contact]
+        point1 = contact_point1[contact]
+        offset0 = contact_offset0[contact]
+        offset1 = contact_offset1[contact]
+        margin0 = contact_margin0[contact]
+        margin1 = contact_margin1[contact]
+        old_lambda = contact_lambda[contact]
+        constants = contact_constants[contact]
+        response0_n = response0_normal[contact]
+        response1_n = response1_normal[contact]
+        normal_support = contact_normal_support[contact]
+        t0 = contact_tangent0[contact]
+        t1 = contact_tangent1[contact]
+        response0_t0 = response0_tangent0[contact]
+        response1_t0 = response1_tangent0[contact]
+        response0_t1 = response0_tangent1[contact]
+        response1_t1 = response1_tangent1[contact]
+        tangent_W = contact_tangent_support[contact]
+        mu = contact_material_mu[contact]
+
+        skeleton0 = wp.transform_point(pose0, point0) if body0 >= 0 else point0
+        skeleton1 = wp.transform_point(pose1, point1) if body1 >= 0 else point1
         penetration = -contact_surface_separation(
             skeleton0,
             skeleton1,
             n,
-            contact_margin0[contact],
-            contact_margin1[contact],
+            margin0,
+            margin1,
         )
 
-        old_lambda = contact_lambda[contact]
         old_normal = wp.max(wp.dot(old_lambda, n), 0.0)
         old_tangent = old_lambda - n * wp.dot(old_lambda, n)
-        constants = contact_constants[contact]
         compliance = constants.compliance
         damping_fraction = constants.damping_fraction
 
         normal_residual = penetration - damping_fraction * constants.previous_penetration - compliance * old_normal
-        response0_n = response0_normal[contact]
-        response1_n = response1_normal[contact]
         x0_n = wp.spatial_top(response0_n)
         w0_n = wp.spatial_bottom(response0_n)
         x1_n = wp.spatial_top(response1_n)
         w1_n = wp.spatial_bottom(response1_n)
-        normal_support = contact_normal_support[contact]
         new_normal = float(0.0)
         denominator = normal_support + compliance
         if denominator > _EPS and compliance >= 0.0:
@@ -902,18 +929,10 @@ def _solve_constraint_contact_group(
 
         # Evaluate the two tangential rows at the same linearization point as
         # the normal row, then apply their combined 3-DOF contact increment.
-        anchor0_local = contact_point0[contact] + contact_offset0[contact]
-        anchor1_local = contact_point1[contact] + contact_offset1[contact]
-        anchor0 = (
-            contact_surface_point(pose0, contact_point0[contact], contact_offset0[contact])
-            if body0 >= 0
-            else anchor0_local
-        )
-        anchor1 = (
-            contact_surface_point(pose1, contact_point1[contact], contact_offset1[contact])
-            if body1 >= 0
-            else anchor1_local
-        )
+        anchor0_local = point0 + offset0
+        anchor1_local = point1 + offset1
+        anchor0 = contact_surface_point(pose0, point0, offset0) if body0 >= 0 else anchor0_local
+        anchor1 = contact_surface_point(pose1, point1, offset1) if body1 >= 0 else anchor1_local
         anchor0_prev = constants.anchor0_prev
         anchor1_prev = constants.anchor1_prev
         relative_motion = (anchor1 - anchor1_prev) - (anchor0 - anchor0_prev) + constants.surface_displacement
@@ -921,12 +940,6 @@ def _solve_constraint_contact_group(
         slip = relative_motion - n * wp.dot(n, relative_motion)
         tangent_drive = -slip
 
-        t0 = contact_tangent0[contact]
-        t1 = contact_tangent1[contact]
-        response0_t0 = response0_tangent0[contact]
-        response1_t0 = response1_tangent0[contact]
-        response0_t1 = response0_tangent1[contact]
-        response1_t1 = response1_tangent1[contact]
         x0_t0 = wp.spatial_top(response0_t0)
         w0_t0 = wp.spatial_bottom(response0_t0)
         x1_t0 = wp.spatial_top(response1_t0)
@@ -935,7 +948,6 @@ def _solve_constraint_contact_group(
         w0_t1 = wp.spatial_bottom(response0_t1)
         x1_t1 = wp.spatial_top(response1_t1)
         w1_t1 = wp.spatial_bottom(response1_t1)
-        tangent_W = contact_tangent_support[contact]
         W00 = tangent_W[0, 0]
         W01 = tangent_W[0, 1]
         W11 = tangent_W[1, 1]
@@ -948,7 +960,7 @@ def _solve_constraint_contact_group(
             delta0 = (W11 * rhs0 - W01 * rhs1) / determinant
             delta1 = (W00 * rhs1 - W01 * rhs0) / determinant
             candidate_tangent = old_tangent + t0 * delta0 + t1 * delta1
-        friction_limit = contact_material_mu[contact] * new_normal
+        friction_limit = mu * new_normal
         candidate_length = wp.length(candidate_tangent)
         if candidate_length > friction_limit and candidate_length > _EPS:
             if friction_limit > _EPS:
@@ -982,28 +994,24 @@ def _solve_constraint_contact_group(
         delta_t0 = wp.dot(delta_tangent, t0)
         delta_t1 = wp.dot(delta_tangent, t1)
         pose0 = _apply_constraint_pose_increment(
-            body0,
+            dynamic0,
             pose0,
             x0_n * delta_normal + x0_t0 * delta_t0 + x0_t1 * delta_t1,
             w0_n * delta_normal + w0_t0 * delta_t0 + w0_t1 * delta_t1,
-            1.0,
-            body_com,
-            body_inv_mass,
+            com0,
         )
         pose1 = _apply_constraint_pose_increment(
-            body1,
+            dynamic1,
             pose1,
             x1_n * delta_normal + x1_t0 * delta_t0 + x1_t1 * delta_t1,
             w1_n * delta_normal + w1_t0 * delta_t0 + w1_t1 * delta_t1,
-            1.0,
-            body_com,
-            body_inv_mass,
+            com1,
         )
         contact_lambda[contact] = n * new_normal + candidate_tangent
 
-    if body0 >= 0 and body_inv_mass[body0] > 0.0:
+    if dynamic0:
         body_q[body0] = pose0
-    if body1 >= 0 and body_inv_mass[body1] > 0.0:
+    if dynamic1:
         body_q[body1] = pose1
 
 
@@ -1099,16 +1107,21 @@ def build_pair_overflow_waves(
     if count == 0:
         return
     start = group_list.shape[0] - count
-    for slot in range(count):
-        group = group_list[start + slot]
-        body0 = group_body0[group]
-        body1 = group_body1[group]
-        if body0 >= 0:
-            body_level[body0] = -1
-        if body1 >= 0:
-            body_level[body1] = -1
+    # Avoid repeated endpoint clears on dense overflow graphs.
+    if body_level.shape[0] <= 2 * count:
+        for body in range(body_level.shape[0]):
+            body_level[body] = -1
+    else:
+        for slot in range(count):
+            group = group_list[start + slot]
+            body0 = group_body0[group]
+            body1 = group_body1[group]
+            if body0 >= 0:
+                body_level[body0] = -1
+            if body1 >= 0:
+                body_level[body1] = -1
+    for slot in range(count + 1):
         wave_offsets[slot] = 0
-    wave_offsets[count] = 0
     levels = int(0)
     for slot in range(count):
         group = group_list[start + slot]

@@ -2863,6 +2863,10 @@ def test_pair_overflow_waves_preserve_dependencies(test, device):
     cases = [
         [],
         [(0, -1)],
+        # Exercise both reset paths and the equal-work boundary.
+        [(i, i + 1) for i in range(body_count // 2 - 1)],
+        [(i, i + 1) for i in range(body_count // 2)],
+        [(i, i + 1) for i in range(body_count // 2 + 1)],
         [(i, i + 1) for i in range(90)],
         [(i, 95) for i in range(95)],
         [(0, i) for i in range(1, 95)],
@@ -2893,6 +2897,11 @@ def test_pair_overflow_waves_preserve_dependencies(test, device):
             expected[level].append(group)
             previous.update(dict.fromkeys(bodies, level))
         for _ in range(3):
+            body_level.fill_(777)
+            group_level.fill_(777)
+            wave_count.fill_(777)
+            offsets.fill_(777)
+            packed.fill_(-1)
             if graph is None:
                 build()
             else:

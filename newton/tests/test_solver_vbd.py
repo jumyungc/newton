@@ -17,7 +17,7 @@ import warp as wp
 import newton
 from newton._src.geometry.soft_contacts_mesh import _SoftContactFilterData
 from newton._src.geometry.tri_mesh_collision import build_tri_mesh_collision_info
-from newton._src.solvers.vbd import particle_vbd_kernels, rigid_vbd_kernels
+from newton._src.solvers.vbd import particle_vbd_kernels, rigid_pair_contact, rigid_vbd_kernels
 from newton._src.solvers.vbd.particle_vbd_kernels import (
     NUM_THREADS_PER_COLLISION_PRIMITIVE,
     TILE_SIZE_TRI_MESH_ELASTICITY_SOLVE,
@@ -6356,6 +6356,7 @@ class TestSolverVBD(unittest.TestCase):
                 particle_vbd_kernels,
                 solver._solve_rigid_body_kernel.module,
                 update_duals_joint.module,
+                rigid_pair_contact,
             ]
             if solver._tiled_elasticity_kernel is not None:
                 fast_modules.append(solver._tiled_elasticity_kernel.module)

@@ -789,7 +789,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 ``NOT_GUARANTEED`` mode and gathered per particle without
                 atomics in every other mode.
             enable_fast_math: Compile the particle kernels, the rigid body
-                solve, and the joint dual update with Warp's ``fast_math``
+                and pair-contact solves, and the joint dual update with Warp's ``fast_math``
                 (approximate division and square root). Results change at the
                 floating-point rounding level. Ignored on CPU.
             tendon_max_sweeps: Maximum capstan material-relaxation sweeps per VBD iteration.
@@ -1114,7 +1114,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             )
             for module in rigid_modules:
                 self._set_module_options(options, module=module)
-            for module in (self._solve_rigid_body_kernel.module, update_duals_joint.module):
+            for module in (self._solve_rigid_body_kernel.module, update_duals_joint.module, rigid_pair_contact):
                 self._set_module_options(options | {"fast_math": enable_fast_math}, module=module)
         if model.joint_count > 0:
             self._set_module_options(
