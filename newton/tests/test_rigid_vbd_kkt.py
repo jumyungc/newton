@@ -1273,6 +1273,7 @@ def _linearize_bucket(model, solver, bucket, body_q, dt):
         bucket.size,
         inputs=[
             bucket.joint_ids,
+            wp.array(np.arange(bucket.size, dtype=np.int32), dtype=wp.int32, device=model.device),
             model.joint_type,
             model.joint_enabled,
             model.joint_parent,
@@ -1330,6 +1331,14 @@ def _linearize_bucket(model, solver, bucket, body_q, dt):
             backend.joint_stress_slot,
             model.body_inv_mass,
             backend.body_stress,
+            False,
+            0,
+            backend.slope_jacobian_parent,
+            backend.slope_jacobian_child,
+            backend.slope_compliance,
+            backend.slope_residual,
+            backend.slope_objective,
+            backend.slope_mode,
         ],
         device=model.device,
     )
@@ -1766,6 +1775,7 @@ def _structural_kkt_bounds_material_frame_rod_stress(test, device):
             inputs = [
                 wp.array([wp.vec2i(0, 1)], dtype=wp.vec2i, device=device),
                 ids,
+                wp.array([0], dtype=wp.int32, device=device),
                 kind,
                 ids,
                 child,

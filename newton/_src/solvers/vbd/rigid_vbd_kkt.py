@@ -146,6 +146,13 @@ _PAIRED_OPEN_CHAIN_MAX_BODIES = 256
 _SPATIAL_GPU_BLOCK_DIM = 32
 """One-warp blocks for register-heavy spatial-matrix kernels."""
 
+_ROW_PASS_GPU_BLOCK_DIM = 8
+"""Blocks for the atomic-free joint row passes, whose rows are visited grouped by joint type.
+
+One thread per row is latency-bound: narrower blocks put more independent warps on more
+multiprocessors, and type grouping keeps rod and general rows in different warps.
+"""
+
 _FUSED_CLOSURE_MAX_BLOCKS = 16
 """Largest measured dense closure solve owned by one synchronized CUDA block."""
 
@@ -1121,6 +1128,7 @@ def _stress_majorized_row(
 def add_joint_stress_majorizer(
     joint_stress_slot: wp.array[wp.vec2i],
     joint_ids: wp.array[int],
+    row_order: wp.array[wp.int32],
     joint_type: wp.array[int],
     joint_parent: wp.array[int],
     joint_child: wp.array[int],
@@ -1151,7 +1159,7 @@ def add_joint_stress_majorizer(
     :func:`_stress_majorized_row` during linearization and skip this pass; a test
     requires both paths to produce identical bytes.
     """
-    row = wp.tid()
+    row = row_order[wp.tid()]
     joint = joint_ids[row]
     parent, child = joint_parent[joint], joint_child[joint]
     destinations = joint_stress_slot[joint]
@@ -1263,49 +1271,8 @@ def add_joint_stress_majorizer(
 
 
 @wp.func
-def _accumulate_joint_slope(
-    parent: int,
-    child: int,
-    body_slot: wp.array[int],
-    body_island: wp.array[int],
-    jp: wp.spatial_matrix,
-    jc: wp.spatial_matrix,
-    compliance: wp.spatial_matrix,
-    residual: wp.spatial_vector,
-    objective_force: wp.spatial_vector,
-    diagonal_rows: bool,
-    correction: wp.array[wp.spatial_vector],
-    merit: wp.array[wp.float64],
-):
-    """Apply the current joint force to a body-tangent direction.
-
-    Rod rows are diagonal in their material frame. General joint rows may
-    contain rotated projectors: their force must not be approximated by
-    dividing the residual by the diagonal of a full compliance matrix.
-    """
-    p, c = int(-1), int(-1)
-    if parent >= 0:
-        p = body_slot[parent]
-    if child >= 0:
-        c = body_slot[child]
-    slot = wp.max(p, c)
-    if slot < 0:
-        return
-    linear = wp.float64(0.0)
-    for axis in range(6):
-        value = wp.float64(0.0)
-        for column in range(6):
-            if p >= 0:
-                value += wp.float64(jp[axis, column]) * wp.float64(correction[p][column])
-            if c >= 0:
-                value += wp.float64(jc[axis, column]) * wp.float64(correction[c][column])
-        if diagonal_rows:
-            # Keep the rod path's previous FP64 arithmetic order.
-            inverse_compliance = wp.float64(1.0) / wp.float64(compliance[axis, axis])
-            linear += value * wp.float64(residual[axis]) * inverse_compliance
-        else:
-            linear += value * wp.float64(objective_force[axis])
-    wp.atomic_add(merit, body_island[slot], linear)
+def _spatial_diagonal(matrix: wp.spatial_matrix):
+    return wp.spatial_vector(matrix[0, 0], matrix[1, 1], matrix[2, 2], matrix[3, 3], matrix[4, 4], matrix[5, 5])
 
 
 def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
@@ -1318,6 +1285,7 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
 
     def linearize_joint_path_rows(
         joint_ids: wp.array[wp.int32],
+        row_order: wp.array[wp.int32],
         joint_type: wp.array[int],
         joint_enabled: wp.array[bool],
         joint_parent: wp.array[int],
@@ -1373,15 +1341,28 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
         joint_stress_slot: wp.array[wp.vec2i],
         body_inv_mass: wp.array[float],
         body_stress: wp.array[wp.mat33],
+        store_slope: bool,
+        slope_offset: int,
+        slope_jacobian_parent: wp.array[wp.spatial_matrix],
+        slope_jacobian_child: wp.array[wp.spatial_matrix],
+        slope_compliance: wp.array[wp.spatial_vector],
+        slope_residual: wp.array[wp.spatial_vector],
+        slope_objective: wp.array[wp.spatial_vector],
+        slope_mode: wp.array[wp.int32],
     ):
-        """Linearize a joint or accumulate its slope without storing unused rows.
+        """Linearize a joint, or store only its slope inputs on a line-search trial.
+
+        With ``store_slope`` or ``slope_only``, the pass stores the unmajorized slope inputs of each row at
+        ``slope_offset + row`` (mode 0: no slope term, 1: diagonal rows, 2: objective force);
+        :func:`accumulate_stored_joint_slope` then adds them in original row order. A slope-only
+        pass stores nothing else.
 
         In the all-rod variant, ``build_majorizer`` applies :func:`_stress_majorized_row`
         to each parented rod row before it is stored, and the caller omits
         :func:`add_joint_stress_majorizer`. The general variant contains no fused code;
         its graphs use that separate pass.
         """
-        row = wp.tid()
+        row = row_order[wp.tid()]
         joint = joint_ids[row]
         zero_matrix = wp.spatial_matrix(0.0)
         jt = joint_type[joint]
@@ -1394,6 +1375,8 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
             or jt == JointType.D6
         )
         if not supported or not joint_enabled[joint]:
+            if store_slope or slope_only:
+                slope_mode[slope_offset + row] = 0
             if slope_only:
                 return
             if wp.static(fuse_rod_stress):
@@ -1610,21 +1593,14 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
                 wp.vec3(shear_defect_x, shear_defect_y, stretch_defect),
                 wp.vec3(bend_defect_x, bend_defect_y, twist_defect),
             )
+            if store_slope or slope_only:
+                slope_row = slope_offset + row
+                slope_jacobian_parent[slope_row] = jp
+                slope_jacobian_child[slope_row] = jc
+                slope_compliance[slope_row] = _spatial_diagonal(material_compliance)
+                slope_residual[slope_row] = defect
+                slope_mode[slope_row] = 1
             if slope_only:
-                _accumulate_joint_slope(
-                    parent,
-                    child,
-                    body_slot,
-                    body_island,
-                    jp,
-                    jc,
-                    material_compliance,
-                    defect,
-                    wp.spatial_vector(),
-                    True,
-                    correction,
-                    merit,
-                )
                 return
             if wp.static(fuse_rod_stress):
                 if build_majorizer and parent >= 0:
@@ -1967,21 +1943,15 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
                             angular_compliance + wp.outer(axis_local, axis_local),
                         )
 
+        if store_slope or slope_only:
+            slope_row = slope_offset + row
+            slope_jacobian_parent[slope_row] = jp
+            slope_jacobian_child[slope_row] = jc
+            slope_compliance[slope_row] = _spatial_diagonal(material_compliance)
+            slope_residual[slope_row] = wp.spatial_vector(c_linear, c_angular)
+            slope_objective[slope_row] = wp.spatial_vector(objective_linear, objective_angular)
+            slope_mode[slope_row] = 1 if jt == JointType.BALL or jt == JointType.FIXED else 2
         if slope_only:
-            _accumulate_joint_slope(
-                parent,
-                child,
-                body_slot,
-                body_island,
-                jp,
-                jc,
-                material_compliance,
-                wp.spatial_vector(c_linear, c_angular),
-                wp.spatial_vector(objective_linear, objective_angular),
-                jt == JointType.BALL or jt == JointType.FIXED,
-                correction,
-                merit,
-            )
             return
         jacobian_parent[row] = jp
         jacobian_child[row] = jc
@@ -1994,6 +1964,65 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
 
 linearize_joint_path_rows = _make_linearize_joint_path_rows(False)
 _linearize_fused_rod_rows = _make_linearize_joint_path_rows(True)
+
+
+@wp.kernel
+def accumulate_stored_joint_slope(
+    joint_ids: wp.array[wp.int32],
+    joint_parent: wp.array[int],
+    joint_child: wp.array[int],
+    slope_offset: int,
+    slope_jacobian_parent: wp.array[wp.spatial_matrix],
+    slope_jacobian_child: wp.array[wp.spatial_matrix],
+    slope_compliance: wp.array[wp.spatial_vector],
+    slope_residual: wp.array[wp.spatial_vector],
+    slope_objective: wp.array[wp.spatial_vector],
+    slope_mode: wp.array[wp.int32],
+    body_slot: wp.array[int],
+    body_island: wp.array[int],
+    correction: wp.array[wp.spatial_vector],
+    merit: wp.array[wp.float64],
+):
+    """Line-search slope from the row inputs stored by the linearization at the same pose.
+
+    One thread per row in original row order, so the FP64 atomic order does not depend on how the
+    linearization grouped its rows.
+    """
+    row = wp.tid()
+    slope_row = slope_offset + row
+    mode = slope_mode[slope_row]
+    if mode == 0:
+        return
+    joint = joint_ids[row]
+    parent = joint_parent[joint]
+    child = joint_child[joint]
+    p, c = int(-1), int(-1)
+    if parent >= 0:
+        p = body_slot[parent]
+    if child >= 0:
+        c = body_slot[child]
+    slot = wp.max(p, c)
+    if slot < 0:
+        return
+    jp = slope_jacobian_parent[slope_row]
+    jc = slope_jacobian_child[slope_row]
+    compliance = slope_compliance[slope_row]
+    residual = slope_residual[slope_row]
+    objective_force = slope_objective[slope_row]
+    linear = wp.float64(0.0)
+    for axis in range(6):
+        value = wp.float64(0.0)
+        for column in range(6):
+            if p >= 0:
+                value += wp.float64(jp[axis, column]) * wp.float64(correction[p][column])
+            if c >= 0:
+                value += wp.float64(jc[axis, column]) * wp.float64(correction[c][column])
+        if mode == 1:
+            inverse_compliance = wp.float64(1.0) / wp.float64(compliance[axis])
+            linear += value * wp.float64(residual[axis]) * inverse_compliance
+        else:
+            linear += value * wp.float64(objective_force[axis])
+    wp.atomic_add(merit, body_island[slot], linear)
 
 
 _SpatialRowMatrix = wp.types.matrix(shape=(1, 6), dtype=float)
@@ -4741,6 +4770,15 @@ def _array_payload_bytes(count: int, dtype) -> int:
     return int(count) * int(wp.types.type_size_in_bytes(dtype))
 
 
+def _row_pass_payload_bytes(row_count: int) -> int:
+    """Count one bucket's joint-type row order and stored line-search slope inputs."""
+    return (
+        2 * _array_payload_bytes(row_count, wp.int32)
+        + 2 * _array_payload_bytes(row_count, wp.spatial_matrix)
+        + 3 * _array_payload_bytes(row_count, wp.spatial_vector)
+    )
+
+
 def _structural_payload_budget(device) -> int:
     """Bound planned payload deterministically without claiming an allocation reserve."""
     if not device.is_cuda:
@@ -4902,6 +4940,7 @@ def _path_bucket_diagnostics(paths: list[_Path], device) -> _BucketDiagnostics:
         + _array_payload_bytes(size, wp.spatial_vector)
         + 2 * _array_payload_bytes(size, wp.vec2i)
         + _path_cr_schedule_bytes(schedule)
+        + _row_pass_payload_bytes(size)
     )
     if schedule.tails:
         route = "path_fused_tail_cr"
@@ -5062,6 +5101,7 @@ def _tree_bucket_diagnostics(
         estimated_bytes += _tree_contraction_payload_bytes(schedules, node_counts)
         fill_count = sum(schedule.edge_count - count for schedule, count in zip(schedules, node_counts, strict=True))
     estimated_bytes += _array_payload_bytes(1, wp.spatial_matrix)
+    estimated_bytes += _row_pass_payload_bytes(row_count)
 
     return _BucketDiagnostics(
         kind="tree",
@@ -5127,7 +5167,7 @@ def _closed_tree_bucket_diagnostics(
 
     matrix_dtype = wp.spatial_matrixd
     vector_dtype = wp.spatial_vectord
-    estimated_bytes = tree_diagnostics.estimated_bytes
+    estimated_bytes = tree_diagnostics.estimated_bytes + _row_pass_payload_bytes(closure_size)
     estimated_bytes += _array_payload_bytes(sum(map(len, component.tree.elimination_levels)), wp.int32)
     estimated_bytes += 3 * _array_payload_bytes(closure_size, wp.int32)
     estimated_bytes += _array_payload_bytes(body_count + 1, wp.int32)
@@ -9480,6 +9520,23 @@ class StructuralGraphKKT:
             bucket.side_streams = self.side_streams
             if self.side_streams is not None:
                 bucket.tree.group_rows_by_joint_type(model.joint_type.numpy())
+        # Row passes visit each launch's rows grouped by joint type; line-search slopes replay the
+        # stored rows in identity order.
+        self.row_block_dim = _ROW_PASS_GPU_BLOCK_DIM if self.device.is_cuda else 1
+        self.row_orders = {}
+        self.row_joint_type = np.asarray(model.joint_type.numpy())
+        for bucket in self.buckets:
+            if isinstance(bucket, _ClosedTreeBucket):
+                launches = (
+                    [bucket.tree.joint_ids]
+                    if bucket.tree.row_slices is None
+                    else [s[0] for s in bucket.tree.row_slices]
+                )
+                launches.append(bucket.closure_joint_ids)
+            else:
+                launches = [bucket.joint_ids]
+            for ids in launches:
+                self._row_order(ids)
 
         self.graph_body_count = len(graph_body_ids)
         self.graph_body_ids = wp.array(graph_body_ids, dtype=wp.int32, device=self.device)
@@ -9551,6 +9608,16 @@ class StructuralGraphKKT:
             path_slots = body_slot_by_id[bucket.body_ids_host]
             body_path_inverse[path_slots[path_slots >= 0]] = 1
         self.body_path_inverse = wp.array(body_path_inverse, dtype=wp.int32, device=self.device)
+        slope_rows = sum(
+            bucket.tree.size + bucket.closure_size if isinstance(bucket, _ClosedTreeBucket) else bucket.size
+            for bucket in self.buckets
+        )
+        self.slope_jacobian_parent = wp.zeros(slope_rows, dtype=wp.spatial_matrix, device=self.device)
+        self.slope_jacobian_child = wp.zeros(slope_rows, dtype=wp.spatial_matrix, device=self.device)
+        self.slope_compliance = wp.zeros(slope_rows, dtype=wp.spatial_vector, device=self.device)
+        self.slope_residual = wp.zeros(slope_rows, dtype=wp.spatial_vector, device=self.device)
+        self.slope_objective = wp.zeros(slope_rows, dtype=wp.spatial_vector, device=self.device)
+        self.slope_mode = wp.zeros(slope_rows, dtype=wp.int32, device=self.device)
         self.line_search_pose = wp.empty_like(model.body_q)
         self.line_search_enabled = wp.ones(len(components), dtype=bool, device=self.device)
         self.line_search_slope = wp.zeros(len(components), dtype=wp.float64, device=self.device)
@@ -9582,6 +9649,15 @@ class StructuralGraphKKT:
             len(graph_joint_ids),
             is_cuda=self.device.is_cuda,
         )
+
+    def _row_order(self, ids: wp.array) -> wp.array:
+        """Return the stable joint-type order of one launch's rows, computing it on first use."""
+        cached = self.row_orders.get(id(ids))
+        if cached is None:
+            grouped = np.argsort(self.row_joint_type[ids.numpy()], kind="stable").astype(np.int32)
+            cached = (ids, wp.array(grouped, dtype=wp.int32, device=self.device))
+            self.row_orders[id(ids)] = cached
+        return cached[1]
 
     def _plan_stress_incidence(
         self,
@@ -9719,7 +9795,15 @@ class StructuralGraphKKT:
                 bucket.closure_row_active,
             )
 
-        def linearize(*, build_majorizer=True, build_body=True, slope_only=False, contact_stream=None):
+        def linearize(
+            *,
+            build_majorizer=True,
+            build_body=True,
+            slope_only=False,
+            contact_stream=None,
+            stored_slope=False,
+            store_slope_rows=False,
+        ):
             # Rows are linearized first: the stress majorizer writes per-row
             # blocks that the body surrogate then sums in fixed order.
             # Independent row groups (joint types, closures) overlap on the row
@@ -9728,6 +9812,7 @@ class StructuralGraphKKT:
             main = wp.get_stream(self.device) if lanes is not None else None
             forked = []
             launch_index = 0
+            slope_offset = 0
             for bucket in self.buckets:
                 linearizations = (
                     (
@@ -9779,12 +9864,41 @@ class StructuralGraphKKT:
                     if stream is not None and all(stream is not lane for lane in forked):
                         stream.wait_stream(main)
                         forked.append(stream)
+                    row_offset = slope_offset
+                    slope_offset += linearization_size
+                    if stored_slope:
+                        with _stream_scope(stream):
+                            wp.launch(
+                                accumulate_stored_joint_slope,
+                                linearization_size,
+                                inputs=[
+                                    linearization_joint_ids,
+                                    joint_parent,
+                                    joint_child,
+                                    row_offset,
+                                    self.slope_jacobian_parent,
+                                    self.slope_jacobian_child,
+                                    self.slope_compliance,
+                                    self.slope_residual,
+                                    self.slope_objective,
+                                    self.slope_mode,
+                                    self.body_slot_by_id,
+                                    self.graph_body_island,
+                                    self.body_correction,
+                                ],
+                                outputs=[self.line_search_slope],
+                                device=self.device,
+                                block_dim=self.spatial_block_dim,
+                            )
+                        continue
+                    grouped_rows = self._row_order(linearization_joint_ids)
                     with _stream_scope(stream):
                         wp.launch(
                             _linearize_fused_rod_rows if self._fuse_rod_stress else linearize_joint_path_rows,
                             linearization_size,
                             inputs=[
                                 linearization_joint_ids,
+                                grouped_rows,
                                 joint_type,
                                 joint_enabled,
                                 joint_parent,
@@ -9842,10 +9956,41 @@ class StructuralGraphKKT:
                                 self.joint_stress_slot,
                                 body_inv_mass,
                                 self.body_stress,
+                                store_slope_rows,
+                                row_offset,
+                                self.slope_jacobian_parent,
+                                self.slope_jacobian_child,
+                                self.slope_compliance,
+                                self.slope_residual,
+                                self.slope_objective,
+                                self.slope_mode,
                             ],
                             device=self.device,
-                            block_dim=self.spatial_block_dim,
+                            block_dim=self.row_block_dim,
                         )
+                        if slope_only:
+                            wp.launch(
+                                accumulate_stored_joint_slope,
+                                linearization_size,
+                                inputs=[
+                                    linearization_joint_ids,
+                                    joint_parent,
+                                    joint_child,
+                                    row_offset,
+                                    self.slope_jacobian_parent,
+                                    self.slope_jacobian_child,
+                                    self.slope_compliance,
+                                    self.slope_residual,
+                                    self.slope_objective,
+                                    self.slope_mode,
+                                    self.body_slot_by_id,
+                                    self.graph_body_island,
+                                    self.body_correction,
+                                ],
+                                outputs=[self.line_search_slope],
+                                device=self.device,
+                                block_dim=self.spatial_block_dim,
+                            )
                         if build_majorizer and not self._fuse_rod_stress:
                             wp.launch(
                                 add_joint_stress_majorizer,
@@ -9853,6 +9998,7 @@ class StructuralGraphKKT:
                                 inputs=[
                                     self.joint_stress_slot,
                                     linearization_joint_ids,
+                                    grouped_rows,
                                     joint_type,
                                     joint_parent,
                                     joint_child,
@@ -9869,7 +10015,7 @@ class StructuralGraphKKT:
                                 ],
                                 outputs=[self.body_stress],
                                 device=self.device,
-                                block_dim=self.spatial_block_dim,
+                                block_dim=self.row_block_dim,
                             )
             for stream in forked:
                 main.wait_stream(stream)
@@ -9969,8 +10115,10 @@ class StructuralGraphKKT:
                     ],
                     outputs=[self.line_search_slope],
                     device=self.device,
+                    block_dim=self.spatial_block_dim,
                 )
-            linearize(build_majorizer=False, build_body=False, slope_only=True)
+            # Without a refresh the pose is the one the full linearization just stored.
+            linearize(build_majorizer=False, build_body=False, slope_only=True, stored_slope=not refresh)
             if contact_side is not None:
                 main.wait_stream(contact_side)
 
@@ -10096,7 +10244,8 @@ class StructuralGraphKKT:
                         translate(refresh=iteration > 0)
             return
 
-        linearize(contact_stream=contact_stream)
+        # Only the contact line search below reads the stored step-zero slope rows.
+        linearize(contact_stream=contact_stream, store_slope_rows=contacts is not None and refresh_contacts is not None)
 
         # Trees consume the body metric directly. Path Schur systems consume
         # its inverse, which the surrogate build already wrote for path bodies.

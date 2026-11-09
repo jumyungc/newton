@@ -77,38 +77,6 @@ def test_directional_step_guard(test, device):
     np.testing.assert_array_equal(pending.numpy(), [1])
 
 
-@wp.kernel
-def _accumulate_joint_slope_control(
-    parent: wp.array[int],
-    child: wp.array[int],
-    slots: wp.array[int],
-    islands: wp.array[int],
-    jp: wp.array[wp.spatial_matrix],
-    jc: wp.array[wp.spatial_matrix],
-    compliance: wp.array[wp.spatial_matrix],
-    residual: wp.array[wp.spatial_vector],
-    force: wp.array[wp.spatial_vector],
-    diagonal_rows: bool,
-    correction: wp.array[wp.spatial_vector],
-    merit: wp.array[wp.float64],
-):
-    row = wp.tid()
-    kkt._accumulate_joint_slope(
-        parent[row],
-        child[row],
-        slots,
-        islands,
-        jp[row],
-        jc[row],
-        compliance[row],
-        residual[row],
-        force[row],
-        diagonal_rows,
-        correction,
-        merit,
-    )
-
-
 def test_directional_derivative_matches_dense_model(test, device):
     """Use original primal blocks, including body rhs and both joint endpoints."""
     rng = np.random.default_rng(240915)
@@ -162,19 +130,21 @@ def test_directional_derivative_matches_dense_model(test, device):
             force = np.linalg.solve(matrix[0].astype(float), residual[0]).astype(np.float32)[None]
             merit.zero_()
             wp.launch(
-                _accumulate_joint_slope_control,
+                kkt.accumulate_stored_joint_slope,
                 1,
                 inputs=[
                     array([0], int),
+                    array([0], int),
                     array([1], int),
-                    array([0, 1], int),
-                    island,
+                    0,
                     array(jp, wp.spatial_matrix),
                     array(jc, wp.spatial_matrix),
-                    array(matrix, wp.spatial_matrix),
+                    array(np.diag(matrix[0])[None], wp.spatial_vector),
                     array(residual, wp.spatial_vector),
                     array(force, wp.spatial_vector),
-                    diagonal_rows,
+                    array([1 if diagonal_rows else 2], int),
+                    array([0, 1], int),
+                    island,
                     correction,
                 ],
                 outputs=[merit],
