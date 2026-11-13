@@ -559,6 +559,17 @@ friction is a Coulomb projection carrying :math:`\boldsymbol{\lambda}_t`. The
 complete law, with the material mixing and the damping, is in
 :ref:`vbd-energy-terms`.
 
+Joint-owned mimics on the compliant path contribute coupled rows inside each
+body sweep, with error :math:`q_f-o-mq_r`. Their finite stiffness uses
+``rigid_joint_linear_ke`` or ``rigid_joint_angular_ke`` according to the
+follower coordinate. Reactions act on both joints' bodies; gradients for a shared
+body are combined before constructing its solve block. Same-colour blocks
+majorize frozen-gradient cross terms. Multipliers advance after the sweep and
+are cleared in reset-selected worlds. This replaces the compliant path's
+post-sweep pose projection; legacy contacts/joints keep that projection.
+A small mimic coordinate error does not certify force balance at a finite
+iteration budget. These rows do not add armature or effort-limit support.
+
 The deprecated legacy path (``rigid_compliant_alm=False``) replaces the
 finite-material rows with ramped penalties and hard or soft slots.
 
@@ -800,6 +811,15 @@ points and :math:`\rho_t` the tangent metric, is projected onto the disk
 and :math:`\boldsymbol{\lambda}_t` is advanced and projected onto the disk of
 radius :math:`\mu\lambda_n` in the same dual step.
 
+When both contact bodies are dynamic and share a colour, their pose updates
+are simultaneous. The compliant path doubles only the normal and tangential
+positive-semidefinite contact solve blocks to majorize the omitted cross-body
+blocks. It does not scale the contact forces, multipliers or material parameters.
+Separate-colour contacts and contacts against a static or kinematic body keep
+their original blocks, as do legacy contacts. This stabilizes a stiff alternating
+mode, but can change finite-iteration convergence; it is not a nonlinear
+convergence guarantee or a replacement for contact-aware colouring.
+
 With positive :math:`k_d`, the compliant ALM path instead eliminates internal
 compression and compression-increment damping together. At a dual fixed point
 the material force is
@@ -810,6 +830,37 @@ at :math:`C=0`. Unloading is undamped. The finite-iteration normal response and
 metric are given by ``_compliant_contact_normal_response``, rather than the
 undamped formulas above. The primal and dual friction disks use only the elastic
 part of that normal response, not the total damped normal force.
+
+The optional constructor setting ``rigid_contact_unloading_damping=True``
+selects a different unilateral Kelvin--Voigt model for compliant body-body
+contacts only. Its fixed-point force is
+:math:`\max(k\max(C,0)+(k_d/h)(C-\max(C_{\mathrm{prev}},0)),0)`.
+The dashpot also resists unloading, but the total normal force is never tensile.
+Its friction support is the smaller of the elastic and total normal forces.
+This is a physical-model choice, not an accuracy switch; it does not change
+particle contact, legacy rigid contact, stiffness or the timestep. The default
+remains compression-only. Both force-reporting APIs use the selected model.
+
+The optional constructor setting ``rigid_contact_activation_guard=True``
+stabilizes contact activation using the actual body Newton trial, including
+joint and other applied forces. It computes a provisional pose, adds normal
+positive-semidefinite metric blocks for currently inactive rows crossed by that
+trial, then recomputes the body update from the original iterate. It adds no
+contact force and changes no constitutive fixed-point equation. It can improve
+finite-budget contact chatter, but is not a convergence guarantee or a
+replacement for iteration, timestep and contact-resolution checks. It requires
+compliant ALM and internal rigid integration. The additional work per colour
+per local iteration is one provisional body solve, one inactive-contact gather
+and a body-pose copy. Disabled by default, it allocates no trial-pose buffer and
+launches none of these additional operations.
+
+Both options are experimental, runtime-only solver choices; they do not add
+USD-authored material properties. They are constructor-only: construct a new
+solver and recapture CUDA
+graphs to change them. Do not toggle their attributes on an existing solver.
+They are not universal remedies for high-stiffness float32 force accuracy,
+under-resolved contact geometry, missing robot features or insufficient solver
+budgets.
 
 The legacy path damps with
 :math:`-k_d\,(\mathbf{n}\cdot\mathbf{v}_{\text{rel}})\,\mathbf{n}` while the

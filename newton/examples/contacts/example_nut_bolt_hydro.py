@@ -54,7 +54,9 @@ SHAPE_CFG = newton.ModelBuilder.ShapeConfig(
     kh=1e11,  # Hydroelastic contact stiffness
     ke=1e7,
     kd=1e4,
-    gap=0.0,
+    # Include approaching thread contacts before the flanks overlap. A zero query
+    # gap makes contact onset depend strongly on the distance moved per substep.
+    gap=0.001,
     density=8000.0,
     mu_torsional=0.0,
     mu_rolling=0.0,
@@ -355,9 +357,11 @@ class Example:
                     scale=self.scene_scale,
                 )
 
-                # Add nut above bolt at grid position
+                # Start just clear of the thread. The former 0.041 m start
+                # overlapped the flanks by about 0.25 mm at unit scene scale,
+                # adding a large initial elastic preload to this gravity task.
                 nut_xform = wp.transform(
-                    wp.vec3(x_offset, y_offset, 0.041 * self.scene_scale),
+                    wp.vec3(x_offset, y_offset, 0.0413 * self.scene_scale),
                     wp.quat_from_axis_angle(wp.vec3(0.0, 0.0, 1.0), np.pi / 8),
                 )
                 add_mesh_object(

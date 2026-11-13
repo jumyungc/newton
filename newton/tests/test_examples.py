@@ -1060,6 +1060,23 @@ add_example_test(
     use_viewer=True,
 )
 
+for scene in ("cube", "pen"):
+    add_example_test(
+        TestRobotExamples,
+        name="robot.example_robot_panda_hydro",
+        devices=cuda_test_devices,
+        test_options={
+            "usd_required": True,
+            "num-frames": 720,
+            "world-count": 2,
+            "solver": "vbd",
+            "iterations": 15,
+            "scene": scene,
+        },
+        use_viewer=True,
+        test_suffix=f"vbd_{scene}",
+    )
+
 
 class TestRobotPolicyExamples(unittest.TestCase):
     pass
@@ -1607,7 +1624,8 @@ add_contact_example_test(
 add_contact_example_test(
     name="contacts.example_nut_bolt_hydro",
     devices=cuda_test_devices,
-    test_options={"num-frames": 120, "world-count": 1, "solver": "kamino"},
+    # Allow gravity-driven rotation to develop without the former initial preload.
+    test_options={"num-frames": 240, "world-count": 1, "solver": "kamino"},
     use_viewer=True,
     test_suffix="kamino",
     expect_output_regexes=[

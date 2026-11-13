@@ -2356,7 +2356,10 @@ def test_mujoco_hydroelastic_penetration_depth(test, device):
             f"Case {i}: Upper cube moved {displacement:.4f}m from initial position, exceeds {position_tolerance}m tolerance",
         )
 
-    # Measure penetration from contact surface depth
+    # Refresh the contact geometry at the state used by the measurement.
+    collision_pipeline.collide(state_0, contacts)
+
+    # Verify that the physical contact surface is present.
     contact_surface_data = (
         collision_pipeline.hydroelastic_sdf.get_contact_surface()
         if collision_pipeline.hydroelastic_sdf is not None
@@ -2370,7 +2373,30 @@ def test_mujoco_hydroelastic_penetration_depth(test, device):
     depths = contact_surface_data.contact_surface_depth.numpy()[:num_faces]
     shape_pairs = contact_surface_data.contact_surface_shape_pair.numpy()[:num_faces]
 
-    # Calculate expected and measured penetration for each case
+    # Integrate elastic support, rather than averaging depths per triangle.
+    # An unweighted face mean changes under triangulation and has no one-sided
+    # bound relative to the uniform-pressure depth F / (k_eff * A).
+    count = int(contacts.rigid_contact_count.numpy()[0])
+    shape0 = contacts.rigid_contact_shape0.numpy()[:count]
+    shape1 = contacts.rigid_contact_shape1.numpy()[:count]
+    shape_body = model.shape_body.numpy()
+    normals = contacts.rigid_contact_normal.numpy()[:count].astype(np.float64)
+
+    def world_points(points, shapes):
+        bodies = shape_body[shapes]
+        poses = body_q[np.maximum(bodies, 0)].astype(np.float64)
+        points = points.astype(np.float64)
+        xyz, w = poses[:, 3:6], poses[:, 6:7]
+        rotated = points + 2.0 * np.cross(xyz, np.cross(xyz, points) + w * points)
+        return np.where((bodies >= 0)[:, None], rotated + poses[:, :3], points)
+
+    point0 = world_points(contacts.rigid_contact_point0.numpy()[:count], shape0)
+    point1 = world_points(contacts.rigid_contact_point1.numpy()[:count], shape1)
+    separation = np.einsum("ij,ij->i", point1 - point0, normals)
+    separation -= contacts.rigid_contact_margin0.numpy()[:count] + contacts.rigid_contact_margin1.numpy()[:count]
+    elastic_force = contacts.rigid_contact_stiffness.numpy()[:count] * np.maximum(-separation, 0.0)
+
+    # Force-equivalent penetration uses the nominal planar patch area.
     total_force = gravity * mass_upper + external_force
 
     for i in range(len(test_cases)):
@@ -2393,15 +2419,19 @@ def test_mujoco_hydroelastic_penetration_depth(test, device):
 
         test.assertGreater(len(instance_depths), 0, f"Case {i} should have penetrating contacts (negative depth)")
 
-        measured = np.mean(-instance_depths)
-        ratio = measured / expected
-
-        # We expect a ratio > 1 due to non-uniform pressure distribution.
-        test.assertGreater(
-            ratio, 1.0, f"Case {i}: ratio {ratio:.3f} too low (measured={measured:.6f}, expected={expected:.6f})"
+        pair_mask = ((shape0 == lower_shape) & (shape1 == upper_shape)) | (
+            (shape0 == upper_shape) & (shape1 == lower_shape)
         )
-        test.assertLess(
-            ratio, 1.2, f"Case {i}: ratio {ratio:.3f} too high (measured={measured:.6f}, expected={expected:.6f})"
+        upper_sign = np.where(shape1 == upper_shape, 1.0, -1.0)
+        support = np.sum(elastic_force[pair_mask] * normals[pair_mask, 2] * upper_sign[pair_mask])
+        measured = support / (kh_val * effective_area)
+        # Allow finite SDF/float32 and equilibrium error, but require the actual
+        # integrated support within 5% of the prescribed load in either direction.
+        test.assertAlmostEqual(
+            measured / expected,
+            1.0,
+            delta=0.05,
+            msg=f"Case {i}: elastic support {support:.6f} N does not match load {total_force:.6f} N",
         )
 
 

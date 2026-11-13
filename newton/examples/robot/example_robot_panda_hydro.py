@@ -7,11 +7,23 @@ Shows how to set up a pick-and-place manipulation simulation using a
 Franka Panda arm with SDF hydroelastic contacts and inverse kinematics.
 Supports different scene configurations: pen or cube.
 
+The experimental VBD option uses compliant joint/contact rows and finite-stiffness
+mimic coupling. It does not implement the authored joint armature or effort limits;
+this example therefore compares task completion, not identical robot dynamics.
+VBD collapses fixed links, initializes its reference pose with forward kinematics,
+and refreshes collision every substep. Its opt-in contact activation guard adds
+one provisional body solve per colour and local iteration. MuJoCo keeps the
+original setup. Equal iteration counts are not equal work or accuracy.
+
 Success criteria:
 - Each world shows a Franka arm, a support box, a cup, and the selected grasp object.
 - The arm lifts and transports the object while the cup remains upright.
 
 Runs:
+- `python -m newton.examples robot_panda_hydro --solver vbd --iterations 15 --scene cube --world-count 2`
+  - Two worlds grasp and place their cubes with compliant VBD.
+- `python -m newton.examples robot_panda_hydro --solver vbd --iterations 15 --scene pen --world-count 2`
+  - Two worlds grasp and place their pens with compliant VBD.
 - `python -m newton.examples robot_panda_hydro --world-count 2 --scene cube`
   - The arm grasps the cube and releases it on top of the cup.
   - Two worlds appear.
@@ -72,6 +84,10 @@ def broadcast_ik_solution_kernel(
 class Example:
     def __init__(self, viewer, args):
         self.scene = SceneType(args.scene)
+        self.solver_name = args.solver
+        if args.iterations < 1:
+            raise ValueError("iterations must be positive for the Panda task")
+        self.sim_iterations = args.iterations
         self.test_mode = args.test
         self.deterministic = args.deterministic
         self.deterministic_solver = args.deterministic_solver
@@ -80,7 +96,7 @@ class Example:
         self.frame_dt = 1.0 / self.fps
         self.sim_time = 0.0
         self.sim_substeps = 10
-        self.collide_substeps = 2  # run collision detection every X simulation steps
+        self.collide_substeps = 1 if self.solver_name == "vbd" else 2
         self.sim_dt = self.frame_dt / self.sim_substeps
         self.world_count = args.world_count
         self.viewer = viewer
@@ -292,14 +308,27 @@ class Example:
         # build model for IK
         self.model_single = copy.deepcopy(builder).finalize()
 
+        if self.solver_name == "vbd":
+            # Keep the IK model unchanged; remove massless fixed links only from
+            # the physical model, then remap the task's free-body indices.
+            builder.collapse_fixed_joints()
+            self.object_body_local = builder.body_label.index("object")
+            if self.cup_body_local is not None:
+                self.cup_body_local = builder.body_label.index("cup")
+
         # Store bodies per world before replication
         self.bodies_per_world = builder.body_count
 
         scene = newton.ModelBuilder()
         scene.replicate(builder, self.world_count)
         scene.add_ground_plane(cfg=shape_cfg)
+        if self.solver_name == "vbd":
+            scene.color()
 
         self.model = scene.finalize()
+        if self.solver_name == "vbd":
+            # VBD's non-rod joint reference frames must match the authored pose.
+            newton.eval_fk(self.model, self.model.joint_q, self.model.joint_qd, self.model)
 
         # num_hydroelastic = (self.model.shape_flags.numpy() & newton.ShapeFlags.HYDROELASTIC).astype(bool).sum()
         # print(f"Number of hydroelastic shapes: {num_hydroelastic} / {self.model.shape_count}")
@@ -322,23 +351,33 @@ class Example:
         )
         self.contacts = self.collision_pipeline.contacts()
 
-        # Create MuJoCo solver with Newton contacts
-        self.solver = newton.solvers.SolverMuJoCo(
-            self.model,
-            use_mujoco_contacts=False,
-            disable_sensors=True,
-            solver="newton",
-            integrator="implicitfast",
-            cone="elliptic",
-            njmax=500,
-            nconmax=500,
-            iterations=15,
-            ls_iterations=100,
-            impratio=1000.0,
-            deterministic=wp.DeterministicMode.RUN_TO_RUN
-            if self.deterministic_solver
-            else wp.DeterministicMode.NOT_GUARANTEED,
+        deterministic_mode = (
+            wp.DeterministicMode.RUN_TO_RUN if self.deterministic_solver else wp.DeterministicMode.NOT_GUARANTEED
         )
+        if self.solver_name == "vbd":
+            self.solver = newton.solvers.SolverVBD(
+                self.model,
+                iterations=self.sim_iterations,
+                rigid_compliant_alm=True,
+                rigid_contact_activation_guard=True,
+                rigid_body_contact_buffer_size=4096,
+                deterministic=deterministic_mode,
+            )
+        else:
+            self.solver = newton.solvers.SolverMuJoCo(
+                self.model,
+                use_mujoco_contacts=False,
+                disable_sensors=True,
+                solver="newton",
+                integrator="implicitfast",
+                cone="elliptic",
+                njmax=500,
+                nconmax=500,
+                iterations=self.sim_iterations,
+                ls_iterations=100,
+                impratio=1000.0,
+                deterministic=deterministic_mode,
+            )
 
         self.viewer.set_model(self.model)
         if hasattr(self.viewer, "renderer"):
@@ -574,6 +613,18 @@ class Example:
         newton.examples.add_world_count_arg(parser)
         parser.set_defaults(num_frames=720)
         parser.set_defaults(world_count=1)
+        parser.add_argument(
+            "--solver",
+            choices=("mujoco", "vbd"),
+            default="mujoco",
+            help="Physics solver. Experimental VBD omits joint armature and effort limits.",
+        )
+        parser.add_argument(
+            "--iterations",
+            type=int,
+            default=15,
+            help="Solver iterations per substep. The experimental VBD runs use 15.",
+        )
         parser.add_argument(
             "--deterministic",
             action=argparse.BooleanOptionalAction,

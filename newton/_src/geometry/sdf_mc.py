@@ -39,12 +39,9 @@ MC_EDGE_CLAMP_MAX = 0.98
 """Upper t-clamp (``1 - MC_EDGE_CLAMP_MIN``)."""
 
 MC_DEGENERATE_N_SQ_EPS = 1.0e-20
-"""Squared-length threshold below which a triangle cross-product is treated
-as degenerate.  With t-clamping producing minimum edge lengths of ~0.02
-voxel edges, near-collinear triangles can have n_sq in the 1e-20..1e-14
-range and still yield an unreliable normal after division.  A threshold of
-1e-20 is conservative with negligible false-positive risk (affected
-triangles contribute near-zero area anyway)."""
+"""Dimensionless squared-cross-product threshold for degenerate triangles.
+Normalize edges by their largest absolute component before applying this
+threshold so changing length units does not discard regular triangles."""
 
 
 def _get_marching_cubes_class():
@@ -123,58 +120,84 @@ def int_to_vec3f(x: wp.int32, y: wp.int32, z: wp.int32):
 
 
 @wp.func
-def get_triangle_fraction(vert_depths: wp.vec3f, num_inside: wp.int32) -> wp.float32:
-    """Compute the fraction of a triangle's area that lies inside the object.
-
-    Uses linear interpolation along edges to estimate where the zero-crossing
-    occurs, then computes the area ratio. Returns 1.0 if all vertices inside,
-    0.0 if all outside, or a proportional fraction for partial intersections.
-    """
+def _triangle_clipped_area_and_centroid(vert_depths: wp.vec3f, num_inside: wp.int32) -> tuple[float, wp.vec3]:
+    """Return clipped area fraction and its centroid's barycentric weights."""
     if num_inside == 3:
-        return 1.0
-
+        return 1.0, wp.vec3(1.0 / 3.0)
     if num_inside == 0:
-        return 0.0
+        return 0.0, wp.vec3(1.0 / 3.0)
 
-    # Rotate the distinct vertex into d0 without dynamic vector indexing. The
-    # latter forces this three-float value into thread-local memory on CUDA.
     d0 = vert_depths[0]
     d1 = vert_depths[1]
     d2 = vert_depths[2]
+    rotation = int(0)
     if num_inside == 1:
-        # Find the one vertex that IS inside (negative depth)
         if vert_depths[1] < 0.0:
-            d0 = vert_depths[1]
-            d1 = vert_depths[2]
-            d2 = vert_depths[0]
+            d0, d1, d2 = vert_depths[1], vert_depths[2], vert_depths[0]
+            rotation = 1
         elif vert_depths[2] < 0.0:
-            d0 = vert_depths[2]
-            d1 = vert_depths[0]
-            d2 = vert_depths[1]
-    else:  # num_inside == 2
-        # Find the one vertex that is NOT inside (non-negative depth)
-        if vert_depths[1] >= 0.0:
-            d0 = vert_depths[1]
-            d1 = vert_depths[2]
-            d2 = vert_depths[0]
-        elif vert_depths[2] >= 0.0:
-            d0 = vert_depths[2]
-            d1 = vert_depths[0]
-            d2 = vert_depths[1]
-
-    denom = (d0 - d1) * (d0 - d2)
-    eps = wp.float32(1e-8)
-    if wp.abs(denom) < eps:
-        if num_inside == 1:
-            return 0.0
-        else:
-            return 1.0
-
-    fraction = wp.clamp((d0 * d0) / denom, 0.0, 1.0)
-    if num_inside == 2:
-        return 1.0 - fraction
+            d0, d1, d2 = vert_depths[2], vert_depths[0], vert_depths[1]
+            rotation = 2
     else:
-        return fraction
+        if vert_depths[1] >= 0.0:
+            d0, d1, d2 = vert_depths[1], vert_depths[2], vert_depths[0]
+            rotation = 1
+        elif vert_depths[2] >= 0.0:
+            d0, d1, d2 = vert_depths[2], vert_depths[0], vert_depths[1]
+            rotation = 2
+
+    scale = wp.max(wp.abs(d0), wp.max(wp.abs(d1), wp.abs(d2)))
+    d0, d1, d2 = d0 / scale, d1 / scale, d2 / scale
+    fraction = float(0.0)
+    weights = wp.vec3(1.0 / 3.0)
+    if num_inside == 1:
+        if d0 != 0.0:
+            t1 = d0 / (d0 - d1)
+            t2 = d0 / (d0 - d2)
+            fraction = t1 * t2
+            weights = wp.vec3(1.0 - (t1 + t2) / 3.0, t1 / 3.0, t2 / 3.0)
+    else:
+        # Split the retained quadrilateral into positive-area triangles.
+        # This avoids cancellation when the excluded triangle is almost full.
+        t1 = float(0.0)
+        t2 = float(0.0)
+        if d1 != 0.0:
+            t1 = -d1 / (d0 - d1)
+        if d2 != 0.0:
+            t2 = -d2 / (d0 - d2)
+        f1 = t1
+        f2 = t2 * (1.0 - t1)
+        fraction = f1 + f2
+        if fraction > 0.0:
+            weights = (
+                (f1 / fraction) * wp.vec3(t1, 2.0 - t1, 1.0) + (f2 / fraction) * wp.vec3(t1 + t2, 1.0 - t1, 2.0 - t2)
+            ) / 3.0
+    if rotation == 1:
+        weights = wp.vec3(weights[2], weights[0], weights[1])
+    elif rotation == 2:
+        weights = wp.vec3(weights[1], weights[2], weights[0])
+    return fraction, weights
+
+
+@wp.func
+def get_triangle_fraction(vert_depths: wp.vec3f, num_inside: wp.int32) -> wp.float32:
+    """Compute the fraction of a triangle's area inside its linear zero contour."""
+    fraction, _weights = _triangle_clipped_area_and_centroid(vert_depths, num_inside)
+    return fraction
+
+
+@wp.func
+def _scaled_triangle_cross(a: wp.vec3, b: wp.vec3, c: wp.vec3) -> tuple[wp.vec3, float]:
+    """Return a dimensionless triangle cross product and its edge scale."""
+    e0 = b - a
+    e1 = c - a
+    scale = wp.max(
+        wp.max(wp.abs(e0[0]), wp.max(wp.abs(e0[1]), wp.abs(e0[2]))),
+        wp.max(wp.abs(e1[0]), wp.max(wp.abs(e1[1]), wp.abs(e1[2]))),
+    )
+    if scale == 0.0:
+        return wp.vec3(0.0), 0.0
+    return wp.cross(e0 / scale, e1 / scale), scale
 
 
 @wp.func
@@ -234,7 +257,7 @@ def mc_calc_face(
         if depth < 0.0:
             num_inside += 1
 
-    n = wp.cross(face_verts[1] - face_verts[0], face_verts[2] - face_verts[0])
+    n, edge_scale = _scaled_triangle_cross(face_verts[0], face_verts[1], face_verts[2])
     n_sq = wp.dot(n, n)
     if n_sq < MC_DEGENERATE_N_SQ_EPS:
         # Degenerate triangle — return zero area with a valid (non-NaN) normal.
@@ -243,8 +266,13 @@ def mc_calc_face(
     else:
         n_len = wp.sqrt(n_sq)
         normal = n / n_len
-        area = n_len / 2.0
+        area = (n_len * 0.5 * edge_scale) * edge_scale
     center = (face_verts[0] + face_verts[1] + face_verts[2]) / 3.0
     pen_depth = (vert_depths[0] + vert_depths[1] + vert_depths[2]) / 3.0
-    area *= get_triangle_fraction(vert_depths, num_inside)
+    fraction = float(num_inside == 3)
+    if num_inside > 0 and num_inside < 3:
+        fraction, weights = _triangle_clipped_area_and_centroid(vert_depths, num_inside)
+        center = weights[0] * face_verts[0] + weights[1] * face_verts[1] + weights[2] * face_verts[2]
+        pen_depth = wp.dot(weights, vert_depths)
+    area *= fraction
     return area, normal, center, pen_depth, face_verts

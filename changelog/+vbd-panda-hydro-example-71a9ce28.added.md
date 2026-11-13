@@ -1,0 +1,1 @@
+Add an experimental `--solver vbd` option to `robot_panda_hydro`, with fixed-link collapse, reference-pose initialization and per-substep collision; VBD still omits the authored joint armature and effort limits.

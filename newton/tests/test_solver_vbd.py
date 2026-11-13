@@ -412,6 +412,7 @@ def _eval_compliant_sliding_contact_metric_kernel(
             wp.vec3(0.0),
             wp.vec3(0.0, 0.0, 1.0),
             0.01,
+            0.0,  # Step-start penetration is unused for this undamped row.
             100.0,
             1000.0,
             100.0,
@@ -977,6 +978,7 @@ def _eval_rigid_contact_rigid_motion_kernel(
         wp.vec3(0.0),
         contact_normal[sample],
         0.06,
+        0.0,  # Legacy damping uses approach velocity, not the compliant reference gap.
         100.0,
         100.0,
         100.0,
@@ -1013,6 +1015,7 @@ def _eval_rigid_contact_rigid_motion_kernel(
         wp.vec3(0.0),
         contact_normal[sample],
         0.06,
+        0.0,  # Unused for this undamped row.
         100.0,
         100.0,
         100.0,
@@ -1460,7 +1463,7 @@ def _history_provenance_matched(device):
 
 
 def _rigid_contact_history_restore_from_match_index(test, device):
-    """Verify legacy hard contact preserves its full-vector warm start."""
+    """Resolve current contact materials before restoring legacy hard history."""
     with wp.ScopedDevice(device):
         contact_count = wp.array([4], dtype=int, device=device)
         shape0 = wp.array([0, 0, 0, 0], dtype=int, device=device)
@@ -1483,50 +1486,84 @@ def _rigid_contact_history_restore_from_match_index(test, device):
         material_kd = wp.zeros(4, dtype=float, device=device)
         material_mu = wp.zeros(4, dtype=float, device=device)
         material_ke = wp.zeros(4, dtype=float, device=device)
-
-        wp.launch(
-            init_body_body_contacts_alm,
-            dim=4,
-            inputs=[
-                contact_count,
-                shape0,
-                shape1,
-                normal,
-                shape_ke,
-                shape_kd,
-                shape_mu,
-                None,
-                None,
-                None,
-                1,
-                0,
-                0,
-                match_index,
-                *matched_gen[:3],
-                history,
-                matched_gen[3],
-                None,
-                None,
-                None,
-                None,
-                None,
-                10.0,
-            ],
-            outputs=[
-                penalty_k,
-                lam,
-                material_kd,
-                material_mu,
-                material_ke,
-            ],
-            device=device,
+        material_outputs = [penalty_k, material_kd, material_mu, material_ke]
+        cases = (
+            ("null", None, None, None, [150.0] * 4, [2.0] * 4, [0.5] * 4),
+            ("unset", [0.0] * 4, [0.0] * 4, [0.0] * 4, [150.0] * 4, [2.0] * 4, [0.5] * 4),
+            # Softer rows preserve kd/ke; stiffer rows retain shape kd.
+            # A positive damping override takes precedence over that scaling.
+            (
+                "mixed",
+                [25.0, 300.0, 75.0, 0.0],
+                [0.0, 0.0, 9.0, 0.0],
+                [0.25, 2.0, 0.0, 0.0],
+                [25.0, 300.0, 75.0, 150.0],
+                [1.0 / 3.0, 2.0, 9.0, 2.0],
+                [0.125, 1.0, 0.5, 0.5],
+            ),
+            ("damping-only", None, [4.0, 0.0, 6.0, 0.0], None, [150.0] * 4, [4.0, 2.0, 6.0, 2.0], [0.5] * 4),
         )
+        for name, row_ke, row_kd, row_mu, expected_ke, expected_kd, expected_mu in cases:
+            with test.subTest(materials=name):
+                overrides = [
+                    None if values is None else wp.array(values, dtype=float, device=device)
+                    for values in (row_ke, row_kd, row_mu)
+                ]
+                material_inputs = [contact_count, shape0, shape1, shape_ke, shape_kd, shape_mu, *overrides]
+                # Reuse the output buffers to catch stale material values when
+                # a previously overridden row returns to shape-only values.
+                for k_start in (10.0, -1.0):
+                    wp.launch(
+                        rigid_vbd_kernels.init_body_body_contact_materials,
+                        dim=4,
+                        inputs=[*material_inputs, k_start],
+                        outputs=material_outputs,
+                        device=device,
+                    )
+                    expected_penalty = np.minimum(expected_ke, 10.0) if k_start >= 0.0 else expected_ke
+                    np.testing.assert_allclose(penalty_k.numpy(), expected_penalty, rtol=1.0e-6)
+                    np.testing.assert_allclose(material_ke.numpy(), expected_ke, rtol=1.0e-6)
+                    np.testing.assert_allclose(material_kd.numpy(), expected_kd, rtol=1.0e-6)
+                    np.testing.assert_allclose(material_mu.numpy(), expected_mu, rtol=1.0e-6)
 
-        np.testing.assert_allclose(penalty_k.numpy(), [40.0, 10.0, 20.0, 10.0])
-        np.testing.assert_allclose(lam.numpy(), [[0.0, 0.0, 7.0], [0.0, 0.0, 0.0], [0.5, 0.0, 1.0], [0.0, 0.0, 0.0]])
-        np.testing.assert_allclose(material_ke.numpy(), [150.0] * 4)
-        np.testing.assert_allclose(material_kd.numpy(), [2.0] * 4)
-        np.testing.assert_allclose(material_mu.numpy(), [0.5] * 4)
+                wp.launch(
+                    init_body_body_contacts_alm,
+                    dim=4,
+                    inputs=[
+                        contact_count,
+                        shape0,
+                        shape1,
+                        normal,
+                        shape_ke,
+                        shape_kd,
+                        shape_mu,
+                        *overrides,
+                        1,
+                        0,
+                        0,
+                        match_index,
+                        *matched_gen[:3],
+                        history,
+                        matched_gen[3],
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        10.0,
+                    ],
+                    outputs=[penalty_k, lam, material_kd, material_mu, material_ke],
+                    device=device,
+                )
+                np.testing.assert_allclose(
+                    penalty_k.numpy(), np.minimum([40.0, 10.0, 20.0, 10.0], expected_ke), rtol=1.0e-6
+                )
+                np.testing.assert_allclose(
+                    lam.numpy(), [[0.0, 0.0, 7.0], [0.0, 0.0, 0.0], [0.5, 0.0, 1.0], [0.0, 0.0, 0.0]]
+                )
+                np.testing.assert_allclose(material_ke.numpy(), expected_ke, rtol=1.0e-6)
+                np.testing.assert_allclose(material_kd.numpy(), expected_kd, rtol=1.0e-6)
+                np.testing.assert_allclose(material_mu.numpy(), expected_mu, rtol=1.0e-6)
 
 
 def _rigid_contact_history_compliant_alm_tangent_warmstart(test, device):
@@ -1534,12 +1571,14 @@ def _rigid_contact_history_compliant_alm_tangent_warmstart(test, device):
     del test
     cases = (
         # sticky: restore penalty and lambda_n only; zero lambda_t
-        ("sticky", [[1.0, 2.0, 3.0]], [0.25, 1.0], 0, [[0.0, 0.0, 3.0]]),
+        ("sticky", [[1.0, 2.0, 3.0]], [0.25, 1.0], 0, None, [[0.0, 0.0, 3.0]]),
         # latest: hist lambda_t=(3,4) length 5; mu=0.5, lambda_n=5 -> cone 2.5 -> (1.5, 2)
-        ("latest", [[3.0, 4.0, 5.0]], [0.5, 0.5], 1, [[1.5, 2.0, 5.0]]),
+        ("latest", [[3.0, 4.0, 5.0]], [0.5, 0.5], 1, None, [[1.5, 2.0, 5.0]]),
+        # A per-contact scale of 0.25 makes the restored cone radius 0.625.
+        ("latest-scaled", [[3.0, 4.0, 5.0]], [0.5, 0.5], 1, 0.25, [[0.375, 0.5, 5.0]]),
     )
     with wp.ScopedDevice(device):
-        for _name, hist_lambda, shape_mu, latest, expected_lambda in cases:
+        for _name, hist_lambda, shape_mu, latest, friction_scale, expected_lambda in cases:
             contact_count = wp.array([1], dtype=int, device=device)
             shape0 = wp.array([0], dtype=int, device=device)
             shape1 = wp.array([1], dtype=int, device=device)
@@ -1571,7 +1610,7 @@ def _rigid_contact_history_compliant_alm_tangent_warmstart(test, device):
                     wp.array(shape_mu, dtype=float, device=device),
                     None,
                     None,
-                    None,
+                    None if friction_scale is None else wp.array([friction_scale], dtype=float, device=device),
                     0,
                     1,
                     latest,
@@ -9116,6 +9155,7 @@ def _eval_first_order_contact_torque_kernel(
         wp.vec3(0.0),
         wp.vec3(0.0, 0.0, 1.0),
         0.01,
+        0.0,  # Step-start penetration is unused for this undamped row.
         1.0e4,
         1.0e3,
         1.0e4,
@@ -9255,6 +9295,7 @@ def test_rigid_contact_warm_multiplier_has_tangential_friction(test, device):
                 pose,
                 wp.array(centers, dtype=wp.vec3),
                 wp.ones(2),
+                wp.array([0, 1], dtype=int),
                 epsilon,
                 scalars(rho),
                 scalars(rho),
@@ -9304,18 +9345,107 @@ def test_rigid_contact_warm_multiplier_has_tangential_friction(test, device):
                 rigid_vbd_kernels._NUM_CONTACT_THREADS_PER_BODY,
                 rigid_vbd_kernels._WIDE_CONTACT_THREADS_PER_BODY,
             ):
-                for output in outputs:
-                    output.zero_()
                 kernel = rigid_vbd_kernels.create_accumulate_body_body_contacts_per_body(width)
-                wp.launch(kernel, dim=2 * width, inputs=inputs, outputs=outputs)
-                for output, reference in zip(outputs, expected, strict=True):
-                    np.testing.assert_allclose(output.numpy(), reference, rtol=2.0e-5, atol=5.0e-5)
+                for colors, inverse_mass, shape_bodies, metric_scale in (
+                    ([0, 1], [1.0, 1.0], [0, 1], 1.0),
+                    ([0, 0], [1.0, 1.0], [0, 1], 2.0),
+                    ([0, 0], [0.0, 1.0], [0, 1], 1.0),
+                    ([0, 0], [0.0, 1.0], [-1, 1], 1.0),
+                ):
+                    inputs[5] = wp.array(inverse_mass, dtype=float)
+                    inputs[6] = wp.array(colors, dtype=int)
+                    inputs[30] = wp.array(shape_bodies, dtype=int)
+                    for output in outputs:
+                        output.zero_()
+                    wp.launch(kernel, dim=2 * width, inputs=inputs, outputs=outputs)
+                    for index, (output, reference) in enumerate(zip(outputs, expected, strict=True)):
+                        scaled_reference = np.array(reference)
+                        scaled_reference[0] *= inverse_mass[0]
+                        if index >= 2:
+                            scaled_reference *= metric_scale
+                        np.testing.assert_allclose(output.numpy(), scaled_reference, rtol=2.0e-5, atol=5.0e-5)
+
+                # Neither legacy contact mode acquires the compliant metric correction.
+                inputs[5] = wp.ones(2)
+                inputs[30] = wp.array([0, 1], dtype=int)
+                inputs[18] = 0
+                for hard in (0, 1):
+                    inputs[17] = hard
+                    reference = None
+                    for colors in ([0, 1], [0, 0]):
+                        inputs[6] = wp.array(colors, dtype=int)
+                        for output in outputs:
+                            output.zero_()
+                        wp.launch(kernel, dim=2 * width, inputs=inputs, outputs=outputs)
+                        actual = [output.numpy() for output in outputs]
+                        if reference is not None:
+                            for value, baseline in zip(actual, reference, strict=True):
+                                np.testing.assert_allclose(value, baseline, rtol=2.0e-5, atol=5.0e-5)
+                        reference = actual
+                inputs[17] = 0
+                inputs[18] = 1
 
 
 add_function_test(
     TestSolverVBD,
     "test_rigid_contact_warm_multiplier_has_tangential_friction",
     test_rigid_contact_warm_multiplier_has_tangential_friction,
+    devices=devices,
+)
+
+
+def test_rigid_same_color_contact_metric_avoids_alternating_release(test, device):
+    """A fixed-stiffness contact split across rows must still resolve at an even sweep count."""
+    with wp.ScopedDevice(device):
+        builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+        rows, stiffness, dt = 64, 5.0e8, 1.0 / 600.0
+        cfg = builder.ShapeConfig(density=0.0, ke=stiffness / rows, kd=0.0, mu=0.0, margin=0.0, gap=0.005)
+        for z in (0.0, 0.199):
+            body = builder.add_body(
+                xform=wp.transform(wp.vec3(0.0, 0.0, z), wp.quat_identity()),
+                mass=1.0,
+                inertia=wp.mat33(np.eye(3) * 0.01),
+                lock_inertia=True,
+            )
+            builder.add_shape_sphere(body, radius=0.1, cfg=cfg)
+        builder.color()
+        model = builder.finalize(device=device)
+        test.assertEqual(len(model.body_color_groups), 1)
+        solver = newton.solvers.SolverVBD(
+            model, iterations=4, rigid_compliant_alm=True, rigid_body_contact_buffer_size=rows
+        )
+        pipeline = newton.CollisionPipeline(model, broad_phase="nxn")
+        contacts = pipeline.contacts()
+        state_in, state_out = model.state(), model.state()
+        pipeline.collide(state_in, contacts)
+        test.assertEqual(int(contacts.rigid_contact_count.numpy()[0]), 1)
+        # Split one physical spring into identical quadrature rows, keeping sum(ke) fixed.
+        for name in (
+            "rigid_contact_shape0",
+            "rigid_contact_shape1",
+            "rigid_contact_point0",
+            "rigid_contact_point1",
+            "rigid_contact_offset0",
+            "rigid_contact_offset1",
+            "rigid_contact_normal",
+            "rigid_contact_margin0",
+            "rigid_contact_margin1",
+        ):
+            array = getattr(contacts, name)
+            array[:rows].assign(np.repeat(array.numpy()[:1], rows, axis=0))
+        contacts.rigid_contact_count.fill_(rows)
+        initial = state_in.body_q.numpy().astype(np.float64)[:, 2]
+        inertia = np.eye(2) / dt**2
+        hessian = inertia + stiffness * np.array([[1.0, -1.0], [-1.0, 1.0]])
+        reference = np.linalg.solve(hessian, inertia @ initial + stiffness * np.array([-0.2, 0.2]))
+        solver.step(state_in, state_out, model.control(), contacts, dt)
+        np.testing.assert_allclose(state_out.body_q.numpy()[:, 2], reference, rtol=0.0, atol=2.0e-6)
+
+
+add_function_test(
+    TestSolverVBD,
+    "test_rigid_same_color_contact_metric_avoids_alternating_release",
+    test_rigid_same_color_contact_metric_avoids_alternating_release,
     devices=devices,
 )
 

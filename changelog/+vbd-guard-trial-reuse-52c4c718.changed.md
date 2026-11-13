@@ -1,0 +1,1 @@
+Reduce redundant work in VBD's rigid-contact activation guard by reusing trial poses for bodies whose trial adds no inactive-contact metric. Accumulate joint-owned mimic reactions through per-color follower lists, refreshed after joint-property notifications. No user migration is required: the guard remains enabled and material laws and iteration budgets are unchanged.

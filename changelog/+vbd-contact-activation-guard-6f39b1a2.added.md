@@ -1,0 +1,1 @@
+Add an opt-in actual-trial rigid contact activation guard for compliant VBD. It adds a provisional body solve and inactive normal-metric gather per colour and iteration; the default scheduling and physical law are unchanged.

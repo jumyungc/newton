@@ -16,6 +16,7 @@ from .sdf_mc import (
     MC_EDGE_CLAMP_MAX,
     MC_EDGE_CLAMP_MIN,
     MC_EDGE_VAL_DIFF_EPS,
+    _scaled_triangle_cross,
     get_mc_tables,
     int_to_vec3f,
     mc_calc_face,
@@ -1598,7 +1599,7 @@ def _generate_dense_mc_kernel(
                 origin[1] + local[1] * voxel_size[1],
                 origin[2] + local[2] * voxel_size[2],
             )
-        n = wp.cross(face_verts[1] - face_verts[0], face_verts[2] - face_verts[0])
+        n, _edge_scale = _scaled_triangle_cross(face_verts[0], face_verts[1], face_verts[2])
         n_sq = wp.dot(n, n)
         if n_sq < MC_DEGENERATE_N_SQ_EPS:
             normal = wp.vec3(0.0, 0.0, 1.0)

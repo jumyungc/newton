@@ -1,0 +1,1 @@
+Start the hydroelastic nut/bolt example clear of the initial thread overlap and use a 1 mm thread query gap. This changes the initial pose and contact activation envelope, without changing materials or damping laws. Extend the Kamino example test to 240 frames for gravity-driven rotation without the former preload.

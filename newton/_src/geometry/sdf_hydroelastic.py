@@ -63,8 +63,9 @@ from .hashtable import hashtable_find_or_insert
 from .sdf_mc import (
     MC_DEGENERATE_N_SQ_EPS,
     MC_EDGE_VAL_DIFF_EPS,
+    _scaled_triangle_cross,
+    _triangle_clipped_area_and_centroid,
     get_mc_tables,
-    get_triangle_fraction,
 )
 from .sdf_texture import (
     TextureSDFData,
@@ -345,7 +346,7 @@ def mc_calc_face_texture(
         if pair_separation < 0.0:
             num_inside += 1
 
-    n = wp.cross(face_verts[1] - face_verts[0], face_verts[2] - face_verts[0])
+    n, edge_scale = _scaled_triangle_cross(face_verts[0], face_verts[1], face_verts[2])
     n_sq = wp.dot(n, n)
     if n_sq < MC_DEGENERATE_N_SQ_EPS:
         # Degenerate triangle — return zero area with a valid (non-NaN) normal.
@@ -354,11 +355,17 @@ def mc_calc_face_texture(
     else:
         inv_n_len = _hydro_rsqrt_approx(n_sq)
         normal = n * inv_n_len
-        geometric_area = (n_sq * inv_n_len) * 0.5
+        geometric_area = (n_sq * inv_n_len * 0.5 * edge_scale) * edge_scale
     center = (face_verts[0] + face_verts[1] + face_verts[2]) / 3.0
     adjusted_sdf = (vert_adjusted_sdf[0] + vert_adjusted_sdf[1] + vert_adjusted_sdf[2]) / 3.0
     pair_separation = (vert_pair_separation[0] + vert_pair_separation[1] + vert_pair_separation[2]) / 3.0
-    force_area = geometric_area * get_triangle_fraction(vert_pair_separation, num_inside)
+    fraction = float(num_inside == 3)
+    if num_inside > 0 and num_inside < 3:
+        fraction, weights = _triangle_clipped_area_and_centroid(vert_pair_separation, num_inside)
+        center = weights[0] * face_verts[0] + weights[1] * face_verts[1] + weights[2] * face_verts[2]
+        adjusted_sdf = wp.dot(weights, vert_adjusted_sdf)
+        pair_separation = wp.dot(weights, vert_pair_separation)
+    force_area = geometric_area * fraction
     return force_area, geometric_area, normal, center, adjusted_sdf, pair_separation, face_verts
 
 
@@ -1024,10 +1031,10 @@ class HydroelasticSDF:
             record_tape=False,
         )
 
-        # Poll infrequently to avoid per-step host sync overhead while still surfacing
-        # dropped-contact conditions outside stdout-captured environments.
+        # Poll infrequently outside capture: host readback is not capture-safe.
+        # Device-side validation above still executes in captured graphs.
         self._launch_counter += 1
-        if self._launch_counter % self._host_warning_poll_interval == 0:
+        if not self.device.is_capturing and self._launch_counter % self._host_warning_poll_interval == 0:
             hashtable_failures = int(self.contact_reduction.reducer.ht_insert_failures.numpy()[0])
             if hashtable_failures > 0:
                 warnings.warn(
