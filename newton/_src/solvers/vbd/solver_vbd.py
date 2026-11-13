@@ -87,10 +87,7 @@ from .rigid_vbd_kernels import (
     compute_rigid_contact_forces,
     compute_rod_dahl_parameters,
     create_accumulate_body_body_contacts_per_body,
-    create_compute_body_body_contact_forces,
-    create_compute_rigid_contact_forces,
     create_solve_rigid_body,
-    create_update_duals_body_body_contacts,
     forward_step_rigid_bodies,
     init_body_body_contact_materials,
     init_body_body_contacts_alm,
@@ -485,7 +482,6 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         # Rigid body - constraint formulation and stabilization
         rigid_compliant_alm: bool = True,
         rigid_contact_activation_guard: bool = False,
-        rigid_contact_unloading_damping: bool = False,
         rigid_avbd_alpha: float | None = None,  # Shared alpha override; None uses mode defaults
         rigid_avbd_joint_alpha: float | None = None,  # Joint alpha override
         rigid_avbd_contact_alpha: float | None = None,  # Body-body contact alpha override
@@ -609,12 +605,6 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 adds one provisional body solve, one normal-metric gather and one pose copy.
                 Forces, materials and the number of dual updates are unchanged. Extra scratch
                 is one transform per body. Defaults to False; this is not a convergence guarantee.
-            rigid_contact_unloading_damping: Experimental, constructor-only unilateral Kelvin-Voigt
-                contact law for compliant ALM. Damps unloading as well as loading, clips the
-                total normal force at zero, and bounds friction by min(elastic, total normal).
-                Defaults to False, preserving compression-only damping. This changes the
-                physical model, not merely the iteration schedule. Rebuild and recapture
-                after changing this option.
             rigid_avbd_alpha: C0 stabilization strength (``C_stab = C - alpha * C0``). Range: [0, 1].
                 Controls both joints and body-body contacts when neither class-specific
                 override (``rigid_avbd_joint_alpha`` / ``rigid_avbd_contact_alpha``) is set.
@@ -627,8 +617,9 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             rigid_avbd_contact_alpha: Body-body contact alpha override. ``None`` falls back
                 to ``rigid_avbd_alpha`` when set, otherwise ``0.0`` under compliant ALM (authored
                 contact stiffness applies to the raw residual) or ``0.95`` on the legacy path.
-                Under compliant ALM, alpha is stabilization only; retention is set separately by
-                ``rigid_avbd_gamma``.
+                Under compliant ALM, alpha stabilizes only the normal residual. Friction uses
+                current-step tangential slip without positional restoration; multiplier retention
+                is set separately by ``rigid_avbd_gamma``.
             rigid_avbd_beta: Legacy AVBD penalty ramp rate per iteration. ``None`` (default)
                 uses ``0``, disabling ramping (fixed-k). Set to e.g. ``1e5`` for ramping. Used for both
                 linear and angular constraints unless overridden. Does not tune the
@@ -668,10 +659,11 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                     Use the default compliant ALM path and author finite contact stiffness.
             rigid_contact_history: Whether to persist body-body numeric contact state
                 across steps using ``Contacts.rigid_contact_match_index``. Compliant ALM
-                restores the normal multiplier for matched rows. With latest
-                matching it also restores projected tangential multipliers as a
-                numerical warm start; with sticky matching, tangential memory is
-                represented by the collision pipeline's replayed material anchor.
+                restores the normal and projected tangential multipliers for
+                matched rows in both latest and sticky modes. Sticky anchors locate the
+                contact, while friction uses their current-step relative slip. Accumulated
+                tangent displacement is not restored under ALM; multipliers provide a
+                numerical force estimate that preserves a loaded equilibrium.
                 Legacy hard contacts restore the full multiplier; legacy soft contacts
                 restore penalty k only. History is restored only from the contact set
                 the previous step solved: a step on the same contacts (no collision
@@ -884,9 +876,6 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
 
         if rigid_contact_activation_guard and (not rigid_compliant_alm or integrate_with_external_rigid_solver):
             raise ValueError("rigid_contact_activation_guard requires compliant ALM and internal rigid integration.")
-
-        if rigid_contact_unloading_damping and not rigid_compliant_alm:
-            raise ValueError("rigid_contact_unloading_damping requires compliant ALM.")
 
         legacy_controls = [
             name
@@ -1114,39 +1103,12 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             if rigid_contact_activation_guard and integrates_rigid_bodies
             else None
         )
-        self.rigid_contact_unloading_damping = bool(rigid_contact_unloading_damping)
-        self._accumulate_body_body_contacts_narrow = (
-            create_accumulate_body_body_contacts_per_body(_NUM_CONTACT_THREADS_PER_BODY, True)
-            if rigid_contact_unloading_damping
-            else accumulate_body_body_contacts_per_body
-        )
-        self._accumulate_body_body_contacts_wide = (
-            create_accumulate_body_body_contacts_per_body(_WIDE_CONTACT_THREADS_PER_BODY, True)
-            if rigid_contact_unloading_damping
-            else create_accumulate_body_body_contacts_per_body(_WIDE_CONTACT_THREADS_PER_BODY)
-        )
-        self._update_rigid_contact_duals = (
-            create_update_duals_body_body_contacts(True)
-            if rigid_contact_unloading_damping
-            else update_duals_body_body_contacts
-        )
-        self._compute_rigid_contact_forces = (
-            create_compute_rigid_contact_forces(True)
-            if rigid_contact_unloading_damping
-            else compute_rigid_contact_forces
-        )
-        self._compute_body_contact_forces = (
-            create_compute_body_body_contact_forces(True)
-            if rigid_contact_unloading_damping
-            else compute_body_body_contact_forces
+        self._accumulate_body_body_contacts_wide = create_accumulate_body_body_contacts_per_body(
+            _WIDE_CONTACT_THREADS_PER_BODY
         )
         self._contact_activation_kernels = (
             tuple(
-                (
-                    create_accumulate_inactive_contact_metric(width, True)
-                    if rigid_contact_unloading_damping
-                    else create_accumulate_inactive_contact_metric(width)
-                )
+                create_accumulate_inactive_contact_metric(width)
                 for width in (_NUM_CONTACT_THREADS_PER_BODY, _WIDE_CONTACT_THREADS_PER_BODY)
             )
             if rigid_contact_activation_guard and integrates_rigid_bodies
@@ -1157,11 +1119,10 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         if integrates_rigid_bodies:
             rigid_modules = (
                 rigid_vbd_kernels,
-                self._accumulate_body_body_contacts_narrow.module,
+                accumulate_body_body_contacts_per_body.module,
                 self._accumulate_body_body_contacts_wide.module,
-                self._compute_rigid_contact_forces.module,
-                self._compute_body_contact_forces.module,
-                self._update_rigid_contact_duals.module,
+                compute_rigid_contact_forces.module,
+                update_duals_body_body_contacts.module,
             )
             for kernel in self._contact_activation_kernels:
                 self._set_module_options(options, module=kernel.module)
@@ -4013,10 +3974,6 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                     history.lambda_ = self._prev_contact_lambda
                     history.penalty_k = self._prev_contact_penalty_k
                     history.normal = self._prev_contact_normal
-                    restore_compliant_tangent_warmstart = int(
-                        self.rigid_compliant_alm and contacts.contact_matching_mode == "latest"
-                    )
-
                     wp.launch(
                         kernel=init_body_body_contacts_alm,
                         dim=contact_launch_dim,
@@ -4033,7 +3990,6 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                             contacts.rigid_contact_friction,
                             self.rigid_contact_hard,
                             self.rigid_compliant_alm,
-                            restore_compliant_tangent_warmstart,
                             contacts.rigid_contact_match_index,
                             contacts.rigid_contact_match_generation,
                             contacts.contact_generation,
@@ -5034,7 +4990,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             if contacts is not None and model.shape_count > 0:
                 lanes = self._rigid_color_contact_lanes[color]
                 wp.launch(
-                    kernel=self._accumulate_body_body_contacts_narrow
+                    kernel=accumulate_body_body_contacts_per_body
                     if lanes == _NUM_CONTACT_THREADS_PER_BODY
                     else self._accumulate_body_body_contacts_wide,
                     dim=color_group.size * lanes,
@@ -5255,7 +5211,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
 
         if contacts is not None and contacts.rigid_contact_max > 0 and model.shape_count > 0:
             wp.launch(
-                kernel=self._update_rigid_contact_duals,
+                kernel=update_duals_body_body_contacts,
                 dim=contacts.rigid_contact_max,
                 inputs=[
                     contacts.rigid_contact_count,
@@ -5397,7 +5353,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         # The rigid prologue sized the per-contact state to this buffer; the iterate poses live in
         # state_in.body_q and body_q_prev still holds the step-start history the iterations used.
         wp.launch(
-            kernel=self._compute_body_contact_forces,
+            kernel=compute_body_body_contact_forces,
             dim=rigid_contact_max,
             inputs=[
                 float(dt),
@@ -5583,7 +5539,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             self._rigid_contact_point1_world = wp.zeros(max_contacts, dtype=wp.vec3, device=self.device)
 
         wp.launch(
-            kernel=self._compute_rigid_contact_forces,
+            kernel=compute_rigid_contact_forces,
             dim=max_contacts,
             inputs=[
                 float(dt),

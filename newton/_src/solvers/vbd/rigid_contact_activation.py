@@ -23,7 +23,7 @@ from .rigid_vbd_kernels import (
 
 
 @functools.cache
-def create_accumulate_inactive_contact_metric(threads_per_body: int, unloading_damping: bool = False):
+def create_accumulate_inactive_contact_metric(threads_per_body: int):
     """Build a strided gather which adds only normal Hessian blocks, never forces.
 
     A body whose trial crosses any inactive row is flagged in ``body_activated``.
@@ -107,17 +107,7 @@ def create_accumulate_inactive_contact_metric(threads_per_body: int, unloading_d
             k, lam_eff = _material_force_terms(contact_rho[row], contact_ke[row], lam, 1)
             # Mirror the existing compliant normal-force activation, including positive warm multipliers.
             if not ((C <= _SMALL_LENGTH_EPS and lam <= 0.0) or k * (C - shift) + lam_eff <= 0.0):
-                if wp.static(not unloading_damping):
-                    continue
-                # Unloading damping also releases a still-penetrating row once its total force is zero.
-                C_start = -contact_surface_separation(
-                    x_prev if self_is_a else y_prev, y_prev if self_is_a else x_prev, n, margin0[row], margin1[row]
-                )
-                force_now, _elastic_now, _metric_now = _compliant_contact_normal_response(
-                    C - shift, C_start - shift, contact_ke[row], contact_kd[row], contact_rho[row], lam, dt, True
-                )
-                if force_now > 0.0:
-                    continue
+                continue
             if k <= 0.0:
                 continue
 
@@ -135,7 +125,7 @@ def create_accumulate_inactive_contact_metric(threads_per_body: int, unloading_d
                 x_prev if self_is_a else y_prev, y_prev if self_is_a else x_prev, n, margin0[row], margin1[row]
             )
             force, _elastic, metric = _compliant_contact_normal_response(
-                Ct - shift, Cp - shift, contact_ke[row], contact_kd[row], contact_rho[row], lam, dt, unloading_damping
+                Ct - shift, Cp - shift, contact_ke[row], contact_kd[row], contact_rho[row], lam, dt
             )
             if force <= 0.0 or metric <= 0.0:
                 continue

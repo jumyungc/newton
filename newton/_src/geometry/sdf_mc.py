@@ -120,70 +120,43 @@ def int_to_vec3f(x: wp.int32, y: wp.int32, z: wp.int32):
 
 
 @wp.func
-def _triangle_clipped_area_and_centroid(vert_depths: wp.vec3f, num_inside: wp.int32) -> tuple[float, wp.vec3]:
-    """Return clipped area fraction and its centroid's barycentric weights."""
+def get_triangle_fraction(vert_depths: wp.vec3f, num_inside: wp.int32) -> wp.float32:
+    """Compute the fraction of a triangle's area inside its linear zero contour."""
     if num_inside == 3:
-        return 1.0, wp.vec3(1.0 / 3.0)
+        return 1.0
     if num_inside == 0:
-        return 0.0, wp.vec3(1.0 / 3.0)
+        return 0.0
 
     d0 = vert_depths[0]
     d1 = vert_depths[1]
     d2 = vert_depths[2]
-    rotation = int(0)
     if num_inside == 1:
         if vert_depths[1] < 0.0:
             d0, d1, d2 = vert_depths[1], vert_depths[2], vert_depths[0]
-            rotation = 1
         elif vert_depths[2] < 0.0:
             d0, d1, d2 = vert_depths[2], vert_depths[0], vert_depths[1]
-            rotation = 2
     else:
         if vert_depths[1] >= 0.0:
             d0, d1, d2 = vert_depths[1], vert_depths[2], vert_depths[0]
-            rotation = 1
         elif vert_depths[2] >= 0.0:
             d0, d1, d2 = vert_depths[2], vert_depths[0], vert_depths[1]
-            rotation = 2
 
     scale = wp.max(wp.abs(d0), wp.max(wp.abs(d1), wp.abs(d2)))
     d0, d1, d2 = d0 / scale, d1 / scale, d2 / scale
-    fraction = float(0.0)
-    weights = wp.vec3(1.0 / 3.0)
     if num_inside == 1:
-        if d0 != 0.0:
-            t1 = d0 / (d0 - d1)
-            t2 = d0 / (d0 - d2)
-            fraction = t1 * t2
-            weights = wp.vec3(1.0 - (t1 + t2) / 3.0, t1 / 3.0, t2 / 3.0)
-    else:
-        # Split the retained quadrilateral into positive-area triangles.
-        # This avoids cancellation when the excluded triangle is almost full.
-        t1 = float(0.0)
-        t2 = float(0.0)
-        if d1 != 0.0:
-            t1 = -d1 / (d0 - d1)
-        if d2 != 0.0:
-            t2 = -d2 / (d0 - d2)
-        f1 = t1
-        f2 = t2 * (1.0 - t1)
-        fraction = f1 + f2
-        if fraction > 0.0:
-            weights = (
-                (f1 / fraction) * wp.vec3(t1, 2.0 - t1, 1.0) + (f2 / fraction) * wp.vec3(t1 + t2, 1.0 - t1, 2.0 - t2)
-            ) / 3.0
-    if rotation == 1:
-        weights = wp.vec3(weights[2], weights[0], weights[1])
-    elif rotation == 2:
-        weights = wp.vec3(weights[1], weights[2], weights[0])
-    return fraction, weights
+        if d0 == 0.0:
+            return 0.0
+        return (d0 / (d0 - d1)) * (d0 / (d0 - d2))
 
-
-@wp.func
-def get_triangle_fraction(vert_depths: wp.vec3f, num_inside: wp.int32) -> wp.float32:
-    """Compute the fraction of a triangle's area inside its linear zero contour."""
-    fraction, _weights = _triangle_clipped_area_and_centroid(vert_depths, num_inside)
-    return fraction
+    # Split the retained quadrilateral into positive-area triangles to avoid
+    # cancellation when the excluded triangle is almost full.
+    t1 = float(0.0)
+    t2 = float(0.0)
+    if d1 != 0.0:
+        t1 = -d1 / (d0 - d1)
+    if d2 != 0.0:
+        t2 = -d2 / (d0 - d2)
+    return t1 + t2 * (1.0 - t1)
 
 
 @wp.func
@@ -269,10 +242,5 @@ def mc_calc_face(
         area = (n_len * 0.5 * edge_scale) * edge_scale
     center = (face_verts[0] + face_verts[1] + face_verts[2]) / 3.0
     pen_depth = (vert_depths[0] + vert_depths[1] + vert_depths[2]) / 3.0
-    fraction = float(num_inside == 3)
-    if num_inside > 0 and num_inside < 3:
-        fraction, weights = _triangle_clipped_area_and_centroid(vert_depths, num_inside)
-        center = weights[0] * face_verts[0] + weights[1] * face_verts[1] + weights[2] * face_verts[2]
-        pen_depth = wp.dot(weights, vert_depths)
-    area *= fraction
+    area *= get_triangle_fraction(vert_depths, num_inside)
     return area, normal, center, pen_depth, face_verts

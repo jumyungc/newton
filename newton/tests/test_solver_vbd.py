@@ -1540,7 +1540,6 @@ def _rigid_contact_history_restore_from_match_index(test, device):
                         *overrides,
                         1,
                         0,
-                        0,
                         match_index,
                         *matched_gen[:3],
                         history,
@@ -1567,18 +1566,18 @@ def _rigid_contact_history_restore_from_match_index(test, device):
 
 
 def _rigid_contact_history_compliant_alm_tangent_warmstart(test, device):
-    """Verify ALM sticky zeros tangent warm-start and latest cone-clips it."""
+    """Project retained tangential forces into the current material's Coulomb disk."""
     del test
     cases = (
-        # sticky: restore penalty and lambda_n only; zero lambda_t
-        ("sticky", [[1.0, 2.0, 3.0]], [0.25, 1.0], 0, None, [[0.0, 0.0, 3.0]]),
-        # latest: hist lambda_t=(3,4) length 5; mu=0.5, lambda_n=5 -> cone 2.5 -> (1.5, 2)
-        ("latest", [[3.0, 4.0, 5.0]], [0.5, 0.5], 1, None, [[1.5, 2.0, 5.0]]),
-        # A per-contact scale of 0.25 makes the restored cone radius 0.625.
-        ("latest-scaled", [[3.0, 4.0, 5.0]], [0.5, 0.5], 1, 0.25, [[0.375, 0.5, 5.0]]),
+        # Preserve an admissible multiplier, including its nonzero tangent.
+        ([[0.5, 1.0, 3.0]], [0.25, 1.0], None, [[0.5, 1.0, 3.0]]),
+        # Tangent length 5; mu=0.5 and lambda_n=5 give cone radius 2.5.
+        ([[3.0, 4.0, 5.0]], [0.5, 0.5], None, [[1.5, 2.0, 5.0]]),
+        # A per-contact friction scale of 0.25 gives cone radius 0.625.
+        ([[3.0, 4.0, 5.0]], [0.5, 0.5], 0.25, [[0.375, 0.5, 5.0]]),
     )
     with wp.ScopedDevice(device):
-        for _name, hist_lambda, shape_mu, latest, friction_scale, expected_lambda in cases:
+        for hist_lambda, shape_mu, friction_scale, expected_lambda in cases:
             contact_count = wp.array([1], dtype=int, device=device)
             shape0 = wp.array([0], dtype=int, device=device)
             shape1 = wp.array([1], dtype=int, device=device)
@@ -1613,7 +1612,6 @@ def _rigid_contact_history_compliant_alm_tangent_warmstart(test, device):
                     None if friction_scale is None else wp.array([friction_scale], dtype=float, device=device),
                     0,
                     1,
-                    latest,
                     match_index,
                     *matched_gen[:3],
                     history,
@@ -1636,6 +1634,196 @@ def _rigid_contact_history_compliant_alm_tangent_warmstart(test, device):
             )
             np.testing.assert_allclose(penalty_k.numpy(), [20.0])
             np.testing.assert_allclose(contact_lambda.numpy(), expected_lambda)
+
+
+def _rigid_contact_history_preserves_loaded_equilibrium(test, device):
+    """Matched history preserves a loaded static contact, then reverses and releases."""
+    dt, mass, radius, ke = 1.0 / 60.0, 1.0, 0.1, 1000.0
+    for matching in ("latest", "sticky"):
+        with test.subTest(matching=matching), wp.ScopedDevice(device):
+            builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+            cfg = builder.ShapeConfig(ke=ke, kd=0.0, mu=1.0, density=0.0)
+            plane = builder.add_shape_plane(body=-1, cfg=cfg)
+            body = builder.add_body(
+                xform=wp.transform(wp.vec3(0.0, 0.0, radius - 0.01), wp.quat_identity()),
+                mass=mass,
+                inertia=wp.mat33(np.diag([0.1, 0.1, 0.1])),
+                lock_inertia=True,
+            )
+            builder.add_shape_sphere(body=body, radius=radius, cfg=cfg)
+            builder.color()
+            model = builder.finalize(device=device)
+            pipeline = newton.CollisionPipeline(model, broad_phase="nxn", contact_matching=matching)
+            contacts = pipeline.contacts()
+            solver = newton.solvers.SolverVBD(
+                model,
+                iterations=1,
+                rigid_compliant_alm=True,
+                rigid_contact_history=True,
+                rigid_avbd_gamma=1.0,
+                rigid_avbd_contact_alpha=0.0,
+            )
+            state, out = model.state(), model.state()
+            obs = solver.observables(contacts=contacts, kinds={solver.ObservableKind.CONTACT_F})
+            pipeline.collide(state, contacts)
+            test.assertEqual(int(contacts.rigid_contact_count.numpy()[0]), 1)
+            s0, s1 = int(contacts.rigid_contact_shape0.numpy()[0]), int(contacts.rigid_contact_shape1.numpy()[0])
+            b0, b1 = model.shape_body.numpy()[[s0, s1]]
+            test.assertNotEqual(b0 == body, b1 == body)
+            sign = 1.0 if b1 == body else -1.0
+            normal = contacts.rigid_contact_normal.numpy()[0].astype(np.float64)
+            np.testing.assert_allclose(sign * normal, (0.0, 0.0, 1.0), atol=1.0e-7)
+            poses = state.body_q.numpy().astype(np.float64)
+            p0, p1 = contacts.rigid_contact_point0.numpy()[0], contacts.rigid_contact_point1.numpy()[0]
+            x0 = _transform_contact_point_np(poses, b0, p0)
+            x1 = _transform_contact_point_np(poses, b1, p1)
+            margins = float(contacts.rigid_contact_margin0.numpy()[0] + contacts.rigid_contact_margin1.numpy()[0])
+            depth = margins - float(np.dot(x1 - x0, normal))
+            test.assertGreater(depth, 0.0)
+            normal_force, load = ke * depth, 0.2 * ke * depth
+            model.gravity.fill_(wp.vec3(0.0, 0.0, -normal_force / mass))
+            a0 = _transform_contact_point_np(poses, b0, p0 + contacts.rigid_contact_offset0.numpy()[0])
+            a1 = _transform_contact_point_np(poses, b1, p1 + contacts.rigid_contact_offset1.numpy()[0])
+            gap = a1 - a0
+            np.testing.assert_allclose(gap - normal * np.dot(gap, normal), 0.0, atol=1.0e-8)
+            initial_pose = poses[body].copy()
+            lever = (a1 if b1 == body else a0) - initial_pose[:3]
+
+            def set_load(state, magnitude, model=model, body=body, lever=lever):
+                # Apply the load at the contact anchor: its torque must balance
+                # the friction torque, otherwise a free sphere should roll.
+                wrench = np.zeros((model.body_count, 6), dtype=np.float32)
+                wrench[body, :3] = (magnitude, 0.0, 0.0)
+                wrench[body, 3:] = np.cross(lever, wrench[body, :3])
+                state.body_f.assign(wrench)
+
+            # Seed the analytic equilibrium through the ordinary snapshot,
+            # then match a new collision generation. No settling loop or
+            # assumed identity generation supplies the initial friction force.
+            solver._refresh_rigid_contact_state(contacts, True)
+            saved_lambda = np.zeros((*solver.body_body_contact_lambda.shape, 3), dtype=np.float32)
+            saved_lambda[0] = sign * np.array((-load, 0.0, normal_force))
+            solver.body_body_contact_lambda.assign(saved_lambda)
+            solver._snapshot_rigid_contact_history(contacts)
+            saved_generation = int(contacts.contact_generation.numpy()[0])
+            pipeline.collide(state, contacts)
+            test.assertEqual(int(contacts.rigid_contact_match_index.numpy()[0]), 0)
+            test.assertEqual(int(contacts.rigid_contact_match_generation.numpy()[0]), saved_generation)
+            test.assertNotEqual(int(contacts.contact_generation.numpy()[0]), saved_generation)
+            set_load(state, load)
+            solver.step(state, out, None, contacts, dt, observables=obs)
+            state, out = out, state
+            pose = state.body_q.numpy()[body].astype(np.float64)
+            test.assertLess(np.linalg.norm(pose[:3] - initial_pose[:3]), 1.0e-6)
+            angle = 2.0 * np.arctan2(np.linalg.norm(pose[3:6]), abs(pose[6]))
+            test.assertLess(angle, 1.0e-5)
+            # CONTACT_F is force on shape0; the solved lambda acts on shape1.
+            np.testing.assert_allclose(-sign * obs.contact_f.numpy()[0, :3], (-load, 0.0, normal_force), atol=1.0e-3)
+
+            # A converged reversal separates stale-force bias from the effect
+            # of deliberately limiting the equilibrium check to one iteration.
+            solver.iterations = 64
+            for _ in range(8):
+                pipeline.collide(state, contacts)
+                set_load(state, -load)
+                solver.step(state, out, None, contacts, dt, observables=obs)
+                state, out = out, state
+            test.assertEqual(int(contacts.rigid_contact_count.numpy()[0]), 1)
+            np.testing.assert_allclose(-sign * obs.contact_f.numpy()[0, :3], (load, 0.0, normal_force), atol=1.0e-3)
+
+            # Move the plane away without resetting the body or its history.
+            # Losing the contact must immediately restore free-flight dynamics.
+            transforms = model.shape_transform.numpy()
+            transforms[plane, 2] -= 1.0
+            model.shape_transform.assign(transforms)
+            pipeline.collide(state, contacts)
+            test.assertEqual(int(contacts.rigid_contact_count.numpy()[0]), 0)
+            set_load(state, 0.0)
+            expected_velocity = state.body_qd.numpy()[body, :3].astype(np.float64)
+            expected_velocity[2] -= normal_force * dt / mass
+            solver.step(state, out, None, contacts, dt, observables=obs)
+            np.testing.assert_allclose(out.body_qd.numpy()[body, :3], expected_velocity, atol=2.0e-5)
+
+
+def _rigid_contact_history_sliding_reversal_dissipates(test, device):
+    """Friction opposes reversed slip even while sticky witnesses remain matched."""
+    dt = 1.0 / 600.0
+    for matching in ("latest", "sticky"):
+        with test.subTest(matching=matching), wp.ScopedDevice(device):
+            builder = newton.ModelBuilder(gravity=(0.0, 0.0, -10.0))
+            cfg = builder.ShapeConfig(ke=1000.0, kd=0.0, mu=1.0, density=0.0)
+            builder.add_ground_plane(cfg=cfg)
+            body = builder.add_body(
+                xform=wp.transform(wp.vec3(0.0, 0.0, 0.09), wp.quat_identity()),
+                mass=1.0,
+                # Keep surface rotation negligible during this short sliding
+                # trajectory; the sphere remains a freely integrated body.
+                inertia=wp.mat33(np.eye(3) * 1000.0),
+                lock_inertia=True,
+            )
+            builder.add_shape_sphere(body, radius=0.1, cfg=cfg)
+            builder.color()
+            model = builder.finalize(device=device)
+            pipeline = newton.CollisionPipeline(model, contact_matching=matching)
+            contacts = pipeline.contacts()
+            solver = newton.solvers.SolverVBD(
+                model, iterations=64, rigid_compliant_alm=True, rigid_contact_history=True, rigid_avbd_gamma=1.0
+            )
+            state, out = model.state(), model.state()
+            obs = solver.observables(contacts=contacts, kinds={solver.ObservableKind.CONTACT_F})
+            for _ in range(10):
+                pipeline.collide(state, contacts)
+                solver.step(state, out, None, contacts, dt, observables=obs)
+                state, out = out, state
+
+            for phase in (1.0, -1.0):
+                # An external impulse reverses the initial velocity. The
+                # subsequent force exceeds the Coulomb bound in that direction.
+                velocity = state.body_qd.numpy()
+                velocity[body, 0] = phase * 0.02
+                state.body_qd.assign(velocity)
+                for step in range(4):
+                    wrench = np.zeros((model.body_count, 6), dtype=np.float32)
+                    wrench[body, 0] = phase * 20.0
+                    state.body_f.assign(wrench)
+                    pipeline.collide(state, contacts)
+                    test.assertEqual(int(contacts.rigid_contact_count.numpy()[0]), 1)
+                    test.assertEqual(int(contacts.rigid_contact_match_index.numpy()[0]), 0)
+                    before = state.body_q.numpy().astype(np.float64)
+                    velocity_before = float(state.body_qd.numpy()[body, 0])
+                    s0 = int(contacts.rigid_contact_shape0.numpy()[0])
+                    s1 = int(contacts.rigid_contact_shape1.numpy()[0])
+                    b0, b1 = model.shape_body.numpy()[[s0, s1]]
+                    force_sign = 1.0 if b0 == body else -1.0
+                    if matching == "sticky" and phase == -1.0 and step == 0:
+                        a0 = _transform_contact_point_np(
+                            before,
+                            b0,
+                            contacts.rigid_contact_point0.numpy()[0] + contacts.rigid_contact_offset0.numpy()[0],
+                        )
+                        a1 = _transform_contact_point_np(
+                            before,
+                            b1,
+                            contacts.rigid_contact_point1.numpy()[0] + contacts.rigid_contact_offset1.numpy()[0],
+                        )
+                        # Establish that this reversal really retains earlier
+                        # slip; fresh or reset anchors would hide the defect.
+                        test.assertGreater(abs(a1[0] - a0[0]), 1.0e-5)
+                        test.assertLess(abs(a1[0] - a0[0]), 0.0005)
+                    solver.step(state, out, None, contacts, dt, observables=obs)
+                    state, out = out, state
+                    dx = float(state.body_q.numpy()[body, 0] - before[body, 0])
+                    force = force_sign * obs.contact_f.numpy()[0, :3].astype(np.float64)
+                    test.assertGreater(phase * dx, 1.0e-6)
+                    test.assertGreater(force[2], 9.0)
+                    np.testing.assert_allclose(force[0], -phase * force[2], rtol=1.0e-3, atol=1.0e-4)
+                    test.assertLessEqual(force[0] * dx, 1.0e-8, "Friction did positive work on sustained slip")
+                    # Tie reported friction to the actual primal motion, so
+                    # correcting only force export cannot hide stale-anchor forces.
+                    velocity_after = float(state.body_qd.numpy()[body, 0])
+                    np.testing.assert_allclose(
+                        velocity_after - velocity_before, dt * (phase * 20.0 + force[0]), atol=1.0e-5
+                    )
 
 
 def _rigid_contact_history_soft_restores_penalty_only(test, device):
@@ -1672,7 +1860,6 @@ def _rigid_contact_history_soft_restores_penalty_only(test, device):
                 None,
                 None,
                 None,
-                0,
                 0,
                 0,
                 wp.array([0], dtype=wp.int32, device=device),
@@ -1939,7 +2126,6 @@ def _rigid_contact_reset_ownership(test, device):
                 None,
                 None,
                 0,
-                1,
                 1,
                 match_index,
                 *matched_gen[:3],
@@ -6070,7 +6256,6 @@ def _rigid_contact_history_restore_checks_provenance(test, device):
                     None,
                     0,
                     1,
-                    1,
                     wp.array([1, 0], dtype=wp.int32, device=device),
                     wp.array([match_generation], dtype=wp.int32, device=device),
                     wp.array([contact_generation], dtype=wp.int32, device=device),
@@ -6588,6 +6773,20 @@ add_function_test(
     _rigid_contact_history_restore_from_match_index,
     devices=devices,
 )
+add_function_test(
+    TestSolverVBD,
+    "test_rigid_contact_history_sliding_reversal_dissipates",
+    _rigid_contact_history_sliding_reversal_dissipates,
+    devices=devices,
+)
+
+add_function_test(
+    TestSolverVBD,
+    "test_rigid_contact_history_preserves_loaded_equilibrium",
+    _rigid_contact_history_preserves_loaded_equilibrium,
+    devices=devices,
+)
+
 add_function_test(
     TestSolverVBD,
     "test_rigid_contact_history_compliant_alm_tangent_warmstart",

@@ -1,0 +1,1 @@
+Use current-step tangential displacement for compliant VBD friction, including sticky contact geometry, and retain projected tangential warm-start forces in both contact matching modes. This preserves loaded equilibrium and avoids friction accelerating reversed sliding from accumulated anchor displacement. Legacy hard-contact positional stabilization is unchanged.

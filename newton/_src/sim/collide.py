@@ -3269,7 +3269,11 @@ class CollisionPipeline:
             wp.copy(self._unit_scale_sdf_rescaled_host, self._unit_scale_sdf_rescaled)
 
         # The reducers' counters are reused by the next pass, so latch losses on this contact stream.
-        for reducer in (self.narrow_phase.global_contact_reducer, self.narrow_phase.group_contact_reducer):
+        for reducer in (
+            self.narrow_phase.global_contact_reducer,
+            self.narrow_phase.group_contact_reducer,
+            self.hydroelastic_sdf.contact_reduction.reducer if self.hydroelastic_sdf is not None else None,
+        ):
             if reducer is not None:
                 wp.launch(
                     _record_reduction_overflow,

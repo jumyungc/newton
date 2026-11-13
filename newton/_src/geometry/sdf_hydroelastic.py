@@ -64,8 +64,8 @@ from .sdf_mc import (
     MC_DEGENERATE_N_SQ_EPS,
     MC_EDGE_VAL_DIFF_EPS,
     _scaled_triangle_cross,
-    _triangle_clipped_area_and_centroid,
     get_mc_tables,
+    get_triangle_fraction,
 )
 from .sdf_texture import (
     TextureSDFData,
@@ -359,13 +359,7 @@ def mc_calc_face_texture(
     center = (face_verts[0] + face_verts[1] + face_verts[2]) / 3.0
     adjusted_sdf = (vert_adjusted_sdf[0] + vert_adjusted_sdf[1] + vert_adjusted_sdf[2]) / 3.0
     pair_separation = (vert_pair_separation[0] + vert_pair_separation[1] + vert_pair_separation[2]) / 3.0
-    fraction = float(num_inside == 3)
-    if num_inside > 0 and num_inside < 3:
-        fraction, weights = _triangle_clipped_area_and_centroid(vert_pair_separation, num_inside)
-        center = weights[0] * face_verts[0] + weights[1] * face_verts[1] + weights[2] * face_verts[2]
-        adjusted_sdf = wp.dot(weights, vert_adjusted_sdf)
-        pair_separation = wp.dot(weights, vert_pair_separation)
-    force_area = geometric_area * fraction
+    force_area = geometric_area * get_triangle_fraction(vert_pair_separation, num_inside)
     return force_area, geometric_area, normal, center, adjusted_sdf, pair_separation, face_verts
 
 
@@ -1026,6 +1020,8 @@ class HydroelasticSDF:
                 writer_data.contact_count,
                 writer_data.contact_max,
                 self.contact_reduction.reducer.ht_insert_failures,
+                self.contact_reduction.reducer.buffer_overflows,
+                self.deterministic,
             ],
             device=self.device,
             record_tape=False,
@@ -2357,9 +2353,12 @@ def verify_collision_step(
     contact_count: wp.array[int],
     max_contact_count: int,
     ht_insert_failures: wp.array[int],
+    face_contact_overflows: wp.array[int],
+    deterministic: bool,
 ):
     # Checks if any buffer overflowed in any stage of the collision pipeline.
     has_overflow = False
+    at_deterministic_limit = False
     if num_broad_collide[0] > max_num_broad_collide:
         wp.printf(
             "  [hydroelastic] broad phase overflow: %d > %d. Increase buffer_fraction or buffer_mult_broad.\n",
@@ -2389,11 +2388,20 @@ def verify_collision_step(
         )
         has_overflow = True
     if num_iso_voxels[0] > max_num_iso_voxels:
-        wp.printf(
-            "  [hydroelastic] iso voxel overflow: %d > %d. Increase buffer_fraction or buffer_mult_iso.\n",
-            num_iso_voxels[0],
-            max_num_iso_voxels,
-        )
+        if deterministic and max_num_iso_voxels == _MAX_DETERMINISTIC_ISO_VOXELS:
+            wp.printf(
+                "  [hydroelastic] iso voxel overflow: %d > %d, the deterministic limit. "
+                "Use fewer worlds or disable deterministic mode.\n",
+                num_iso_voxels[0],
+                max_num_iso_voxels,
+            )
+            at_deterministic_limit = True
+        else:
+            wp.printf(
+                "  [hydroelastic] iso voxel overflow: %d > %d. Increase buffer_fraction or buffer_mult_iso.\n",
+                num_iso_voxels[0],
+                max_num_iso_voxels,
+            )
         has_overflow = True
     if face_contact_count[0] > max_face_contact_count:
         wp.printf(
@@ -2401,6 +2409,24 @@ def verify_collision_step(
             face_contact_count[0],
             max_face_contact_count,
         )
+        has_overflow = True
+    if face_contact_overflows[0] > 0:
+        # Failed reservations roll back contact_count, so the count alone cannot reveal this loss.
+        if deterministic and max_face_contact_count == (1 << int(CONTACT_ID_BITS)) - 1:
+            wp.printf(
+                "  [hydroelastic] face contact overflow: %d faces dropped at the deterministic limit of %d. "
+                "Use fewer worlds or disable deterministic mode.\n",
+                face_contact_overflows[0],
+                max_face_contact_count,
+            )
+            at_deterministic_limit = True
+        else:
+            wp.printf(
+                "  [hydroelastic] face contact overflow: %d faces dropped at capacity %d. "
+                "Increase buffer_fraction or buffer_mult_contact.\n",
+                face_contact_overflows[0],
+                max_face_contact_count,
+            )
         has_overflow = True
     if contact_count[0] > max_contact_count:
         wp.printf(
@@ -2418,7 +2444,13 @@ def verify_collision_step(
         has_overflow = True
 
     if has_overflow:
-        wp.printf(
-            "Warning: Hydroelastic buffers overflowed; some contacts may be dropped. "
-            "Increase HydroelasticSDF.Config.buffer_fraction and/or per-stage buffer multipliers.\n",
-        )
+        if at_deterministic_limit:
+            wp.printf(
+                "Warning: Hydroelastic deterministic limit exceeded; contacts beyond it are dropped. "
+                "Buffer multipliers cannot raise this limit.\n",
+            )
+        else:
+            wp.printf(
+                "Warning: Hydroelastic buffers overflowed; some contacts may be dropped. "
+                "Increase HydroelasticSDF.Config.buffer_fraction and/or per-stage buffer multipliers.\n",
+            )

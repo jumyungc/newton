@@ -103,10 +103,16 @@ labels (:ref:`Contact Matching`). The solver uses the labels in two places.
 Between steps, ``rigid_contact_history=True`` snapshots the solved state of
 every contact at the end of the step (multiplier, penalty stiffness, normal)
 and restores it onto the matched contacts at the next step's contact refresh:
-the normal multiplier along the new normal and, with ``"latest"`` matching,
-the tangential multiplier projected onto the friction disk. Unmatched contacts
-start cold, and so does every contact when two detection passes run between
-two steps. Between iterations, a ``RIGID`` slot on the ``ITERATIONS`` schedule
+the normal multiplier along the new normal and the tangential multiplier
+projected onto the friction disk, in both ``"latest"`` and ``"sticky"`` modes.
+Under compliant ALM, friction responds to the anchors' relative displacement
+within the current step, including any prescribed surface velocity. It does
+not restore accumulated tangential displacement from an earlier step: doing
+so can make friction accelerate reversed slip. The saved multiplier is a
+numerical force estimate that preserves loaded static equilibrium. Contact
+alpha stabilizes the normal residual only; legacy hard contact retains its
+positional tangent stabilization. Unmatched contacts start cold, and so does
+every contact when two detection passes run between two steps. Between iterations, a ``RIGID`` slot on the ``ITERATIONS`` schedule
 re-detects inside the iteration loop and replaces the contact set in the
 middle of the solve; the solver snapshots the in-flight state before each pass
 and restores it onto the new set in the same way, so the multipliers built up
@@ -805,11 +811,15 @@ resting contact carries its load like a penalty of the material stiffness
 uses the smaller :math:`k_{\text{eff}}`, which keeps the 6x6 systems well
 conditioned. Friction is a Coulomb bound, not a smooth law: the tangential
 force :math:`\rho_t\,\mathbf{u}_t + \boldsymbol{\lambda}_t`, with
-:math:`\mathbf{u}_t` the tangential offset between the two anchored surface
-points and :math:`\rho_t` the tangent metric, is projected onto the disk
+:math:`\mathbf{u}_t` the current-step relative displacement of the surface
+anchors, including prescribed surface velocity, and :math:`\rho_t` the tangent
+metric, is projected onto the disk
 :math:`\lVert\mathbf{f}_t\rVert \le \mu f_n`,
 and :math:`\boldsymbol{\lambda}_t` is advanced and projected onto the disk of
-radius :math:`\mu\lambda_n` in the same dual step.
+radius :math:`\mu\lambda_n` in the same dual step. Accumulated tangential
+separation from previous steps is not added to this residual. Sticky matching
+still replays material anchors, while retained multipliers warm-start their
+contact forces; it does not impose a positional tangential spring.
 
 When both contact bodies are dynamic and share a colour, their pose updates
 are simultaneous. The compliant path doubles only the normal and tangential
@@ -831,16 +841,6 @@ metric are given by ``_compliant_contact_normal_response``, rather than the
 undamped formulas above. The primal and dual friction disks use only the elastic
 part of that normal response, not the total damped normal force.
 
-The optional constructor setting ``rigid_contact_unloading_damping=True``
-selects a different unilateral Kelvin--Voigt model for compliant body-body
-contacts only. Its fixed-point force is
-:math:`\max(k\max(C,0)+(k_d/h)(C-\max(C_{\mathrm{prev}},0)),0)`.
-The dashpot also resists unloading, but the total normal force is never tensile.
-Its friction support is the smaller of the elastic and total normal forces.
-This is a physical-model choice, not an accuracy switch; it does not change
-particle contact, legacy rigid contact, stiffness or the timestep. The default
-remains compression-only. Both force-reporting APIs use the selected model.
-
 The optional constructor setting ``rigid_contact_activation_guard=True``
 stabilizes contact activation using the actual body Newton trial, including
 joint and other applied forces. It computes a provisional pose, adds normal
@@ -854,11 +854,11 @@ per local iteration is one provisional body solve, one inactive-contact gather
 and a body-pose copy. Disabled by default, it allocates no trial-pose buffer and
 launches none of these additional operations.
 
-Both options are experimental, runtime-only solver choices; they do not add
-USD-authored material properties. They are constructor-only: construct a new
+This option is an experimental, runtime-only solver choice; it does not add
+USD-authored material properties. It is constructor-only: construct a new
 solver and recapture CUDA
-graphs to change them. Do not toggle their attributes on an existing solver.
-They are not universal remedies for high-stiffness float32 force accuracy,
+graphs to change it. Do not toggle its attribute on an existing solver.
+It is not a universal remedy for high-stiffness float32 force accuracy,
 under-resolved contact geometry, missing robot features or insufficient solver
 budgets.
 

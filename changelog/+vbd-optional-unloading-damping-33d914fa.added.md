@@ -1,1 +1,0 @@
-Add an opt-in unilateral unloading-damping model for compliant VBD body-body contacts, with consistent primal, dual and force-reporting paths. The optional activation guard recognizes unloading-released rows even at positive penetration. Keep compression-only damping as the default; particle and legacy rigid contact laws are unchanged.

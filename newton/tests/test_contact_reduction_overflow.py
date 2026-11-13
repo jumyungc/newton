@@ -3,6 +3,7 @@
 
 """Report contact candidates dropped inside global contact reduction."""
 
+import sys
 import unittest
 import warnings
 from unittest import mock
@@ -17,9 +18,11 @@ from newton._src.geometry.contact_reduction_global import (
     export_contact_to_buffer,
 )
 from newton._src.geometry.contact_reduction_hydroelastic import HydroelasticContactReduction
+from newton._src.geometry.sdf_hydroelastic import verify_collision_step
+from newton.geometry import HydroelasticSDF
 from newton.solvers import SolverSemiImplicit
 from newton.solvers.experimental.coupled import SolverCoupled
-from newton.tests.unittest_utils import add_function_test, get_cuda_test_devices, get_test_devices
+from newton.tests.unittest_utils import StdOutCapture, add_function_test, get_cuda_test_devices, get_test_devices
 
 
 @wp.kernel
@@ -59,6 +62,31 @@ def test_buffer_exhaustion_is_reported_and_cleared(test, device):
     # The rollback keeps contact_count within capacity, so the count alone cannot reveal the loss.
     test.assertEqual(int(reducer.contact_count.numpy()[0]), 1)
     test.assertEqual(int(reducer.buffer_overflows.numpy()[0]), 1)
+    if device.is_cpu and sys.platform != "win32":
+        # In-process native printf capture is unreliable on Windows. Other platforms
+        # verify the diagnostic using the real failed-reservation counter.
+        zero = wp.zeros(1, dtype=wp.int32, device=device)
+        output_capture = StdOutCapture()
+        output_capture.begin()
+        try:
+            wp.launch(
+                verify_collision_step,
+                dim=1,
+                inputs=[zero, 1] * 5
+                + [
+                    reducer.contact_count,
+                    reducer.capacity,
+                    zero,
+                    1,
+                    reducer.ht_insert_failures,
+                    reducer.buffer_overflows,
+                    False,
+                ],
+                device=device,
+            )
+        finally:
+            output = output_capture.end()
+        test.assertIn("face contact overflow: 1 faces dropped at capacity 1.", output)
     reducer.clear_active()
     test.assertEqual(int(reducer.buffer_overflows.numpy()[0]), 0)
     reducer.buffer_overflows.fill_(1)
@@ -147,6 +175,91 @@ def test_unreduced_hydroelastic_clear_resets_buffer_overflows(test, device):
     hydro.clear()
     test.assertEqual(int(hydro.reducer.buffer_overflows.numpy()[0]), 0)
     test.assertEqual(int(hydro.reducer.contact_count.numpy()[0]), 0)
+
+
+def test_pipeline_flags_dropped_hydroelastic_faces(test, device, reduce_contacts):
+    """Latch real hydroelastic face losses and reset them during captured replay."""
+    builder = newton.ModelBuilder()
+    cfg = newton.ModelBuilder.ShapeConfig(
+        is_hydroelastic=True,
+        sdf_max_resolution=32,
+        sdf_narrow_band_range=(-0.2, 0.2),
+        sdf_padding=0.1,
+        gap=0.0,
+        margin=0.0,
+        kh=1.0e8,
+    )
+    for z in (0.0, 0.9):
+        body = builder.add_body(xform=wp.transform(wp.vec3(0.0, 0.0, z), wp.quat_identity()))
+        builder.add_shape_box(body, hx=0.5, hy=0.5, hz=0.5, cfg=cfg)
+    model = builder.finalize(device=device)
+    state = model.state()
+    pipeline = newton.CollisionPipeline(
+        model,
+        broad_phase="explicit",
+        rigid_contact_max=4096,
+        sdf_hydroelastic_config=HydroelasticSDF.Config(
+            reduce_contacts=reduce_contacts,
+            pre_prune_contacts=False,
+            buffer_mult_contact=0,
+            contact_reduction_hashtable_size_factor=4.0,
+        ),
+    )
+    contacts = pipeline.contacts()
+    hydro = pipeline.hydroelastic_sdf
+    test.assertIsNotNone(hydro)
+    reducer = hydro.contact_reduction.reducer
+    test.assertEqual(hydro.max_num_face_contacts, 64)
+
+    # Keep intentional device diagnostics out of the outer CheckOutput capture.
+    # StdOutCapture itself does not synchronize CUDA or flush pending printf.
+    output_capture = StdOutCapture()
+    output_capture.begin()
+    try:
+        # Warm up the real pipeline and isolate the exhausted capacity.
+        pipeline.collide(state, contacts)
+        stage_capacities = (hydro.max_num_blocks_broad, *hydro.iso_max_dims)
+        for count, capacity in zip(hydro.iso_buffer_counts, stage_capacities, strict=True):
+            test.assertLessEqual(int(count.numpy()[0]), capacity)
+        test.assertEqual(int(reducer.ht_insert_failures.numpy()[0]), 0)
+        test.assertEqual(int(reducer.contact_count.numpy()[0]), reducer.capacity)
+        dropped_faces = int(reducer.buffer_overflows.numpy()[0])
+        test.assertGreater(dropped_faces, 0)
+        test.assertGreater(int(contacts.rigid_contact_count.numpy()[0]), 0)
+        test.assertLessEqual(int(contacts.rigid_contact_count.numpy()[0]), contacts.rigid_contact_max)
+        # This is the rejecting assertion on the original implementation.
+        test.assertEqual(int(contacts._reduction_overflow.numpy()[0]), 1)
+
+        overlapping = state.body_q.numpy()
+        separated = overlapping.copy()
+        separated[1, 2] = 2.0
+        state.body_q.assign(separated)
+        pipeline.collide(state, contacts)
+        test.assertEqual(int(contacts._reduction_overflow.numpy()[0]), 0)
+        test.assertEqual(int(reducer.buffer_overflows.numpy()[0]), 0)
+        test.assertEqual(int(contacts.rigid_contact_count.numpy()[0]), 0)
+
+        # Replay the same graph against changed poses. Every asserted loss comes
+        # from geometry, and a later separated pass must clear the latched flag.
+        with wp.ScopedCapture(device=device) as capture:
+            pipeline.collide(state, contacts)
+        for poses, expect_loss in ((overlapping, True), (separated, False)):
+            state.body_q.assign(poses)
+            wp.capture_launch(capture.graph)
+            loss = int(reducer.buffer_overflows.numpy()[0])
+            test.assertEqual(int(contacts._reduction_overflow.numpy()[0]), int(expect_loss))
+            if expect_loss:
+                test.assertGreater(loss, 0)
+            else:
+                test.assertEqual(loss, 0)
+                test.assertEqual(int(contacts.rigid_contact_count.numpy()[0]), 0)
+    finally:
+        # Flush kernel printf while the nested fd capture remains active, even
+        # when a fail-before assertion aborts the test.
+        try:
+            wp.synchronize_device(device)
+        finally:
+            output_capture.end()
 
 
 def test_coupled_entry_contacts_keep_reduction_loss(test, device):
@@ -391,6 +504,16 @@ add_function_test(
     test_deterministic_limit_applies_only_with_reducer,
     devices=["cpu"],
 )
+
+for _reduce_contacts in (True, False):
+    add_function_test(
+        TestContactReductionOverflow,
+        "test_pipeline_flags_dropped_hydroelastic_faces_" + ("reduced" if _reduce_contacts else "unreduced"),
+        test_pipeline_flags_dropped_hydroelastic_faces,
+        devices=get_cuda_test_devices(),
+        reduce_contacts=_reduce_contacts,
+    )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

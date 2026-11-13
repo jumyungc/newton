@@ -1,0 +1,1 @@
+Report hydroelastic face-buffer losses and preserve reducer overflow status on contact streams, including CUDA graph replay; distinguish deterministic packing limits from adjustable buffer capacities.
