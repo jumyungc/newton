@@ -11,7 +11,7 @@ import warp as wp
 import newton
 from newton.solvers.experimental.coupled import SolverCoupled
 from newton.tests._usd_deformable_test_utils import _add_cable_curve, _deformable_stage
-from newton.tests.unittest_utils import USD_AVAILABLE, add_function_test, get_test_devices
+from newton.tests.unittest_utils import add_function_test, get_test_devices, requires
 
 
 def _axial_rod(device, *, stiffness, damping, mass, ratio, tau, gravity, bend_ratio=0.0, inertia=1.0e-3, frame=None):
@@ -402,7 +402,7 @@ def test_relax_history_holds_current_pose(test, device):
     test.assertGreater(drift[False], 1.0e-3)
 
 
-@unittest.skipUnless(USD_AVAILABLE, "Requires usd-core")
+@requires("pxr.Usd")
 def test_usd_cable_curve_authors_relaxation(test, device):
     """Apply relaxation attributes authored on a USD cable curve to every rod joint generated from it."""
     from pxr import Sdf, UsdGeom
