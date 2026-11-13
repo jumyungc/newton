@@ -1,0 +1,1 @@
+Parallelize scalar-row reduction in long CUDA paths of the VBD structural KKT solver while preserving arithmetic order. Keep short-path and CPU scheduling unchanged, register the new kernels with solver-owned module options, and reuse long-path float views across solves.

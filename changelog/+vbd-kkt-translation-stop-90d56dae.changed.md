@@ -1,0 +1,1 @@
+Stop the contact-time translation reconciliation of the VBD structural KKT solver once an island's residual and solved correction are within a relative float32 tolerance, and withhold a correction whose part outside that tolerance does not lower the island's quadratic. This changes the numerical stopping rule; trajectories can differ. No public option or call changes.

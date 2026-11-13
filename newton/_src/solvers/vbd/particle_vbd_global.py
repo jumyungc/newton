@@ -974,8 +974,7 @@ class ParticleGlobalVBD:
         ):
             raise ValueError(
                 "particle_global_iterations requires finite, nonnegative shear, shifted-volume and damping "
-                "coefficients, with lambda + mu >= 1e-6 when mu > 0; smaller shifted-volume coefficients "
-                "use a different clamped constitutive law in local VBD."
+                "coefficients. Its supported constitutive material domain requires lambda + mu >= 1e-6 when mu > 0."
             )
         if model.world_count > 1:
             raise ValueError("particle_global_iterations does not yet support multiple worlds.")

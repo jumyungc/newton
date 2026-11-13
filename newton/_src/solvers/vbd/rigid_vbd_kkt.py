@@ -524,278 +524,297 @@ def reset_structural_solve_state(
         island_step_scale[slot] = 1.0
 
 
-@wp.kernel
-def accumulate_structural_body_body_contacts(
-    dt: float,
-    body_ids: wp.array[wp.int32],
-    body_q_prev: wp.array[wp.transform],
-    body_q: wp.array[wp.transform],
-    body_com: wp.array[wp.vec3],
-    body_inv_mass: wp.array[float],
-    friction_epsilon: float,
-    contact_penalty_k: wp.array[float],
-    contact_normal_rho: wp.array[float],
-    contact_material_ke: wp.array[float],
-    contact_material_kd: wp.array[float],
-    contact_material_mu: wp.array[float],
-    contact_tangent_rho: wp.array[float],
-    contact_lambda: wp.array[wp.vec3],
-    contact_C0: wp.array[wp.vec3],
-    stab_alpha: float,
-    legacy_hard_contacts: int,
-    contact_compliant_alm: int,
-    rigid_contact_count: wp.array[int],
-    rigid_contact_shape0: wp.array[int],
-    rigid_contact_shape1: wp.array[int],
-    rigid_contact_point0: wp.array[wp.vec3],
-    rigid_contact_point1: wp.array[wp.vec3],
-    rigid_contact_surface_velocity: wp.array[wp.vec3],
-    rigid_contact_offset0: wp.array[wp.vec3],
-    rigid_contact_offset1: wp.array[wp.vec3],
-    rigid_contact_normal: wp.array[wp.vec3],
-    rigid_contact_margin0: wp.array[float],
-    rigid_contact_margin1: wp.array[float],
-    shape_body: wp.array[wp.int32],
-    body_slot_by_id: wp.array[wp.int32],
-    graph_body_island: wp.array[wp.int32],
-    classify_islands: int,
-    translation_only: bool,
-    forces_only: bool,
-    body_inertia_q: wp.array[wp.transform],
-    body_mass: wp.array[float],
-    island_translation_free: wp.array[int],
-    translation_system: wp.array[wp.mat44d],
-    body_contact_buffer_pre_alloc: int,
-    body_contact_counts: wp.array[wp.int32],
-    body_contact_indices: wp.array[wp.int32],
-    body_forces: wp.array[wp.vec3],
-    body_torques: wp.array[wp.vec3],
-    body_hessian_ll: wp.array[wp.mat33],
-    body_hessian_al: wp.array[wp.mat33],
-    body_hessian_aa: wp.array[wp.mat33],
-    body_dynamic_contact_hessian: wp.array[wp.spatial_matrix],
-    island_contact_state: wp.array[wp.int32],
-):
-    """Accumulate the contact objective and classify structural islands."""
-    tid = wp.tid()
-    body_slot = tid // _NUM_CONTACT_THREADS_PER_BODY
-    contact_thread = tid % _NUM_CONTACT_THREADS_PER_BODY
-    if body_slot >= body_ids.shape[0]:
-        return
+def _make_accumulate_structural_contacts(translation_only: bool, forces_only: bool):
+    """Specialize atomic destinations without changing the contact work budget.
 
-    body = body_ids[body_slot]
-    if body_inv_mass[body] <= 0.0:
-        return
+    The deterministic runtime plans scatter storage from compiled destinations.
+    Static modes avoid sorting and polling destinations unused by this pass.
+    """
 
-    body_contact_count = body_contact_counts[body]
-    island = graph_body_island[body_slot]
-    if classify_islands == 1 and contact_thread == 0 and body_contact_count > body_contact_buffer_pre_alloc:
-        wp.atomic_min(island_contact_state, island, -2)
-    num_contacts = wp.min(body_contact_count, body_contact_buffer_pre_alloc)
-    if contact_thread >= num_contacts and not (translation_only and contact_thread == 0):
-        # Translation lane zero also owns the body's inertial contribution.
-        return
-    if translation_only and island_translation_free[island] == 0:
-        return
-    contact_count = rigid_contact_count[0]
-    force_acc = wp.vec3(0.0)
-    torque_acc = wp.vec3(0.0)
-    h_ll_acc = wp.mat33(0.0)
-    h_al_acc = wp.mat33(0.0)
-    h_aa_acc = wp.mat33(0.0)
-    dynamic_h_ll_acc = wp.mat33(0.0)
-    dynamic_h_al_acc = wp.mat33(0.0)
-    dynamic_h_aa_acc = wp.mat33(0.0)
+    def accumulate_structural_body_body_contacts(
+        dt: float,
+        body_ids: wp.array[wp.int32],
+        body_q_prev: wp.array[wp.transform],
+        body_q: wp.array[wp.transform],
+        body_com: wp.array[wp.vec3],
+        body_inv_mass: wp.array[float],
+        friction_epsilon: float,
+        contact_penalty_k: wp.array[float],
+        contact_normal_rho: wp.array[float],
+        contact_material_ke: wp.array[float],
+        contact_material_kd: wp.array[float],
+        contact_material_mu: wp.array[float],
+        contact_tangent_rho: wp.array[float],
+        contact_lambda: wp.array[wp.vec3],
+        contact_C0: wp.array[wp.vec3],
+        stab_alpha: float,
+        legacy_hard_contacts: int,
+        contact_compliant_alm: int,
+        rigid_contact_count: wp.array[int],
+        rigid_contact_shape0: wp.array[int],
+        rigid_contact_shape1: wp.array[int],
+        rigid_contact_point0: wp.array[wp.vec3],
+        rigid_contact_point1: wp.array[wp.vec3],
+        rigid_contact_surface_velocity: wp.array[wp.vec3],
+        rigid_contact_offset0: wp.array[wp.vec3],
+        rigid_contact_offset1: wp.array[wp.vec3],
+        rigid_contact_normal: wp.array[wp.vec3],
+        rigid_contact_margin0: wp.array[float],
+        rigid_contact_margin1: wp.array[float],
+        shape_body: wp.array[wp.int32],
+        body_slot_by_id: wp.array[wp.int32],
+        graph_body_island: wp.array[wp.int32],
+        classify_islands: int,
+        body_inertia_q: wp.array[wp.transform],
+        body_mass: wp.array[float],
+        island_translation_free: wp.array[int],
+        translation_system: wp.array[wp.mat44d],
+        body_contact_buffer_pre_alloc: int,
+        body_contact_counts: wp.array[wp.int32],
+        body_contact_indices: wp.array[wp.int32],
+        body_forces: wp.array[wp.vec3],
+        body_torques: wp.array[wp.vec3],
+        body_hessian_ll: wp.array[wp.mat33],
+        body_hessian_al: wp.array[wp.mat33],
+        body_hessian_aa: wp.array[wp.mat33],
+        body_dynamic_contact_hessian: wp.array[wp.spatial_matrix],
+        island_contact_state: wp.array[wp.int32],
+    ):
+        """Accumulate only the selected objective and classify structural islands."""
+        tid = wp.tid()
+        body_slot = tid // _NUM_CONTACT_THREADS_PER_BODY
+        contact_thread = tid % _NUM_CONTACT_THREADS_PER_BODY
+        if body_slot >= body_ids.shape[0]:
+            return
 
-    i = contact_thread
-    while i < num_contacts:
-        contact = body_contact_indices[body * body_contact_buffer_pre_alloc + i]
-        if contact >= contact_count:
-            i += _NUM_CONTACT_THREADS_PER_BODY
-            continue
+        body = body_ids[body_slot]
+        if body_inv_mass[body] <= 0.0:
+            return
 
-        shape0 = rigid_contact_shape0[contact]
-        shape1 = rigid_contact_shape1[contact]
-        body0 = shape_body[shape0] if shape0 >= 0 else -1
-        body1 = shape_body[shape1] if shape1 >= 0 else -1
-        if body0 != body and body1 != body:
-            i += _NUM_CONTACT_THREADS_PER_BODY
-            continue
+        body_contact_count = body_contact_counts[body]
+        island = graph_body_island[body_slot]
+        if classify_islands == 1 and contact_thread == 0 and body_contact_count > body_contact_buffer_pre_alloc:
+            wp.atomic_min(island_contact_state, island, -2)
+        num_contacts = wp.min(body_contact_count, body_contact_buffer_pre_alloc)
+        if contact_thread >= num_contacts and not (wp.static(translation_only) and contact_thread == 0):
+            # Translation lane zero also owns the body's inertial contribution.
+            return
+        if wp.static(translation_only) and island_translation_free[island] == 0:
+            return
+        contact_count = rigid_contact_count[0]
+        force_acc = wp.vec3(0.0)
+        torque_acc = wp.vec3(0.0)
+        h_ll_acc = wp.mat33(0.0)
+        h_al_acc = wp.mat33(0.0)
+        h_aa_acc = wp.mat33(0.0)
+        dynamic_h_ll_acc = wp.mat33(0.0)
+        dynamic_h_al_acc = wp.mat33(0.0)
+        dynamic_h_aa_acc = wp.mat33(0.0)
 
-        point0_local = rigid_contact_point0[contact]
-        point1_local = rigid_contact_point1[contact]
-        point0_offset = rigid_contact_offset0[contact]
-        point1_offset = rigid_contact_offset1[contact]
-        normal = rigid_contact_normal[contact]
-        point0 = wp.transform_point(body_q[body0], point0_local) if body0 >= 0 else point0_local
-        point1 = wp.transform_point(body_q[body1], point1_local) if body1 >= 0 else point1_local
-        normal_error = -contact_surface_separation(
-            point0,
-            point1,
-            normal,
-            rigid_contact_margin0[contact],
-            rigid_contact_margin1[contact],
-        )
+        i = contact_thread
+        while i < num_contacts:
+            contact = body_contact_indices[body * body_contact_buffer_pre_alloc + i]
+            if contact >= contact_count:
+                i += _NUM_CONTACT_THREADS_PER_BODY
+                continue
 
-        other_body = body1 if body == body0 else body0
-        dynamic_pair = other_body >= 0 and body_inv_mass[other_body] > 0.0 and body_slot_by_id[other_body] >= 0
-        if translation_only and other_body >= 0 and body_inv_mass[other_body] > 0.0:
-            other_slot = body_slot_by_id[other_body]
-            if other_slot < 0 or graph_body_island[other_slot] != island:
-                # A dynamic contact crossing islands couples their translations.
-                blocked = wp.mat44d(0.0)
-                blocked[3, 3] = wp.float64(1.0)
-                wp.atomic_add(translation_system, island, blocked)
-                return
-        if translation_only and dynamic_pair and graph_body_island[body_slot_by_id[other_body]] == island:
-            # A common translation does no work on an internal pair. Omit
-            # both endpoint forces instead of cancelling rounded sums.
-            i += _NUM_CONTACT_THREADS_PER_BODY
-            continue
-        if classify_islands == 1 and dynamic_pair:
-            separation = (
-                wp.dot(normal, point1 - point0) - rigid_contact_margin0[contact] - rigid_contact_margin1[contact]
+            shape0 = rigid_contact_shape0[contact]
+            shape1 = rigid_contact_shape1[contact]
+            body0 = shape_body[shape0] if shape0 >= 0 else -1
+            body1 = shape_body[shape1] if shape1 >= 0 else -1
+            if body0 != body and body1 != body:
+                i += _NUM_CONTACT_THREADS_PER_BODY
+                continue
+
+            point0_local = rigid_contact_point0[contact]
+            point1_local = rigid_contact_point1[contact]
+            point0_offset = rigid_contact_offset0[contact]
+            point1_offset = rigid_contact_offset1[contact]
+            normal = rigid_contact_normal[contact]
+            point0 = wp.transform_point(body_q[body0], point0_local) if body0 >= 0 else point0_local
+            point1 = wp.transform_point(body_q[body1], point1_local) if body1 >= 0 else point1_local
+            normal_error = -contact_surface_separation(
+                point0,
+                point1,
+                normal,
+                rigid_contact_margin0[contact],
+                rigid_contact_margin1[contact],
             )
-            if not (separation > 0.0 and wp.dot(contact_lambda[contact], normal) <= 0.0):
-                wp.atomic_min(island_contact_state, island, -1)
 
-        multiplier = wp.vec3(0.0)
-        multiplier_normal = 0.0
-        stabilized_error = normal_error
-        tangent_C0 = wp.vec3(0.0)
-        normal_weight = _load_solve_weight(
-            contact_penalty_k,
-            contact_normal_rho,
-            contact,
-            contact_compliant_alm,
-        )
-        material_k = contact_material_ke[contact]
-        if legacy_hard_contacts == 1 or contact_compliant_alm == 1:
-            multiplier = contact_lambda[contact]
-            multiplier_normal = wp.dot(multiplier, normal)
-            C0 = contact_C0[contact]
-            C0_normal = wp.dot(normal, C0)
-            stabilized_error = normal_error - stab_alpha * C0_normal
-            tangent_C0 = (1.0 - stab_alpha) * (C0 - normal * C0_normal)
+            other_body = body1 if body == body0 else body0
+            dynamic_pair = other_body >= 0 and body_inv_mass[other_body] > 0.0 and body_slot_by_id[other_body] >= 0
+            if wp.static(translation_only):
+                if other_body >= 0 and body_inv_mass[other_body] > 0.0:
+                    other_slot = body_slot_by_id[other_body]
+                    if other_slot < 0 or graph_body_island[other_slot] != island:
+                        # A dynamic contact crossing islands couples their translations.
+                        blocked = wp.mat44d(0.0)
+                        blocked[3, 3] = wp.float64(1.0)
+                        wp.atomic_add(translation_system, island, blocked)
+                        return
+            if (
+                wp.static(translation_only)
+                and dynamic_pair
+                and graph_body_island[body_slot_by_id[other_body]] == island
+            ):
+                # A common translation does no work on an internal pair. Omit
+                # both endpoint forces instead of cancelling rounded sums.
+                i += _NUM_CONTACT_THREADS_PER_BODY
+                continue
+            if classify_islands == 1 and dynamic_pair:
+                separation = (
+                    wp.dot(normal, point1 - point0) - rigid_contact_margin0[contact] - rigid_contact_margin1[contact]
+                )
+                if not (separation > 0.0 and wp.dot(contact_lambda[contact], normal) <= 0.0):
+                    wp.atomic_min(island_contact_state, island, -1)
 
-        normal_primal_k, multiplier_normal_eff = _material_force_terms(
-            normal_weight,
-            material_k,
-            multiplier_normal,
-            contact_compliant_alm,
-        )
-        inactive = multiplier_normal <= 0.0 and (
-            normal_error <= _SMALL_LENGTH_EPS or normal_primal_k * stabilized_error + multiplier_normal_eff <= 0.0
-        )
-        if inactive:
-            # Use the local active-set metric: a zero-reaction, open contact
-            # adds neither force nor curvature. Trial contact refresh still
-            # detects activation along a simultaneous structural correction.
+            multiplier = wp.vec3(0.0)
+            multiplier_normal = 0.0
+            stabilized_error = normal_error
+            tangent_C0 = wp.vec3(0.0)
+            normal_weight = _load_solve_weight(
+                contact_penalty_k,
+                contact_normal_rho,
+                contact,
+                contact_compliant_alm,
+            )
+            material_k = contact_material_ke[contact]
+            if legacy_hard_contacts == 1 or contact_compliant_alm == 1:
+                multiplier = contact_lambda[contact]
+                multiplier_normal = wp.dot(multiplier, normal)
+                C0 = contact_C0[contact]
+                C0_normal = wp.dot(normal, C0)
+                stabilized_error = normal_error - stab_alpha * C0_normal
+                tangent_C0 = (1.0 - stab_alpha) * (C0 - normal * C0_normal)
+
+            normal_primal_k, multiplier_normal_eff = _material_force_terms(
+                normal_weight,
+                material_k,
+                multiplier_normal,
+                contact_compliant_alm,
+            )
+            inactive = multiplier_normal <= 0.0 and (
+                normal_error <= _SMALL_LENGTH_EPS or normal_primal_k * stabilized_error + multiplier_normal_eff <= 0.0
+            )
+            if inactive:
+                # Use the local active-set metric: a zero-reaction, open contact
+                # adds neither force nor curvature. Trial contact refresh still
+                # detects activation along a simultaneous structural correction.
+                i += _NUM_CONTACT_THREADS_PER_BODY
+                continue
+
+            surface_velocity = wp.vec3(0.0)
+            if rigid_contact_surface_velocity:
+                surface_velocity = rigid_contact_surface_velocity[contact]
+
+            (
+                force0,
+                torque0,
+                h_ll0,
+                h_al0,
+                h_aa0,
+                force1,
+                torque1,
+                h_ll1,
+                h_al1,
+                h_aa1,
+            ) = evaluate_rigid_contact_from_collision(
+                body0,
+                body1,
+                body_q,
+                body_q_prev,
+                body_com,
+                point0_local,
+                point1_local,
+                surface_velocity,
+                point0_offset,
+                point1_offset,
+                normal,
+                stabilized_error,
+                normal_weight,
+                material_k,
+                contact_tangent_rho[contact],
+                contact_material_kd[contact],
+                multiplier,
+                contact_material_mu[contact],
+                friction_epsilon,
+                legacy_hard_contacts,
+                contact_compliant_alm,
+                dt,
+                tangent_C0,
+            )
+
+            if body == body0:
+                force_acc += force0
+                torque_acc += torque0
+                h_ll_acc += h_ll0
+                h_al_acc += h_al0
+                h_aa_acc += h_aa0
+                if dynamic_pair:
+                    dynamic_h_ll_acc += h_ll0
+                    dynamic_h_al_acc += h_al0
+                    dynamic_h_aa_acc += h_aa0
+            else:
+                force_acc += force1
+                torque_acc += torque1
+                h_ll_acc += h_ll1
+                h_al_acc += h_al1
+                h_aa_acc += h_aa1
+                if dynamic_pair:
+                    dynamic_h_ll_acc += h_ll1
+                    dynamic_h_al_acc += h_al1
+                    dynamic_h_aa_acc += h_aa1
             i += _NUM_CONTACT_THREADS_PER_BODY
-            continue
 
-        surface_velocity = wp.vec3(0.0)
-        if rigid_contact_surface_velocity:
-            surface_velocity = rigid_contact_surface_velocity[contact]
+        if wp.static(translation_only):
+            # Restrict directly to the three common-translation coordinates.
+            # No rotational scratch or body-matrix gather is consumed here.
+            contribution = wp.mat44d(0.0)
+            com_world = wp.transform_point(body_q[body], body_com[body])
+            inertial_delta = wp.transform_point(body_inertia_q[body], body_com[body]) - com_world
+            mass = wp.float64(0.0)
+            if contact_thread == 0:
+                mass = wp.float64(body_mass[body]) / (wp.float64(dt) * wp.float64(dt))
+                for col in range(3):
+                    contribution[3, col] = mass * wp.float64(wp.abs(com_world[col]))
+            for row in range(3):
+                contribution[row, 3] = mass * wp.float64(inertial_delta[row]) + wp.float64(force_acc[row])
+                for column in range(3):
+                    value = wp.float64(h_ll_acc[row, column])
+                    if row == column:
+                        value += mass
+                    contribution[row, column] = value
+            wp.atomic_add(translation_system, island, contribution)
+            return
 
-        (
-            force0,
-            torque0,
-            h_ll0,
-            h_al0,
-            h_aa0,
-            force1,
-            torque1,
-            h_ll1,
-            h_al1,
-            h_aa1,
-        ) = evaluate_rigid_contact_from_collision(
-            body0,
-            body1,
-            body_q,
-            body_q_prev,
-            body_com,
-            point0_local,
-            point1_local,
-            surface_velocity,
-            point0_offset,
-            point1_offset,
-            normal,
-            stabilized_error,
-            normal_weight,
-            material_k,
-            contact_tangent_rho[contact],
-            contact_material_kd[contact],
-            multiplier,
-            contact_material_mu[contact],
-            friction_epsilon,
-            legacy_hard_contacts,
-            contact_compliant_alm,
-            dt,
-            tangent_C0,
-        )
-
-        if body == body0:
-            force_acc += force0
-            torque_acc += torque0
-            h_ll_acc += h_ll0
-            h_al_acc += h_al0
-            h_aa_acc += h_aa0
-            if dynamic_pair:
-                dynamic_h_ll_acc += h_ll0
-                dynamic_h_al_acc += h_al0
-                dynamic_h_aa_acc += h_aa0
         else:
-            force_acc += force1
-            torque_acc += torque1
-            h_ll_acc += h_ll1
-            h_al_acc += h_al1
-            h_aa_acc += h_aa1
-            if dynamic_pair:
-                dynamic_h_ll_acc += h_ll1
-                dynamic_h_al_acc += h_al1
-                dynamic_h_aa_acc += h_aa1
-        i += _NUM_CONTACT_THREADS_PER_BODY
+            wp.atomic_add(body_forces, body, force_acc)
+            if wp.static(forces_only):
+                # The line search reads force/torque, never these trial Hessians.
+                wp.atomic_add(body_torques, body, torque_acc)
+                return
+            else:
+                wp.atomic_add(body_hessian_ll, body, h_ll_acc)
+                if wp.static(not translation_only):
+                    wp.atomic_add(body_torques, body, torque_acc)
+                    wp.atomic_add(body_hessian_al, body, h_al_acc)
+                    wp.atomic_add(body_hessian_aa, body, h_aa_acc)
+                dynamic_hessian = wp.spatial_matrix(0.0)
+                for row in range(3):
+                    for column in range(3):
+                        dynamic_hessian[row, column] = dynamic_h_ll_acc[row, column]
+                        if wp.static(not translation_only):
+                            dynamic_hessian[row, column + 3] = dynamic_h_al_acc[column, row]
+                            dynamic_hessian[row + 3, column] = dynamic_h_al_acc[row, column]
+                            dynamic_hessian[row + 3, column + 3] = dynamic_h_aa_acc[row, column]
+                wp.atomic_add(body_dynamic_contact_hessian, body_slot, dynamic_hessian)
 
-    if translation_only:
-        # Restrict directly to the three common-translation coordinates.
-        # No rotational scratch or body-matrix gather is consumed here.
-        contribution = wp.mat44d(0.0)
-        inertial_delta = wp.transform_point(body_inertia_q[body], body_com[body]) - wp.transform_point(
-            body_q[body], body_com[body]
-        )
-        mass = wp.float64(0.0)
-        if contact_thread == 0:
-            mass = wp.float64(body_mass[body]) / (wp.float64(dt) * wp.float64(dt))
-        for row in range(3):
-            contribution[row, 3] = mass * wp.float64(inertial_delta[row]) + wp.float64(force_acc[row])
-            for column in range(3):
-                value = wp.float64(h_ll_acc[row, column])
-                if row == column:
-                    value += mass
-                contribution[row, column] = value
-        wp.atomic_add(translation_system, island, contribution)
-        return
+    return wp.kernel(accumulate_structural_body_body_contacts)
 
-    wp.atomic_add(body_forces, body, force_acc)
-    if forces_only:
-        # The line search reads force/torque, never these trial Hessians.
-        wp.atomic_add(body_torques, body, torque_acc)
-        return
-    wp.atomic_add(body_hessian_ll, body, h_ll_acc)
-    if not translation_only:
-        wp.atomic_add(body_torques, body, torque_acc)
-        wp.atomic_add(body_hessian_al, body, h_al_acc)
-        wp.atomic_add(body_hessian_aa, body, h_aa_acc)
-    dynamic_hessian = wp.spatial_matrix(0.0)
-    for row in range(3):
-        for column in range(3):
-            dynamic_hessian[row, column] = dynamic_h_ll_acc[row, column]
-            if not translation_only:
-                dynamic_hessian[row, column + 3] = dynamic_h_al_acc[column, row]
-                dynamic_hessian[row + 3, column] = dynamic_h_al_acc[row, column]
-                dynamic_hessian[row + 3, column + 3] = dynamic_h_aa_acc[row, column]
-    wp.atomic_add(body_dynamic_contact_hessian, body_slot, dynamic_hessian)
+
+accumulate_structural_body_body_contacts = _make_accumulate_structural_contacts(False, False)
+_accumulate_structural_contact_forces = _make_accumulate_structural_contacts(False, True)
+_accumulate_structural_translation_contacts = _make_accumulate_structural_contacts(True, False)
 
 
 @wp.kernel
@@ -2341,6 +2360,161 @@ def back_substitute_cr_in_place(
     """Recover eliminated rows into rhs, which now stores the solution."""
     entry = eliminated_rows[wp.tid()]
     _back_substitute_cr_row(entry[0], entry[1], stride, entry[2], lower, diagonal, upper, rhs)
+
+
+# Scalar-row long-path reduction adapted from Argon's 11 November review.
+@wp.func
+def _mul_row6_mat66(row_vec: wp.spatial_vector, mat: wp.array3d[float], slot: int) -> wp.spatial_vector:
+    out = wp.spatial_vector()
+    for c in range(6):
+        s = float(0.0)
+        for t in range(6):
+            s = _path_matrix_fma(row_vec[t], mat[slot, t, c], s)
+        out[c] = s
+    return out
+
+
+@wp.func
+def _dot_row6_vec6(row_vec: wp.spatial_vector, vec: wp.array2d[float], slot: int) -> float:
+    m = _SpatialRowMatrix(0.0)
+    for c in range(6):
+        m[0, c] = row_vec[c]
+    v = wp.spatial_vector(vec[slot, 0], vec[slot, 1], vec[slot, 2], vec[slot, 3], vec[slot, 4], vec[slot, 5])
+    return (m * v)[0]
+
+
+@wp.func
+def _reduce_cr_scalar_row(
+    base: int,
+    local_row: int,
+    r: int,
+    stride: int,
+    row_count: int,
+    lower: wp.array3d[float],
+    diagonal: wp.array3d[float],
+    upper: wp.array3d[float],
+    rhs: wp.array2d[float],
+):
+    row = base + local_row
+    lower_r = wp.spatial_vector()
+    diag_r = wp.spatial_vector(
+        diagonal[row, r, 0],
+        diagonal[row, r, 1],
+        diagonal[row, r, 2],
+        diagonal[row, r, 3],
+        diagonal[row, r, 4],
+        diagonal[row, r, 5],
+    )
+    upper_r = wp.spatial_vector()
+    rhs_r = rhs[row, r]
+
+    if local_row >= stride:
+        eliminated = row - stride
+        lo_in = wp.spatial_vector(
+            lower[row, r, 0],
+            lower[row, r, 1],
+            lower[row, r, 2],
+            lower[row, r, 3],
+            lower[row, r, 4],
+            lower[row, r, 5],
+        )
+        factor = _mul_row6_mat66(lo_in, diagonal, eliminated)
+        prod_lo = _mul_row6_mat66(factor, lower, eliminated)
+        prod_up = _mul_row6_mat66(factor, upper, eliminated)
+        lower_r = -prod_lo
+        diag_r = diag_r - prod_up
+        rhs_r = rhs_r - _dot_row6_vec6(factor, rhs, eliminated)
+
+    if local_row + stride < row_count:
+        eliminated = row + stride
+        up_in = wp.spatial_vector(
+            upper[row, r, 0],
+            upper[row, r, 1],
+            upper[row, r, 2],
+            upper[row, r, 3],
+            upper[row, r, 4],
+            upper[row, r, 5],
+        )
+        factor = _mul_row6_mat66(up_in, diagonal, eliminated)
+        prod_lo = _mul_row6_mat66(factor, lower, eliminated)
+        diag_r = diag_r - prod_lo
+        rhs_r = rhs_r - _dot_row6_vec6(factor, rhs, eliminated)
+        if local_row + 2 * stride < row_count:
+            prod_up = _mul_row6_mat66(factor, upper, eliminated)
+            upper_r = -prod_up
+
+    for c in range(6):
+        lower[row, r, c] = lower_r[c]
+        diagonal[row, r, c] = diag_r[c]
+        upper[row, r, c] = upper_r[c]
+    rhs[row, r] = rhs_r
+
+
+@wp.kernel(module="unique", enable_backward=False)
+def reduce_cr_in_place_rows(
+    stride: int,
+    survivor_rows: wp.array[wp.vec3i],
+    lower_f: wp.array3d[float],
+    diagonal_f: wp.array3d[float],
+    upper_f: wp.array3d[float],
+    rhs_f: wp.array2d[float],
+):
+    """Reduce retained CR rows with one scalar row per thread."""
+    idx, r = wp.tid()
+    entry = survivor_rows[idx]
+    _reduce_cr_scalar_row(entry[0], entry[1], r, stride, entry[2], lower_f, diagonal_f, upper_f, rhs_f)
+
+
+@wp.kernel(module="unique", enable_backward=False)
+def solve_cr_tail_persistent_rows(
+    paths: wp.array[wp.vec3i],
+    lower: wp.array[wp.spatial_matrix],
+    diagonal: wp.array[wp.spatial_matrix],
+    upper: wp.array[wp.spatial_matrix],
+    rhs: wp.array[wp.spatial_vector],
+    lower_f: wp.array3d[float],
+    diagonal_f: wp.array3d[float],
+    upper_f: wp.array3d[float],
+    rhs_f: wp.array2d[float],
+):
+    """Finish a strided CR tail in place with scalar-row CR reductions."""
+    tid = wp.tid()
+    width = wp.block_dim()
+    lane = tid % width
+    path = paths[tid // width]
+    base = path[0]
+    row_count = path[1]
+    initial_stride = path[2]
+    stride = int(initial_stride)
+    groups = width // 6
+    group = lane // 6
+    r = lane % 6
+    active_count = (row_count + stride - 1) // stride
+    while active_count > _CR_SERIAL_TERMINAL_SIZE:
+        row = stride + 2 * stride * lane
+        while row < row_count:
+            diagonal[base + row] = _inverse_spatial_robust(diagonal[base + row])
+            row += 2 * stride * width
+        _synchronize_cr_block()
+        if group < groups:
+            row = 2 * stride * group
+            while row < row_count:
+                _reduce_cr_scalar_row(base, row, r, stride, row_count, lower_f, diagonal_f, upper_f, rhs_f)
+                row += 2 * stride * groups
+        _synchronize_cr_block()
+        stride *= 2
+        active_count = (row_count + stride - 1) // stride
+    if lane == 0:
+        _solve_strided_cr_coarse_impl(base, stride, row_count, lower, diagonal, upper, rhs)
+    _synchronize_cr_block()
+    stride //= 2
+    while stride >= initial_stride:
+        row = stride + 2 * stride * lane
+        while row < row_count:
+            _back_substitute_cr_row(base, row, stride, row_count, lower, diagonal, upper, rhs)
+            row += 2 * stride * width
+        _synchronize_cr_block()
+        stride //= 2
 
 
 @wp.kernel
@@ -3907,10 +4081,11 @@ def accumulate_free_translation_system(
                     wp.atomic_add(system, island, contribution)
                     return
 
-    inertial_delta = wp.transform_point(body_inertia_q[body], body_com[body]) - wp.transform_point(
-        body_q[body], body_com[body]
-    )
+    com_world = wp.transform_point(body_q[body], body_com[body])
+    inertial_delta = wp.transform_point(body_inertia_q[body], body_com[body]) - com_world
     mass = wp.float64(body_mass[body]) / (wp.float64(dt) * wp.float64(dt))
+    for col in range(3):
+        contribution[3, col] = mass * wp.float64(wp.abs(com_world[col]))
     delta = correction[slot] * step_scale[island]
     h_ll, h_al = contact_hessian_ll[body], contact_hessian_al[body]
     dynamic = dynamic_contact_hessian[slot]
@@ -3952,10 +4127,6 @@ def correct_free_translation(
     packed = system[island]
     if translation_free[island] == 0 or island_state[island] < -1 or packed[3, 3] != wp.float64(0.0) or scale <= 0.0:
         return
-    if apply_translation and track_pending and not stop_at_roundoff:
-        # Keep all iterations whenever any island admits this correction.
-        # A blocked island never writes poses, even if its factor is nonfinite.
-        wp.atomic_max(pending, 0, 1)
     matrix = wp.mat33d(0.0)
     rhs = wp.vec3d(0.0)
     for row in range(3):
@@ -3963,6 +4134,24 @@ def correct_free_translation(
         for column in range(3):
             matrix[row, column] = packed[row, column]
     shift = wp.inverse(matrix) * rhs
+    if apply_translation and stop_at_roundoff:
+        # A coordinate is at roundoff when neither the island residual nor the solved step taken
+        # through the metric's own diagonal exceeds a relative tolerance of 2^-22 (two float32
+        # epsilons) on the island's inertia-weighted coordinates (packed in row 3, cols 0..2).
+        # The step test keeps a correction that off-diagonal contact curvature moves onto
+        # another coordinate.
+        tolerance = wp.float64(2.384185791015625e-7)
+        kept = shift
+        moving = int(0)
+        for axis in range(3):
+            if wp.max(wp.abs(rhs[axis]), wp.abs(matrix[axis, axis] * shift[axis])) <= tolerance * packed[3, axis]:
+                kept[axis] = wp.float64(0.0)
+            else:
+                moving += 1
+        # Stop when every coordinate is at roundoff, and when the step without the coordinates
+        # at roundoff, a model of what a coarse position keeps, does not lower the quadratic.
+        if moving == 0 or wp.dot(rhs, kept) <= wp.float64(0.5) * wp.dot(kept, matrix * kept):
+            return
     if wp.isfinite(shift[0]) and wp.isfinite(shift[1]) and wp.isfinite(shift[2]):
         if apply_translation:
             # This path solves only common translation, with unit step scale
@@ -3974,10 +4163,7 @@ def correct_free_translation(
             translated = position + wp.vec3(float(shift[0]), float(shift[1]), float(shift[2]))
             body_q[body] = wp.transform(translated, wp.transform_get_rotation(pose))
             if track_pending and stop_at_roundoff:
-                for axis in range(3):
-                    roundoff = 2.384185791015625e-7 * wp.max(wp.abs(position[axis]), wp.abs(translated[axis]))
-                    if wp.abs(translated[axis] - position[axis]) > roundoff:
-                        wp.atomic_max(pending, 0, 1)
+                wp.atomic_max(pending, 0, 1)
         else:
             value = correction[slot]
             for axis in range(3):
@@ -7107,10 +7293,17 @@ class _PathBucket:
         self.cr_side_stream = (
             wp.Stream(self.device) if fused and self.persistent_paths is not None and long_route else None
         )
+        # Float aliases share the four owned row buffers; no extra device storage.
+        self.cr_float_buffers = (
+            [array.view(float) for array in (self.lower[0], self.diagonal[0], self.upper[0], self.rhs[0])]
+            if self.device.is_cuda and fused and long_route
+            else None
+        )
 
     def solve_rows(self):
         """Solve every block-tridiagonal path in four in-place row buffers."""
         buffers = [self.lower[0], self.diagonal[0], self.upper[0], self.rhs[0]]
+        buffers_f = self.cr_float_buffers
         invert_limit = _CR_TAIL_MAX_ROWS if self.cr_fused else _CR_SERIAL_TERMINAL_SIZE
         side = self.cr_side_stream
         if side is not None:
@@ -7118,7 +7311,7 @@ class _PathBucket:
             main = wp.get_stream(self.device)
             side.wait_stream(main)
             with wp.ScopedStream(side, sync_enter=False):
-                self._solve_long_rows(buffers, invert_limit)
+                self._solve_long_rows(buffers, buffers_f, invert_limit)
         if self.persistent_paths is not None:
             wp.launch(
                 solve_cr_persistent,
@@ -7131,12 +7324,12 @@ class _PathBucket:
         if side is not None:
             main.wait_stream(side)
         else:
-            self._solve_long_rows(buffers, invert_limit)
+            self._solve_long_rows(buffers, buffers_f, invert_limit)
 
-    def _solve_long_rows(self, buffers, invert_limit):
+    def _solve_long_rows(self, buffers, buffers_f, invert_limit):
         """Reduce paths too long for one block level by level, then finish their tails."""
         for level_idx, (stride, eliminated, survivors) in enumerate(self.cr_levels):
-            if level_idx == 0:
+            if buffers_f is not None or level_idx == 0:
                 wp.launch(
                     invert_cr_eliminated_in_place,
                     eliminated.shape[0],
@@ -7145,20 +7338,30 @@ class _PathBucket:
                     device=self.device,
                     block_dim=self.spatial_block_dim,
                 )
-            wp.launch(
-                reduce_cr_in_place,
-                survivors.shape[0],
-                inputs=[stride, invert_limit, survivors],
-                outputs=buffers,
-                device=self.device,
-                block_dim=self.spatial_block_dim,
-            )
+            if buffers_f is not None:
+                wp.launch(
+                    reduce_cr_in_place_rows,
+                    (survivors.shape[0], 6),
+                    inputs=[stride, survivors],
+                    outputs=buffers_f,
+                    device=self.device,
+                    block_dim=128,
+                )
+            else:
+                wp.launch(
+                    reduce_cr_in_place,
+                    survivors.shape[0],
+                    inputs=[stride, invert_limit, survivors],
+                    outputs=buffers,
+                    device=self.device,
+                    block_dim=self.spatial_block_dim,
+                )
         if self.tail_paths is not None:
             wp.launch(
-                solve_cr_tail_persistent,
+                solve_cr_tail_persistent_rows if buffers_f is not None else solve_cr_tail_persistent,
                 self.tail_paths.shape[0] * self.spatial_block_dim,
                 inputs=[self.tail_paths],
-                outputs=buffers,
+                outputs=buffers + buffers_f if buffers_f is not None else buffers,
                 device=self.device,
                 block_dim=self.spatial_block_dim,
             )
@@ -9210,7 +9413,6 @@ class StructuralGraphKKT:
         body_inv_mass,
         *,
         enable_paired_open_chains=False,
-        enable_captured_contact_shortcuts=False,
         allow_general_joint_paths=False,
         supported_joint_types: set[int] | None = None,
         ignore_free_completion_joints=False,
@@ -9227,10 +9429,6 @@ class StructuralGraphKKT:
         # Row launches use the current stream and every side stream except the
         # contact stream, which may refresh the contact objective meanwhile.
         self.row_lanes = (None, self.side_streams[0], *self.side_streams[2:]) if self.side_streams is not None else None
-        # Translation refinement may accumulate rounded shifts on each pass.
-        # Its early exit is restricted to reproducible reductions. A completed
-        # directional search, in contrast, needs no further trial evaluation.
-        self.enable_captured_contact_shortcuts = enable_captured_contact_shortcuts
         self.spatial_block_dim = _SPATIAL_GPU_BLOCK_DIM if self.device.is_cuda else 1
         self.path_buckets: list[_PathBucket] = []
         self.tree_buckets: list[_TreeBucket] = []
@@ -10186,34 +10384,32 @@ class StructuralGraphKKT:
             # and internal contact separations are invariant under the shift.
             self.island_step_scale.fill_(1.0)
             self.body_correction.zero_()
+            if contacts is None:
+                # Nothing to reconcile without contacts: one projection, always applied.
+                balance_translation(apply_translation=True, stop_at_roundoff=False)
+                return
             track_pending = self.device.is_cpu or (self.device.is_capturing and wp.is_conditional_graph_supported())
-            stop_at_roundoff = self.device.is_cpu or self.enable_captured_contact_shortcuts
             if track_pending:
                 self.line_search_pending.fill_(1)
 
             def translate(*, refresh=True):
                 if refresh:
                     refresh_contact_objective(translation=True)
-                # Eligibility depends on fixed incidence, so check it once.
-                # Reproducible roundoff stopping still checks every iterate.
-                check_pending = track_pending and (stop_at_roundoff or not refresh)
-                if check_pending:
+                # An island accepts a correction only under the stop's relative tolerance and guard;
+                # every island that accepted one in this evaluation raises the flag again.
+                if track_pending:
                     self.line_search_pending.zero_()
                 balance_translation(
                     apply_translation=True,
-                    track_pending=check_pending,
-                    stop_at_roundoff=stop_at_roundoff,
-                    restricted_ready=contacts is not None and contacts.rigid_contact_max > 0,
+                    track_pending=track_pending,
+                    restricted_ready=contacts.rigid_contact_max > 0,
                 )
 
-            # Default CUDA skips repeated evaluations only if every island
-            # is blocked: no pose was changed and incidence is fixed here.
-            # Eligible islands retain all sixteen evaluations. Only reproducible
-            # modes may additionally stop at float32 position roundoff.
-            evaluations = 1 if contacts is None else 16
-            if self.device.is_cuda and track_pending and stop_at_roundoff and evaluations > 1:
-                # Keep the same first evaluation and at most fifteen refreshes,
-                # without replicating every conditional body into the graph.
+            # One evaluation on the stored objective and at most fifteen refreshed ones, with
+            # the same stopping rule in every determinism mode.
+            evaluations = 16
+            if self.device.is_cuda and track_pending:
+                # One graph loop instead of fifteen replicated conditional bodies.
                 translate(refresh=False)
                 self.translation_iterations_remaining.fill_(evaluations - 1)
 
@@ -10227,15 +10423,6 @@ class StructuralGraphKKT:
                     )
 
                 wp.capture_while(self.line_search_pending, repeat_translation)
-            elif track_pending and not stop_at_roundoff:
-                translate(refresh=False)
-
-                def finish_translation():
-                    for _ in range(1, evaluations):
-                        translate()
-
-                if evaluations > 1:
-                    wp.capture_if(self.line_search_pending, finish_translation)
             else:
                 for iteration in range(evaluations):
                     if track_pending:

@@ -853,9 +853,9 @@ def scatter_closed_tree_multiplier(
     node_row: wp.array[wp.int32],
     tree_joint_ids: wp.array[wp.int32],
     tree_row_scale: wp.array[wp.spatial_vector],
-    tree_solution: wp.array[wp.spatial_vector],
-    response_solution: wp.array[wp.spatial_matrix],
-    closure_multiplier: wp.array[wp.spatial_vector],
+    tree_solution: wp.array[wp.spatial_vectord],
+    response_solution: wp.array[wp.spatial_matrixd],
+    closure_multiplier: wp.array[wp.spatial_vectord],
     joint_multiplier: wp.array[wp.spatial_vector],
 ):
     node = wp.tid()
@@ -869,18 +869,25 @@ def scatter_closed_tree_multiplier(
                 - response_solution[node * closure_count + closure]
                 * closure_multiplier[batch * closure_count + closure]
             )
-        joint_multiplier[tree_joint_ids[row]] = _scale_spatial_vector(tree_row_scale[row], value)
+        # Closed-tree response subtraction remains FP64 until the output boundary.
+        result = wp.spatial_vector()
+        for axis in range(6):
+            result[axis] = float(wp.float64(tree_row_scale[row][axis]) * value[axis])
+        joint_multiplier[tree_joint_ids[row]] = result
 
 
 @wp.kernel
 def scatter_closure_multiplier(
     joint_ids: wp.array[wp.int32],
     row_scale: wp.array[wp.spatial_vector],
-    solution: wp.array[wp.spatial_vector],
+    solution: wp.array[wp.spatial_vectord],
     joint_multiplier: wp.array[wp.spatial_vector],
 ):
     row = wp.tid()
-    joint_multiplier[joint_ids[row]] = _scale_spatial_vector(row_scale[row], solution[row])
+    result = wp.spatial_vector()
+    for axis in range(6):
+        result[axis] = float(wp.float64(row_scale[row][axis]) * solution[row][axis])
+    joint_multiplier[joint_ids[row]] = result
 
 
 @wp.kernel

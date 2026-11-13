@@ -5586,7 +5586,29 @@ def _body_particle_attachment_to_cable_capsule(test, device):
     test.assertGreater(float(np.linalg.norm(particle_q[particle] - initial_particle_pos)), 1.0e-3)
 
 
+def _check_tile_equivalence_with_matching_options(test, device, variants, check):
+    kernels = [make_solve_elasticity_tile(*variant) for variant in variants]
+    saved_options = [dict(wp.get_module_options(kernel.module)) for kernel in kernels]
+    try:
+        # Solver construction updates memoized tile modules. A direct-kernel
+        # comparison must not inherit different modes from earlier tests.
+        for fast_math in (False, True):
+            with test.subTest(fast_math=fast_math):
+                for kernel in kernels:
+                    wp.set_module_options({"fast_math": fast_math}, module=kernel.module)
+                check(test, device)
+    finally:
+        for kernel, options in zip(kernels, saved_options, strict=True):
+            wp.set_module_options(options, module=kernel.module)
+
+
 def _two_particle_tile_solve_matches_legacy_bits(test, device):
+    _check_tile_equivalence_with_matching_options(
+        test, device, ((True, True, False), (True, False, True)), _two_particle_tile_solve_one_mode
+    )
+
+
+def _two_particle_tile_solve_one_mode(test, device):
     """Pack odd-sized, high-valence cloth work without changing any result bit."""
     ring_count = 20
     angles = np.arange(ring_count, dtype=np.float64) * (2.0 * np.pi / ring_count)
@@ -5756,6 +5778,12 @@ def _tet_only_elasticity_eligibility_matches_active_materials(test, device):
 
 
 def _tet_only_tile_solve_matches_legacy_bits(test, device):
+    _check_tile_equivalence_with_matching_options(
+        test, device, ((True, True, False), (False, True, False)), _tet_only_tile_solve_one_mode
+    )
+
+
+def _tet_only_tile_solve_one_mode(test, device):
     """Match the general tile solve bit for bit on a high-valence tet mesh."""
     # The central particle has 17 adjacent tets, exercising a second 16-lane batch.
     vertices = [wp.vec3(0.0, 0.0, 0.0)]

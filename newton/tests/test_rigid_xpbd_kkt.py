@@ -10,6 +10,7 @@ import warp as wp
 
 import newton
 from newton._src.solvers.xpbd.kernels import apply_body_deltas, solve_body_joints
+from newton._src.solvers.xpbd.rigid_xpbd_kkt import scatter_closed_tree_multiplier, scatter_closure_multiplier
 from newton.tests.unittest_utils import add_function_test, get_cuda_test_devices, get_test_devices
 
 
@@ -95,8 +96,10 @@ def _build_branched_fixed_tree(device):
     return builder.finalize(device=device)
 
 
-def _build_ball_loop(device):
+def _build_ball_loop(device, *, report_forces=False):
     builder = newton.ModelBuilder(gravity=(0.0, -9.81, 0.0), up_axis=newton.Axis.Y)
+    if report_forces:
+        builder.request_state_attributes("body_parent_f")
     positions = np.asarray(
         [(-0.5, 1.5, 0.0), (0.5, 1.5, 0.0), (0.5, 0.5, 0.0), (-0.5, 0.5, 0.0)],
         dtype=np.float32,
@@ -496,6 +499,94 @@ def test_global_joint_parent_force(test, device):
     np.testing.assert_allclose(parent_force[3:], 0.0, atol=1.0e-5)
 
 
+def test_closed_loop_parent_force(test, device):
+    """Report closed-loop forces without changing motion, including captured replay."""
+    results = []
+    for output_mode in ("disabled", "state", "observables"):
+        model = _build_ball_loop(device, report_forces=output_mode == "state")
+        solver = newton.solvers.SolverXPBD(model, iterations=2, rigid_joint_global_iterations=1)
+        observables = solver.observables({"body_parent_f"}) if output_mode == "observables" else None
+        source, target = model.state(), model.state()
+        solver.step(source, target, None, None, 1.0 / 240.0, observables=observables)
+
+        def pair(solver=solver, source=source, target=target, observables=observables):
+            solver.step(target, source, None, None, 1.0 / 240.0, observables=observables)
+            solver.step(source, target, None, None, 1.0 / 240.0, observables=observables)
+
+        if device.is_cuda:
+            with wp.ScopedCapture(device) as capture:
+                pair()
+            for _ in range(3):
+                wp.capture_launch(capture.graph)
+        else:
+            for _ in range(3):
+                pair()
+        results.append((target.body_q.numpy(), target.body_qd.numpy()))
+        if output_mode != "disabled":
+            force = (observables if observables is not None else target).body_parent_f.numpy()
+            test.assertTrue(np.isfinite(force).all())
+            test.assertGreater(float(np.linalg.norm(force)), 1.0)
+            if output_mode == "state":
+                state_force = force
+            else:
+                np.testing.assert_array_equal(force, state_force)
+    for result in results[1:]:
+        for actual, expected in zip(result, results[0], strict=True):
+            np.testing.assert_array_equal(actual, expected)
+
+
+def test_closed_loop_multiplier_precision(test, device):
+    """Recover batched cyclic multipliers before rounding the public output."""
+    # Each batch has a body node followed by two constraint nodes. Deliberate
+    # cancellation makes premature FP32 conversion a rejecting control.
+    node_rows = np.asarray([-1, 0, 1, -1, 2, 3], dtype=np.int32)
+    tree_ids = np.asarray([2, 0, 5, 3], dtype=np.int32)
+    closure_ids = np.asarray([1, 4], dtype=np.int32)
+    scales = np.arange(1, 25, dtype=np.float32).reshape(4, 6) / 8.0
+    closure_scales = np.arange(1, 13, dtype=np.float32).reshape(2, 6) / 8.0
+    closure = np.ones((2, 6), dtype=np.float64)
+    response = np.tile(1.0e8 * np.eye(6), (6, 1, 1))
+    tree = np.full((6, 6), 1.0e8) + np.arange(1, 37).reshape(6, 6) / 64.0
+    expected = np.zeros((6, 6), dtype=np.float32)
+    for node, row in enumerate(node_rows):
+        if row >= 0:
+            expected[tree_ids[row]] = scales[row].astype(np.float64) * (
+                tree[node] - response[node] @ closure[node // 3]
+            )
+    expected[closure_ids] = closure_scales.astype(np.float64) * closure
+    test.assertGreater(float(np.linalg.norm(expected[tree_ids])), 1.0)
+    np.testing.assert_array_equal(tree.astype(np.float32) - 1.0e8, 0.0)
+    output = wp.empty(6, dtype=wp.spatial_vector, device=device)
+    tree_inputs = [
+        3,
+        1,
+        wp.array(node_rows, dtype=int, device=device),
+        wp.array(tree_ids, dtype=int, device=device),
+        wp.array(scales, dtype=wp.spatial_vector, device=device),
+        wp.array(tree, dtype=wp.spatial_vectord, device=device),
+        wp.array(response, dtype=wp.spatial_matrixd, device=device),
+        wp.array(closure, dtype=wp.spatial_vectord, device=device),
+    ]
+    closure_inputs = [
+        wp.array(closure_ids, dtype=int, device=device),
+        wp.array(closure_scales, dtype=wp.spatial_vector, device=device),
+        tree_inputs[-1],
+    ]
+
+    def scatter():
+        output.fill_(wp.spatial_vector(float("nan")))
+        wp.launch(scatter_closed_tree_multiplier, 6, inputs=tree_inputs, outputs=[output], device=device)
+        wp.launch(scatter_closure_multiplier, 2, inputs=closure_inputs, outputs=[output], device=device)
+
+    scatter()
+    np.testing.assert_array_equal(output.numpy(), expected)
+    if device.is_cuda:
+        with wp.ScopedCapture(device) as capture:
+            scatter()
+        wp.capture_launch(capture.graph)
+        np.testing.assert_array_equal(output.numpy(), expected)
+
+
 def _single_joint_local_result(model, state, dt):
     """Evaluate an unrelaxed local correction without advancing time."""
     control = model.control()
@@ -858,6 +949,10 @@ add_function_test(
     test_global_joint_parent_force,
     devices=get_test_devices(),
 )
+
+
+for _test in (test_closed_loop_parent_force, test_closed_loop_multiplier_precision):
+    add_function_test(TestRigidXPBDKKT, _test.__name__, _test, devices=get_test_devices())
 
 
 if __name__ == "__main__":

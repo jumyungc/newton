@@ -227,9 +227,6 @@ def evaluate_volumetric_neo_hookean_force_and_hessian(
     # gives mu_NH = mu_Lamé, lambda_NH = lambda_Lamé + mu_Lamé.
     mu_nh = mu
     lmbd_nh = lmbd + mu
-    # Guard against division by zero in lambda_NH
-    lmbd_safe = wp.sign(lmbd_nh) * wp.max(wp.abs(lmbd_nh), 1e-6)
-    alpha = 1.0 + mu_nh / lmbd_safe
     # Compute cofactor (adjugate) matrix directly for numerical stability when J ≈ 0
     cof = compute_cofactor(F)
 
@@ -246,14 +243,18 @@ def evaluate_volumetric_neo_hookean_force_and_hessian(
     )
 
     # ============ Stress ============
-    s = lmbd_nh * (J - alpha)
-    P_vec = rest_volume * (mu_nh * f + s * cof_vec)
+    # Expand the alpha offset before evaluating it: rounding
+    # alpha = 1 + mu_NH / lambda_NH can create stress even at F = I.
+    # The expanded stable Neo-Hookean law avoids cancelling shear terms at rest
+    # and needs no denominator floor, including at zero or tiny stiffness.
+    P_vec = rest_volume * (mu_nh * (f - cof_vec) + lmbd_nh * (J - 1.0) * cof_vec)
 
     # ============ Hessian ============
     # The full elastic Hessian also has an s * d^2 J / dF^2 term, but its
     # contribution to VBD's per-vertex 3x3 block is identically zero:
     # the Levi-Civita tensor in d^2 J / dF^2 contracts against (m^a x m^a),
-    # which vanishes. Drop it; the remaining two terms are SPD by inspection.
+    # which vanishes. Drop it; the remaining terms are positive semidefinite
+    # for nonnegative stable Neo-Hookean coefficients (zero stiffness included).
     H = mu_nh * wp.identity(n=9, dtype=float) + lmbd_nh * wp.outer(cof_vec, cof_vec)
     H = rest_volume * H
 

@@ -2605,6 +2605,76 @@ def _structural_kkt_external_dynamic_contact_blocks_free_translation(test, devic
     np.testing.assert_array_equal(correction.numpy(), 0.0)
 
 
+def _structural_kkt_translation_stop_keeps_coupled_step(test, device):
+    """The stop keeps a step that curvature moves onto a finer axis and drops one stored uphill."""
+    ids = wp.zeros(1, dtype=int, device=device)
+    enabled = wp.ones(1, dtype=int, device=device)
+    scale = wp.ones(1, dtype=float, device=device)
+    correction = wp.zeros(1, dtype=wp.spatial_vector, device=device)
+    system = wp.zeros(1, dtype=wp.mat44d, device=device)
+    pending = wp.zeros(1, dtype=int, device=device)
+    # Inertia 1e6 N/m. At x = 1 m, 0.2 N in x is within the tolerance (0.238 N). At x = 1024 m the x part
+    # of the coupled step (6.7e-6 m) is lost in storage and its y part alone would raise the quadratic.
+    for x, force, curvature, step in (
+        (1.0, 0.2, 0.0, None),
+        (1.0, 0.2, 1.0e6, [2.0**-23, 0.2 / 3.0e6, 0.0]),
+        (1024.0, 10.0, 1.0e6, None),
+    ):
+        start = np.array([[x, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0]], dtype=np.float32)
+        pose = wp.array(start, dtype=wp.transform, device=device)
+        hessian = curvature * np.array([[[1.0, -1.0, 0.0], [-1.0, 1.0, 0.0], [0.0, 0.0, 0.0]]], dtype=np.float32)
+        system.zero_()
+        pending.zero_()
+        wp.launch(
+            rigid_vbd_kkt.accumulate_free_translation_system,
+            1,
+            inputs=[
+                ids,
+                ids,
+                ids,
+                enabled,
+                enabled,
+                scale,
+                correction,
+                1.0e-3,
+                pose,
+                pose,
+                wp.zeros(1, dtype=wp.vec3, device=device),
+                wp.ones(1, dtype=float, device=device),
+                wp.ones(1, dtype=float, device=device),
+                wp.array(hessian, dtype=wp.mat33, device=device),
+                wp.zeros(1, dtype=wp.mat33, device=device),
+                wp.array([[force, 0.0, 0.0]], dtype=wp.vec3, device=device),
+                wp.zeros(1, dtype=wp.spatial_matrix, device=device),
+                0,
+                None,
+                None,
+                None,
+                None,
+                0,
+                None,
+                None,
+            ],
+            outputs=[system],
+            device=device,
+        )
+        wp.launch(
+            rigid_vbd_kkt.correct_free_translation,
+            1,
+            inputs=[ids, enabled, enabled, scale, system, correction, True, True, True, ids],
+            outputs=[pose, pending],
+            device=device,
+        )
+        moved = pose.numpy()[0, :3] - start[0, :3]
+        with test.subTest(x=x, curvature=curvature):
+            test.assertEqual(int(pending.numpy()[0]), int(step is not None))
+            if step is not None:
+                # At x = 1 m: H^-1 r = (1.33e-7, 6.67e-8, 0) m; x keeps one quantum, y is resolved.
+                np.testing.assert_allclose(moved, step, rtol=1.0e-5, atol=0.0)
+            else:
+                np.testing.assert_array_equal(moved, 0.0)
+
+
 def _cable_kkt_preserves_local_grounded_loop(test, device):
     """Improve stiff-loop closure while maintaining ground support."""
     local = _simulate_grounded_loop_load(device, 0)
@@ -5302,8 +5372,8 @@ def _structural_kkt_captured_contact_shortcut_preserves_state(test, device):
     # fifteen refreshed evaluations, also when represented by a graph loop.
     test.assertLessEqual(refresh_counts[1][1], 15)
 
-    # Default atomic reductions may skip a wholly blocked translation group,
-    # but must not stop eligible translation iterates at float32 roundoff.
+    # Default atomic reductions take the same bounded reconciliation loop and the
+    # same stopping rule as the reproducible modes.
     # Other directional and collective-mode conditionals remain valid.
     with test.subTest(deterministic=False):
         model, pipeline, contacts, solver, _, _, _ = _build_grounded_chain(
@@ -5316,14 +5386,15 @@ def _structural_kkt_captured_contact_shortcut_preserves_state(test, device):
         state_in, state_out, control = model.state(), model.state(), model.control()
         pipeline.collide(state_in, contacts)
         solver.step(state_in, state_out, control, contacts, dt)
-        test.assertFalse(solver._structural_graph_kkt.enable_captured_contact_shortcuts)
         with (
             mock.patch.object(wp, "capture_if", wraps=wp.capture_if) as conditional,
+            mock.patch.object(wp, "capture_while", wraps=wp.capture_while) as loop,
             mock.patch.object(wp.array, "numpy", side_effect=AssertionError("host readback")),
             wp.ScopedCapture(device) as capture,
         ):
             solver.step(state_in, state_out, control, contacts, dt)
         test.assertNotIn("translate", [call.args[1].__name__ for call in conditional.call_args_list])
+        test.assertIn("repeat_translation", [call.args[1].__name__ for call in loop.call_args_list])
         wp.capture_launch(capture.graph)
         test.assertTrue(np.isfinite(state_out.body_q.numpy()).all())
 
@@ -5733,6 +5804,12 @@ add_function_test(
     TestVBDRigidKKT,
     "test_structural_kkt_external_dynamic_contact_blocks_free_translation",
     _structural_kkt_external_dynamic_contact_blocks_free_translation,
+    devices=get_test_devices(),
+)
+add_function_test(
+    TestVBDRigidKKT,
+    "test_structural_kkt_translation_stop_keeps_coupled_step",
+    _structural_kkt_translation_stop_keeps_coupled_step,
     devices=get_test_devices(),
 )
 add_function_test(
@@ -6270,6 +6347,101 @@ add_function_test(
     "test_local_factor_recovery_is_opt_in",
     _local_factor_recovery_is_opt_in,
     devices=get_test_devices(),
+)
+
+
+def _static_contact_modes(test, device):
+    """Preserve structural contact outputs across specialized modes and graph replay."""
+    with wp.ScopedDevice(device):
+        model, pipeline, contacts, solver, _, _, _ = _build_grounded_chain(
+            device,
+            global_iterations=1,
+            segments=4,
+            contact_history=True,
+            deterministic=wp.DeterministicMode.RUN_TO_RUN,
+        )
+        state_in, state_out, control = model.state(), model.state(), model.control()
+        dt = 1.0 / 600.0
+        for _ in range(45):
+            state_in.clear_forces()
+            pipeline.collide(state_in, contacts)
+            solver.step(state_in, state_out, control, contacts, dt)
+            state_in, state_out = state_out, state_in
+        test.assertGreater(int(contacts.rigid_contact_count.numpy()[0]), 0)
+        backend = solver._structural_graph_kkt
+        test.assertIsNotNone(backend)
+        backend.island_translation_free.fill_(1)
+        names = (
+            "body_forces",
+            "body_torques",
+            "body_hessian_ll",
+            "body_hessian_al",
+            "body_hessian_aa",
+            "body_dynamic_contact_hessian",
+        )
+        outputs = {}
+        for mode in ("full", "forces", "translation"):
+
+            def evaluate(mode=mode):
+                solver._reset_structural_solve_state()
+                backend.translation_system.zero_()
+                solver._refresh_structural_contact_objective(
+                    state_in,
+                    contacts,
+                    dt,
+                    translation_only=mode == "translation",
+                    forces_only=mode == "forces",
+                )
+
+            def snapshot():
+                result = {name: getattr(solver, name).numpy().copy() for name in names}
+                result["translation_system"] = backend.translation_system.numpy().copy()
+                result["island_contact_state"] = backend.island_contact_state.numpy().copy()
+                return result
+
+            evaluate()
+            expected = snapshot()
+            for _ in range(2):
+                evaluate()
+                for name, value in snapshot().items():
+                    np.testing.assert_array_equal(value, expected[name])
+            if device.is_cuda:
+                with wp.ScopedCapture(device) as capture:
+                    evaluate()
+                for _ in range(2):
+                    wp.capture_launch(capture.graph)
+                    for name, value in snapshot().items():
+                        np.testing.assert_array_equal(value, expected[name])
+            outputs[mode] = expected
+
+        test.assertGreater(np.linalg.norm(outputs["full"]["body_forces"]), 0.0)
+        test.assertGreater(np.linalg.norm(outputs["full"]["body_hessian_ll"]), 0.0)
+        for name in ("body_forces", "body_torques"):
+            np.testing.assert_array_equal(outputs["full"][name], outputs["forces"][name])
+        for name in names[2:]:
+            test.assertTrue(np.all(outputs["forces"][name] == 0))
+        for name in names:
+            test.assertTrue(np.all(outputs["translation"][name] == 0))
+        for mode in ("full", "forces"):
+            test.assertTrue(np.all(outputs[mode]["translation_system"] == 0))
+        system = outputs["translation"]["translation_system"]
+        test.assertTrue(np.isfinite(system).all())
+        test.assertGreater(np.linalg.norm(system), 0.0)
+        # Every contact is against the fixed ground, with COM-centered body frames.
+        # Restriction to common translation therefore sums the body linear terms.
+        np.testing.assert_array_equal(model.body_com.numpy(), np.zeros((model.body_count, 3)))
+        delta = solver.body_inertia_q.numpy()[:, :3] - state_in.body_q.numpy()[:, :3]
+        mass = model.body_mass.numpy().astype(float) / float(np.float32(dt)) ** 2
+        expected_rhs = (delta.astype(float) * mass[:, None]).sum(axis=0)
+        expected_rhs += outputs["full"]["body_forces"].astype(float).sum(axis=0)
+        expected_hessian = outputs["full"]["body_hessian_ll"].astype(float).sum(axis=0)
+        expected_hessian += mass.sum() * np.eye(3)
+        np.testing.assert_allclose(system[:, :3, 3].sum(axis=0), expected_rhs, rtol=1.0e-6, atol=1.0e-5)
+        np.testing.assert_allclose(system[:, :3, :3].sum(axis=0), expected_hessian, rtol=1.0e-6, atol=1.0e-5)
+
+
+add_function_test(
+    TestVBDRigidKKT, "test_static_contact_modes", _static_contact_modes, devices=get_test_devices(mode="basic")
 )
 
 

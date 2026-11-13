@@ -620,7 +620,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 and frictionless, undamped static-shape contact without DAT or a log barrier.
                 Feature-filtered mesh contacts are not supported. Tet coefficients must be
                 finite with nonnegative shear, lambda + mu, and damping; lambda + mu must
-                be at least 1e-6 when mu is positive, to match local VBD's constitutive law.
+                be at least 1e-6 when mu is positive in the global backend's supported domain.
                 Particle topology, rest geometry, masses and active flags must remain fixed;
                 construct a new solver if they change. For supported material/contact changes,
                 call :meth:`notify_model_changed` outside graph capture before stepping.
@@ -1816,6 +1816,12 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
 
         rigid_vbd_kkt = _load_rigid_vbd_kkt()
         self._set_module_options(self._rigid_module_options, module=rigid_vbd_kkt)
+        # Unique long-path kernels retain this solver's module-option ownership.
+        for kernel in (
+            rigid_vbd_kkt.reduce_cr_in_place_rows,
+            rigid_vbd_kkt.solve_cr_tail_persistent_rows,
+        ):
+            self._set_module_options(self._rigid_module_options, module=kernel.module)
         backend = rigid_vbd_kkt.StructuralGraphKKT(
             self.model,
             self.body_inv_mass_effective,
@@ -1824,9 +1830,6 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             ignore_free_completion_joints=True,
             enable_paired_open_chains=(
                 self._rigid_module_options["deterministic"] == wp.DeterministicMode.NOT_GUARANTEED
-            ),
-            enable_captured_contact_shortcuts=(
-                self._rigid_module_options["deterministic"] != wp.DeterministicMode.NOT_GUARANTEED
             ),
             enable_stream_concurrency=(
                 self._rigid_module_options["deterministic"] == wp.DeterministicMode.NOT_GUARANTEED
@@ -4793,8 +4796,14 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         if contacts is None or contacts.rigid_contact_max == 0:
             return
 
+        if translation_only:
+            contact_kernel = rigid_vbd_kkt._accumulate_structural_translation_contacts
+        elif forces_only:
+            contact_kernel = rigid_vbd_kkt._accumulate_structural_contact_forces
+        else:
+            contact_kernel = rigid_vbd_kkt.accumulate_structural_body_body_contacts
         wp.launch(
-            kernel=rigid_vbd_kkt.accumulate_structural_body_body_contacts,
+            kernel=contact_kernel,
             dim=backend.graph_body_count * _NUM_CONTACT_THREADS_PER_BODY,
             inputs=[
                 dt,
@@ -4830,8 +4839,6 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 backend.body_slot_by_id,
                 backend.graph_body_island,
                 int(backend.use_fused_contact_classification),
-                translation_only,
-                forces_only,
                 self.body_inertia_q,
                 self.model.body_mass,
                 backend.island_translation_free,
