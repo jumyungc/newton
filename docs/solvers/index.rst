@@ -572,8 +572,7 @@ stiffness when the segment length changes. Register the VBD custom attributes be
 then author positive pairs before constructing the solver.
 
 For one material across all rods, fill the Model arrays as below. Only the bend pair is
-needed for bending relaxation; the stretch pair is optional. This uses the same custom-attribute
-registration as VBD's Dahl model and leaves the normal State and stepping workflow unchanged.
+needed for bending relaxation; the stretch pair is optional.
 
 .. code-block:: python
 
@@ -605,7 +604,8 @@ rod joints, :meth:`~newton.ModelBuilder.add_joint_rod` also accepts the existing
 ``custom_attributes={"vbd:visco_bend_ratio": 3.0, "vbd:visco_bend_tau": 0.5}`` argument.
 
 In USD, author ``newton:vbd:visco_bend_ratio`` and the other attributes on the cable curve;
-they apply to every rod joint generated from it. After construction, edited values take
+they apply to every rod joint generated from it, and the importer's SI-stage requirement
+applies. After construction, edited values take
 effect through ``solver.notify_model_changed(newton.ModelFlags.JOINT_DOF_FORCE_PROPERTIES)``.
 
 With no SLS branch, an elastic row with ordinary viscous damping has a Kelvin--Voigt
@@ -627,8 +627,6 @@ Each step uses backward Euler: with relaxation history :math:`u_v` from the inpu
 branch adds :math:`g k (u - u_v)` with :math:`g = r\tau / (\tau + \Delta t)` to the row as a
 frozen stiffness and offset, outside the compliant-ALM multiplier, and the output state
 receives :math:`u_v \leftarrow u_v + \tfrac{\Delta t}{\tau + \Delta t}(u - u_v)` once per step.
-Computing this small increment directly preserves relaxation when :math:`\Delta t/\tau`
-is smaller than float32 precision near one; forming ``1 - tau/(tau + dt)`` can round it to zero.
 While a parameter pair is inactive, its history tracks the current strain; re-enabling it
 after an inactive step starts that branch relaxed, independently of other active channels.
 This differs from a newly created state's virgin-at-rest history. Editing positive parameters
@@ -646,23 +644,18 @@ including the material history, instead of only body poses and velocities.
 The bending history uses dimensionless geometric bend coordinates in the parent material frame;
 axial history is an anchor extension [m], not engineering strain. Ratios are dimensionless and
 relaxation times are in seconds. A ratio parameterization cannot represent a pure Maxwell material
-with zero equilibrium stiffness. Existing viscous damping and Dahl hysteresis remain separate,
-additive mechanisms; they are not replaced by SLS. Dahl's ``dahl_tau`` is a deformation-memory
-scale, not a time. History is measured from the rest configuration and keeps its values when the
-rest shape is edited; such an edit is not a stress-preserving remapping.
+with zero equilibrium stiffness. Dahl hysteresis remains a separate, additive mechanism; its
+``dahl_tau`` is a deformation-memory scale, not a time. History is measured from the rest
+configuration and keeps its values when the rest shape is edited; such an edit is not a
+stress-preserving remapping.
 
 SLS is linear viscoelasticity in these rod coordinates, combined with the existing nonlinear
-rod geometry. It does not add plastic flow, arbitrary nonlinear stiffness laws, twist/shear
-relaxation, or a general material-model registry. USD support uses registered Newton custom
-attributes on curves and joint prims, with ratios dimensionless and times in seconds;
-the importer's existing SI-stage requirements still apply.
-Rod bending and axial stretch share the same constitutive coefficients and history update.
-Routed-tendon SLS is outside this feature's scope.
+rod geometry. It does not relax twist or shear and adds no plastic flow or nonlinear
+stiffness law.
 
-There is no SLS preparation pass: trial forces read the input State, and one final kernel
-commits the history once per step. With no active pair at construction, the solve excludes
-SLS array reads and the history kernel is omitted. Registering the attributes still allocates
-their standard Model/State storage, even when their values are zero. A solver initially
+With no active pair at construction, the solve excludes SLS array reads and the history
+kernel is omitted. Registering the attributes still allocates their standard Model/State
+storage, even when their values are zero. A solver initially
 constructed with SLS retains its buffers and history update when all pairs are later disabled,
 so subsequent re-enabling has well-defined history.
 

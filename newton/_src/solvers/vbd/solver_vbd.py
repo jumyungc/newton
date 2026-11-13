@@ -1107,11 +1107,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             if relaxation is None
             else wp.array(relaxation, dtype=wp.vec4, device=self.device)
         )
-        self._solve_rigid_body_kernel = (
-            create_solve_rigid_body(model.tendon_count > 0, True)
-            if relaxation is not None
-            else create_solve_rigid_body(model.tendon_count > 0)
-        )
+        self._solve_rigid_body_kernel = create_solve_rigid_body(model.tendon_count > 0, relaxation is not None)
         if integrates_rigid_bodies:
             rigid_modules = (
                 rigid_vbd_kernels,

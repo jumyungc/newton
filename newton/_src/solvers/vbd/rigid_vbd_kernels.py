@@ -50,7 +50,6 @@ from newton._src.solvers.vbd.interval_arithmetic import (
     rigid_point_plane_signed_distance_derivative_interval,
     rigid_point_plane_signed_distance_interval,
 )
-from newton._src.solvers.viscoelasticity import sls_gain, sls_step_fraction, sls_update_history
 
 from .tendon_kernels import TendonForceElementAdjacencyInfo, evaluate_tendon_force_hessians
 
@@ -7203,6 +7202,44 @@ def update_rod_dahl_state(
     joint_sigma_prev[j] = sigma_final_out
     joint_kappa_prev[j] = kappa_final
     joint_dkappa_prev[j] = d_kappa_out
+
+
+# Rod relaxation: a standard-linear-solid (Zener) Maxwell branch of stiffness ratio * k and
+# viscosity ratio * k * tau in parallel with a row's equilibrium stiffness k. With the input
+# viscous deformation z frozen during the solve, backward Euler adds
+# k * sls_gain(ratio, tau, dt) * (e - z) to the row; update_rod_visco_history commits z once per step.
+
+
+@wp.func
+def sls_step_fraction(tau: float, dt: float) -> float:
+    """Return the backward-Euler relaxation fraction for ``tau >= 0`` and ``dt > 0`` [s]."""
+    return dt / (tau + dt)
+
+
+@wp.func
+def sls_gain(ratio: float, tau: float, dt: float) -> float:
+    """Return transient step stiffness per unit equilibrium stiffness; ``ratio >= 0``.
+
+    With input history ``z`` frozen, the branch force is ``gain * k * (e - z)``
+    and its tangent with respect to ``e`` is ``gain * k``. A zero ratio or time
+    disables this force contribution. Parameters must be finite and validated by
+    the authoring layer; this function does not clamp invalid material inputs.
+    """
+    return ratio * (tau / (tau + dt))
+
+
+@wp.func
+def sls_update_history(deformation: float, history: float, step_fraction: float) -> float:
+    """Commit viscous deformation from the accepted pose and a fixed relaxation fraction.
+
+    ``deformation`` and ``history`` have the same units (a bending coordinate or an
+    extension). Use :func:`sls_step_fraction` for an active branch; a fraction of one
+    tracks the accepted deformation for an inactive channel.
+    """
+    if step_fraction == 1.0:
+        return deformation
+    # Compute the small increment directly; 1 - decay can round to zero for long relaxation times.
+    return history + step_fraction * (deformation - history)
 
 
 @wp.func

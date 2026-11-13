@@ -9,6 +9,7 @@ import numpy as np
 import warp as wp
 
 import newton
+from newton._src.solvers.vbd.rigid_vbd_kernels import sls_gain, sls_step_fraction, sls_update_history
 from newton.solvers.experimental.coupled import SolverCoupled
 from newton.tests._usd_deformable_test_utils import _add_cable_curve, _deformable_stage
 from newton.tests.unittest_utils import add_function_test, get_test_devices, requires
@@ -61,9 +62,124 @@ def _creep(model, link, solver, steps, dt, u=0.0, v=0.0, maxwell=0.0, *, stiffne
     return u
 
 
+# Held single link: a tilted rod joint bent by _HELD_THETA [rad] and stretched by _HELD_EXTENSION [m].
+_HELD_RATIO, _HELD_TAU, _HELD_STIFFNESS, _HELD_THETA, _HELD_EXTENSION = 3.0, 0.4, 1.0e3, 0.2, 0.02
+_HELD_FRAME = wp.transform(wp.vec3(0.15, -0.2, 0.25), wp.quat_from_axis_angle(wp.normalize(wp.vec3(1, 2, 3)), 0.7))
+# Planar geometric bend coordinate of _HELD_THETA, independent of Warp helpers.
+_HELD_BEND = 2.0 * np.tan(_HELD_THETA / 2)
+
+
+def _held_link(device):
+    """Return ``model, link, solver, state_0, state_1, pose`` with ``state_0`` posed in the held configuration."""
+    model, link = _axial_rod(
+        device,
+        stiffness=_HELD_STIFFNESS,
+        damping=0.0,
+        mass=1.0,
+        ratio=_HELD_RATIO,
+        tau=_HELD_TAU,
+        gravity=0.0,
+        bend_ratio=_HELD_RATIO,
+        inertia=0.1,
+        frame=_HELD_FRAME,
+    )
+    solver = newton.solvers.SolverVBD(model, iterations=20)
+    state_0, state_1 = model.state(), model.state()
+    pose = state_0.body_q.numpy().copy()
+    pose[link] = _HELD_FRAME * wp.transform(
+        wp.vec3(0.0, 0.0, 0.1 + _HELD_EXTENSION), wp.quat_from_axis_angle(wp.vec3(1, 0, 0), _HELD_THETA)
+    )
+    state_0.body_q.assign(pose)
+    return model, link, solver, state_0, state_1, pose
+
+
+def _held_load(model, link, factor):
+    """Return ``body_f`` holding the held link when its rows act with ``factor`` times the authored stiffness."""
+    rotation = wp.transform_get_rotation(_HELD_FRAME)
+    force = np.zeros((model.body_count, 6), dtype=np.float32)
+    force[link, :3] = wp.quat_rotate(rotation, wp.vec3(0, 0, _HELD_STIFFNESS * _HELD_EXTENSION * factor))
+    # Bend stiffness is 1 N*m; the bend coordinate's angle derivative maps it to a moment in the material frame.
+    force[link, 3:] = wp.quat_rotate(rotation, wp.vec3(_HELD_BEND / np.cos(_HELD_THETA / 2) ** 2 * factor, 0, 0))
+    return force
+
+
 def _relative_angle(q_a, q_b):
     """Return the sign-invariant rotation angle [rad] between two unit xyzw quaternions."""
     return 2.0 * np.arccos(np.clip(abs(np.dot(q_a, q_b)), 0.0, 1.0))
+
+
+@wp.kernel
+def _hold_and_unload(
+    parameters: wp.array[wp.vec4],  # equilibrium stiffness, ratio, tau, coordinate scale
+    response: wp.array2d[wp.vec3],  # force, history, stored energy
+):
+    material = wp.tid()
+    p = parameters[material]
+    history = float(0.0)
+    for step in range(40):
+        deformation = 0.02 * p[3]
+        dt = float(0.01)
+        if step >= 20:
+            deformation = 0.0
+            dt = 0.025
+        force = p[0] * deformation + p[0] * sls_gain(p[1], p[2], dt) * (deformation - history)
+        history = sls_update_history(deformation, history, sls_step_fraction(p[2], dt))
+        energy = 0.5 * p[0] * (deformation * deformation + p[1] * (deformation - history) ** 2.0)
+        response[material, step] = wp.vec3(force, history, energy)
+
+
+@wp.kernel
+def _history_numerical_limits(response: wp.array[float]):
+    history = float(0.0)
+    fraction = sls_step_fraction(100.0, 1.0e-6)
+    for _ in range(100000):
+        history = sls_update_history(0.02, history, fraction)
+    response[0] = history
+    response[1] = sls_update_history(1.0e8, 1.0e-8, 0.0)
+    response[2] = sls_update_history(1.0e-8, 1.0e8, 1.0)
+
+
+def test_sls_material_point_hold_unload_and_coordinate_units(test, device):
+    """Match analytic hold/unload, dissipation, elastic limits, and strain/extension coordinates.
+
+    Rod solver tests cover geometry and lifecycle. This independent material-point test
+    covers the constitutive law, including the signed force of a bilateral row on unloading.
+    """
+    parameters = wp.array(
+        [(1000.0, 3.0, 0.4, 1.0), (100.0, 3.0, 0.4, 10.0), (1000.0, 0.0, 0.4, 1.0), (1000.0, 3.0, 0.0, 1.0)],
+        dtype=wp.vec4,
+        device=device,
+    )
+    response = wp.empty((4, 40), dtype=wp.vec3, device=device)
+    wp.launch(_hold_and_unload, dim=4, inputs=[parameters], outputs=[response], device=device)
+    values = response.numpy()
+    n = np.arange(1, 21)
+    a, b = 0.4 / 0.41, 0.4 / 0.425
+    expected_hold = 20.0 * (1.0 + 3.0 * a**n)
+    expected_unload = -60.0 * (1.0 - a**20) * b**n
+    np.testing.assert_allclose(values[0, :, 0], np.concatenate((expected_hold, expected_unload)), atol=5.0e-5)
+    test.assertLess(values[0, 20, 0], 0.0)  # The constitutive law itself is bilateral.
+    for start in (0, 20):
+        test.assertTrue(np.all(np.diff(values[0, start : start + 20, 2]) <= 0.0))
+
+    # L0=0.1 m: k=EA/L0 with extension, or EA with strain. Physical forces agree.
+    np.testing.assert_allclose(values[1, :, 0], values[0, :, 0], atol=5.0e-5)
+    np.testing.assert_allclose(values[1, :, 1], 10.0 * values[0, :, 1], atol=2.0e-7)
+    # The strain-coordinate energy is per reference length; multiply by L0 for physical energy.
+    np.testing.assert_allclose(0.1 * values[1, :, 2], values[0, :, 2], atol=1.0e-6)
+    for material in (2, 3):
+        np.testing.assert_allclose(values[material, :, 0], np.repeat([20.0, 0.0], 20), atol=1.0e-6)
+
+
+def test_sls_history_small_step_and_endpoint_precision(test, device):
+    """Advance long-time relaxation and preserve exact zero/full-fraction history endpoints."""
+    response = wp.empty(3, dtype=float, device=device)
+    wp.launch(_history_numerical_limits, dim=1, outputs=[response], device=device)
+    values = response.numpy()
+    expected = 0.02 * -np.expm1(-100000 * np.log1p(1.0e-6 / 100.0))
+    # Float32 incremental accumulation differs by about 0.08%; decay subtraction stays zero.
+    np.testing.assert_allclose(values[0], expected, rtol=0.002, atol=0.0)
+    np.testing.assert_array_equal(values[1:], np.array([1.0e-8, 1.0e-8], dtype=np.float32))
 
 
 def test_relaxation_parameters_enable_and_validate(test, device):
@@ -124,46 +240,17 @@ def test_held_bend_and_stretch_relaxation(test, device):
     Creep alone does not cover bending forces or verify that input history stays frozen during
     a solve. A single link held by independently known axial force and bending torque covers both.
     """
-    ratio, tau, stiffness, theta, extension = 3.0, 0.4, 1.0e3, 0.2, 0.02
-    frame = wp.transform(wp.vec3(0.15, -0.2, 0.25), wp.quat_from_axis_angle(wp.normalize(wp.vec3(1, 2, 3)), 0.7))
-    model, link = _axial_rod(
-        device,
-        stiffness=stiffness,
-        damping=0.0,
-        mass=1.0,
-        ratio=ratio,
-        tau=tau,
-        gravity=0.0,
-        bend_ratio=ratio,
-        inertia=0.1,
-        frame=frame,
-    )
-    solver = newton.solvers.SolverVBD(model, iterations=20)
-    state_0, state_1 = model.state(), model.state()
-    pose = state_0.body_q.numpy().copy()
-    pose[link] = frame * wp.transform(
-        wp.vec3(0.0, 0.0, 0.1 + extension), wp.quat_from_axis_angle(wp.vec3(1, 0, 0), theta)
-    )
-    state_0.body_q.assign(pose)
-    # Planar geometric bend coordinate and its angle derivative, independent of Warp helpers.
-    bend = 2.0 * np.tan(theta / 2)
-    bend_jacobian = 1.0 / np.cos(theta / 2) ** 2
+    model, link, solver, state_0, state_1, pose = _held_link(device)
+    ratio, tau = _HELD_RATIO, _HELD_TAU
     decay_product = 1.0
     for dt in [0.01] * 10 + [0.025] * 10:
         before = state_0.vbd.visco_history.numpy().copy()
         decay_product *= tau / (tau + dt)
-        factor = 1.0 + ratio * decay_product
-        force = np.zeros((model.body_count, 6), dtype=np.float32)
-        force[link, :3] = wp.quat_rotate(
-            wp.transform_get_rotation(frame), wp.vec3(0, 0, stiffness * extension * factor)
-        )
-        # Bend stiffness is 1 N*m. World torque balances a moment in the material frame.
-        force[link, 3:] = wp.quat_rotate(wp.transform_get_rotation(frame), wp.vec3(bend * bend_jacobian * factor, 0, 0))
-        state_0.body_f.assign(force)
+        state_0.body_f.assign(_held_load(model, link, 1.0 + ratio * decay_product))
         solver.step(state_0, state_1, None, None, dt)
         np.testing.assert_array_equal(state_0.vbd.visco_history.numpy(), before)
         np.testing.assert_allclose(state_1.body_q.numpy()[link], pose[link], atol=2.0e-6)
-        expected = np.array([bend, 0.0, extension]) * (1.0 - decay_product)
+        expected = np.array([_HELD_BEND, 0.0, _HELD_EXTENSION]) * (1.0 - decay_product)
         np.testing.assert_allclose(state_1.vbd.visco_history.numpy()[0], expected, atol=2.0e-6)
         state_0, state_1 = state_1, state_0
 
@@ -348,26 +435,10 @@ def test_relax_history_holds_current_pose(test, device):
 
     A virgin (zero) history in the same pose loads the transient branch, so the same load moves it.
     """
-    ratio, tau, stiffness, theta, extension = 3.0, 0.4, 1.0e3, 0.2, 0.02
-    frame = wp.transform(wp.vec3(0.15, -0.2, 0.25), wp.quat_from_axis_angle(wp.normalize(wp.vec3(1, 2, 3)), 0.7))
-    bend = 2.0 * np.tan(theta / 2)
-    bend_jacobian = 1.0 / np.cos(theta / 2) ** 2
+    relaxed_history = [_HELD_BEND, 0.0, _HELD_EXTENSION]
     drift = {}
     for relaxed in (True, False):
-        model, link = _axial_rod(
-            device,
-            stiffness=stiffness,
-            damping=0.0,
-            mass=1.0,
-            ratio=ratio,
-            tau=tau,
-            gravity=0.0,
-            bend_ratio=ratio,
-            inertia=0.1,
-            frame=frame,
-        )
-        solver = newton.solvers.SolverVBD(model, iterations=20)
-        state_0, state_1 = model.state(), model.state()
+        model, link, solver, state_0, state_1, pose = _held_link(device)
         if relaxed:
             with test.assertRaisesRegex(ValueError, "required"):
                 solver.relax_rod_history(None)
@@ -375,19 +446,11 @@ def test_relax_history_holds_current_pose(test, device):
             with test.assertRaisesRegex(ValueError, "body_q"):
                 solver.relax_rod_history(state_1)
             state_1 = model.state()
-        pose = state_0.body_q.numpy().copy()
-        pose[link] = frame * wp.transform(
-            wp.vec3(0.0, 0.0, 0.1 + extension), wp.quat_from_axis_angle(wp.vec3(1, 0, 0), theta)
-        )
-        state_0.body_q.assign(pose)
-        if relaxed:
             solver.relax_rod_history(state_0, world_mask=wp.array([False, False], dtype=wp.bool, device=device))
             np.testing.assert_array_equal(state_0.vbd.visco_history.numpy(), 0.0)
             solver.relax_rod_history(state_0)
-            np.testing.assert_allclose(state_0.vbd.visco_history.numpy()[0], [bend, 0.0, extension], atol=2.0e-6)
-        force = np.zeros((model.body_count, 6), dtype=np.float32)
-        force[link, :3] = wp.quat_rotate(wp.transform_get_rotation(frame), wp.vec3(0, 0, stiffness * extension))
-        force[link, 3:] = wp.quat_rotate(wp.transform_get_rotation(frame), wp.vec3(bend * bend_jacobian, 0, 0))
+            np.testing.assert_allclose(state_0.vbd.visco_history.numpy()[0], relaxed_history, atol=2.0e-6)
+        force = _held_load(model, link, 1.0)
         drift[relaxed] = 0.0
         for dt in [0.01] * 5 + [0.025] * 5:
             state_0.body_f.assign(force)
@@ -397,7 +460,7 @@ def test_relax_history_holds_current_pose(test, device):
             drift[relaxed] = max(drift[relaxed], float(moved))
             state_0, state_1 = state_1, state_0
         if relaxed:
-            np.testing.assert_allclose(state_0.vbd.visco_history.numpy()[0], [bend, 0.0, extension], atol=2.0e-6)
+            np.testing.assert_allclose(state_0.vbd.visco_history.numpy()[0], relaxed_history, atol=2.0e-6)
     test.assertLess(drift[True], 2.0e-6)
     test.assertGreater(drift[False], 1.0e-3)
 
