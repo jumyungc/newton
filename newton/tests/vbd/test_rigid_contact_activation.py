@@ -16,12 +16,14 @@ from newton.tests.unittest_utils import add_function_test, get_test_devices
 def test_metric_oracle(test, device):
     """Warm history and loading damping choose the actual normal-response metric."""
     cases = (
-        (0.002, -0.0015, 1.0, 0.0, 1000.0 * 100.0 / 1100.0),
-        (0.0001, -0.0002, 0.0, 10.0, 1000.0 * 10100.0 / 11100.0),
-        (0.002, -0.0005, 1.0, 0.0, 0.0),
+        (0.002, -0.0015, 1.0, 0.0, False, 1000.0 * 100.0 / 1100.0),
+        (0.0001, -0.0002, 0.0, 10.0, False, 1000.0 * 10100.0 / 11100.0),
+        (0.0001, -0.0002, 0.0, 10.0, True, 1000.0 * 100.0 / 1100.0 + 10000.0),
+        (0.002, -0.0005, 1.0, 0.0, False, 0.0),
+        (0.002, -0.0005, 1.0, 10.0, True, 0.0),
     )
     with wp.ScopedDevice(device):
-        for gap, dz, lam, kd, expected in cases:
+        for gap, dz, lam, kd, bidirectional, expected in cases:
             identity = wp.array([wp.transform_identity()], dtype=wp.transform)
             trial = wp.array([wp.transform((0.0, 0.0, dz), wp.quat_identity())], dtype=wp.transform)
             inputs = [
@@ -39,6 +41,7 @@ def test_metric_oracle(test, device):
                 wp.array([[0.0, 0.0, lam]], dtype=wp.vec3),
                 wp.zeros(1, dtype=wp.vec3),
                 0.0,
+                bidirectional,
                 wp.array([1], dtype=int),
                 wp.zeros(1, dtype=int),
                 wp.ones(1, dtype=int),
@@ -60,7 +63,7 @@ def test_metric_oracle(test, device):
                 kernel = create_accumulate_inactive_contact_metric(width)
                 wp.launch(kernel, dim=width, inputs=inputs, outputs=[*outputs, activated])
                 actual = [x.numpy()[0] for x in outputs]
-                with test.subTest(gap=gap, dz=dz, kd=kd, width=width):
+                with test.subTest(gap=gap, dz=dz, kd=kd, bidirectional=bidirectional, width=width):
                     test.assertEqual(activated.numpy()[0], int(expected > 0.0))
                     np.testing.assert_allclose(actual[0], metric, rtol=2.0e-6, atol=1.0e-6)
                     np.testing.assert_allclose(actual[1], -skew.T @ metric, rtol=2.0e-6, atol=1.0e-6)
@@ -172,6 +175,7 @@ def test_pair_rotations_and_offset_com(test, device):
                 wp.zeros(1, dtype=wp.vec3),
                 wp.zeros(1, dtype=wp.vec3),
                 0.0,
+                False,  # contact_damping_bidirectional
                 wp.ones(1, dtype=int),
                 wp.zeros(1, dtype=int),
                 wp.ones(1, dtype=int),

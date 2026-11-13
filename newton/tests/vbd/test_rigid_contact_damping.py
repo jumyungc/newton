@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 The Newton Developers
 # SPDX-License-Identifier: Apache-2.0
 
-"""Independent force-reporting control for the default compression-only law."""
+"""Independent normal damping controls for compliant solving and force reporting."""
 
 import unittest
 
@@ -9,6 +9,11 @@ import numpy as np
 import warp as wp
 
 import newton
+from newton._src.solvers.vbd.rigid_vbd_kernels import (
+    compute_rigid_contact_forces,
+    evaluate_rigid_contact_from_collision,
+    update_duals_body_body_contacts,
+)
 from newton.tests.unittest_utils import add_function_test, get_test_devices
 
 
@@ -90,12 +95,148 @@ def test_solver_force_reporting(test, device):
                 np.testing.assert_array_equal(wrench.numpy()[0], expected_wrench)
 
 
+@wp.kernel
+def _evaluate_damping(
+    q: wp.array[wp.transform],
+    previous: wp.array[wp.transform],
+    com: wp.array[wp.vec3],
+    lam: wp.array[wp.vec3],
+    bidirectional: bool,
+    force: wp.array[wp.vec3],
+    normal_metric: wp.array[float],
+):
+    row = wp.tid()
+    _fa, _ta, _hla, _hala, _haaa, fb, _tb, hll, _halb, _haab = evaluate_rigid_contact_from_collision(
+        -1,
+        row,
+        q,
+        previous,
+        com,
+        wp.vec3(0.0),
+        wp.vec3(0.0),
+        wp.vec3(0.0),
+        wp.vec3(0.0),
+        wp.vec3(0.0),
+        wp.vec3(0.0, 0.0, 1.0),
+        -wp.transform_get_translation(q[row])[2],
+        -wp.transform_get_translation(previous[row])[2],
+        1000.0,
+        1000.0,
+        1000.0,
+        100.0,
+        lam[row],
+        0.5,
+        0.01,
+        0,
+        1,
+        0.1,
+        wp.vec3(0.0),
+        bidirectional,
+    )
+    force[row] = fb
+    normal_metric[row] = hll[2, 2]
+
+
+def test_compliant_damping_modes(test, device):
+    """Signed damping stays outside elastic ALM; default damping remains coupled."""
+    # Four loaded rows have C=.01 and lambda_n=k*C=10 N. Their normal
+    # velocities are -.1, 0, .1 and .2 m/s; a fifth row is fully unloaded.
+    # The warm tangent exceeds the elastic Coulomb cap, so damping must not
+    # enlarge that cap even when it doubles the total approach force.
+    depths = (0.01, 0.01, 0.01, 0.01, -0.01)
+    previous_depths = (0.0, 0.01, 0.02, 0.03, 0.02)
+    count = len(depths)
+    with wp.ScopedDevice(device):
+        q = wp.array([wp.transform((0.0, 0.0, -c), wp.quat_identity()) for c in depths], dtype=wp.transform)
+        previous = wp.array(
+            [wp.transform((0.0, 0.0, -c), wp.quat_identity()) for c in previous_depths], dtype=wp.transform
+        )
+        com = wp.zeros(count, dtype=wp.vec3)
+        initial = wp.array([[8.0, 0.0, 10.0]] * 4 + [[8.0, 0.0, 0.0]], dtype=wp.vec3)
+        lam = wp.empty_like(initial)
+        points = wp.zeros(count, dtype=wp.vec3)
+        zeros = wp.zeros(count, dtype=float)
+        rho = wp.full(count, 1000.0, dtype=float)
+        kd = wp.full(count, 100.0, dtype=float)
+        mu = wp.full(count, 0.5, dtype=float)
+        geometry = [
+            wp.array([count], dtype=int),
+            wp.zeros(count, dtype=int),
+            wp.array(np.arange(1, count + 1), dtype=int),
+            points,
+            points,
+            None,
+            points,
+            points,
+            wp.array([[0.0, 0.0, 1.0]] * count, dtype=wp.vec3),
+            zeros,
+            zeros,
+            wp.array(np.arange(-1, count), dtype=int),
+            q,
+            previous,
+            com,
+        ]
+        force = wp.empty(count, dtype=wp.vec3)
+        metric = wp.empty(count, dtype=float)
+        exported = [wp.empty(count, dtype=t) for t in (int, int, wp.vec3, wp.vec3, wp.vec3)]
+        for bidirectional in (False, True):
+            if bidirectional:
+                # f_total=k*C-kd*v_n; the dual and cone retain elastic support.
+                expected_force = [[5.0, 0.0, z] for z in (20.0, 10.0, 0.0, -10.0)] + [[0.0, 0.0, 0.0]]
+                expected_dual = [[5.0, 0.0, 10.0]] * 4 + [[0.0, 0.0, 0.0]]
+                # kd/h contributes even at v_n=0 and when total force is tensile.
+                expected_metric = [1500.0] * 4 + [0.0]
+            else:
+                # First-touch material elimination: (k+kd/h)=2000, rho=1000,
+                # giving total 40/3 N and elastic 20/3 N on the loading row.
+                expected_force = [[10.0 / 3.0, 0.0, 40.0 / 3.0]] + [[5.0, 0.0, 10.0]] * 3 + [[0.0, 0.0, 0.0]]
+                expected_dual = expected_force
+                expected_metric = [2000.0 / 3.0, 500.0, 500.0, 500.0, 0.0]
+
+            def evaluate(bidirectional=bidirectional):
+                wp.copy(lam, initial)
+                wp.launch(
+                    _evaluate_damping, count, inputs=[q, previous, com, lam, bidirectional], outputs=[force, metric]
+                )
+                wp.launch(
+                    compute_rigid_contact_forces,
+                    count,
+                    inputs=[0.1, *geometry, rho, rho, rho, kd, mu, rho, lam, points, 0.0, 0, 1, 0.01, bidirectional],
+                    outputs=exported,
+                )
+                wp.launch(
+                    update_duals_body_body_contacts,
+                    count,
+                    inputs=[*geometry, 0.1, mu, points, 0.0, 0, 1, rho, kd, rho, rho, 0.0, bidirectional, rho, lam],
+                )
+
+            def check(expected_force=expected_force, expected_dual=expected_dual, expected_metric=expected_metric):
+                np.testing.assert_allclose(force.numpy(), expected_force, rtol=2.0e-6, atol=2.0e-5)
+                np.testing.assert_allclose(exported[-1].numpy(), expected_force, rtol=2.0e-6, atol=2.0e-5)
+                np.testing.assert_allclose(lam.numpy(), expected_dual, rtol=2.0e-6, atol=2.0e-5)
+                np.testing.assert_allclose(metric.numpy(), expected_metric, rtol=2.0e-6, atol=2.0e-5)
+
+            with test.subTest(bidirectional=bidirectional):
+                evaluate()
+                check()
+                if device.is_cuda:
+                    with wp.ScopedCapture() as capture:
+                        evaluate()
+                    wp.capture_launch(capture.graph)
+                    check()
+
+
 class TestRigidContactDamping(unittest.TestCase):
     pass
 
 
 add_function_test(
     TestRigidContactDamping, "test_solver_force_reporting", test_solver_force_reporting, devices=get_test_devices()
+)
+
+
+add_function_test(
+    TestRigidContactDamping, "test_compliant_damping_modes", test_compliant_damping_modes, devices=get_test_devices()
 )
 
 

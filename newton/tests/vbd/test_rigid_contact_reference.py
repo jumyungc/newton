@@ -109,11 +109,11 @@ def test_fixed_damping_reference(test, device):
             wp.launch(
                 compute_rigid_contact_forces,
                 count,
-                inputs=[1.0 / 1920.0, *geometry, rho, rho, ke, kd, zeros, rho, lam, shift, alpha, 0, 1, 0.01],
+                inputs=[1.0 / 1920.0, *geometry, rho, rho, ke, kd, zeros, rho, lam, shift, alpha, 0, 1, 0.01, False],
                 outputs=output,
             )
             np.testing.assert_allclose(output[-1].numpy(), expected.numpy(), rtol=4.0e-7, atol=3.0e-5)
-            inputs = [*geometry, 1.0 / 1920.0, zeros, shift, alpha, 0, 1, ke, kd, rho, rho, 1.0, rho, lam]
+            inputs = [*geometry, 1.0 / 1920.0, zeros, shift, alpha, 0, 1, ke, kd, rho, rho, 1.0, False, rho, lam]
             update = update_duals_body_body_contacts
             wp.launch(update, count, inputs=inputs)
             np.testing.assert_allclose(lam.numpy(), expected.numpy(), rtol=4.0e-7, atol=3.0e-5)

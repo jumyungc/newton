@@ -45,6 +45,7 @@ def create_accumulate_inactive_contact_metric(threads_per_body: int):
         contact_lambda: wp.array[wp.vec3],
         contact_C0: wp.array[wp.vec3],
         alpha: float,
+        contact_damping_bidirectional: bool,
         contact_count: wp.array[int],
         shape0: wp.array[int],
         shape1: wp.array[int],
@@ -124,9 +125,16 @@ def create_accumulate_inactive_contact_metric(threads_per_body: int):
             Cp = -contact_surface_separation(
                 x_prev if self_is_a else y_prev, y_prev if self_is_a else x_prev, n, margin0[row], margin1[row]
             )
-            force, _elastic, metric = _compliant_contact_normal_response(
-                Ct - shift, Cp - shift, contact_ke[row], contact_kd[row], contact_rho[row], lam, dt
-            )
+            force = k * (Ct - shift) + lam_eff
+            metric = k
+            if contact_damping_bidirectional:
+                # The explicit velocity damper does not enter the elastic ALM multiplier.
+                # Its metric is active even at zero normal velocity.
+                metric += wp.max(contact_kd[row], 0.0) / dt
+            else:
+                force, _elastic, metric = _compliant_contact_normal_response(
+                    Ct - shift, Cp - shift, contact_ke[row], contact_kd[row], contact_rho[row], lam, dt
+                )
             if force <= 0.0 or metric <= 0.0:
                 continue
             if b0 >= 0 and b1 >= 0:

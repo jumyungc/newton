@@ -134,7 +134,7 @@ publishes :attr:`~newton.CollisionPipeline.rigid_contact_max`, or run one uncapt
 
 Start at ``dt`` = 1/600 s with 10 iterations and adjust following
 :ref:`vbd-rules-of-thumb`. The :ref:`Tuning VBD` parameter table lists the
-constructor arguments that matter most for particle systems, with their
+constructor arguments that matter most for tuning, with their
 effect and cost; the signature of :class:`~newton.solvers.SolverVBD` is the
 complete list.
 
@@ -310,17 +310,18 @@ Key Constructor Parameters
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The constructor has three groups. Common: ``iterations``, ``friction_epsilon``,
-``dat_conservative_bound_relaxation``,
+``soft_contact_damping_bidirectional``, ``dat_conservative_bound_relaxation``,
 ``integrate_with_external_rigid_solver``, and ``collision_pipeline`` with
 ``collision_frequency_type`` and ``collision_frequency``. ``particle_*``:
 self-contact on or off, margin and gap, the candidate buffer sizes, the
 topological and rest-shape filters, and the tile solve. ``rigid_*``: the
 compliant ALM switch with its stabilization and retention factors, body-body
-contact history, the per-body contact list capacities, the rigid-soft barrier
-law and DAT, and the structural joint stiffness and damping. Defaults and exact
-semantics are in :class:`~newton.solvers.SolverVBD`; effects, symptoms and
-recommended values for particle systems are in the :ref:`Tuning VBD`
-parameter table.
+contact history and two-sided damping (``rigid_contact_damping_bidirectional``),
+the per-body contact list capacities, the rigid-soft barrier law and DAT, and
+the structural joint stiffness and damping. Defaults and exact
+semantics are in :class:`~newton.solvers.SolverVBD`; recommended values for
+particle systems, and effects and symptoms for rigid bodies and cables, are
+in the :ref:`Tuning VBD` parameter table.
 
 .. _vbd-how-it-works:
 
@@ -725,9 +726,14 @@ relative displacement of the two closest points over the step and
 with :math:`\mu = \mathtt{soft\_contact\_mu}`. Unlike IPC, the contact normal
 is held constant inside the block solve; the kernel notes that this improves
 stability. Damping (``damp_collision``) acts on the gap rate :math:`\dot d =
-\mathbf{n}\cdot\Delta\mathbf{x}_{\text{rel}}/h`, only while the gap closes:
-:math:`\mathbf{f}_d = -\mathtt{soft\_contact\_kd}\;\dot d\,\mathbf{n}`. A
-separating pair is not damped.
+(d - d_{\text{prev}})/h`, the change of the contact distance over the substep;
+:math:`d_{\text{prev}}` is the distance at the substep-start positions from its own
+closest point, so a rigid motion of the pair gives :math:`\dot d = 0`. The force is
+:math:`\mathbf{f}_d = -\mathtt{soft\_contact\_kd}\;\dot d\,\mathbf{n}` with the
+Hessian :math:`(\mathtt{soft\_contact\_kd}/h)\,\mathbf{n}\mathbf{n}^T`. By default
+(``soft_contact_damping_bidirectional=True``) it acts while the gap closes and
+while it opens. ``soft_contact_damping_bidirectional=False`` keeps
+closing-only damping, which leaves a separating pair undamped.
 
 *Rigid-soft contact* acts between a soft contact point and one shape of a
 rigid or static body. The point is a particle, or, with full-surface mesh
@@ -747,8 +753,11 @@ quadratic penalty :math:`E = \tfrac{k}{2}(r - d)^2` for :math:`d < r`;
 ``rigid_soft_contact_use_log_barrier=True`` switches it to the self-contact
 barrier law. Damping and friction have the same form as for self-contact,
 written in world space (``compute_projected_isotropic_friction``): the damping force
-:math:`-k_d\,\dot d\,\mathbf{n}` acts only while the point approaches the
-shape, and the friction force is :math:`-\mu\, f_n\,
+:math:`-k_d\,\dot d\,\mathbf{n}`, with :math:`\dot d =
+\mathbf{n}\cdot\Delta\mathbf{x}_{\text{rel}}/h` the normal rate of the point
+relative to the shape, acts in both directions by default, or only while the
+point approaches the shape with
+``soft_contact_damping_bidirectional=False``, and the friction force is :math:`-\mu\, f_n\,
 f_1(\lVert\mathbf{u}_t\rVert)\,\hat{\mathbf{u}}_t`, with :math:`\mathbf{u}_t`
 the tangential slip of the point relative to the shape surface over the step.
 The force is distributed to the particles by their barycentric weights, and
@@ -830,8 +839,9 @@ their original blocks, as do legacy contacts. This stabilizes a stiff alternatin
 mode, but can change finite-iteration convergence; it is not a nonlinear
 convergence guarantee or a replacement for contact-aware colouring.
 
-With positive :math:`k_d`, the compliant ALM path instead eliminates internal
-compression and compression-increment damping together. At a dual fixed point
+With positive :math:`k_d` and the default
+``rigid_contact_damping_bidirectional=False``, the compliant ALM path instead
+eliminates internal compression and compression-increment damping together. At a dual fixed point
 the material force is
 :math:`k\max(C, 0) + (k_d/h)\max(C - \max(C_{\text{prev}}, 0), 0)`, with
 :math:`C_{\text{prev}}` the penetration at the step start. Clamping the previous
@@ -864,7 +874,15 @@ budgets.
 
 The legacy path damps with
 :math:`-k_d\,(\mathbf{n}\cdot\mathbf{v}_{\text{rel}})\,\mathbf{n}` while the
-bodies approach and the row carries load. The multipliers start from zero in
+bodies approach and the row carries load. With
+``rigid_contact_damping_bidirectional=True``, both the compliant ALM and legacy
+paths use this velocity damper in both directions, including while separating.
+The compliant ALM multiplier and friction disk then use the undamped elastic
+response above; damping is added separately to the force and solve metric.
+The signed damping force can exceed the elastic force during unloading, so this
+option does not clamp the total normal force to be repulsive.
+
+The multipliers start from zero in
 every step unless ``rigid_contact_history=True`` warm-starts them from the
 matched contacts of the previous step. The legacy AVBD path
 (``rigid_compliant_alm=False``, deprecated) uses the pair stiffness as a fixed
@@ -965,9 +983,11 @@ damping coefficient.
 Examples
 --------
 
-:ref:`vbd-empirical-table` on the tuning page lists one shipped example per
-scenario, from cloth drape to a gripper on a soft pad, and says what each one
-demonstrates; copy the values from the example file.
+:ref:`Empirical parameter combinations <vbd-empirical-table>` on the tuning
+page lists one shipped example per scenario, from cloth drape to a gripper on
+a soft pad, and says what each one demonstrates; copy the values from the
+example file. For cables, see the
+:ref:`cable example table <vbd-cable-examples>`.
 
 Runnable examples using :class:`~newton.solvers.SolverVBD` on GitHub:
 
