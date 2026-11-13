@@ -60,7 +60,6 @@ def build_and_color_pair_groups_serial(
     color_cursors: wp.array[wp.int32],
     group_count_out: wp.array[wp.int32],
     overflow_count_out: wp.array[wp.int32],
-    parallel_tail: wp.array[wp.int32],
 ):
     """Build contiguous body-pair runs and reverse-greedy exact edge colors."""
     if wp.tid() != 0:
@@ -73,9 +72,6 @@ def build_and_color_pair_groups_serial(
         body_color_mask[body] = 0
     for color in range(color_count):
         color_counts[color] = 0
-        color_offsets[color] = 0
-        color_cursors[color] = 0
-    color_offsets[color_count] = 0
 
     active_contacts = wp.min(contact_count[0], contact_shape0.shape[0])
     group_count = wp.int32(0)
@@ -105,7 +101,6 @@ def build_and_color_pair_groups_serial(
             group_end[group_count] = end
             group_body0[group_count] = body0
             group_body1[group_count] = body1
-            group_color[group_count] = -1
             group_count += 1
         contact = end
 
@@ -161,10 +156,6 @@ def build_and_color_pair_groups_serial(
 
     group_count_out[0] = group_count
     overflow_count_out[0] = overflow_count
-    parallel_tail[0] = 0
-    for color in range(_DIRECT_COLOR_COUNT, 2 * _DIRECT_COLOR_COUNT):
-        if color_counts[color] > _FUSED_THREADS:
-            parallel_tail[0] = 1
 
 
 @wp.kernel
@@ -484,7 +475,6 @@ def scatter_pair_groups_by_color(
 @wp.kernel
 def accumulate_constraint_contact_forces_per_body(
     color_group: wp.array[wp.int32],
-    dynamic_body_ids: wp.array[wp.int32],
     dynamic_color_starts: wp.array[wp.int32],
     active_dynamic_color: int,
     body_q: wp.array[wp.transform],
@@ -509,8 +499,8 @@ def accumulate_constraint_contact_forces_per_body(
 ):
     """Accumulate the current contact reaction in each VBD primal block."""
     slot = wp.tid()
-    body = _body_id_for_color_slot(slot, color_group, dynamic_body_ids, dynamic_color_starts, active_dynamic_color)
-    if body < 0 or body_inv_mass[body] <= 0.0:
+    body = _body_id_for_color_slot(slot, color_group, dynamic_color_starts, active_dynamic_color)
+    if body < 0 or body_inv_mass[body] <= 0.0 or body_uses_pair_contacts[body] == 0:
         return
 
     force_sum = wp.vec3(0.0)
@@ -658,16 +648,15 @@ def _constraint_direction_response(
     return x0, w0, x1, w1, point_delta1 - point_delta0
 
 
-@wp.kernel
-def prepare_constraint_contact_blocks(
+@wp.func
+def _prepare_constraint_contact_block(
+    contact: int,
     dt: float,
     refresh_constants: bool,
-    legacy_hard_contacts: int,
     contact_compliant_alm: int,
     body_q_prev: wp.array[wp.transform],
     contact_material_ke: wp.array[float],
     contact_material_kd: wp.array[float],
-    contact_count: wp.array[wp.int32],
     contact_shape0: wp.array[wp.int32],
     contact_shape1: wp.array[wp.int32],
     contact_point0: wp.array[wp.vec3],
@@ -695,10 +684,10 @@ def prepare_constraint_contact_blocks(
     tangent_support: wp.array[wp.mat22],
     contact_constants: wp.array[ContactConstants],
 ):
-    """Prepare a fixed inertial Delassus linearization for each contact."""
-    contact = wp.tid()
-    if contact >= contact_count[0]:
-        return
+    """Linearize one contact's inertial Delassus response at the current poses.
+
+    Material and step-start anchors are refreshed only when ``refresh_constants`` is set.
+    """
     shape0 = contact_shape0[contact]
     shape1 = contact_shape1[contact]
     body0 = shape_body[shape0] if shape0 >= 0 else -1
@@ -793,7 +782,8 @@ def prepare_constraint_contact_blocks(
     )
     compliance = float(0.0)
     damping_fraction = float(0.0)
-    use_finite_material = contact_compliant_alm == 1 or legacy_hard_contacts == 0
+    # The pair lane runs only for compliant ALM or legacy hard contacts.
+    use_finite_material = contact_compliant_alm == 1
     effective_stiffness = float(0.0)
     if use_finite_material:
         stiffness = contact_material_ke[contact]
@@ -819,6 +809,124 @@ def prepare_constraint_contact_blocks(
     constants.compliance = compliance if not use_finite_material or effective_stiffness > 0.0 else -1.0
     constants.damping_fraction = damping_fraction
     contact_constants[contact] = constants
+
+
+@wp.kernel
+def prepare_constraint_contact_blocks(
+    dt: float,
+    refresh_constants: bool,
+    contact_compliant_alm: int,
+    body_q_prev: wp.array[wp.transform],
+    contact_material_ke: wp.array[float],
+    contact_material_kd: wp.array[float],
+    contact_count: wp.array[wp.int32],
+    contact_shape0: wp.array[wp.int32],
+    contact_shape1: wp.array[wp.int32],
+    contact_point0: wp.array[wp.vec3],
+    contact_point1: wp.array[wp.vec3],
+    contact_surface_velocity: wp.array[wp.vec3],
+    contact_offset0: wp.array[wp.vec3],
+    contact_offset1: wp.array[wp.vec3],
+    contact_normal: wp.array[wp.vec3],
+    contact_margin0: wp.array[float],
+    contact_margin1: wp.array[float],
+    shape_body: wp.array[wp.int32],
+    body_q: wp.array[wp.transform],
+    body_com: wp.array[wp.vec3],
+    body_inv_mass: wp.array[float],
+    body_inv_inertia: wp.array[wp.mat33],
+    tangent0: wp.array[wp.vec3],
+    tangent1: wp.array[wp.vec3],
+    response0_normal: wp.array[wp.spatial_vector],
+    response1_normal: wp.array[wp.spatial_vector],
+    response0_tangent0: wp.array[wp.spatial_vector],
+    response1_tangent0: wp.array[wp.spatial_vector],
+    response0_tangent1: wp.array[wp.spatial_vector],
+    response1_tangent1: wp.array[wp.spatial_vector],
+    normal_support: wp.array[float],
+    tangent_support: wp.array[wp.mat22],
+    contact_constants: wp.array[ContactConstants],
+):
+    """Linearize each contact's inertial Delassus response at the current poses."""
+    contact = wp.tid()
+    if contact >= contact_count[0]:
+        return
+    _prepare_constraint_contact_block(
+        contact,
+        dt,
+        refresh_constants,
+        contact_compliant_alm,
+        body_q_prev,
+        contact_material_ke,
+        contact_material_kd,
+        contact_shape0,
+        contact_shape1,
+        contact_point0,
+        contact_point1,
+        contact_surface_velocity,
+        contact_offset0,
+        contact_offset1,
+        contact_normal,
+        contact_margin0,
+        contact_margin1,
+        shape_body,
+        body_q,
+        body_com,
+        body_inv_mass,
+        body_inv_inertia,
+        tangent0,
+        tangent1,
+        response0_normal,
+        response1_normal,
+        response0_tangent0,
+        response1_tangent0,
+        response0_tangent1,
+        response1_tangent1,
+        normal_support,
+        tangent_support,
+        contact_constants,
+    )
+
+
+@wp.func
+def _project_sliding_friction(W00: float, W01: float, W11: float, c0: float, c1: float, friction_limit: float):
+    """Project an exterior tangent onto a positive-radius Coulomb disk in an SPD metric."""
+    rhs0 = W00 * c0 + W01 * c1
+    rhs1 = W01 * c0 + W11 * c1
+    # Normalize the SPD metric before comparing the squared root
+    # residual. Its positive determinant can be multiplied through,
+    # avoiding a reciprocal in every bisection step.
+    inverse_scale = 1.0 / wp.max(W00, W11)
+    a = W00 * inverse_scale
+    b = W01 * inverse_scale
+    d = W11 * inverse_scale
+    u = rhs0 * (inverse_scale / friction_limit)
+    v = rhs1 * (inverse_scale / friction_limit)
+    # Keep all coefficients bounded, including when the friction radius tends
+    # to zero. Otherwise squaring the determinant can overflow during sliding.
+    inverse_bound = 1.0 / wp.max(1.0, wp.max(wp.abs(u), wp.abs(v)))
+    a *= inverse_bound
+    b *= inverse_bound
+    d *= inverse_bound
+    u *= inverse_bound
+    v *= inverse_bound
+    lower = float(0.0)
+    upper = wp.sqrt(u * u + v * v)
+    for _root_iter in range(16):
+        eta = 0.5 * (lower + upper)
+        d0 = a + eta
+        d1 = d + eta
+        determinant = d0 * d1 - b * b
+        x0 = d1 * u - b * v
+        x1 = d0 * v - b * u
+        if x0 * x0 + x1 * x1 > determinant * determinant:
+            lower = eta
+        else:
+            upper = eta
+    d0 = a + upper
+    d1 = d + upper
+    scale = friction_limit / (d0 * d1 - b * b)
+    return wp.vec2((d1 * u - b * v) * scale, (d0 * v - b * u) * scale)
 
 
 @wp.func
@@ -923,7 +1031,7 @@ def _solve_constraint_contact_group(
         w1_n = wp.spatial_bottom(response1_n)
         new_normal = float(0.0)
         denominator = normal_support + compliance
-        if denominator > _EPS and compliance >= 0.0:
+        if denominator > 0.0 and compliance >= 0.0:
             new_normal = wp.max(old_normal + normal_residual / denominator, 0.0)
         delta_normal = new_normal - old_normal
 
@@ -962,32 +1070,13 @@ def _solve_constraint_contact_group(
             candidate_tangent = old_tangent + t0 * delta0 + t1 * delta1
         friction_limit = mu * new_normal
         candidate_length = wp.length(candidate_tangent)
-        if candidate_length > friction_limit and candidate_length > _EPS:
+        if candidate_length > friction_limit:
             if friction_limit > _EPS:
                 # Minimize the local quadratic in the W metric on the Coulomb disk.
                 c0 = wp.dot(candidate_tangent, t0)
                 c1 = wp.dot(candidate_tangent, t1)
-                rhs0 = W00 * c0 + W01 * c1
-                rhs1 = W01 * c0 + W11 * c1
-                lower = float(0.0)
-                upper = wp.sqrt(rhs0 * rhs0 + rhs1 * rhs1) / friction_limit
-                for _root_iter in range(16):
-                    eta = 0.5 * (lower + upper)
-                    d0 = W00 + eta
-                    d1 = W11 + eta
-                    inverse_det = 1.0 / (d0 * d1 - W01 * W01)
-                    x0 = (d1 * rhs0 - W01 * rhs1) * inverse_det
-                    x1 = (d0 * rhs1 - W01 * rhs0) * inverse_det
-                    if x0 * x0 + x1 * x1 > friction_limit * friction_limit:
-                        lower = eta
-                    else:
-                        upper = eta
-                d0 = W00 + upper
-                d1 = W11 + upper
-                inverse_det = 1.0 / (d0 * d1 - W01 * W01)
-                candidate_tangent = t0 * ((d1 * rhs0 - W01 * rhs1) * inverse_det) + t1 * (
-                    (d0 * rhs1 - W01 * rhs0) * inverse_det
-                )
+                projected = _project_sliding_friction(W00, W01, W11, c0, c1, friction_limit)
+                candidate_tangent = t0 * projected[0] + t1 * projected[1]
             else:
                 candidate_tangent = wp.vec3(0.0)
         delta_tangent = candidate_tangent - old_tangent
@@ -1015,7 +1104,7 @@ def _solve_constraint_contact_group(
         body_q[body1] = pose1
 
 
-@wp.kernel
+@wp.kernel(grid_stride=False)
 def solve_constraint_contact_color(
     launch_dim: int,
     active_color: int,
@@ -1535,7 +1624,6 @@ class RigidPairContact:
                     self.color_cursors,
                     self.group_count,
                     self.overflow_count,
-                    self.parallel_tail,
                 ],
                 device=self.device,
                 block_dim=1,
@@ -1567,7 +1655,6 @@ class RigidPairContact:
         contact_material_kd: wp.array,
         contact_material_mu: wp.array,
         contact_lambda: wp.array,
-        legacy_hard_contacts: int,
         contact_compliant_alm: bool,
         parallel_tail: bool | None = None,
         refresh_constants: bool = True,
@@ -1583,7 +1670,6 @@ class RigidPairContact:
             inputs=[
                 dt,
                 refresh_constants,
-                legacy_hard_contacts,
                 int(contact_compliant_alm),
                 body_q_prev,
                 contact_material_ke,

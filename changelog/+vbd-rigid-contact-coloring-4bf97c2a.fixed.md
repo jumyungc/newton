@@ -1,10 +1,11 @@
 Preserve rigid VBD linear velocity when small displacements round away in float32 poses,
-including through joint-mimic projection and free-body pair-contact impulses.
-Preserve distinct normal and tangential moment arms in pair-contact warm starts.
-Evaluate pair-contact damping from step-start poses, independently of collision-frame refreshes.
-Clamp pair-coloring reads to allocated contact capacity.
-Keep legacy penalty-only contacts, and legacy hard contacts with in-iteration collision detection,
-on a complete per-body schedule when pair state is unavailable.
-Preserve requested run-to-run determinism for pair-contact force gathering.
+including through joint-mimic projection. For compliant body solves, retain the
+final Newton update lost to position rounding when reconstructing velocity;
+discard this remainder after subsequent pose projection.
 
-Preserve every retained pair-contact reaction when a per-body contact list overflows, using an ordered gather compatible with CUDA graph capture.
+Preserve pair-contact normal forces across uniform mass/material scales.
+Clamp pair-contact friction to zero when its Coulomb disk has zero radius,
+including for sub-epsilon tangential forces.
+
+Use the same non-attractive spring-damper law for compliant body and pair contacts,
+including release damping and a friction bound based on the total normal reaction.

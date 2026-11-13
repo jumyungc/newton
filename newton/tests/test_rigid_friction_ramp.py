@@ -210,14 +210,6 @@ def assert_grid_behavior(test, settle_q, final_q, final_qd, mus, angles_deg, box
         test.fail("\n  ".join([f"{len(failures)} friction-ramp cell(s) failed:", *failures]))
 
 
-def _make_collision_pipeline(model, solver):
-    """Enable contact history only for the VBD configuration that consumes it."""
-    kwargs = {}
-    if isinstance(solver, newton.solvers.SolverVBD):
-        kwargs = {"contact_matching": "sticky", "deterministic": True}
-    return newton.CollisionPipeline(model, **kwargs)
-
-
 def test_friction_ramp(test, device, solver_fn, mus, angles_deg, thresholds, native_contacts=False, contact_kf=0.0):
     """Verify static and sliding behavior across a friction-ramp grid."""
     model, box_ids = build_friction_grid(device, mus, angles_deg, contact_kf=contact_kf)
@@ -230,7 +222,7 @@ def test_friction_ramp(test, device, solver_fn, mus, angles_deg, thresholds, nat
         collision_pipeline = None
         contacts = None
     else:
-        collision_pipeline = _make_collision_pipeline(model, solver)
+        collision_pipeline = newton.CollisionPipeline(model)
         contacts = collision_pipeline.contacts()
 
     graph = capture_frame(solver, model, state_0, state_1, control, collision_pipeline, contacts)
@@ -322,7 +314,7 @@ def test_friction_stopping_distance(
     state_1 = model.state()
     control = model.control()
     is_mujoco = isinstance(solver, newton.solvers.SolverMuJoCo)
-    collision_pipeline = None if native_contacts else _make_collision_pipeline(model, solver)
+    collision_pipeline = None if native_contacts else newton.CollisionPipeline(model)
     contacts = collision_pipeline.contacts() if collision_pipeline is not None else None
 
     # Establish resting contacts so the measurement excludes landing impulses.
@@ -494,7 +486,6 @@ _SOLVERS = {
             model,
             iterations=40,
             rigid_compliant_alm=True,
-            rigid_contact_history=True,
         ),
         "mus": _VBD_MUS,
         "angles_deg": _VBD_ANGLES_DEG,

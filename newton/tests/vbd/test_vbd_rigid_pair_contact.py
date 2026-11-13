@@ -36,6 +36,77 @@ def _make_pipeline(model, capacity):
     )
 
 
+@wp.kernel
+def _project_sliding_friction_test_kernel(data: wp.array2d[float], projected: wp.array[wp.vec2]):
+    row = wp.tid()
+    projected[row] = rigid_pair_contact._project_sliding_friction(
+        data[row, 0], data[row, 1], data[row, 2], data[row, 3], data[row, 4], data[row, 5]
+    )
+
+
+def test_sliding_friction_projection_matches_metric_disk(test, device):
+    """Preserve the Coulomb disk and metric minimizer across units and anisotropy."""
+    rng = np.random.default_rng(413)
+    count = 256
+    angle = rng.uniform(-np.pi, np.pi, count)
+    condition = np.exp(rng.uniform(0.0, np.log(64.0), count))
+    scale = 10.0 ** rng.uniform(-12.0, 4.0, count)
+    c, s = np.cos(angle), np.sin(angle)
+    a = scale * (c * c + s * s / condition)
+    b = scale * (c * s - c * s / condition)
+    d = scale * (s * s + c * c / condition)
+    radius = 10.0 ** rng.uniform(-5.0, 5.0, count)
+    direction = rng.uniform(-np.pi, np.pi, count)
+    length = radius * np.exp(rng.uniform(0.0001, np.log(1000.0), count))
+    data = np.column_stack((a, b, d, length * np.cos(direction), length * np.sin(direction), radius)).astype(np.float32)
+    # Small positive normal force must still produce a feasible friction force.
+    stress = np.asarray(
+        [[1.0e-8, 0.0, 1.0e-8, 1.0, 1.0, 1.0e-10], [1.0e-5, 1.0e-6, 2.0e-5, 1.0e4, -1.0e4, 1.0e-10]], dtype=np.float32
+    )
+    data = np.concatenate((data, stress), axis=0)
+    count = len(data)
+    inputs = wp.array(data, dtype=float, device=device)
+    output = wp.zeros(count, dtype=wp.vec2, device=device)
+
+    def project():
+        wp.launch(_project_sliding_friction_test_kernel, dim=count, inputs=[inputs, output], device=device)
+
+    project()
+    eager = output.numpy().copy()
+    if device.is_cuda:
+        with wp.ScopedCapture(device=device) as capture:
+            project()
+        wp.capture_launch(capture.graph)
+        np.testing.assert_array_equal(output.numpy(), eager)
+    actual = output.numpy().astype(np.float64)
+    a, b, d, c0, c1, radius = data.astype(np.float64).T
+    rhs0, rhs1 = a * c0 + b * c1, b * c0 + d * c1
+    lower = np.zeros(count)
+    initial_upper = np.hypot(rhs0, rhs1) / radius
+    upper = initial_upper.copy()
+    for _ in range(90):
+        eta = (lower + upper) * 0.5
+        determinant = (a + eta) * (d + eta) - b * b
+        x0 = ((d + eta) * rhs0 - b * rhs1) / determinant
+        x1 = ((a + eta) * rhs1 - b * rhs0) / determinant
+        outside = x0 * x0 + x1 * x1 > radius * radius
+        lower, upper = np.where(outside, eta, lower), np.where(outside, upper, eta)
+    determinant = (a + upper) * (d + upper) - b * b
+    expected = np.column_stack(
+        (((d + upper) * rhs0 - b * rhs1) / determinant, ((a + upper) * rhs1 - b * rhs0) / determinant)
+    )
+    eigen_max = 0.5 * (a + d + np.hypot(a - d, 2.0 * b))
+    eigen_min = (a * d - b * b) / eigen_max
+    # A 16-step bracket has width initial_upper / 2**16. Above the
+    # exact root, ||dx/deta|| <= radius / (lambda_min + eta).
+    rounding = 32.0 * np.finfo(np.float32).eps * eigen_max / eigen_min
+    error_bound = initial_upper / (2**16 * (eigen_min + lower)) + rounding
+    relative_error = np.linalg.norm(actual - expected, axis=1) / radius
+    test.assertTrue(np.isfinite(actual).all())
+    test.assertTrue(np.all(relative_error <= error_bound))
+    test.assertTrue(np.all(np.linalg.norm(actual, axis=1) <= radius * (1.0 + rounding)))
+
+
 def test_pair_preparation_refreshes_material_and_previous_pose(test, device):
     """Refresh material, anchors and prescribed surface motion on captured sweeps."""
     model = SimpleNamespace(
@@ -79,7 +150,7 @@ def test_pair_preparation_refreshes_material_and_previous_pose(test, device):
     def sweep():
         wp.copy(pose, seed)
         multiplier.zero_()
-        pair.solve(pose, previous_pose, contacts, dt, stiffness, damping, friction, multiplier, 0, True)
+        pair.solve(pose, previous_pose, contacts, dt, stiffness, damping, friction, multiplier, True)
         # Later sweeps reuse constants, but must still solve from the current pose.
         wp.copy(pose, seed)
         multiplier.zero_()
@@ -92,7 +163,6 @@ def test_pair_preparation_refreshes_material_and_previous_pose(test, device):
             damping,
             friction,
             multiplier,
-            0,
             True,
             refresh_constants=False,
         )
@@ -103,29 +173,38 @@ def test_pair_preparation_refreshes_material_and_previous_pose(test, device):
         with wp.ScopedCapture(device=device) as capture:
             sweep()
         graph = capture.graph
-    for ke, kd, previous_x, gap, surface_velocity in [
-        (1000.0, 0.0, 0.0, 0.01, (0.0, 0.0, 0.0)),
-        (2000.0, 10.0, 0.01, 0.004, (0.5, 0.0, 1.0)),
-        (0.0, 0.0, -0.01, 0.02, (-0.5, 0.0, 0.0)),
-        (500.0, 0.0, -0.02, 0.01, (-0.5, 0.0, -1.0)),
+    for ke, kd, previous_x, gap, surface_velocity, mu, mass_scale in [
+        (1000.0, 0.0, 0.0, 0.01, (0.0, 0.0, 0.0), 1.0e6, 1.0),
+        (2000.0, 10.0, 0.01, 0.004, (0.5, 0.0, 1.0), 1.0e6, 1.0),
+        (0.0, 0.0, -0.01, 0.02, (-0.5, 0.0, 0.0), 1.0e6, 1.0),
+        (500.0, 0.0, -0.02, 0.01, (-0.5, 0.0, -1.0), 1.0e6, 1.0),
+        # A zero-radius friction disk must also reject sub-epsilon forces.
+        (1000.0, 0.0, 0.02, 0.01, (1.0e-15, 0.0, 0.0), 0.0, 1.0),
+        (0.0, 0.0, 0.02, 0.01, (1.0e-15, 0.0, 0.0), 0.8, 1.0),
+        # Scaling mass and material together must preserve the pose response.
+        (1000.0, 10.0, 0.02, 0.01, (0.0, 0.0, 0.0), 0.0, 1.0e10),
     ]:
+        inverse_mass.fill_(1.0 / mass_scale)
+        friction.fill_(mu)
         contacts.rigid_contact_surface_velocity.assign(np.asarray([surface_velocity], dtype=np.float32))
-        stiffness.fill_(ke)
-        damping.fill_(kd)
+        stiffness.fill_(ke * mass_scale)
+        damping.fill_(kd * mass_scale)
         previous_pose.assign(np.asarray([[previous_x, 0.0, 0.1 - gap, 0.0, 0.0, 0.0, 1.0]], dtype=np.float32))
         if graph is None:
             sweep()
         else:
             wp.capture_launch(graph)
-        # Implicit Kelvin--Voigt normal response with unit inverse mass.
+        # Implicit Kelvin--Voigt normal force normalized by the mass scale.
         effective_stiffness = ke + kd / dt
         normal_force = max(0.0, (ke * 0.01 + kd / dt * (0.01 - gap)) / (1.0 + effective_stiffness * dt * dt))
         # Large friction is intentionally non-sliding: remove relative translation.
-        expected_x = previous_x - dt * surface_velocity[0] if normal_force > 0.0 else 0.02
+        expected_x = previous_x - dt * surface_velocity[0] if normal_force > 0.0 and mu > 0.0 else 0.02
         actual = pose.numpy()[0]
         np.testing.assert_allclose(actual[:3], [expected_x, 0.0, 0.09 + dt * dt * normal_force], atol=3.0e-7, rtol=0.0)
-        np.testing.assert_allclose(multiplier.numpy()[0, 2], normal_force, atol=3.0e-5, rtol=1.0e-6)
+        np.testing.assert_allclose(multiplier.numpy()[0, 2] / mass_scale, normal_force, atol=3.0e-5, rtol=1.0e-6)
         np.testing.assert_array_equal(actual[3:], [0.0, 0.0, 0.0, 1.0])
+        if mu == 0.0 or normal_force == 0.0:
+            np.testing.assert_array_equal(multiplier.numpy()[0, :2], [0.0, 0.0])
 
 
 def test_pair_contacts_are_limited_to_free_body_systems(test, device):
@@ -417,7 +496,6 @@ def test_pair_warmstart_keeps_reactions_when_body_list_overflows(test, device):
     empty = wp.empty(0, dtype=int, device=device)
     prefix = [
         array([0, 1], int),
-        empty,
         empty,
         -1,
         poses,
@@ -720,7 +798,6 @@ def test_jointed_contact_refinement_counts_manifolds_not_points(test, device):
     count, pairs = _dynamic_contact_pairs(model, contacts)
 
     test.assertGreater(count, pairs.shape[0])
-    test.assertEqual(int(solver._rigid_body_max_same_color_degree.numpy()[0]), 1)
     test.assertEqual(int(solver._rigid_body_refinement_active.numpy()[0]), 0)
 
 
@@ -731,7 +808,6 @@ def test_jointed_contact_refinement_preserves_joint_colors(test, device):
     pipeline.collide(state_in, contacts)
     solver.step(state_in, model.state(), model.control(), contacts, 1.0 / 600.0)
 
-    test.assertGreater(int(solver._rigid_body_max_same_color_degree.numpy()[0]), 2)
     test.assertEqual(int(solver._rigid_body_refinement_active.numpy()[0]), 1)
     test.assertEqual(int(solver._rigid_body_refinement_overflow.numpy()[0]), 0)
 
@@ -744,28 +820,6 @@ def test_jointed_contact_refinement_preserves_joint_colors(test, device):
 
     _, pairs = _dynamic_contact_pairs(model, contacts)
     test.assertTrue(np.all(colors[pairs[:, 0]] != colors[pairs[:, 1]]))
-
-
-def test_jointed_contact_refinement_is_cuda_graph_repeatable(test, device):
-    """Dynamic analysis, coloring, and nested solve selection replay entirely on-device."""
-    model, pipeline, contacts, solver = _make_jointed_contact_lattice(device, ny=4, nz=2)
-    state_in = model.state()
-    state_out = model.state()
-    pipeline.collide(state_in, contacts)
-    solver.step(state_in, state_out, model.control(), contacts, 1.0 / 600.0)
-
-    state_in = model.state()
-    state_out = model.state()
-    pipeline.collide(state_in, contacts)
-    with wp.ScopedCapture(device=device) as capture:
-        solver.step(state_in, state_out, model.control(), contacts, 1.0 / 600.0)
-
-    wp.capture_launch(capture.graph)
-    first = solver._rigid_body_colors.numpy().copy()
-    wp.capture_launch(capture.graph)
-    second = solver._rigid_body_colors.numpy().copy()
-    np.testing.assert_array_equal(first, second)
-    test.assertEqual(int(solver._rigid_body_refinement_active.numpy()[0]), 1)
 
 
 def test_jointed_contact_auto_without_conditional_graphs(test, device):
@@ -1993,83 +2047,311 @@ def test_body_contact_color_budget_is_bounded_and_joint_safe(test, device):
                 test.assertEqual((state_out.body_q.numpy().tobytes(), state_out.body_qd.numpy().tobytes()), expected)
 
 
-def test_disjoint_joint_force_controls_preserve_wrenches(test, device):
-    """Preserve nonzero controls and mutable enables without cross-body reduction."""
+def test_joint_force_gather_matches_xpbd_wrenches(test, device):
+    """Gather joint_f wrenches per body in fixed tile order, with XPBD's equations and no atomics."""
+    builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+    inertia = wp.mat33(np.eye(3, dtype=np.float32))
+    hub = builder.add_link(mass=1.0, inertia=inertia, com=wp.vec3(0.1, -0.2, 0.05))
+    spokes = [
+        builder.add_link(
+            mass=1.0,
+            inertia=inertia,
+            com=wp.vec3(0.03 * i, 0.02, -0.01),
+            xform=wp.transform(wp.vec3(1.0 + i, 0.3 * i, 0.2), wp.quat_rpy(0.1 * i, 0.2, -0.3)),
+        )
+        for i in range(7)
+    ]
+    anchor = wp.transform(wp.vec3(0.4, -0.1, 0.2), wp.quat_rpy(0.3, -0.2, 0.1))
+    joints = [
+        builder.add_joint_free(hub),
+        builder.add_joint_revolute(hub, spokes[0], parent_xform=anchor, axis=(0.0, 1.0, 0.0)),
+        builder.add_joint_ball(hub, spokes[1], parent_xform=anchor),
+        builder.add_joint_d6(
+            hub,
+            spokes[2],
+            parent_xform=anchor,
+            linear_axes=[newton.ModelBuilder.JointDofConfig(axis=(1.0, 0.0, 0.0))],
+            angular_axes=[
+                newton.ModelBuilder.JointDofConfig(axis=(0.0, 0.0, 1.0)),
+                newton.ModelBuilder.JointDofConfig(axis=(0.0, 1.0, 0.0)),
+            ],
+        ),
+        builder.add_joint_prismatic(spokes[2], spokes[3], axis=(0.0, 0.0, 1.0)),
+        builder.add_joint_d6(
+            hub,
+            spokes[4],
+            parent_xform=anchor,
+            angular_axes=[
+                newton.ModelBuilder.JointDofConfig(axis=axis)
+                for axis in ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+            ],
+        ),
+        builder.add_joint_rod(hub, spokes[5], parent_xform=anchor),
+        builder.add_joint_fixed(hub, spokes[6], parent_xform=anchor),
+    ]
+    builder.add_articulation(joints)
+    builder.color()
+    model = builder.finalize(device=device)
+    test.assertFalse(
+        newton.solvers.SolverVBD(
+            model, iterations=1, rigid_compliant_alm=True, deterministic=wp.DeterministicMode.NOT_GUARANTEED
+        )._gather_joint_forces
+    )
+    solver = newton.solvers.SolverVBD(
+        model, iterations=1, rigid_compliant_alm=True, deterministic=wp.DeterministicMode.RUN_TO_RUN
+    )
+    state = model.state()
+    rng = np.random.default_rng(3)
+    model.joint_q.assign(
+        (model.joint_q.numpy() + rng.normal(scale=0.2, size=model.joint_coord_count)).astype(np.float32)
+    )
+    newton.eval_fk(model, model.joint_q, model.joint_qd, state)
+    control = model.control()
+    body_seed = rng.normal(size=(model.body_count, 6)).astype(np.float32)
+    seed = wp.array(body_seed, dtype=wp.spatial_vector, device=device)
+    actual = wp.zeros_like(seed)
+    joint_inputs = [
+        state.body_q,
+        model.body_com,
+        model.joint_type,
+        model.joint_enabled,
+        model.joint_parent,
+        model.joint_child,
+        model.joint_X_p,
+        model.joint_X_c,
+        model.joint_qd_start,
+        model.joint_dof_dim,
+        model.joint_axis,
+        control.joint_f,
+    ]
+
+    def gather():
+        wp.launch(
+            rigid_vbd_kernels.eval_applied_joint_wrenches,
+            dim=model.joint_count,
+            inputs=joint_inputs,
+            outputs=[solver._applied_joint_wrench],
+            device=device,
+        )
+        wp.launch_tiled(
+            rigid_vbd_kernels.accumulate_applied_joint_wrenches,
+            dim=model.body_count,
+            block_dim=32,
+            inputs=[
+                model.joint_parent,
+                solver._applied_joint_offsets,
+                solver._applied_joints,
+                solver._applied_joint_wrench,
+                seed,
+            ],
+            outputs=[actual],
+            device=device,
+        )
+
+    def joint_wrench(joint):
+        # One enabled joint at a time: XPBD's scatter then has a single writer per body.
+        enabled = model.joint_enabled.numpy()
+        mask = np.zeros_like(enabled)
+        mask[joint] = enabled[joint]
+        only = wp.array(mask, dtype=bool, device=device)
+        out = wp.zeros(model.body_count, dtype=wp.spatial_vector, device=device)
+        inputs = list(joint_inputs)
+        inputs[3] = only
+        wp.launch(
+            xpbd_kernels.apply_joint_forces,
+            dim=model.joint_count,
+            inputs=[*inputs, 1.0 / 120.0],
+            outputs=[out, None],
+            device=device,
+        )
+        return out.numpy()
+
+    gather()
+    capture = None
+    if device.is_cuda:
+        with wp.ScopedCapture(device=device) as capture:
+            gather()
+    for enabled in (True, False, True):
+        control.joint_f.assign(np.linspace(-11, 17, model.joint_dof_count, dtype=np.float32))
+        model.joint_enabled.assign(np.full(model.joint_count, enabled, dtype=bool))
+        expected = body_seed.copy()
+        for joint in range(model.joint_count):
+            expected = expected + joint_wrench(joint)
+        for _ in range(3):
+            if capture is not None:
+                wp.capture_launch(capture.graph)
+            else:
+                gather()
+            if not enabled:
+                np.testing.assert_array_equal(actual.numpy(), body_seed)
+            np.testing.assert_allclose(actual.numpy(), expected, rtol=1.0e-6, atol=1.0e-5)
+        # The hub receives several wrenches; the summation order is fixed, so repeats are identical.
+        first = actual.numpy().copy()
+        gather()
+        np.testing.assert_array_equal(actual.numpy(), first)
+    # A leaf with one joint matches XPBD's scatter bit for bit.
+    scatter = wp.array(body_seed, dtype=wp.spatial_vector, device=device)
+    wp.launch(
+        xpbd_kernels.apply_joint_forces,
+        dim=model.joint_count,
+        inputs=[*joint_inputs, 1.0 / 120.0],
+        outputs=[scatter, None],
+        device=device,
+    )
+    for body in (spokes[0], spokes[1], spokes[3]):
+        np.testing.assert_array_equal(actual.numpy()[body], scatter.numpy()[body])
+
+
+def test_disjoint_joint_mimics_skip_ordered_reduction(test, device):
+    """Mimic relationships with distinct endpoint bodies need no ordered reduction; shared bodies keep it."""
     for shared in (False, True):
         builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
-        for x in (0.0, 3.0):
-            body = builder.add_body(xform=wp.transform(wp.vec3(x, 0.0, 0.0), wp.quat_identity()))
-            builder.add_shape_sphere(body, radius=0.5)
+        inertia = wp.mat33(np.eye(3, dtype=np.float32))
+        base = builder.add_link(mass=1.0, inertia=inertia)
+        links = [builder.add_link(mass=1.0, inertia=inertia) for _ in range(4)]
+        joints = [builder.add_joint_fixed(-1, base)]
+        joints += [builder.add_joint_revolute(base, link, axis=(0.0, 0.0, 1.0)) for link in links]
+        builder.add_articulation(joints)
+        builder.set_joint_mimic(joints[2], joints[1], coeffs=(0.0, 1.0))
         if shared:
-            builder.add_joint_fixed(parent=0, child=1)
+            # The second relationship shares the base body with the first.
+            builder.set_joint_mimic(joints[4], joints[3], coeffs=(0.0, 1.0))
         builder.color()
         model = builder.finalize(device=device)
         solver = newton.solvers.SolverVBD(
             model, iterations=1, rigid_compliant_alm=True, deterministic=wp.DeterministicMode.RUN_TO_RUN
         )
-        selected = getattr(solver, "_joint_force_kernel", xpbd_kernels.apply_joint_forces)
-        if device.is_cuda and not shared:
-            test.assertIsNot(selected, xpbd_kernels.apply_joint_forces)
-        else:
-            test.assertIs(selected, xpbd_kernels.apply_joint_forces)
-        if shared:
-            continue
-        control = model.control()
-        state = model.state()
-        body_seed = np.asarray([[3, -2, 7, 4, -5, 6], [-1, 2, -3, 4, -5, 6]], dtype=np.float32)
-        expected = wp.array(body_seed, dtype=wp.spatial_vector, device=device)
-        actual = wp.clone(expected)
-        seed = wp.clone(expected)
-        inputs = [
-            state.body_q,
-            model.body_com,
-            model.joint_type,
-            model.joint_enabled,
-            model.joint_parent,
-            model.joint_child,
-            model.joint_X_p,
-            model.joint_X_c,
-            model.joint_qd_start,
-            model.joint_dof_dim,
-            model.joint_axis,
-            control.joint_f,
-            1.0 / 120.0,
-        ]
+        expected = wp.DeterministicMode.RUN_TO_RUN if shared else wp.DeterministicMode.NOT_GUARANTEED
+        test.assertEqual(
+            wp.get_module_options(module=xpbd_kernels.solve_joint_mimics.module)["deterministic"], expected
+        )
 
-        def launch(actual=actual, seed=seed, selected=selected, inputs=inputs, count=model.joint_count):
-            wp.copy(actual, seed)
-            wp.launch(selected, dim=count, inputs=inputs, outputs=[actual, None], device=device)
+        def replay(current, model=model):
+            state_in, state_out = model.state(), model.state()
+            control = model.control()
+            control.joint_f.assign(np.linspace(-2.0, 3.0, model.joint_dof_count, dtype=np.float32))
+            copies = [
+                (value, wp.clone(value))
+                for owner in (current, state_in, state_out)
+                for value in vars(owner).values()
+                if isinstance(value, wp.array)
+            ]
 
-        launch()
-        capture = None
-        if device.is_cuda:
-            with wp.ScopedCapture(device=device) as capture:
-                launch()
-        for enabled in (True, False, True):
-            control.joint_f.assign(np.linspace(-11, 17, model.joint_dof_count, dtype=np.float32))
-            model.joint_enabled.assign(np.full(model.joint_count, enabled, dtype=bool))
-            expected.assign(body_seed)
-            solver._apply_module_options()
-            wp.launch(
-                xpbd_kernels.apply_joint_forces,
-                dim=model.joint_count,
-                inputs=inputs,
-                outputs=[expected, None],
-                device=device,
-            )
+            def restore():
+                for value, seed in copies:
+                    wp.copy(value, seed)
+
+            current.step(state_in, state_out, control, None, 1.0 / 120.0)
+            eager = (state_out.body_q.numpy(), state_out.body_qd.numpy())
+            restore()
+            capture = None
+            if device.is_cuda:
+                with wp.ScopedCapture(device=device) as capture:
+                    current.step(state_in, state_out, control, None, 1.0 / 120.0)
             for _ in range(3):
+                restore()
                 if capture is not None:
                     wp.capture_launch(capture.graph)
                 else:
-                    launch()
-                np.testing.assert_array_equal(actual.numpy(), expected.numpy())
-            if not enabled:
-                np.testing.assert_array_equal(actual.numpy(), body_seed)
-        test.assertEqual(wp.get_module_options(xpbd_kernels)["deterministic"], wp.DeterministicMode.RUN_TO_RUN)
-        strict = newton.solvers.SolverVBD(
-            model, iterations=1, rigid_compliant_alm=True, deterministic=wp.DeterministicMode.GPU_TO_GPU
+                    current.step(state_in, state_out, control, None, 1.0 / 120.0)
+                np.testing.assert_array_equal(state_out.body_q.numpy(), eager[0])
+                np.testing.assert_array_equal(state_out.body_qd.numpy(), eager[1])
+            test.assertGreater(float(np.max(np.abs(eager[1]))), 0.0)
+            return eager
+
+        actual = replay(solver)
+        reference = newton.solvers.SolverVBD(
+            model, iterations=1, rigid_compliant_alm=True, deterministic=wp.DeterministicMode.RUN_TO_RUN
         )
-        test.assertIs(strict._joint_force_kernel, xpbd_kernels.apply_joint_forces)
+        options = reference._module_options[xpbd_kernels.solve_joint_mimics.module]
+        reference._set_module_options(
+            options | {"deterministic": wp.DeterministicMode.RUN_TO_RUN},
+            module=xpbd_kernels.solve_joint_mimics.module,
+        )
+        expected_state = replay(reference)
+        for actual_array, expected_array in zip(actual, expected_state, strict=True):
+            np.testing.assert_allclose(actual_array, expected_array, rtol=1.0e-6, atol=1.0e-6)
+        # Interleaving instances must restore each instance's module policy.
+        solver._apply_module_options()
+        test.assertEqual(
+            wp.get_module_options(module=xpbd_kernels.solve_joint_mimics.module)["deterministic"], expected
+        )
+        if device.is_cuda:
+            strict = newton.solvers.SolverVBD(
+                model, iterations=1, rigid_compliant_alm=True, deterministic=wp.DeterministicMode.GPU_TO_GPU
+            )
+            for kernel in (xpbd_kernels.solve_joint_mimics, xpbd_kernels.apply_joint_mimic_deltas):
+                test.assertEqual(
+                    wp.get_module_options(module=kernel.module)["deterministic"], wp.DeterministicMode.GPU_TO_GPU
+                )
+            replay(strict)
+
+
+def test_pair_sticky_warm_start_is_row_local(test, device):
+    """Pair friction retains numeric history without changing per-body sticky rows in another world."""
+    history = rigid_vbd_kernels.RigidContactHistory()
+    history.lambda_ = wp.array([[0.4, 0.0, 1.0]] * 4, dtype=wp.vec3, device=device)
+    history.penalty_k = wp.full(4, 20.0, dtype=float, device=device)
+    history.normal = wp.array([[0.0, 0.0, 1.0]] * 4, dtype=wp.vec3, device=device)
+    shape_body = wp.array([-1, 0, 1, 2, 3], dtype=int, device=device)
+    pair_bodies = wp.array([1, 1, 0, 0], dtype=int, device=device)
+    friction = wp.full(5, 0.5, dtype=float, device=device)
+    output = wp.zeros(5, dtype=wp.vec3, device=device)
+    inputs = [
+        wp.array([5], dtype=int, device=device),
+        wp.array([0, 0, 1, 1, 0], dtype=int, device=device),
+        wp.array([1, 3, 2, 3, 1], dtype=int, device=device),
+        wp.array([[0.0, 1.0, 0.0]] * 5, dtype=wp.vec3, device=device),
+        wp.full(5, 100.0, dtype=float, device=device),
+        wp.zeros(5, dtype=float, device=device),
+        friction,
+        0,
+        1,
+        0,  # sticky: body rows retain their material anchor, not lambda_t
+        wp.array([0, 1, 2, 3, -1], dtype=int, device=device),
+        wp.array([4], dtype=int, device=device),
+        wp.array([5], dtype=int, device=device),
+        1,
+        history,
+        wp.array([1, 4], dtype=int, device=device),
+        None,
+        None,
+        None,
+        shape_body,
+        None,
+        pair_bodies,
+        10.0,
+    ]
+    outputs = [wp.zeros(5, dtype=float, device=device), output]
+    outputs += [wp.zeros(5, dtype=float, device=device) for _ in range(3)]
+
+    def restore():
+        wp.launch(rigid_vbd_kernels.init_body_body_contacts_alm, dim=5, inputs=inputs, outputs=outputs, device=device)
+
+    restore()
+    capture = None
+    if device.is_cuda:
+        with wp.ScopedCapture(device=device) as capture:
+            restore()
+    for mu in (0.5, 0.1, 0.0):
+        friction.fill_(mu)
+        expected = np.array([[0.0, 1.0, 0.0]] * 4 + [[0.0, 0.0, 0.0]], dtype=np.float32)
+        expected[[0, 2], 0] = min(0.4, mu)
+        for _ in range(3):
+            if capture is not None:
+                wp.capture_launch(capture.graph)
+            else:
+                restore()
+            np.testing.assert_allclose(output.numpy(), expected, rtol=0.0, atol=1.0e-7)
+    # A route change on the GPU must be honored by the already-captured kernel.
+    friction.fill_(0.5)
+    pair_bodies.zero_()
+    if capture is not None:
+        wp.capture_launch(capture.graph)
+    else:
+        restore()
+    expected = np.array([[0.0, 1.0, 0.0]] * 4 + [[0.0, 0.0, 0.0]], dtype=np.float32)
+    np.testing.assert_array_equal(output.numpy(), expected)
 
 
 def test_pair_parallel_tail_replays_population_changes(test, device):
@@ -2184,7 +2466,6 @@ def test_particle_attachments_follow_refined_contact_schedule(test, device):
             dim=3,
             inputs=[
                 1.0,
-                model.body_color_groups[0],
                 ids,
                 starts,
                 0,
@@ -2381,12 +2662,6 @@ add_function_test(
 )
 add_function_test(
     TestVBDRigidPairContact,
-    "test_jointed_contact_refinement_is_cuda_graph_repeatable",
-    test_jointed_contact_refinement_is_cuda_graph_repeatable,
-    devices=cuda_devices,
-)
-add_function_test(
-    TestVBDRigidPairContact,
     "test_pair_color_overflow_is_complete_and_repeatable",
     test_pair_color_overflow_is_complete_and_repeatable,
     devices=cuda_devices,
@@ -2425,8 +2700,14 @@ add_function_test(
 
 add_function_test(
     TestVBDRigidPairContact,
-    "test_disjoint_joint_force_controls_preserve_wrenches",
-    test_disjoint_joint_force_controls_preserve_wrenches,
+    "test_joint_force_gather_matches_xpbd_wrenches",
+    test_joint_force_gather_matches_xpbd_wrenches,
+    devices=devices,
+)
+add_function_test(
+    TestVBDRigidPairContact,
+    "test_disjoint_joint_mimics_skip_ordered_reduction",
+    test_disjoint_joint_mimics_skip_ordered_reduction,
     devices=devices,
 )
 add_function_test(
@@ -2584,12 +2865,11 @@ def test_body_contact_scratch_overwrite_and_accumulate(test, device):
     test.assertTrue(calls)
     call = calls[0]
     inputs = list(call["inputs"])
-    active_color = inputs[4]
+    active_color = inputs[3]
+    selected = inputs[1].numpy()
     if active_color >= 0:
-        starts = inputs[3].numpy()
-        selected = inputs[2].numpy()[starts[active_color] : starts[active_color + 1]]
-    else:
-        selected = inputs[1].numpy()
+        starts = inputs[2].numpy()
+        selected = selected[starts[active_color] : starts[active_color + 1]]
     selected = selected[inverse_mass[selected] > 0.0]
     counts = solver.body_body_contact_counts
     original_counts = counts.numpy().copy()
@@ -2925,6 +3205,159 @@ add_function_test(
     devices=devices,
 )
 
+
+add_function_test(
+    TestVBDRigidPairContact,
+    "test_pair_sticky_warm_start_is_row_local",
+    test_pair_sticky_warm_start_is_row_local,
+    devices=devices,
+)
+
+add_function_test(
+    TestVBDRigidPairContact,
+    "test_sliding_friction_projection_matches_metric_disk",
+    test_sliding_friction_projection_matches_metric_disk,
+    devices=devices,
+)
+
+
+@wp.kernel
+def _eval_compliant_contact_damping_force(
+    body_q: wp.array[wp.transform],
+    body_q_prev: wp.array[wp.transform],
+    body_com: wp.array[wp.vec3],
+    stiffness: float,
+    damping: float,
+    residual: float,
+    dt: float,
+    multiplier: wp.vec3,
+    output: wp.array[wp.vec3],
+):
+    _f0, _t0, _h0, _a0, _b0, force, _t1, _h1, _a1, _b1 = rigid_vbd_kernels.evaluate_rigid_contact_from_collision(
+        -1,
+        0,
+        body_q,
+        body_q_prev,
+        body_com,
+        wp.vec3(0.0),
+        wp.vec3(0.0),
+        wp.vec3(100.0, 0.0, 0.0),
+        wp.vec3(0.0),
+        wp.vec3(0.0),
+        wp.vec3(0.0, 0.0, 1.0),
+        residual,
+        1.0e8,
+        stiffness,
+        1.0e8,
+        damping,
+        multiplier,
+        0.5,
+        0.01,
+        0,
+        1,
+        dt,
+        wp.vec3(0.0),
+    )
+    output[0] = force
+
+
+def test_compliant_contact_damping_force_and_cone(test, device):
+    """Friction uses the full non-attractive spring-damper normal reaction."""
+    h = 1.0 / 480.0
+    depth = 0.01
+    q = wp.array([wp.transform_identity()], dtype=wp.transform, device=device)
+    previous = wp.clone(q)
+    com = wp.zeros(1, dtype=wp.vec3, device=device)
+    output = wp.zeros(1, dtype=wp.vec3, device=device)
+    for stiffness, damping in ((1.0e8, 0.0), (1.0e8, 256000.0), (0.0, 256000.0)):
+        for velocity in (-20.0, 0.0, 2.0, 100.0):
+            with test.subTest(stiffness=stiffness, damping=damping, velocity=velocity):
+                previous.assign([[0.0, 0.0, -h * velocity, 0.0, 0.0, 0.0, 1.0]])
+                force = max(stiffness * depth - damping * velocity, 0.0)
+                wp.launch(
+                    _eval_compliant_contact_damping_force,
+                    dim=1,
+                    inputs=[q, previous, com, stiffness, damping, depth, h, wp.vec3(0.0, 0.0, force), output],
+                    device=device,
+                )
+                np.testing.assert_allclose(output.numpy()[0], [-0.5 * force, 0.0, force], rtol=3.0e-6, atol=0.2)
+
+
+def test_compliant_contact_damping_route_consistency(test, device):
+    """History and joint routing must not select different normal material laws."""
+    radius = 0.4
+    mass = 512.0
+    cases = [(1.0e8, d, v) for d in (0.0, 256000.0) for v in (-20.0, 0.0, 2.0, 100.0)]
+    cases += [(0.0, 256000.0, -20.0)]
+    routes = [(False, mode) for mode in ("disabled", "latest", "sticky")]
+    routes += [(True, mode) for mode in ("disabled", "sticky")]
+    for jointed, history in routes:
+        for stiffness, damping, velocity in cases:
+            with test.subTest(
+                jointed=jointed, history=history, stiffness=stiffness, damping=damping, velocity=velocity
+            ):
+                builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+                cfg = newton.ModelBuilder.ShapeConfig(
+                    density=mass / (4.0 * math.pi * radius**3 / 3.0),
+                    mu=0.0,
+                    ke=stiffness,
+                    kd=damping,
+                    restitution=0.0,
+                )
+                builder.add_ground_plane(cfg=cfg)
+                pose = wp.transform(wp.vec3(0.0, 0.0, radius - 0.01), wp.quat_identity())
+                body = builder.add_link(xform=pose) if jointed else builder.add_body(xform=pose)
+                builder.add_shape_sphere(body, radius=radius, cfg=cfg)
+                if jointed:
+                    joint = builder.add_joint_prismatic(-1, body, axis=(0.0, 0.0, 1.0), parent_xform=pose)
+                    builder.add_articulation([joint])
+                builder.color()
+                model = builder.finalize(device=device)
+                pipeline = newton.CollisionPipeline(
+                    model, contact_matching=history, deterministic=True, rigid_contact_max=32
+                )
+                contacts = pipeline.contacts()
+                state_in, state_out = model.state(), model.state()
+                velocity_data = state_in.body_qd.numpy().copy()
+                velocity_data[0, 2] = velocity
+                state_in.body_qd.assign(velocity_data)
+                initial_z = float(state_in.body_q.numpy()[0, 2])
+                actual_mass = float(model.body_mass.numpy()[0])
+                initial_depth = float(model.shape_scale.numpy()[-1, 0]) - initial_z
+                solver = newton.solvers.SolverVBD(
+                    model,
+                    iterations=80,
+                    rigid_compliant_alm=True,
+                    rigid_contact_history=history != "disabled",
+                    rigid_contact_coloring="refined",
+                    deterministic=wp.DeterministicMode.RUN_TO_RUN,
+                )
+                pipeline.collide(state_in, contacts)
+                test.assertEqual(int(contacts.rigid_contact_count.numpy()[0]), 1)
+                h = 1.0 / 480.0
+                solver.step(state_in, state_out, model.control(), contacts, h)
+                test.assertEqual(bool(solver._pair_contacts_enabled_this_step), not jointed and history != "disabled")
+                force = max(
+                    (stiffness * initial_depth - (stiffness * h + damping) * velocity)
+                    / (1.0 + (stiffness * h + damping) * h / actual_mass),
+                    0.0,
+                )
+                expected_velocity = velocity + h * force / actual_mass
+                np.testing.assert_allclose(state_out.body_qd.numpy()[0, 2], expected_velocity, atol=0.002, rtol=0.002)
+
+
+add_function_test(
+    TestVBDRigidPairContact,
+    "test_compliant_contact_damping_force_and_cone",
+    test_compliant_contact_damping_force_and_cone,
+    devices=devices,
+)
+add_function_test(
+    TestVBDRigidPairContact,
+    "test_compliant_contact_damping_route_consistency",
+    test_compliant_contact_damping_route_consistency,
+    devices=devices,
+)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -72,8 +72,7 @@ _DAHL_KAPPADOT_DEADBAND = wp.constant(1.0e-6)
 """Deadband threshold for hysteresis direction selection"""
 
 _NUM_CONTACT_THREADS_PER_BODY = wp.constant(4)
-"""Threads per body for contact accumulation using strided iteration"""
-
+"""Threads per body for strided body-body contact force harvesting"""
 
 # DER bend-twist strain measure tolerances (curvature binormal + Bishop transport).
 _ROD_KB_FOLD_EPS = wp.constant(1.0e-12)
@@ -277,21 +276,20 @@ def _sync_cuda_block(): ...
 @wp.func
 def _body_id_for_color_slot(
     slot: int,
-    fallback_ids: wp.array[wp.int32],
-    dynamic_ids: wp.array[wp.int32],
+    body_ids: wp.array[wp.int32],
     color_starts: wp.array[wp.int32],
     active_color: int,
 ) -> int:
-    """Resolve a body from either a model color or a device-built contact color."""
+    """Resolve a body from a model color group, or from the device-built schedule when ``active_color >= 0``."""
     if active_color >= 0:
         start = color_starts[active_color]
         count = color_starts[active_color + 1] - start
         if slot >= count:
             return -1
-        return dynamic_ids[start + slot]
-    if slot >= fallback_ids.shape[0]:
+        return body_ids[start + slot]
+    if slot >= body_ids.shape[0]:
         return -1
-    return fallback_ids[slot]
+    return body_ids[slot]
 
 
 @wp.struct
@@ -1197,6 +1195,24 @@ def _compliant_contact_dual_step(
 
 
 @wp.func
+def _compliant_contact_normal_material(
+    stiffness: float, damping: float, dt: float, residual: float, normal_displacement: float
+):
+    """Write the implicit spring-damper force as K*R for both ALM updates.
+
+    Normal displacement is positive in compression. Projecting the resulting
+    force keeps release damping non-attractive, as in the pair-contact solve.
+    """
+    material_k = stiffness
+    material_residual = residual
+    if damping > 0.0:
+        damping_rate = damping / dt
+        material_k += damping_rate
+        material_residual += (damping_rate / material_k) * (normal_displacement - residual)
+    return material_k, material_residual
+
+
+@wp.func
 def _contact_force_terms(
     normal_rho: float,
     material_k: float,
@@ -2001,34 +2017,6 @@ def evaluate_rigid_contact_from_collision(
         10-tuple: (force_a, torque_a, H_ll_a, H_al_a, H_aa_a,
                    force_b, torque_b, H_ll_b, H_al_b, H_aa_b)
     """
-    normal_primal_k = normal_solve_weight
-    contact_lam_eff = contact_lam
-    if contact_compliant_alm == 1:
-        normal_primal_k, contact_lam_eff = _contact_force_terms(
-            normal_solve_weight, contact_material_ke, contact_lam, contact_normal
-        )
-
-    lam_n = wp.dot(contact_lam_eff, contact_normal)
-
-    if penetration_depth <= _SMALL_LENGTH_EPS and lam_n <= 0.0:
-        zero_vec = wp.vec3(0.0)
-        zero_mat = wp.mat33(0.0)
-        return (zero_vec, zero_vec, zero_mat, zero_mat, zero_mat, zero_vec, zero_vec, zero_mat, zero_mat, zero_mat)
-
-    f_n = normal_primal_k * penetration_depth + lam_n
-    if normal_primal_k <= 0.0:
-        zero_vec = wp.vec3(0.0)
-        zero_mat = wp.mat33(0.0)
-        return (zero_vec, zero_vec, zero_mat, zero_mat, zero_mat, zero_vec, zero_vec, zero_mat, zero_mat, zero_mat)
-    f_n = wp.max(f_n, 0.0)
-
-    # Only legacy hard retains a zero-force Hessian. Soft and compliant rows release
-    # it so separated contacts do not resist free motion.
-    if f_n == 0.0 and (legacy_hard_contact == 0 or contact_compliant_alm == 1):
-        zero_vec = wp.vec3(0.0)
-        zero_mat = wp.mat33(0.0)
-        return (zero_vec, zero_vec, zero_mat, zero_mat, zero_mat, zero_vec, zero_vec, zero_mat, zero_mat, zero_mat)
-
     if body_a_index < 0:
         X_wa = wp.transform_identity()
         X_wa_prev = wp.transform_identity()
@@ -2068,11 +2056,45 @@ def evaluate_rigid_contact_from_collision(
     v_rel_n = (x_s_b_now - x_s_b_prev - x_s_a_now + x_s_a_prev) / dt
     v_dot_n = wp.dot(contact_normal, v_rel_n)
 
+    material_k = contact_material_ke
+    normal_residual = penetration_depth
+    if contact_compliant_alm == 1:
+        material_k, normal_residual = _compliant_contact_normal_material(
+            contact_material_ke, contact_kd, dt, penetration_depth, -dt * v_dot_n
+        )
+    normal_primal_k = normal_solve_weight
+    contact_lam_eff = contact_lam
+    if contact_compliant_alm == 1:
+        normal_primal_k, contact_lam_eff = _contact_force_terms(
+            normal_solve_weight, material_k, contact_lam, contact_normal
+        )
+
+    lam_n = wp.dot(contact_lam_eff, contact_normal)
+
+    if normal_residual <= _SMALL_LENGTH_EPS and lam_n <= 0.0:
+        zero_vec = wp.vec3(0.0)
+        zero_mat = wp.mat33(0.0)
+        return (zero_vec, zero_vec, zero_mat, zero_mat, zero_mat, zero_vec, zero_vec, zero_mat, zero_mat, zero_mat)
+
+    f_n = normal_primal_k * normal_residual + lam_n
+    if normal_primal_k <= 0.0:
+        zero_vec = wp.vec3(0.0)
+        zero_mat = wp.mat33(0.0)
+        return (zero_vec, zero_vec, zero_mat, zero_mat, zero_mat, zero_vec, zero_vec, zero_mat, zero_mat, zero_mat)
+    f_n = wp.max(f_n, 0.0)
+
+    # Only legacy hard retains a zero-force Hessian. Soft and compliant rows release
+    # it so separated contacts do not resist free motion.
+    if f_n == 0.0 and (legacy_hard_contact == 0 or contact_compliant_alm == 1):
+        zero_vec = wp.vec3(0.0)
+        zero_mat = wp.mat33(0.0)
+        return (zero_vec, zero_vec, zero_mat, zero_mat, zero_mat, zero_vec, zero_vec, zero_mat, zero_mat, zero_mat)
+
     # Tangential slip from the surface anchor (required for finite-radius friction).
     v_rel_t = (x_c_b_now - x_c_b_prev - x_c_a_now + x_c_a_prev) / dt + contact_surface_velocity
     v_t = v_rel_t - contact_normal * wp.dot(contact_normal, v_rel_t)
 
-    # Normal block (force + optional approach damping), applied at the geometric lever.
+    # Normal block at the geometric lever; ALM includes damping in its material law.
     f_n_vec = contact_normal * f_n
     K_n = normal_primal_k * n_outer
 
@@ -2114,7 +2136,7 @@ def evaluate_rigid_contact_from_collision(
             f_t_vec = f_friction
             K_t = K_friction
 
-    if contact_kd > 0.0 and v_dot_n < 0.0 and f_n > 0.0:
+    if contact_compliant_alm == 0 and contact_kd > 0.0 and v_dot_n < 0.0 and f_n > 0.0:
         f_n_vec = f_n_vec - contact_kd * v_dot_n * contact_normal
         K_n = K_n + (contact_kd / dt) * n_outer
 
@@ -4339,7 +4361,6 @@ def analyze_rigid_body_contact_refinement(
     body_uses_pair_contacts: wp.array[wp.int32],
     body_schedule_active: wp.array[wp.int32],
     body_joint_colors: wp.array[wp.int32],
-    max_same_color_degree: wp.array[wp.int32],
     refinement_active: wp.array[wp.int32],
 ):
     """Detect branching that is hidden inside an authored joint color.
@@ -4388,7 +4409,6 @@ def analyze_rigid_body_contact_refinement(
             else:
                 break
 
-    wp.atomic_max(max_same_color_degree, 0, degree)
     if degree > 2:
         wp.atomic_max(refinement_active, 0, 1)
 
@@ -5702,6 +5722,8 @@ def init_body_body_contacts_alm(
     shape_world: wp.array[wp.int32],
     shape_body: wp.array[wp.int32],
     body_world: wp.array[wp.int32],
+    # Optional per-body pair routing; null keeps the per-body history policy.
+    body_uses_pair_contacts: wp.array[wp.int32],
     # Scalar parameters
     k_start: float,
     # Outputs
@@ -5717,9 +5739,10 @@ def init_body_body_contacts_alm(
     own row on the same contact set, else its match index when the indices refer to
     the snapshotted set) and starts cold otherwise.
 
-    ALM: always restore matched ``lambda_n``; with ``latest`` matching also
-    restore cone-clamped ``lambda_t``. Sticky matching keeps tangent memory in
-    the replayed material anchor (via C0), not in ``lambda_t``. Legacy hard:
+    ALM: always restore matched ``lambda_n``. Restore cone-clamped ``lambda_t``
+    with latest matching or for pair-routed rows, whose friction uses per-step slip.
+    Per-body sticky rows keep tangent memory in the replayed anchor (via C0).
+    Legacy hard:
     full-vector warm start. Legacy soft: ``penalty_k`` only. C0/decay live in
     :func:`step_body_body_contact_C0_lambda`.
     """
@@ -5765,7 +5788,14 @@ def init_body_body_contacts_alm(
             n_old = history.normal[slot]
             lam_n = wp.dot(lam_hist, n_old)
             lam_new = n_new * lam_n
-            if use_legacy_hard or restore_compliant_tangent_warmstart == 1:
+            restore_pair_tangent = False
+            if contact_compliant_alm == 1 and body_uses_pair_contacts:
+                b0 = shape_body[s0]
+                b1 = shape_body[s1]
+                restore_pair_tangent = (b0 < 0 or body_uses_pair_contacts[b0] != 0) and (
+                    b1 < 0 or body_uses_pair_contacts[b1] != 0
+                )
+            if use_legacy_hard or restore_compliant_tangent_warmstart == 1 or restore_pair_tangent:
                 lam_t_old = lam_hist - n_old * lam_n
                 lam_t_new = lam_t_old - n_new * wp.dot(lam_t_old, n_new)
                 if contact_compliant_alm == 1:
@@ -5839,6 +5869,7 @@ def step_body_body_contact_C0_lambda(
     inv_dt_sq: float,
     penalty_decay: float,
     contact_material_ke: wp.array[float],
+    contact_material_kd: wp.array[float],
     k_start: float,
     # In/out
     contact_normal_rho: wp.array[float],
@@ -5850,7 +5881,7 @@ def step_body_body_contact_C0_lambda(
     """Per-step contact penalty decay, lambda retention, C0, and ALM rho.
 
     ALM retention needs a compressive warm-start (``lambda·n > 0``), a live row
-    (``ke > 0`` and ``rho_n > 0``), and positive ``lambda_retention``. Legacy
+    (``ke + kd/dt > 0`` and ``rho_n > 0``), and positive ``lambda_retention``. Legacy
     AVBD applies its ``alpha*gamma`` retention to the full multiplier vector
     without those gates. ALM rho is automatic from support and independent of
     history. C0 is refreshed for legacy hard and ALM contacts.
@@ -5863,6 +5894,7 @@ def step_body_body_contact_C0_lambda(
     contact_tangent_rho[i] = 0.0
 
     ke = contact_material_ke[i]
+    material_k = ke + contact_material_kd[i] * wp.sqrt(inv_dt_sq)
     s0 = rigid_contact_shape0[i]
     s1 = rigid_contact_shape1[i]
     k_min = _contact_penalty_floor(ke, k_start)
@@ -5903,7 +5935,7 @@ def step_body_body_contact_C0_lambda(
                 body_structural_k,
                 inv_dt_sq,
             )
-            contact_normal_rho[i] = _contact_auto_normal_rho(normal_support, ke)
+            contact_normal_rho[i] = _contact_auto_normal_rho(normal_support, material_k)
             tangent_support = _contact_tangent_conditioning_scale(
                 s0,
                 s1,
@@ -5938,7 +5970,7 @@ def step_body_body_contact_C0_lambda(
         return
 
     has_compressive_warmstart = wp.dot(lam, n) > 0.0
-    live = ke > 0.0 and contact_normal_rho[i] > 0.0
+    live = material_k > 0.0 and contact_normal_rho[i] > 0.0
     if has_compressive_warmstart and live and lambda_retention > 0.0:
         contact_lambda[i] = lam * lambda_retention
     else:
@@ -6219,7 +6251,6 @@ def create_accumulate_body_body_contacts_per_body():
     def accumulate_body_body_contacts_per_body(
         dt: float,
         color_group: wp.array[wp.int32],
-        dynamic_body_ids: wp.array[wp.int32],
         dynamic_color_starts: wp.array[wp.int32],
         active_dynamic_color: int,
         body_q_prev: wp.array[wp.transform],
@@ -6268,9 +6299,7 @@ def create_accumulate_body_body_contacts_per_body():
         """
         body_idx_in_group, lane = wp.tid()
         threads_per_body = wp.block_dim()
-        body_id = _body_id_for_color_slot(
-            body_idx_in_group, color_group, dynamic_body_ids, dynamic_color_starts, active_dynamic_color
-        )
+        body_id = _body_id_for_color_slot(body_idx_in_group, color_group, dynamic_color_starts, active_dynamic_color)
         if body_id < 0:
             return
         if body_inv_mass[body_id] <= 0.0:
@@ -6347,7 +6376,9 @@ def create_accumulate_body_body_contacts_per_body():
                 C_eff = C_n - stab_alpha * C0_n
                 friction_c0 = (1.0 - stab_alpha) * (C0_vec - contact_normal * C0_n)
 
-            if C_n <= _SMALL_LENGTH_EPS and lam_n <= 0.0:
+            contact_kd = contact_material_kd[contact_idx]
+            damped_alm = contact_compliant_alm == 1 and contact_kd > 0.0
+            if not damped_alm and C_n <= _SMALL_LENGTH_EPS and lam_n <= 0.0:
                 i += threads_per_body
                 continue
 
@@ -6355,11 +6386,10 @@ def create_accumulate_body_body_contacts_per_body():
                 normal_solve_weight, material_k, lam_n, contact_compliant_alm
             )
             f_n_check = normal_primal_k * C_eff + lambda_n_eff
-            if f_n_check <= 0.0 and lam_n <= 0.0:
+            if not damped_alm and f_n_check <= 0.0 and lam_n <= 0.0:
                 i += threads_per_body
                 continue
 
-            contact_kd = contact_material_kd[contact_idx]
             contact_mu = contact_material_mu[contact_idx]
 
             surface_velocity = wp.vec3(0.0)
@@ -6470,8 +6500,9 @@ def _evaluate_body_body_contact_slot(
     point1_world, force_0, torque_0, force_1)``: the bodies of shape 0 and shape 1 (``-1`` for a
     static shape, or both ``-1`` for an invalid slot), the offset-shifted world-space surface
     points, the force on body 0 with its torque about body 0's COM (the world origin for a static
-    shape), and the force on body 1 -- as the solve applies them through
-    :func:`evaluate_rigid_contact_from_collision`. Invalid slots return zeros; separated or
+    shape), and the force on body 1 -- as the per-body solve applies them through
+    :func:`evaluate_rigid_contact_from_collision`, or the solved multiplier for pair-routed
+    contacts. Invalid slots return zeros; separated or
     inactive contacts return zero forces with valid bodies and points.
     """
     zero = wp.vec3(0.0)
@@ -6536,10 +6567,11 @@ def _evaluate_body_body_contact_slot(
 
     normal_primal_k, lambda_n_eff = _material_force_terms(normal_solve_weight, material_k, lam_n, contact_compliant_alm)
     f_n_check = normal_primal_k * C_eff + lambda_n_eff
-    if (C_n <= _SMALL_LENGTH_EPS or f_n_check <= 0.0) and lam_n <= 0.0:
+    contact_kd = contact_material_kd[contact_idx]
+    damped_alm = contact_compliant_alm == 1 and contact_kd > 0.0
+    if not damped_alm and (C_n <= _SMALL_LENGTH_EPS or f_n_check <= 0.0) and lam_n <= 0.0:
         return b0, b1, point0_world, point1_world, zero, zero, zero
 
-    contact_kd = contact_material_kd[contact_idx]
     contact_mu = contact_material_mu[contact_idx]
 
     surface_velocity = wp.vec3(0.0)
@@ -6807,7 +6839,6 @@ def _fill_body_particle_attachments_per_body(
 def accumulate_body_particle_attachments_per_body(
     dt: float,
     color_group: wp.array[int],
-    dynamic_body_ids: wp.array[int],
     dynamic_color_starts: wp.array[int],
     active_dynamic_color: int,
     particle_q: wp.array[wp.vec3],
@@ -6833,9 +6864,7 @@ def accumulate_body_particle_attachments_per_body(
 ):
     """Accumulate particle-body attachment forces and Hessians on each rigid body."""
     body_idx_in_group = wp.tid()
-    body_id = _body_id_for_color_slot(
-        body_idx_in_group, color_group, dynamic_body_ids, dynamic_color_starts, active_dynamic_color
-    )
+    body_id = _body_id_for_color_slot(body_idx_in_group, color_group, dynamic_color_starts, active_dynamic_color)
     if body_id < 0:
         return
     if body_inv_mass[body_id] <= 0.0:
@@ -6893,7 +6922,6 @@ def accumulate_body_particle_attachments_per_body(
 def accumulate_body_particle_contacts_per_body(
     dt: float,
     color_group: wp.array[wp.int32],
-    dynamic_body_ids: wp.array[wp.int32],
     dynamic_color_starts: wp.array[wp.int32],
     active_dynamic_color: int,
     threads_per_body: int,
@@ -6956,9 +6984,7 @@ def accumulate_body_particle_contacts_per_body(
     body_idx_in_group = tid // threads_per_body
     thread_id_within_body = tid % threads_per_body
 
-    body_id = _body_id_for_color_slot(
-        body_idx_in_group, color_group, dynamic_body_ids, dynamic_color_starts, active_dynamic_color
-    )
+    body_id = _body_id_for_color_slot(body_idx_in_group, color_group, dynamic_color_starts, active_dynamic_color)
     if body_id < 0:
         return
     if body_inv_mass[body_id] <= 0.0:
@@ -7221,7 +7247,6 @@ def create_solve_rigid_body(has_tendons: bool):
     def solve_rigid_body(
         dt: float,
         body_ids_in_color: wp.array[wp.int32],
-        dynamic_body_ids: wp.array[wp.int32],
         dynamic_color_starts: wp.array[wp.int32],
         active_dynamic_color: int,
         body_q: wp.array[wp.transform],
@@ -7303,6 +7328,7 @@ def create_solve_rigid_body(has_tendons: bool):
         tendon_segment_active_guide_r: wp.array[int],
         # Output
         body_q_new: wp.array[wp.transform],
+        body_position_roundoff: wp.array[wp.vec3],
     ):
         """
         AVBD solve step for rigid bodies.
@@ -7342,9 +7368,7 @@ def create_solve_rigid_body(has_tendons: bool):
           - All forces, torques, and Hessian blocks are expressed in the world frame.
         """
         tid = wp.tid()
-        body_index = _body_id_for_color_slot(
-            tid, body_ids_in_color, dynamic_body_ids, dynamic_color_starts, active_dynamic_color
-        )
+        body_index = _body_id_for_color_slot(tid, body_ids_in_color, dynamic_color_starts, active_dynamic_color)
         if body_index < 0:
             return
 
@@ -7549,8 +7573,152 @@ def create_solve_rigid_body(has_tendons: bool):
         pos_new = com_new - wp.quat_rotate(rot_new, body_com_local)
 
         body_q_new[body_index] = wp.transform(pos_new, rot_new)
+        # Keep the last unrounded Newton iterate for velocity reconstruction.
+        # Replace, do not sum: each solve evaluates the stored (rounded) pose.
+        body_position_roundoff[body_index] = wp.vec3(0.0)
+        if joint_compliant_alm == 1:
+            origin_increment = (
+                x_inc + wp.quat_rotate(rot_current, body_com_local) - wp.quat_rotate(rot_new, body_com_local)
+            )
+            body_position_roundoff[body_index] = origin_increment - (pos_new - pos_current)
 
     return solve_rigid_body
+
+
+@wp.func
+def _applied_joint_wrenches(
+    joint: int,
+    body_q: wp.array[wp.transform],
+    body_com: wp.array[wp.vec3],
+    joint_type: wp.array[int],
+    joint_parent: wp.array[int],
+    joint_child: wp.array[int],
+    joint_X_p: wp.array[wp.transform],
+    joint_X_c: wp.array[wp.transform],
+    joint_qd_start: wp.array[int],
+    joint_dof_dim: wp.array2d[int],
+    joint_axis: wp.array[wp.vec3],
+    joint_f: wp.array[float],
+):
+    """Return the ``joint_f`` wrenches added to a joint's child and subtracted from its parent [N, N·m].
+
+    Same arithmetic per joint as ``apply_joint_forces`` in the XPBD kernels: world frame, about each body's COM.
+    """
+    type = joint_type[joint]
+    id_c = joint_child[joint]
+    id_p = joint_parent[joint]
+    X_wp = joint_X_p[joint]
+    pose_p = X_wp
+    com_p = wp.vec3(0.0)
+    if id_p >= 0:
+        pose_p = body_q[id_p]
+        X_wp = pose_p * X_wp
+        com_p = body_com[id_p]
+    r_p = wp.transform_get_translation(X_wp) - wp.transform_point(pose_p, com_p)
+    pose_c = body_q[id_c]
+    X_wc = pose_c * joint_X_c[joint]
+    com_c = body_com[id_c]
+    r_c = wp.transform_get_translation(X_wc) - wp.transform_point(pose_c, com_c)
+
+    qd_start = joint_qd_start[joint]
+    lin_axis_count = joint_dof_dim[joint, 0]
+    ang_axis_count = joint_dof_dim[joint, 1]
+    t_total = wp.vec3()
+    f_total = wp.vec3()
+    if type == JointType.FREE or type == JointType.DISTANCE or type == JointType.ROD:
+        # World-frame wrench at the child COM; the reaction is shifted to the parent COM.
+        f_total = wp.vec3(joint_f[qd_start + 0], joint_f[qd_start + 1], joint_f[qd_start + 2])
+        t_total = wp.vec3(joint_f[qd_start + 3], joint_f[qd_start + 4], joint_f[qd_start + 5])
+        r_pc = wp.transform_point(pose_c, com_c) - wp.transform_point(pose_p, com_p)
+        return wp.spatial_vector(f_total, t_total), wp.spatial_vector(f_total, t_total + wp.cross(r_pc, f_total))
+    elif type == JointType.BALL:
+        t_total = wp.vec3(joint_f[qd_start + 0], joint_f[qd_start + 1], joint_f[qd_start + 2])
+    elif type == JointType.REVOLUTE or type == JointType.PRISMATIC or type == JointType.D6:
+        if lin_axis_count > 0:
+            f_total += joint_f[qd_start + 0] * wp.transform_vector(X_wp, joint_axis[qd_start + 0])
+        if lin_axis_count > 1:
+            f_total += joint_f[qd_start + 1] * wp.transform_vector(X_wp, joint_axis[qd_start + 1])
+        if lin_axis_count > 2:
+            f_total += joint_f[qd_start + 2] * wp.transform_vector(X_wp, joint_axis[qd_start + 2])
+        ang_start = qd_start + lin_axis_count
+        if ang_axis_count == 1:
+            t_total += joint_f[ang_start] * wp.transform_vector(X_wp, joint_axis[ang_start])
+        elif ang_axis_count > 1:
+            _angles, covectors = eval_angular_coordinates(
+                joint_axis, ang_start, ang_axis_count, wp.transform_get_rotation(X_wp), wp.transform_get_rotation(X_wc)
+            )
+            tau = wp.vec3(joint_f[ang_start], joint_f[ang_start + 1], 0.0)
+            if ang_axis_count == 3:
+                tau[2] = joint_f[ang_start + 2]
+            t_total += wp.transpose(covectors) * tau
+    return (
+        wp.spatial_vector(f_total, t_total + wp.cross(r_c, f_total)),
+        wp.spatial_vector(f_total, t_total + wp.cross(r_p, f_total)),
+    )
+
+
+@wp.kernel(enable_backward=False)
+def eval_applied_joint_wrenches(
+    body_q: wp.array[wp.transform],
+    body_com: wp.array[wp.vec3],
+    joint_type: wp.array[int],
+    joint_enabled: wp.array[bool],
+    joint_parent: wp.array[int],
+    joint_child: wp.array[int],
+    joint_X_p: wp.array[wp.transform],
+    joint_X_c: wp.array[wp.transform],
+    joint_qd_start: wp.array[int],
+    joint_dof_dim: wp.array2d[int],
+    joint_axis: wp.array[wp.vec3],
+    joint_f: wp.array[float],
+    # outputs
+    joint_wrench: wp.array[wp.spatial_vector],
+):
+    """Store each joint's ``joint_f`` wrench on its child (slot ``2 * joint``) and parent (slot ``2 * joint + 1``)."""
+    joint = wp.tid()
+    child_wrench = wp.spatial_vector()
+    parent_wrench = wp.spatial_vector()
+    if joint_enabled[joint] and joint_type[joint] != JointType.FIXED:
+        child_wrench, parent_wrench = _applied_joint_wrenches(
+            joint,
+            body_q,
+            body_com,
+            joint_type,
+            joint_parent,
+            joint_child,
+            joint_X_p,
+            joint_X_c,
+            joint_qd_start,
+            joint_dof_dim,
+            joint_axis,
+            joint_f,
+        )
+    joint_wrench[2 * joint] = child_wrench
+    joint_wrench[2 * joint + 1] = parent_wrench
+
+
+@wp.kernel(enable_backward=False)
+def accumulate_applied_joint_wrenches(
+    joint_parent: wp.array[int],
+    body_joint_offsets: wp.array[wp.int32],
+    body_joints: wp.array[wp.int32],
+    joint_wrench: wp.array[wp.spatial_vector],
+    body_f: wp.array[wp.spatial_vector],
+    # outputs
+    body_f_out: wp.array[wp.spatial_vector],
+):
+    """Gather joint wrenches with a fixed tile reduction (one lane on CPU), without atomics."""
+    body, lane = wp.tid()
+    wrench = wp.spatial_vector()
+    for k in range(body_joint_offsets[body] + lane, body_joint_offsets[body + 1], wp.block_dim()):
+        joint = body_joints[k]
+        if joint_parent[joint] == body:
+            wrench -= joint_wrench[2 * joint + 1]
+        else:
+            wrench += joint_wrench[2 * joint]
+    total = wp.tile_sum(wp.tile(wrench, preserve_type=True))
+    total += wp.tile_load(body_f, shape=1, offset=body)
+    wp.tile_store(body_f_out, total, offset=body)
 
 
 # Separate module for fast math, same constraint as solve_rigid_body
@@ -8184,6 +8352,7 @@ def create_update_duals_body_body_contacts():
         legacy_hard_contacts: int,
         contact_compliant_alm: int,
         contact_material_ke: wp.array[float],
+        contact_material_kd: wp.array[float],
         contact_tangent_rho: wp.array[float],
         contact_normal_rho: wp.array[float],
         beta: float,
@@ -8264,6 +8433,12 @@ def create_update_duals_body_body_contacts():
             tangent_residual = tangential_disp + (1.0 - stab_alpha) * C0_t_vec
 
             if contact_compliant_alm == 1:
+                p0_prev = wp.transform_point(body_q_prev[body_id_0], cp0_local) if body_id_0 >= 0 else cp0_local
+                p1_prev = wp.transform_point(body_q_prev[body_id_1], cp1_local) if body_id_1 >= 0 else cp1_local
+                normal_displacement = wp.dot(n, (p0_world - p0_prev) - (p1_world - p1_prev))
+                material_k, C_stab_n = _compliant_contact_normal_material(
+                    material_k, contact_material_kd[idx], dt, C_stab_n, normal_displacement
+                )
                 contact_lambda[idx] = _compliant_contact_dual_step(
                     lam_vec,
                     n,
@@ -8375,6 +8550,7 @@ def update_body_velocity(
     body_com: wp.array[wp.vec3],
     body_inertia_q: wp.array[wp.transform],
     body_inertia_v: wp.array[wp.vec3],
+    body_position_roundoff: wp.array[wp.vec3],
     body_inv_mass: wp.array[float],
     body_uses_pair_contacts: wp.array[wp.int32],
     body_contact_buffer_size: int,
@@ -8390,9 +8566,10 @@ def update_body_velocity(
     body_q_out: wp.array[wp.transform],
 ):
     """
-    Update body velocities from position changes (world frame).
+    Update body velocities after the VBD iterations (world frame).
 
-    Preserve predicted linear velocity and add the solved COM correction.
+    Preserve predicted linear velocity and add the solved COM correction,
+    including the last body Newton update's world-position rounding remainder.
     Free pair-contact bodies use the equivalent net contact impulse to avoid
     losing small corrections in rounded world-space poses.
     Kinematic and angular velocities use pose finite differences.
@@ -8409,6 +8586,8 @@ def update_body_velocity(
         body_com: Center of mass offsets (local frame).
         body_inertia_q: Forward-integrated target transforms.
         body_inertia_v: Immutable predicted velocities plus non-reset authored motion [m/s].
+        body_position_roundoff: Last body Newton update lost to pose rounding [m].
+            Consumed and cleared here; pose projections discard it.
         body_inv_mass: Effective inverse masses; zero for kinematic bodies.
         body_uses_pair_contacts: Bodies eligible for contact-impulse linear velocity.
         body_contact_buffer_size: Per-body contact-list capacity.
@@ -8451,7 +8630,7 @@ def update_body_velocity(
         x_predicted = wp.transform_get_translation(predicted)
         q_predicted = wp.transform_get_rotation(predicted)
         delta_com = (x - x_predicted) + (wp.quat_rotate(q, com_local) - wp.quat_rotate(q_predicted, com_local))
-        v = body_inertia_v[tid] + delta_com / dt
+        v = body_inertia_v[tid] + (delta_com + body_position_roundoff[tid]) / dt
         if body_uses_pair_contacts[tid] != 0 and body_contact_counts[tid] <= body_contact_buffer_size:
             # Pair blocks change translation only through M^-1 times contact
             # force. Recover that impulse directly; subtracting rounded poses
@@ -8468,6 +8647,7 @@ def update_body_velocity(
     # Angular velocity
     omega = quat_velocity(q, q_prev, dt)
 
+    body_position_roundoff[tid] = wp.vec3(0.0)
     body_qd[tid] = wp.spatial_vector(v, omega)
 
     # Mirror to state_in (CUDA-graph-capture safety).

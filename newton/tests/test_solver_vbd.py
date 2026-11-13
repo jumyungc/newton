@@ -1428,6 +1428,7 @@ def _rigid_contact_structural_support_conditions_tangent_rho(test, device):
                 100.0,
                 1.0,
                 wp.array([1.0e9], dtype=float, device=device),
+                wp.zeros(1, dtype=float, device=device),
                 -1.0,
             ],
             outputs=[
@@ -1508,6 +1509,7 @@ def _rigid_contact_history_restore_from_match_index(test, device):
                 None,
                 None,
                 None,
+                None,  # no pair-routed rows
                 10.0,
             ],
             outputs=[
@@ -1579,6 +1581,7 @@ def _rigid_contact_history_compliant_alm_tangent_warmstart(test, device):
                     None,
                     None,
                     None,
+                    None,  # no pair-routed rows
                     10.0,
                 ],
                 outputs=[
@@ -1637,6 +1640,7 @@ def _rigid_contact_history_soft_restores_penalty_only(test, device):
                 None,
                 None,
                 None,
+                None,  # no pair-routed rows
                 10.0,
             ],
             outputs=[
@@ -1820,6 +1824,7 @@ def _rigid_contact_dual_update_computes_lambda(test, device):
                 0,
                 1,
                 contact_ke,
+                wp.zeros(2, dtype=float, device=device),
                 contact_rho,
                 contact_rho,
                 0.0,
@@ -1898,6 +1903,7 @@ def _rigid_contact_reset_ownership(test, device):
                 shape_world,
                 shape_body,
                 body_world,
+                None,  # no pair-routed rows
                 -1.0,  # fixed-k sentinel
             ],
             outputs=[
@@ -5471,7 +5477,6 @@ def _body_particle_attachment_accumulates_body_csr(test, device):
             1.0,
             wp.array([body], dtype=int, device=device),
             None,
-            None,
             -1,
             model.particle_q,
             model.particle_q,
@@ -6042,6 +6047,7 @@ def _rigid_contact_history_restore_checks_provenance(test, device):
                     None,
                     None,
                     None,
+                    None,  # no pair-routed rows
                     10.0,
                 ],
                 outputs=[penalty_k, lam, *material],
@@ -6430,18 +6436,6 @@ class TestSolverVBD(unittest.TestCase):
 
         device.is_cuda = False
         self.assertEqual(_select_rigid_block_dim(1, device), 256)
-
-        widths = (4, 8, 16, 32, 64, 128, 256)
-        for sm_count in (1, 2, 3, 16, 71, 142):
-            device = SimpleNamespace(is_cuda=True, sm_count=sm_count)
-            target = sm_count
-            for launch_dim in (0, 1, 4, 17, 63, 128, 257, 4096, 1000000):
-                with self.subTest(sm_count=sm_count, launch_dim=launch_dim):
-                    valid = [width for width in widths if (launch_dim + width - 1) // width >= target]
-                    self.assertEqual(
-                        _select_rigid_block_dim(launch_dim, device),
-                        max(valid, default=4),
-                    )
 
 
 add_function_test(TestSolverVBD, "test_rigid_constraint_adjacency", _rigid_constraint_adjacency, devices=devices)
@@ -9169,10 +9163,13 @@ def test_rigid_velocity_correction_preserves_com_and_kinematics(test, device):
     output = wp.zeros(2, dtype=wp.spatial_vector, device=device)
     pose_output = wp.zeros(2, dtype=wp.transform, device=device)
     no_pair_contacts = wp.zeros(2, dtype=int, device=device)
+    seed_roundoff = wp.array([wp.vec3(1.0e-6, -2.0e-6, 3.0e-6)] * 2, dtype=wp.vec3, device=device)
+    roundoff = wp.clone(seed_roundoff)
 
     def run():
         wp.copy(prev, seed_prev)
         wp.copy(mirror, seed_velocity)
+        wp.copy(roundoff, seed_roundoff)
         wp.launch(
             update_body_velocity,
             dim=2,
@@ -9182,6 +9179,7 @@ def test_rigid_velocity_correction_preserves_com_and_kinematics(test, device):
                 centers,
                 targets,
                 predicted_v,
+                roundoff,
                 inverse_mass,
                 no_pair_contacts,
                 0,
@@ -9204,6 +9202,7 @@ def test_rigid_velocity_correction_preserves_com_and_kinematics(test, device):
     delta += np.asarray(wp.quat_rotate(wp.transform_get_rotation(solved), com), dtype=np.float64) - np.asarray(
         wp.quat_rotate(wp.transform_get_rotation(predicted), com), dtype=np.float64
     )
+    delta += seed_roundoff.numpy()[0]
     np.testing.assert_allclose(actual[0, :3], np.array([1.0, 2.0, 3.0]) + delta / dt, atol=2.0e-5, rtol=0.0)
     expected_kinematic = (
         np.asarray(wp.transform_point(solved, com)) - np.asarray(wp.transform_point(previous, com))
@@ -9219,6 +9218,7 @@ def test_rigid_velocity_correction_preserves_com_and_kinematics(test, device):
     np.testing.assert_array_equal(output.numpy(), mirror.numpy())
     np.testing.assert_array_equal(pose_output.numpy(), poses.numpy())
     np.testing.assert_array_equal(prev.numpy(), poses.numpy())
+    np.testing.assert_array_equal(roundoff.numpy(), np.zeros((2, 3)))
 
 
 add_function_test(
