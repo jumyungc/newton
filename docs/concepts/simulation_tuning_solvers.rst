@@ -111,6 +111,14 @@ Collision frequency
    frequent updates. See :ref:`collision-frequency-in-the-simulation-loop` for
    loop patterns.
 
+   For rigid contacts with fast motion, consider the experimental
+   :class:`CollisionSubstepScheduler` instead of a fixed collision interval.
+   It reserves nearby contact candidates and conditionally refreshes them
+   based on observed travel and the maximum refresh interval while preserving
+   every solver substep. See :ref:`tuning-adaptive-collision-detection` for
+   configuration, solver requirements, overflow diagnostics, and the limits of
+   this alternative to full continuous collision detection.
+
 Solver-Specific Knobs
 ---------------------
 
@@ -237,6 +245,7 @@ repository examples spend tuning effort, not a shared solver API.
        ``propagation_constraint_max``, ``warn_constraint_overflow``, ``drive_mode``,
        ``fuse_joint_velocity_limits``, ``enable_bilateral_preelimination``,
        ``bilateral_preelimination_include_mimics``, ``friction_anchor_beta``,
+       ``reuse_kinematics``,
        ``contact_regularization``, ``velocity_iterations``,
        ``contact_warmstart``, ``restitution_velocity_threshold``,
        ``contact_friction_scale``, ``contact_friction_position_iterations``,
@@ -251,14 +260,15 @@ repository examples spend tuning effort, not a shared solver API.
        ``propagation_color_order``,
        ``contact_shared_anchor``, ``contact_friction_shared_anchor``,
        ``row_watermark``, ``row_schedule``, ``use_parallel_streams``,
-       ``double_buffer``, ``friction_mode``.
+       ``double_buffer``, ``friction_mode``, ``nesterov_momentum``.
      - Experimental. The solve is matrix-free; ``solve_mode`` selects its
        Gauss-Seidel sweep order: ``"serial"`` (the default) sweeps each world's rows
        in order, ``"colored"`` solves the propagation contact rows in parallel
        batches (see below). On CPU both modes run world-serial portable kernels;
        contact torsion, contact compliance, joint friction, the non-default
-       ``friction_mode`` values and sleeping with ``solve_mode="colored"`` require
-       CUDA. The spellings ``solve_mode="matrix_free"`` and ``"split"`` (whose dense
+       ``friction_mode`` values, ``nesterov_momentum`` and sleeping with
+       ``solve_mode="colored"`` require CUDA. The spellings
+       ``solve_mode="matrix_free"`` and ``"split"`` (whose dense
        Delassus solve was removed) and ``articulated_contact_response="propagation_colored"``
        are deprecated and map to the new options with a warning.
        Joint limits are enforced only with ``enable_joint_limits=True`` (off by
@@ -287,6 +297,15 @@ repository examples spend tuning effort, not a shared solver API.
        :class:`~newton.CollisionPipeline`) reuses the previous step's
        impulses. ``contact_gap_gate`` and ``contact_speculative_scale`` bound
        the work and the closing allowance of speculative contacts.
+       The opt-in ``nesterov_momentum`` accelerates the serial sweep with
+       Nesterov momentum and restart, which can reduce the ``iterations``
+       needed on stacks, large mass ratios and long chains. Velocity-limit rows
+       are not extrapolated, so measure convergence on the scene before
+       lowering ``iterations``. It requires
+       ``articulated_contact_response="immediate"`` and
+       ``row_schedule="interleaved"``, and every world then runs the general
+       sweep with dense factors; the specialized sparse-factor, diagonal,
+       articulation-local and paired-factor solves are skipped.
        Experimental contact torsion adds spin friction to the contacts of
        articulated bodies whose shapes carry a positive
        ``steel:min_torsional_patch_radius`` (imported from
@@ -339,12 +358,23 @@ repository examples spend tuning effort, not a shared solver API.
        disables elimination for the whole solver with a warning. On CUDA,
        branched articulations of one shared
        topology select sparse mass factors automatically from the model's
-       structure when contacts use hard point friction
-       (``friction_anchor_beta=0``), not from a performance estimate
-       (depending on the topology and the world count they can be faster or
-       markedly slower);
+       structure when contacts use hard point friction or persistent friction
+       patches and the configuration meets the conditions in the
+       :class:`~newton.solvers.SolverSteel` docstring, not from a performance
+       estimate (depending on the topology and the world count they can be
+       faster or markedly slower); warm-started contacts
+       (``contact_warmstart=True``), a finite ``contact_friction_gap_max``,
+       ``nesterov_momentum`` and shapes with a positive restitution coefficient
+       keep the dense factors;
        ``parallel_tree`` traverses independent tree branches in parallel and is
-       worth measuring on broad trees such as hands. The
+       worth measuring on broad trees such as hands. The opt-in
+       ``reuse_kinematics`` (off by default) carries the kinematics a step
+       publishes into the next step on CUDA when none of the restrictions in
+       the option's docstring apply (gradients, joint velocity limits, sleeping,
+       the parallel tree, a FREE or DISTANCE joint that is not its
+       articulation's first joint); the attribute reports whether it runs, and a
+       caller that writes joint or body state in place between steps then calls
+       ``notify_state_changed`` or ``reset`` with a world mask. The
        experimental ``enable_sleeping`` freezes settled, supported islands of
        articulations and skips their rows and dynamics until a force, state
        change, contact with a moving body or a tangentially moving mesh

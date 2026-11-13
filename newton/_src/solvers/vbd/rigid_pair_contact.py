@@ -36,6 +36,8 @@ class ContactConstants:
     previous_penetration: float
     compliance: float
     damping_fraction: float
+    elastic_compliance: float
+    damping_bidirectional: bool
 
 
 @wp.kernel
@@ -654,6 +656,7 @@ def _prepare_constraint_contact_block(
     dt: float,
     refresh_constants: bool,
     contact_compliant_alm: int,
+    contact_damping_bidirectional: bool,
     body_q_prev: wp.array[wp.transform],
     contact_material_ke: wp.array[float],
     contact_material_kd: wp.array[float],
@@ -784,9 +787,11 @@ def _prepare_constraint_contact_block(
     damping_fraction = float(0.0)
     # The pair lane runs only for compliant ALM or legacy hard contacts.
     use_finite_material = contact_compliant_alm == 1
+    elastic_compliance = float(0.0)
     effective_stiffness = float(0.0)
     if use_finite_material:
         stiffness = contact_material_ke[contact]
+        elastic_compliance = 1.0 / stiffness if stiffness > 0.0 else -1.0
         damping_rate = contact_material_kd[contact] / dt
         effective_stiffness = stiffness + damping_rate
         if effective_stiffness > 0.0:
@@ -808,6 +813,8 @@ def _prepare_constraint_contact_block(
     )
     constants.compliance = compliance if not use_finite_material or effective_stiffness > 0.0 else -1.0
     constants.damping_fraction = damping_fraction
+    constants.elastic_compliance = elastic_compliance
+    constants.damping_bidirectional = contact_damping_bidirectional
     contact_constants[contact] = constants
 
 
@@ -816,6 +823,7 @@ def prepare_constraint_contact_blocks(
     dt: float,
     refresh_constants: bool,
     contact_compliant_alm: int,
+    contact_damping_bidirectional: bool,
     body_q_prev: wp.array[wp.transform],
     contact_material_ke: wp.array[float],
     contact_material_kd: wp.array[float],
@@ -856,6 +864,7 @@ def prepare_constraint_contact_blocks(
         dt,
         refresh_constants,
         contact_compliant_alm,
+        contact_damping_bidirectional,
         body_q_prev,
         contact_material_ke,
         contact_material_kd,
@@ -962,8 +971,9 @@ def _solve_constraint_contact_group(
 ):
     """Solve one body-pair manifold in the free-body inertial metric.
 
-    Normal compliance is the implicit Kelvin--Voigt relation
-    ``lambda = k*C + d*(C-C_prev)/dt``. Tangential force minimizes the local
+    Normal compliance uses the implicit spring-damper relation, with the damper
+    active only in compression unless bidirectional damping is enabled.
+    Tangential force minimizes the local
     two-dimensional quadratic over the Coulomb disk using a bounded root solve.
 
     The contacts form one serial chain through the two poses, so every contact
@@ -1033,6 +1043,19 @@ def _solve_constraint_contact_group(
         denominator = normal_support + compliance
         if denominator > 0.0 and compliance >= 0.0:
             new_normal = wp.max(old_normal + normal_residual / denominator, 0.0)
+        if not constants.damping_bidirectional and damping_fraction > 0.0:
+            # Select the piecewise damper from the solved displacement. Testing
+            # only the current pose can choose the wrong branch across reversal.
+            solved_penetration = penetration - normal_support * (new_normal - old_normal)
+            if solved_penetration <= constants.previous_penetration:
+                elastic_compliance = constants.elastic_compliance
+                denominator = normal_support + elastic_compliance
+                new_normal = 0.0
+                if elastic_compliance >= 0.0 and denominator > 0.0:
+                    new_normal = wp.max(
+                        old_normal + (penetration - elastic_compliance * old_normal) / denominator,
+                        0.0,
+                    )
         delta_normal = new_normal - old_normal
 
         # Evaluate the two tangential rows at the same linearization point as
@@ -1658,6 +1681,7 @@ class RigidPairContact:
         contact_compliant_alm: bool,
         parallel_tail: bool | None = None,
         refresh_constants: bool = True,
+        contact_damping_bidirectional: bool = False,
     ) -> None:
         """Apply one sweep; an optional enclosing graph branch selects the tail."""
         capacity = contacts.rigid_contact_max
@@ -1671,6 +1695,7 @@ class RigidPairContact:
                 dt,
                 refresh_constants,
                 int(contact_compliant_alm),
+                contact_damping_bidirectional,
                 body_q_prev,
                 contact_material_ke,
                 contact_material_kd,

@@ -8,4 +8,5 @@ Clamp pair-contact friction to zero when its Coulomb disk has zero radius,
 including for sub-epsilon tangential forces.
 
 Use the same non-attractive spring-damper law for compliant body and pair contacts,
-including release damping and a friction bound based on the total normal reaction.
+honoring the closing-only default and optional bidirectional damping, with a
+friction bound based on the total normal reaction.
