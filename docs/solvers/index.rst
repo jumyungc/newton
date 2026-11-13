@@ -543,6 +543,142 @@ coupler also warns when both endpoints belong to one entry whose solver does not
 support attachments. Hard attachments require both endpoints in one VBD entry;
 the coupler raises an error for other ownership arrangements.
 
+VBD Cable Relaxation
+--------------------
+
+.. experimental::
+
+   The ``visco_*`` custom attributes and their behavior may change without prior notice.
+
+:class:`~newton.solvers.SolverVBD` can add a standard-linear-solid (Zener) branch to rod
+bending and rod stretch, so a held cable relaxes its force and a loaded cable creeps beyond
+its instantaneous response. For a row of authored stiffness :math:`k`, a Maxwell element of
+stiffness :math:`r k` and relaxation time :math:`\tau` acts in parallel; the response to a
+held strain decays as
+
+.. math::
+
+   k(t) = k \left(1 + r\, e^{-t/\tau}\right),
+
+so the authored stiffness is the equilibrium (long-time) stiffness and :math:`k (1 + r)` is the
+instantaneous stiffness. :math:`\tau` is the relaxation time under held deformation; under a
+held force a pure SLS material (no other damping) creeps with time constant :math:`(1 + r)\tau`. Calibration must state
+which stiffness a measurement represents. The dimensionless ratio :math:`r` follows the authored
+stiffness when the segment length changes. Register the VBD custom attributes before building,
+then author positive pairs before constructing the solver.
+
+For one material across all rods, fill the Model arrays as below. Only the bend pair is
+needed for bending relaxation; the stretch pair is optional. This uses the same custom-attribute
+registration as VBD's Dahl model and leaves the normal State and stepping workflow unchanged.
+
+.. code-block:: python
+
+   builder = newton.ModelBuilder()
+   newton.solvers.SolverVBD.register_custom_attributes(builder)
+   builder.add_rod(rod=rod, stretch_stiffness=stretch_k, bend_stiffness=bend_k)
+   builder.color()
+   model = builder.finalize()
+   model.vbd.visco_bend_ratio.fill_(9.9)  # bending (twist is not relaxed)
+   model.vbd.visco_bend_tau.fill_(3.5)
+   model.vbd.visco_stretch_ratio.fill_(2.0)  # axial stretch
+   model.vbd.visco_stretch_tau.fill_(0.5)
+   solver = newton.solvers.SolverVBD(model)
+
+For different materials on different cables, author the joint indices returned by
+:meth:`~newton.ModelBuilder.add_rod` before finalizing the builder instead. Update the
+existing override map so assigning a second cable preserves the first cable's values:
+
+.. code-block:: python
+
+   bodies, joints = builder.add_rod(rod=rod, stretch_stiffness=stretch_k, bend_stiffness=bend_k)
+   for name, value in {"visco_bend_ratio": 3.0, "visco_bend_tau": 0.5}.items():
+       builder.custom_attributes[f"vbd:{name}"].values.update(dict.fromkeys(joints, value))
+
+Repeat this block for each cable, then call ``builder.color()``, ``builder.finalize()``,
+and construct the solver. Unspecified joints retain their zero defaults. Model-wide
+``fill_()`` is appropriate only when every rod should use that value. For manually built
+rod joints, :meth:`~newton.ModelBuilder.add_joint_rod` also accepts the existing
+``custom_attributes={"vbd:visco_bend_ratio": 3.0, "vbd:visco_bend_tau": 0.5}`` argument.
+
+In USD, author ``newton:vbd:visco_bend_ratio`` and the other attributes on the cable curve;
+they apply to every rod joint generated from it. After construction, edited values take
+effect through ``solver.notify_model_changed(newton.ModelFlags.JOINT_DOF_FORCE_PROPERTIES)``.
+
+With no SLS branch, an elastic row with ordinary viscous damping has a Kelvin--Voigt
+response. A pure three-parameter SLS instead has an equilibrium spring in parallel
+with a spring--dashpot series branch: set the existing damping of the enabled mode
+(``bend_damping`` or ``stretch_damping``) to zero to obtain this response. Retaining that
+damping adds a separate parallel dashpot; it is not the SLS branch's internal viscosity.
+The latter is :math:`\eta_1 = r k \tau` in the row's deformation coordinates.
+All four parameters must be finite and non-negative. Enabling SLS on a solver constructed
+without any active pair requires a new solver and recapturing any CUDA graphs that use it;
+edits to an already-enabled solver preserve
+buffer addresses for CUDA graph replay. SLS requires VBD to integrate the rod bodies;
+``integrate_with_external_rigid_solver=True`` is not supported for active SLS.
+An SLS-enabled VBD solver also cannot be an entry of ``SolverCoupled``: the coupler
+does not synchronize this State-owned material history between global and entry states.
+Construction rejects that combination; use :class:`~newton.solvers.SolverVBD` directly.
+
+Each step uses backward Euler: with relaxation history :math:`u_v` from the input state, the
+branch adds :math:`g k (u - u_v)` with :math:`g = r\tau / (\tau + \Delta t)` to the row as a
+frozen stiffness and offset, outside the compliant-ALM multiplier, and the output state
+receives :math:`u_v \leftarrow u_v + \tfrac{\Delta t}{\tau + \Delta t}(u - u_v)` once per step.
+Computing this small increment directly preserves relaxation when :math:`\Delta t/\tau`
+is smaller than float32 precision near one; forming ``1 - tau/(tau + dt)`` can round it to zero.
+While a parameter pair is inactive, its history tracks the current strain; re-enabling it
+after an inactive step starts that branch relaxed, independently of other active channels.
+This differs from a newly created state's virgin-at-rest history. Editing positive parameters
+preserves existing history and can change stored energy; such an edit is not passive material evolution.
+The history ``state.vbd.visco_history`` (bend x, bend y, axial extension) lives on the
+:class:`~newton.State`; zero means relaxed in the rest configuration, and
+:meth:`~newton.solvers.SolverVBD.reset` restores it for the selected worlds. Legacy AVBD
+hard rows are not affected, and models without positive pairs run exactly as before.
+An initially deformed state with zero history is a newly strained material, not a cable
+already relaxed in that deformed pose. For a cable that has been held in its initial pose,
+for example a measured shape before release, call
+:meth:`~newton.solvers.SolverVBD.relax_rod_history` after authoring that pose and before the
+first step. To restart a trajectory, copy its full State,
+including the material history, instead of only body poses and velocities.
+The bending history uses dimensionless geometric bend coordinates in the parent material frame;
+axial history is an anchor extension [m], not engineering strain. Ratios are dimensionless and
+relaxation times are in seconds. A ratio parameterization cannot represent a pure Maxwell material
+with zero equilibrium stiffness. Existing viscous damping and Dahl hysteresis remain separate,
+additive mechanisms; they are not replaced by SLS. Dahl's ``dahl_tau`` is a deformation-memory
+scale, not a time. History is measured from the rest configuration and keeps its values when the
+rest shape is edited; such an edit is not a stress-preserving remapping.
+
+SLS is linear viscoelasticity in these rod coordinates, combined with the existing nonlinear
+rod geometry. It does not add plastic flow, arbitrary nonlinear stiffness laws, twist/shear
+relaxation, or a general material-model registry. USD support uses registered Newton custom
+attributes on curves and joint prims, with ratios dimensionless and times in seconds;
+the importer's existing SI-stage requirements still apply.
+Rod bending and axial stretch share the same constitutive coefficients and history update.
+Routed-tendon SLS is outside this feature's scope.
+
+There is no SLS preparation pass: trial forces read the input State, and one final kernel
+commits the history once per step. With no active pair at construction, the solve excludes
+SLS array reads and the history kernel is omitted. Registering the attributes still allocates
+their standard Model/State storage, even when their values are zero. A solver initially
+constructed with SLS retains its buffers and history update when all pairs are later disabled,
+so subsequent re-enabling has well-defined history.
+
+The transient branch increases stiffness and can require more iterations or smaller timesteps.
+In compliant-ALM mode, contact conditioning uses inertial support and a structural summary of
+the authored equilibrium stretch/shear stiffness; the SLS transient stiffness is not included.
+A stiff contact loaded along a rod with stretch relaxation can therefore require more iterations.
+Bending relaxation does not directly change this structural summary.
+Check iteration convergence at a fixed timestep separately from timestep convergence; discrete
+convergence alone does not establish time accuracy. For pure SLS at a constant timestep small
+relative to the material time constants, backward Euler makes held-deformation relaxation and
+quasistatic creep time constants approximately :math:`\Delta t / 2` longer than :math:`\tau`
+and :math:`(1 + r)\tau`, respectively.
+
+The ``cable_viscoelastic_release`` example holds a cable tip, then releases it:
+
+.. code-block:: console
+
+   python -m newton.examples cable_viscoelastic_release
+
 .. _Differentiability:
 
 Differentiability

@@ -403,10 +403,18 @@ python -m newton.examples --describe robot_omniwheel
         <img width="320" src="https://raw.githubusercontent.com/newton-physics/newton/main/docs/images/examples/example_cable_initial_rest_pose.jpg" alt="Cable Initial and Rest Poses">
       </a>
     </td>
+    <td align="center" width="33%">
+      <a href="https://github.com/newton-physics/newton/blob/main/newton/examples/cable/example_cable_viscoelastic_release.py">
+        <img width="320" src="https://raw.githubusercontent.com/newton-physics/newton/main/docs/images/examples/example_cable_viscoelastic_release.jpg" alt="Cable Viscoelastic Release">
+      </a>
+    </td>
   </tr>
   <tr>
     <td align="center" width="33%">
       <code>python -m newton.examples cable_initial_rest_pose</code>
+    </td>
+    <td align="center" width="33%">
+      <code>python -m newton.examples cable_viscoelastic_release</code>
     </td>
   </tr>
   <tr>

@@ -1,0 +1,1 @@
+Add experimental standard-linear-solid relaxation of rod bending and stretch to ``SolverVBD``, with ``SolverVBD.relax_rod_history()`` to start rods relaxed in their current pose. Use direct VBD integration; coupled solvers reject this material-history mode.

@@ -20,9 +20,11 @@ from functools import partial
 from itertools import pairwise
 from typing import TYPE_CHECKING
 
+import numpy as np
 import warp as wp
 
 from ..exceptions import NewtonDeprecationWarning, NewtonWarning
+from ..sim.model import Model
 from ..sim.rod import _CIRCULAR_SECTION_TRANSVERSE_SHEAR_CORRECTION, Rod
 from ..usd import utils as usd
 from ..usd._resolution_policy import _resolve_shape_contact
@@ -623,6 +625,25 @@ def _apply_local_rod_material_gains(
         )
 
 
+def _cable_joint_custom_attributes(builder: ModelBuilder, prim: Usd.Prim) -> dict:
+    """Read joint custom attributes (such as ``newton:vbd:*``) explicitly authored on a cable curve.
+
+    Wildcard (``"*"``) attributes derive values from joint prims, so they do not apply to curves.
+    """
+    attributes = [
+        attribute
+        for attribute in builder.get_custom_attributes_by_frequency([Model.AttributeFrequency.JOINT])
+        if attribute.usd_attribute_name != "*"
+    ]
+    return usd.get_custom_attribute_values(prim, attributes, context={"builder": builder})
+
+
+def _apply_cable_joint_custom_attributes(builder: ModelBuilder, values: dict, joints: list[int]) -> None:
+    """Apply curve-authored joint custom attributes to every rod joint generated from the curve."""
+    if values and joints:
+        builder._process_custom_attributes(list(joints), values, Model.AttributeFrequency.JOINT)
+
+
 def _read_cable_articulation_root(
     ctx: _DeformableImportContext,
     prim,
@@ -1111,6 +1132,21 @@ def _deformable_prepare_cable_topology(
             graph_joint_radii,
             linear_unit,
         )
+        # Curve-authored joint custom attributes follow the representative curve, as the material does.
+        joint_attributes = [_cable_joint_custom_attributes(builder, curve_recs[p].prim) for p in comp_paths]
+        reference_attributes = joint_attributes[0]
+        if any(
+            values.keys() != reference_attributes.keys()
+            or any(not np.array_equal(value, reference_attributes[name]) for name, value in values.items())
+            for values in joint_attributes[1:]
+        ):
+            logger.warning(
+                "cable graph '%s': welded curves author differing joint custom attributes; using "
+                "'%s' for the whole component.",
+                cid,
+                comp_paths[0],
+            )
+        _apply_cable_joint_custom_attributes(builder, joint_attributes[0], graph_joint_ids)
 
         # Partition graph bodies back to their owning curve, and rebuild the per-prim anchor
         # maps the curve-to-xform attachment pass reads (point index / segment index -> body).
@@ -1296,6 +1332,7 @@ def _deformable_import_cable(
         # after rod construction.
         cable_mat = usd._get_curve_deformable_material(prim, deformable_read)
         _warn_legacy_curve_material(path, cable_mat)
+        joint_attributes = _cable_joint_custom_attributes(builder, prim)
         fallback_radius = _cable_radius_from_material(cable_mat, linear_unit)
         vertex_counts_int = [int(count) for count in vertex_counts]
         authored_segment_count = sum(count if closed else max(0, count - 1) for count in vertex_counts_int)
@@ -1473,6 +1510,7 @@ def _deformable_import_cable(
                 curve_joint_radii,
                 linear_unit,
             )
+            _apply_cable_joint_custom_attributes(builder, joint_attributes, joints)
             cable_bodies.extend(bodies)
             cable_joints.extend(joints)
             cable_mass_runs.append(

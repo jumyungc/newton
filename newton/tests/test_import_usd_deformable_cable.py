@@ -158,6 +158,27 @@ class TestUSDDeformableCable(unittest.TestCase):
         s1, s2 = builder.body_shapes[body_a][0], builder.body_shapes[body_b][0]
         return (min(s1, s2), max(s1, s2)) in set(builder.shape_collision_filter_pairs)
 
+    def test_welded_cable_joint_custom_attributes(self):
+        """Use the representative curve's joint attributes and report heterogeneous asset data."""
+        from pxr import Sdf
+
+        stage = self._author_attached_cable_pair(gap=0.0)
+        for suffix, ratio in (("A", 2.0), ("B", 3.0)):
+            prim = stage.GetPrimAtPath(f"/World/Cable{suffix}")
+            prim.CreateAttribute("newton:vbd:visco_stretch_ratio", Sdf.ValueTypeNames.Float).Set(ratio)
+            prim.CreateAttribute("newton:vbd:visco_stretch_tau", Sdf.ValueTypeNames.Float).Set(0.5)
+        builder = newton.ModelBuilder()
+        newton.solvers.SolverVBD.register_custom_attributes(builder)
+        with self.assertLogs("newton", level="WARNING") as logs:
+            builder.add_usd(stage)
+        self.assertTrue(any("differing joint custom attributes" in message for message in logs.output))
+        model = builder.finalize(device="cpu")
+        rods = model.joint_type.numpy() == int(newton.JointType.ROD)
+        self.assertGreater(np.count_nonzero(rods), 0)
+        np.testing.assert_array_equal(model.vbd.visco_stretch_ratio.numpy()[rods], 2.0)
+        np.testing.assert_array_equal(model.vbd.visco_stretch_tau.numpy()[rods], 0.5)
+        np.testing.assert_array_equal(model.vbd.visco_stretch_ratio.numpy()[~rods], 0.0)
+
     def test_cable_self_collision_flag(self):
         """Verify that an authored newton:selfCollisionEnabled overrides enable_self_collisions per curve."""
         from pxr import Sdf

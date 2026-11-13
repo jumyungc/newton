@@ -562,6 +562,11 @@ directly from the curve; no articulation API schema needs to be applied to it. I
 any member curve authoring self-collision off disables it for the whole graph. A cable joined to
 a rigid body's articulation follows that articulation's setting.
 
+Joint custom attributes authored on the curve, such as ``newton:vbd:visco_bend_ratio``, apply to
+every rod joint generated from it. Wildcard attributes, which derive their values from joint prims,
+are not read from curves. A welded graph takes these values from its first curve, as it does the
+material, and warns when member curves differ.
+
 .. code-block:: python
 
     from newton.selection import DeformableCurveView

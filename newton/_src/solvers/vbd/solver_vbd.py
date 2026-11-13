@@ -91,8 +91,10 @@ from .rigid_vbd_kernels import (
     init_rod_rest_bend_twist,
     refresh_body_structural_k,
     refresh_joint_material_params,
+    relax_rod_visco_history,
     reset_particle_body_attachment_state,
     reset_rigid_state,
+    reset_rod_visco_history,
     select_variant_bounding_radius,
     snapshot_body_body_contact_history,
     step_body_body_contact_C0_lambda,
@@ -103,6 +105,7 @@ from .rigid_vbd_kernels import (
     update_duals_joint,
     update_duals_particle_body_attachments,
     update_rod_dahl_state,
+    update_rod_visco_history,
 )
 from .tendon_kernels import (
     TendonForceElementAdjacencyInfo,
@@ -122,6 +125,9 @@ logger = logging.getLogger(__name__)
 __all__ = ["SolverVBD"]
 
 _PARTICLE_CONTACT_GATHER_BLOCK_DIM = 128
+
+# Rod relaxation attributes, packed per joint in this order.
+_ROD_RELAXATION_ATTRIBUTES = ("visco_bend_ratio", "visco_bend_tau", "visco_stretch_ratio", "visco_stretch_tau")
 
 # ``NewtonVbdSceneAPI`` settings: constructor argument -> (dtype, default, USD attribute name).
 # Read by both ``register_custom_attributes`` and ``SolverVBD.__init__``.
@@ -795,6 +801,10 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
               ``model.vbd.dahl_eps_max`` and ``model.vbd.dahl_tau``. Register them with
               ``SolverVBD.register_custom_attributes`` before building the model. Dahl friction is
               enabled only when positive Dahl parameters are authored.
+            - Standard-linear-solid relaxation of rod bending and stretch is controlled by the
+              ``model.vbd.visco_*`` ratio/tau attributes (see :meth:`register_custom_attributes`). It is
+              enabled when a positive pair is authored before the solver is constructed. This mode
+              requires direct VBD integration and is not supported as a ``SolverCoupled`` entry.
 
         """
         integrates_rigid_bodies = model.body_count > 0 and not integrate_with_external_rigid_solver
@@ -1066,7 +1076,20 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         )
 
         options = {"deterministic": effective_deterministic, "deterministic_max_records": 0}
-        self._solve_rigid_body_kernel = create_solve_rigid_body(model.tendon_count > 0)
+        # Rod relaxation (bend ratio, bend tau, stretch ratio, stretch tau); an empty array disables it.
+        relaxation = self._rod_relaxation_values()
+        if relaxation is not None and not integrates_rigid_bodies:
+            raise ValueError("Rod relaxation requires SolverVBD to integrate the rigid bodies.")
+        self.joint_visco = (
+            wp.empty(0, dtype=wp.vec4, device=self.device)
+            if relaxation is None
+            else wp.array(relaxation, dtype=wp.vec4, device=self.device)
+        )
+        self._solve_rigid_body_kernel = (
+            create_solve_rigid_body(model.tendon_count > 0, True)
+            if relaxation is not None
+            else create_solve_rigid_body(model.tendon_count > 0)
+        )
         if integrates_rigid_bodies:
             rigid_modules = (
                 rigid_vbd_kernels,
@@ -1632,6 +1655,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             # joint_material_k as an input, so a stale material_k here would
             # produce a stale body_structural_k that is harder to spot.
             self._refresh_joint_material_params()
+        if flags & (ModelFlags.JOINT_DOF_PROPERTIES | ModelFlags.JOINT_DOF_FORCE_PROPERTIES):
+            self._refresh_rod_relaxation()
         if refresh_structural_k:
             self._refresh_structural_k()
         if flags & (ModelFlags.JOINT_DOF_PROPERTIES | ModelFlags.JOINT_REFERENCE_POSE_PROPERTIES):
@@ -1644,6 +1669,16 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
     @override
     def coupling_supports_full_surface_soft_contacts(self) -> bool:
         return True
+
+    @override
+    def coupling_notify_iteration_restarts(self, enabled: bool) -> None:
+        """Reject coupled rod relaxation, whose State history the coupler does not transfer."""
+        del enabled
+        if self.joint_visco.shape[0] > 0:
+            raise ValueError(
+                "Rod relaxation is not supported by SolverCoupled because it does not transfer "
+                "the material history between global and entry states; use SolverVBD directly."
+            )
 
     def coupling_notify_input_state_update(
         self,
@@ -2094,6 +2129,39 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         result = cpu.numpy() if hasattr(cpu, "numpy") else np.asarray(cpu)
         return result if dtype is None else result.astype(dtype, copy=False)
 
+    def _rod_relaxation_values(self) -> np.ndarray | None:
+        """Return validated per-joint ``(bend ratio, bend tau, stretch ratio, stretch tau)`` rows.
+
+        Returns None when the attributes are not registered or no ``(ratio, tau)`` pair is positive.
+        """
+        attrs = getattr(self.model, "vbd", None)
+        arrays = [getattr(attrs, name, None) for name in _ROD_RELAXATION_ATTRIBUTES]
+        if any(array is None for array in arrays):
+            return None
+        values = np.stack([self._to_numpy(array, dtype=np.float32) for array in arrays], axis=-1)
+        if not np.all(np.isfinite(values)) or np.any(values < 0.0):
+            raise ValueError(f"model.vbd.{{{', '.join(_ROD_RELAXATION_ATTRIBUTES)}}} values must be finite and >= 0.")
+        return values if np.any((values[:, 0::2] > 0.0) & (values[:, 1::2] > 0.0)) else None
+
+    def _refresh_rod_relaxation(self) -> None:
+        """Copy edited relaxation parameters into the existing buffer so captured graphs stay valid."""
+        relaxation = self._rod_relaxation_values()
+        if self.joint_visco.shape[0] > 0:
+            # All pairs zero keeps the buffer, with zero gains.
+            values = np.zeros((self.joint_visco.shape[0], 4), np.float32) if relaxation is None else relaxation
+            self.joint_visco.assign(values)
+        elif relaxation is not None:
+            raise ValueError("Rod relaxation authored after construction requires a new SolverVBD.")
+
+    def _rod_visco_history(self, state: State) -> wp.array | None:
+        """Return the State rod relaxation history when relaxation is active."""
+        if self.joint_visco.shape[0] == 0:
+            return None
+        history = getattr(getattr(state, "vbd", None), "visco_history", None)
+        if history is None:
+            raise ValueError("Rod relaxation is active but state.vbd.visco_history is missing; use model.state().")
+        return history
+
     def _init_joint_constraint_layout(self) -> np.ndarray:
         """Initialize VBD-owned joint constraint indexing.
 
@@ -2529,7 +2597,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
     @override
     @classmethod
     def register_custom_attributes(cls, builder: ModelBuilder) -> None:
-        """Register SolverVBD custom Model attributes.
+        """Register SolverVBD custom Model and State attributes.
 
         Currently registers:
           - ``vbd:max_solver_iterations`` for ``NewtonSceneAPI.newton:maxSolverIterations``.
@@ -2542,14 +2610,37 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             stiffness and damping must be finite and non-negative.
           - ``vbd:joint_is_hard`` for per-joint hard/soft constraint mode (non-rod joints)
           - ``vbd:dahl_eps_max`` and ``vbd:dahl_tau`` for optional rod angular Dahl friction
+          - ``vbd:visco_bend_ratio``, ``vbd:visco_bend_tau``, ``vbd:visco_stretch_ratio``, and
+            ``vbd:visco_stretch_tau`` for optional rod relaxation, with its State history
+            ``vbd:visco_history``
 
         Attributes are declared in the ``vbd`` namespace so they can be authored
         in scenes. The Dahl and ``joint_is_hard`` attributes are authored in USD as
         ``newton:vbd:<attr>``; the solver settings above use the names listed there.
+        The rod relaxation attributes also use ``newton:vbd:<attr>``. On a USD cable
+        curve, joint custom attributes apply to every rod joint generated from it.
 
         Dahl rod friction is enabled per joint only where both
         ``model.vbd.dahl_eps_max`` and ``model.vbd.dahl_tau`` are authored
         positive; the attributes default to zero.
+
+        Rod relaxation adds a standard-linear-solid (Zener) Maxwell branch to a row of authored
+        (equilibrium) stiffness ``k``: the response to a held strain decays as
+        ``k * (1 + ratio * exp(-t / tau))``. ``ratio`` [dimensionless] scales the row's authored
+        stiffness, so it follows that stiffness when the segment length changes; ``tau`` [s] is the
+        relaxation time. Bend parameters relax bending (not twist) and stretch parameters relax axial
+        extension. A branch is active where both values are positive; enable it before constructing
+        the solver, after which edits take effect through
+        ``notify_model_changed(newton.ModelFlags.JOINT_DOF_FORCE_PROPERTIES)``. The relaxation history
+        ``(bend_x, bend_y, axial extension)`` [dimensionless, dimensionless, m] is trajectory data
+        stored on :class:`~newton.State` (zero means relaxed in the rest configuration) and is
+        restored by :meth:`reset`; :meth:`relax_rod_history` instead relaxes it in the current pose.
+        Use direct VBD integration: ``SolverCoupled`` does not synchronize this material history
+        and rejects an SLS-enabled VBD entry.
+
+        .. experimental::
+
+           The rod relaxation attributes ``vbd:visco_*`` and their behavior may change without notice.
 
         Args:
             builder: Model builder to register attributes on.
@@ -2579,6 +2670,27 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 )
             )
 
+        for name in _ROD_RELAXATION_ATTRIBUTES:
+            builder.add_custom_attribute(
+                ModelBuilder.CustomAttribute(
+                    name=name,
+                    frequency=Model.AttributeFrequency.JOINT,
+                    assignment=Model.AttributeAssignment.MODEL,
+                    dtype=wp.float32,
+                    default=0.0,
+                    namespace="vbd",
+                )
+            )
+        builder.add_custom_attribute(
+            ModelBuilder.CustomAttribute(
+                name="visco_history",
+                frequency=Model.AttributeFrequency.JOINT,
+                assignment=Model.AttributeAssignment.STATE,
+                dtype=wp.vec3,
+                default=wp.vec3(0.0),
+                namespace="vbd",
+            )
+        )
         builder.add_custom_attribute(
             ModelBuilder.CustomAttribute(
                 name="dahl_eps_max",
@@ -2910,7 +3022,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         The solver follows a 3-phase structure:
         1. Initialize: Forward integrate particles and rigid bodies, detect collisions, initialize contact state
         2. Iterate: Interleave particle and rigid-body VBD iterations
-        3. Finalize: Update velocities and persistent state (Dahl friction)
+        3. Finalize: Update velocities and persistent state (Dahl friction, rod relaxation)
 
         To control rigid body substepping behavior, call set_rigid_history_update().
         When True (default), the step rebuilds rigid contact lists, re-initializes
@@ -3062,7 +3174,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         stress, and increment) are rebaselined together from the next :meth:`step`
         input pose, after any intervening state edits or forward kinematics.
         Mutable tendon material and routing state is restored to its initialized
-        values regardless of *flags*.
+        values regardless of *flags*, as is the rod relaxation history ``state.vbd.visco_history``.
         REVOLUTE and one-axis-D6 winding re-anchors to the pose-equivalent angle
         nearest the authored rest coordinate; a pose alone cannot restore an
         independently intended multi-turn coordinate.
@@ -3209,6 +3321,17 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         if not self._integrates_rigid_bodies:
             return
 
+        # Rod relaxation history restarts from the model default (zero: relaxed at rest).
+        visco_history = self._rod_visco_history(state)
+        if visco_history is not None:
+            wp.launch(
+                kernel=reset_rod_visco_history,
+                dim=model.joint_count,
+                inputs=[world_mask, world_mask is None, model.world_count, model.joint_world, model.vbd.visco_history],
+                outputs=[visco_history],
+                device=self.device,
+            )
+
         # Entity-parallel launch over the widest lane: world slots (+1 global),
         # joints, and bodies (bodies only when copying model-default body state).
         reset_dim = max(
@@ -3247,6 +3370,67 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 self._contact_history_reset_mask,
                 self._contact_history_reset_pending,
             ],
+            device=self.device,
+        )
+
+    def relax_rod_history(self, state: State, *, world_mask: wp.array[wp.bool] | None = None) -> None:
+        """Set the rod relaxation history of selected worlds to the deformation of ``state.body_q``.
+
+        The rods then start as a material fully relaxed in their current pose, for example a cable
+        held in a measured shape long enough for its transient branch to decay. A new
+        :class:`~newton.State` instead starts with the model default history (zero: relaxed in the
+        rest configuration), which a deformed pose loads at its instantaneous stiffness. Call this
+        after authoring the pose (or :func:`~newton.eval_fk`) and before the next :meth:`step`;
+        :meth:`reset` restores the model default. It does nothing when no relaxation pair was
+        active at construction, and it is graph-capturable. Only the transient SLS branch is
+        relaxed: the equilibrium spring, rest shape, velocities, and Dahl history are unchanged.
+
+        .. experimental::
+
+           This initializer and the ``vbd:visco_*`` attributes may change without notice.
+
+        Args:
+            state: State whose pose defines the relaxed configuration; its
+                ``vbd.visco_history`` is modified in place.
+            world_mask: One-dimensional Warp boolean mask on the solver device, with shape
+                ``(world_count + 1,)``. The final entry selects global world ``-1``;
+                ``None`` selects all local and global worlds, as in :meth:`reset`.
+
+        Raises:
+            ValueError: If the state, required arrays, or world mask are invalid.
+        """
+        if state is None:
+            raise ValueError("'state' argument is required.")
+        world_mask = self._normalize_reset_world_mask(world_mask)
+        history = self._rod_visco_history(state)
+        if history is None:
+            return
+        model = self.model
+        for name, array, dtype, count in (
+            ("body_q", state.body_q, wp.transform, model.body_count),
+            ("vbd.visco_history", history, wp.vec3, model.joint_count),
+        ):
+            if array is None or array.dtype != dtype or array.shape != (count,) or array.device != self.device:
+                raise ValueError(f"state.{name} must match this model's shape, dtype, and device; use model.state().")
+        wp.launch(
+            kernel=relax_rod_visco_history,
+            dim=model.joint_count,
+            inputs=[
+                world_mask,
+                world_mask is None,
+                model.world_count,
+                model.joint_world,
+                model.joint_type,
+                model.joint_parent,
+                model.joint_child,
+                model.joint_X_p,
+                model.joint_X_c,
+                self.joint_rod_rest_kb_local,
+                self.joint_rod_rest_twist,
+                state.body_q,
+            ],
+            outputs=[history],
+            block_dim=self._rigid_joint_block_dim,
             device=self.device,
         )
 
@@ -4904,6 +5088,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                     self.joint_penalty_kd,
                     self.joint_sigma_start,
                     self.joint_C_fric,
+                    self.joint_visco,
+                    self._rod_visco_history(state_in),
                     model.joint_target_ke,
                     model.joint_target_kd,
                     control.joint_target_q,
@@ -5363,9 +5549,9 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         )
 
     def _finalize_rigid_bodies(self, state_in: State, state_out: State, dt: float):
-        """Finalize rigid body velocities and Dahl friction state after VBD iterations (post-iteration phase).
+        """Finalize rigid body velocities and rod material history after VBD iterations.
 
-        Updates rigid body velocities using BDF1 and updates Dahl hysteresis state for rod bend/twist.
+        Updates velocities using BDF1, Dahl hysteresis, and the output State's SLS history.
         Also transfers the final body poses from state_in to state_out.
         """
         model = self.model
@@ -5411,6 +5597,29 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                     self.joint_kappa_prev,
                     self.joint_dkappa_prev,
                 ],
+                dim=model.joint_count,
+                block_dim=self._rigid_joint_block_dim,
+                device=self.device,
+            )
+
+        if self.joint_visco.shape[0] > 0:
+            wp.launch(
+                kernel=update_rod_visco_history,
+                inputs=[
+                    dt,
+                    model.joint_type,
+                    model.joint_enabled,
+                    model.joint_parent,
+                    model.joint_child,
+                    model.joint_X_p,
+                    model.joint_X_c,
+                    self.joint_rod_rest_kb_local,
+                    self.joint_rod_rest_twist,
+                    state_out.body_q,
+                    self.joint_visco,
+                    self._rod_visco_history(state_in),
+                ],
+                outputs=[self._rod_visco_history(state_out)],
                 dim=model.joint_count,
                 block_dim=self._rigid_joint_block_dim,
                 device=self.device,

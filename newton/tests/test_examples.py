@@ -37,8 +37,10 @@ import warp as wp
 
 import newton.examples
 import newton.tests.unittest_utils
+from newton.examples.cable.example_cable_viscoelastic_release import Example as CableViscoelasticExample
 from newton.examples.robot.example_robot_cartpole import Example as RobotCartpoleExample
 from newton.tests.unittest_utils import (
+    MODULE_LOAD_OUTPUT_RE,
     USD_AVAILABLE,
     NewtonTestCase,
     add_function_test,
@@ -723,6 +725,67 @@ add_example_batch(
         },
     ],
 )
+add_example_test(
+    TestCableExamples,
+    name="cable.example_cable_viscoelastic_release",
+    devices=test_devices,
+    use_viewer=True,
+    test_options={"num-frames": 100, "release-time": 0.1},
+)
+
+
+def _test_cable_viscoelastic_capture_matches_eager(test, device):
+    """Preserve cable poses and material history across odd and even captured frames."""
+    test.allowOutputRegex(MODULE_LOAD_OUTPUT_RE, stream="stdout")
+    with wp.ScopedDevice(device):
+        for substeps in (1, 2, 3):
+            with test.subTest(substeps=substeps):
+                args = CableViscoelasticExample.create_parser().parse_args(
+                    [
+                        "--device",
+                        str(device),
+                        "--substeps",
+                        str(substeps),
+                        "--segments",
+                        "4",
+                        "--iterations",
+                        "8",
+                        "--release-time",
+                        "0",
+                    ]
+                )
+                with patch.object(CableViscoelasticExample, "capture", lambda example: setattr(example, "graph", None)):
+                    eager = CableViscoelasticExample(ViewerNull(num_frames=4), args)
+                expected = []
+                for _ in range(4):
+                    eager.step()
+                    expected.append(
+                        (
+                            eager.state_0.body_q.numpy(),
+                            eager.state_0.body_qd.numpy(),
+                            eager.state_0.vbd.visco_history.numpy(),
+                        )
+                    )
+                test.assertGreater(np.max(np.abs(expected[-1][2])), 1.0e-6)
+
+                captured = CableViscoelasticExample(ViewerNull(num_frames=4), args)
+                for frame, (q, qd, history) in enumerate(expected):
+                    captured.step()
+                    with test.subTest(frame=frame):
+                        np.testing.assert_array_equal(captured.state_0.body_q.numpy(), q)
+                        np.testing.assert_array_equal(captured.state_0.body_qd.numpy(), qd)
+                        np.testing.assert_array_equal(captured.state_0.vbd.visco_history.numpy(), history)
+
+
+add_function_test(
+    TestCableExamples,
+    "test_cable_viscoelastic_capture_matches_eager",
+    _test_cable_viscoelastic_capture_matches_eager,
+    devices=cuda_test_devices,
+    check_output=False,
+)
+
+
 add_example_test(
     TestCableExamples,
     name="cable.example_cable_cross_slide_table",

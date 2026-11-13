@@ -22,7 +22,7 @@ Organization, in file order:
 - Pre-iteration kernels: Forward integration, contact history restore, rho seeding,
   Dahl parameter computation
 - Iteration kernels: Contact accumulation, rigid body solve, dual updates
-- Post-iteration kernels: Velocity updates, Dahl state updates
+- Post-iteration kernels: Velocity updates, Dahl and SLS state updates
 """
 
 import functools
@@ -42,6 +42,7 @@ from newton._src.solvers.vbd.interval_arithmetic import (
     rigid_point_plane_signed_distance_derivative_interval,
     rigid_point_plane_signed_distance_interval,
 )
+from newton._src.solvers.viscoelasticity import sls_gain, sls_step_fraction, sls_update_history
 
 from .tendon_kernels import TendonForceElementAdjacencyInfo, evaluate_tendon_force_hessians
 
@@ -2989,6 +2990,8 @@ def evaluate_joint_force_hessian(
     joint_penalty_kd: wp.array[float],
     joint_sigma_start: wp.array[wp.vec3],
     joint_C_fric: wp.array[wp.vec3],
+    visco_gain: wp.vec2,
+    visco_history: wp.vec3,
     # Drive parameters (DOF-indexed via joint_qd_start)
     joint_target_ke: wp.array[float],
     joint_target_kd: wp.array[float],
@@ -3015,6 +3018,9 @@ def evaluate_joint_force_hessian(
     dt: float,
 ):
     """Compute VBD joint force and Hessian contributions for one body.
+
+    ``visco_gain`` (bend, stretch) and ``visco_history`` (bend_x, bend_y, axial extension) describe the rod's
+    standard-linear-solid Maxwell branches for this step; zero gains disable them.
 
     Supported joint types: ROD, BALL, FIXED, REVOLUTE, PRISMATIC, D6.
     Rod joints use split stretch/shear and bend/twist helpers; other joints use
@@ -3161,6 +3167,11 @@ def evaluate_joint_force_hessian(
             if twist_stiff and not twist_hard:
                 sigma = sigma + wp.vec3(0.0, 0.0, dahl_sigma[2])
                 H_fric_diag = H_fric_diag + wp.vec3(0.0, 0.0, dahl_fric[2])
+            # Standard-linear-solid Maxwell branch on the soft bend rows, outside the ALM dual.
+            if visco_gain[0] > 0.0 and bend_stiff and not bend_hard:
+                k_bend = visco_gain[0] * material_bend
+                K_elastic_diag = K_elastic_diag + wp.vec3(k_bend, k_bend, 0.0)
+                sigma = sigma - k_bend * wp.vec3(visco_history[0], visco_history[1], 0.0)
 
             rod_torque, rod_H_aa, _rod_kappa, _rod_J = evaluate_rod_bend_twist_force_hessian_z(
                 q_wp,
@@ -3222,6 +3233,10 @@ def evaluate_joint_force_hessian(
             lambda_local = stretch_dual_eff + shear_dual_eff
             C0_force_local = shear_primal_k * shear_alpha * wp.vec3(C0_lin[0], C0_lin[1], 0.0)
             C0_force_local = C0_force_local + stretch_primal_k * stretch_alpha * wp.vec3(0.0, 0.0, C0_lin[2])
+            if visco_gain[1] > 0.0 and stretch_stiff and not stretch_hard:
+                k_stretch = visco_gain[1] * material_stretch
+                k_diag = k_diag + wp.vec3(0.0, 0.0, k_stretch)
+                lambda_local = lambda_local - wp.vec3(0.0, 0.0, k_stretch * visco_history[2])
 
             f_l, t_l, Hll_l, Hal_l, Haa_l = evaluate_rod_stretch_shear_force_hessian(
                 X_wp,
@@ -6261,8 +6276,8 @@ def compute_body_particle_contact_forces(
 
 
 @functools.cache
-def create_solve_rigid_body(has_tendons: bool):
-    """Specialize the body solve to exclude tendon assembly for tendon-free models."""
+def create_solve_rigid_body(has_tendons: bool, has_rod_visco: bool = False):
+    """Specialize the body solve to exclude tendon assembly and rod relaxation when a model has none."""
 
     # Separate module so SolverVBD can enable fast math; keep small-angle sin/cos out of reachable code
     @wp.kernel(module="unique", enable_backward=False)
@@ -6299,6 +6314,9 @@ def create_solve_rigid_body(has_tendons: bool):
         # Dahl hysteresis parameters (frozen for this timestep, component-wise vec3 per joint)
         joint_sigma_start: wp.array[wp.vec3],
         joint_C_fric: wp.array[wp.vec3],
+        # Rod relaxation parameters and start-of-step relaxation history (read only with has_rod_visco)
+        joint_visco: wp.array[wp.vec4],
+        joint_visco_history: wp.array[wp.vec3],
         # Drive parameters (DOF-indexed via joint_qd_start)
         joint_target_ke: wp.array[float],
         joint_target_kd: wp.array[float],
@@ -6500,6 +6518,12 @@ def create_solve_rigid_body(has_tendons: bool):
         num_adj_joints = get_body_num_adjacent_joints(adjacency, body_index)
         for joint_counter in range(num_adj_joints):
             joint_idx = get_body_adjacent_joint_id(adjacency, body_index, joint_counter)
+            visco_gain = wp.vec2(0.0)
+            visco_history = wp.vec3(0.0)
+            if wp.static(has_rod_visco):
+                visco = joint_visco[joint_idx]
+                visco_gain = wp.vec2(sls_gain(visco[0], visco[1], dt), sls_gain(visco[2], visco[3], dt))
+                visco_history = joint_visco_history[joint_idx]
             joint_force, joint_torque, joint_H_ll, joint_H_al, joint_H_aa = evaluate_joint_force_hessian(
                 body_index,
                 joint_idx,
@@ -6525,6 +6549,8 @@ def create_solve_rigid_body(has_tendons: bool):
                 joint_penalty_kd,
                 joint_sigma_start,
                 joint_C_fric,
+                visco_gain,
+                visco_history,
                 joint_target_ke,
                 joint_target_kd,
                 joint_target_q,
@@ -7581,6 +7607,135 @@ def update_rod_dahl_state(
     joint_sigma_prev[j] = sigma_final_out
     joint_kappa_prev[j] = kappa_final
     joint_dkappa_prev[j] = d_kappa_out
+
+
+@wp.func
+def _rod_visco_deformation(
+    parent: int,
+    child: int,
+    X_p: wp.transform,
+    X_c: wp.transform,
+    rest_kb_local: wp.vec3,
+    rest_twist: float,
+    body_q: wp.array[wp.transform],
+):
+    """Return the rod relaxation coordinates ``[bend_x, bend_y, axial extension]`` of a pose."""
+    if parent >= 0:
+        X_wp = body_q[parent] * X_p
+    else:
+        X_wp = X_p
+    X_wc = body_q[child] * X_c
+    q_wp = wp.transform_get_rotation(X_wp)
+    kappa = compute_geometric_rod_kappa_cached_z(q_wp, wp.transform_get_rotation(X_wc), rest_kb_local, rest_twist)
+    return wp.vec3(
+        kappa[0],
+        kappa[1],
+        wp.quat_rotate_inv(q_wp, wp.transform_get_translation(X_wc) - wp.transform_get_translation(X_wp))[2],
+    )
+
+
+@wp.kernel
+def update_rod_visco_history(
+    dt: float,
+    joint_type: wp.array[int],
+    joint_enabled: wp.array[bool],
+    joint_parent: wp.array[int],
+    joint_child: wp.array[int],
+    joint_X_p: wp.array[wp.transform],
+    joint_X_c: wp.array[wp.transform],
+    joint_rod_rest_kb_local: wp.array[wp.vec3],
+    joint_rod_rest_twist: wp.array[float],
+    body_q: wp.array[wp.transform],
+    joint_visco: wp.array[wp.vec4],
+    history_in: wp.array[wp.vec3],
+    # Outputs
+    history_out: wp.array[wp.vec3],
+):
+    """Advance the rod relaxation history ``[bend_x, bend_y, axial extension]`` by one backward-Euler step.
+
+    The history relaxes toward the accepted deformation with time constant ``tau``. Disabled
+    joints and inactive parameter pairs track the pose, so a branch that becomes active starts relaxed.
+    """
+    j = wp.tid()
+    history = history_in[j]
+    child = joint_child[j]
+    if joint_type[j] != JointType.ROD or child < 0:
+        history_out[j] = history
+        return
+
+    deformation = _rod_visco_deformation(
+        joint_parent[j],
+        child,
+        joint_X_p[j],
+        joint_X_c[j],
+        joint_rod_rest_kb_local[j],
+        joint_rod_rest_twist[j],
+        body_q,
+    )
+
+    visco = joint_visco[j]
+    step_fraction = wp.vec3(1.0)
+    if joint_enabled[j]:
+        if visco[0] > 0.0 and visco[1] > 0.0:
+            fraction_bend = sls_step_fraction(visco[1], dt)
+            step_fraction = wp.vec3(fraction_bend, fraction_bend, 1.0)
+        if visco[2] > 0.0 and visco[3] > 0.0:
+            step_fraction[2] = sls_step_fraction(visco[3], dt)
+    history_out[j] = wp.vec3(
+        sls_update_history(deformation[0], history[0], step_fraction[0]),
+        sls_update_history(deformation[1], history[1], step_fraction[1]),
+        sls_update_history(deformation[2], history[2], step_fraction[2]),
+    )
+
+
+@wp.kernel
+def reset_rod_visco_history(
+    world_mask: wp.array[wp.bool],
+    reset_all: bool,
+    world_count: int,
+    joint_world: wp.array[wp.int32],
+    initial: wp.array[wp.vec3],
+    # Outputs
+    history: wp.array[wp.vec3],
+):
+    """Restore the rod relaxation history of reset-selected worlds."""
+    j = wp.tid()
+    if _reset_world_selected(joint_world[j], world_mask, reset_all, world_count):
+        history[j] = initial[j]
+
+
+@wp.kernel
+def relax_rod_visco_history(
+    world_mask: wp.array[wp.bool],
+    reset_all: bool,
+    world_count: int,
+    joint_world: wp.array[wp.int32],
+    joint_type: wp.array[int],
+    joint_parent: wp.array[int],
+    joint_child: wp.array[int],
+    joint_X_p: wp.array[wp.transform],
+    joint_X_c: wp.array[wp.transform],
+    joint_rod_rest_kb_local: wp.array[wp.vec3],
+    joint_rod_rest_twist: wp.array[float],
+    body_q: wp.array[wp.transform],
+    # Outputs
+    history: wp.array[wp.vec3],
+):
+    """Set the rod relaxation history of selected worlds to the deformation of ``body_q``."""
+    j = wp.tid()
+    child = joint_child[j]
+    if joint_type[j] != JointType.ROD or child < 0:
+        return
+    if _reset_world_selected(joint_world[j], world_mask, reset_all, world_count):
+        history[j] = _rod_visco_deformation(
+            joint_parent[j],
+            child,
+            joint_X_p[j],
+            joint_X_c[j],
+            joint_rod_rest_kb_local[j],
+            joint_rod_rest_twist[j],
+            body_q,
+        )
 
 
 # =====================================================================================
