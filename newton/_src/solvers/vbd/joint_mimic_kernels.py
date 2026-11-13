@@ -5,9 +5,8 @@
 
 import warp as wp
 
-from ...math import quat_decompose
 from ...sim import JointType
-from ...sim.articulation import transform_3d_rotational_axes
+from ...sim.articulation import eval_angular_coordinates
 from .rigid_vbd_kernels import (
     _alm_relaxed_ascent,
     _bilateral_auto_rho,
@@ -105,23 +104,11 @@ def _coordinate(data: JointMimicData, joint: int, component: int, body_q: wp.arr
         denom = wp.max(w * w + twist * twist, 1.0e-12)
         covector = (w * w * axis_0 + w * wp.cross(v, axis_0) + twist * v) / denom
     else:
-        axis_1 = data.joint_axis[start + 1]
-        axis_2 = wp.cross(axis_0, axis_1)
-        # Use the same canonical frame as invert_2d/3d_rotational_dofs.
-        q_off = wp.quat_from_matrix(wp.matrix_from_cols(axis_0, axis_1, axis_2))
-        angles = quat_decompose(wp.quat_inverse(q_off) * wp.quat_inverse(q_p) * q_c * q_off)
-        coordinate = angles[angular_component]
-        a0 = wp.quat_rotate(q_off, wp.vec3(1.0, 0.0, 0.0))
-        a1 = wp.quat_rotate(q_off, wp.vec3(0.0, 1.0, 0.0))
-        a2 = wp.quat_rotate(q_off, wp.vec3(0.0, 0.0, 1.0))
-        a0, a1, a2 = transform_3d_rotational_axes(a0, a1, a2, angles[0], angles[1])
-        # A coordinate gradient is a row of the inverse angular-velocity basis.
-        axes = wp.matrix_from_rows(a0, a1, a2)
-        covector = wp.cross(axes[(angular_component + 1) % 3], axes[(angular_component + 2) % 3])
-        covector /= wp.dot(axes[angular_component], covector)
-        if angular_component == 2 and wp.dot(axis_2, data.joint_axis[start + 2]) < 0.0:
-            coordinate = -coordinate
-            covector = -covector
+        coordinates, covectors = eval_angular_coordinates(data.joint_axis, start, angular_count, q_p, q_c)
+        coordinate = coordinates[angular_component]
+        # The shared articulation helper already returns world-frame covectors.
+        covector = covectors[angular_component]
+        return coordinate, wp.spatial_vector(wp.vec3(0.0), -covector), wp.spatial_vector(wp.vec3(0.0), covector)
     covector = wp.quat_rotate(q_p, covector)
     return coordinate, wp.spatial_vector(wp.vec3(0.0), -covector), wp.spatial_vector(wp.vec3(0.0), covector)
 

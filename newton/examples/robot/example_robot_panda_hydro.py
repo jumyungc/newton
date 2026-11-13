@@ -631,7 +631,7 @@ class Example:
             default=True,
             help=(
                 "Make contact generation and ordering reproducible across runs on the same GPU. "
-                "Enabled by default to keep the pick-and-place sequence stable; costs a few percent of step time."
+                "Enabled by default to keep the pick-and-place sequence stable; performance cost depends on the scene."
             ),
         )
         parser.add_argument(
@@ -639,9 +639,9 @@ class Example:
             action=argparse.BooleanOptionalAction,
             default=False,
             help=(
-                "Additionally make the solver bit-exact. Separate from --deterministic because "
-                "it instruments every atomic scatter in the solver and costs ~7x step time, "
-                "while contact ordering is what varies between runs."
+                "Additionally request run-to-run deterministic solver kernels. "
+                "Separate from deterministic contact generation and ordering; "
+                "performance cost depends on the scene and solver backend."
             ),
         )
         parser.add_argument(

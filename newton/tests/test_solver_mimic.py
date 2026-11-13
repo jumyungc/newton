@@ -8,6 +8,9 @@ import warp as wp
 
 import newton
 from newton._src.sim.joint_mimic import eval_joint_mimic_coordinate, eval_joint_mimic_velocity
+from newton._src.solvers.vbd.joint_mimic_kernels import JointMimicData
+from newton._src.solvers.vbd.joint_mimic_kernels import _coordinate as eval_vbd_mimic_coordinate
+from newton._src.solvers.vbd.joint_mimic_kernels import _row as eval_vbd_mimic_row
 from newton.tests.unittest_utils import add_function_test, get_cuda_test_devices, get_test_devices
 
 
@@ -199,6 +202,7 @@ def test_vbd_mimic(test, device):
 
 @wp.kernel
 def _eval_mimic_coordinates(
+    use_vbd: bool,
     body_q: wp.array[wp.transform],
     body_qd: wp.array[wp.spatial_vector],
     body_com: wp.array[wp.vec3],
@@ -212,24 +216,41 @@ def _eval_mimic_coordinates(
     joint_axis: wp.array[wp.vec3],
     coordinates: wp.array[float],
     velocities: wp.array[float],
+    gradients_p: wp.array[wp.spatial_vector],
+    gradients_c: wp.array[wp.spatial_vector],
 ):
     k = wp.tid()
-    q, gradient_p, gradient_c = eval_joint_mimic_coordinate(
-        0,
-        k,
-        body_q,
-        body_com,
-        joint_type,
-        joint_parent,
-        joint_child,
-        joint_X_p,
-        joint_X_c,
-        joint_qd_start,
-        joint_dof_dim,
-        joint_axis,
-    )
+    if use_vbd:
+        data = JointMimicData()
+        data.body_com = body_com
+        data.joint_type = joint_type
+        data.joint_parent = joint_parent
+        data.joint_child = joint_child
+        data.joint_X_p = joint_X_p
+        data.joint_X_c = joint_X_c
+        data.joint_qd_start = joint_qd_start
+        data.joint_dof_dim = joint_dof_dim
+        data.joint_axis = joint_axis
+        q, gradient_p, gradient_c = eval_vbd_mimic_coordinate(data, 0, k, body_q)
+    else:
+        q, gradient_p, gradient_c = eval_joint_mimic_coordinate(
+            0,
+            k,
+            body_q,
+            body_com,
+            joint_type,
+            joint_parent,
+            joint_child,
+            joint_X_p,
+            joint_X_c,
+            joint_qd_start,
+            joint_dof_dim,
+            joint_axis,
+        )
     coordinates[k] = q
     velocities[k] = eval_joint_mimic_velocity(joint_parent[0], joint_child[0], gradient_p, gradient_c, body_qd)
+    gradients_p[k] = gradient_p
+    gradients_c[k] = gradient_c
 
 
 def test_vbd_mimic_load_balance(test, device):
@@ -329,48 +350,165 @@ def test_vbd_mimic_reset_and_notification(test, device):
 
 
 def test_mimic_compound_d6_coordinate_gradients(test, device):
-    """Mimic gradients of multi-angular D6 coordinates must map body velocities to eval_fk joint velocities."""
-    q = np.array([0.5, -0.4, 0.7], dtype=np.float32)
+    """Shared and VBD mimic coordinates follow FK, including two-axis rotations through 90 degrees."""
     qd = np.array([0.9, -0.6, 0.3], dtype=np.float32)
-    # non-XYZ axis orders, as in the nv_humanoid.xml hips
-    for axes in ((newton.Axis.X, newton.Axis.Z, newton.Axis.Y), (newton.Axis.X, newton.Axis.Z)):
-        with test.subTest(axis_count=len(axes)):
+    # Include both handednesses, non-XYZ axis orders, and the unchanged single-axis path.
+    for axes in (
+        (newton.Axis.X, newton.Axis.Y, newton.Axis.Z),
+        (newton.Axis.X, newton.Axis.Z, newton.Axis.Y),
+        (newton.Axis.X, newton.Axis.Y),
+        (newton.Axis.X, newton.Axis.Z),
+        (newton.Axis.X,),
+    ):
+        with test.subTest(axes=axes):
             n = len(axes)
             builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
             body = builder.add_link(mass=1.0, inertia=wp.mat33(np.eye(3)))
             joint = builder.add_joint_d6(
-                -1, body, angular_axes=[newton.ModelBuilder.JointDofConfig(axis=axis) for axis in axes]
+                -1,
+                body,
+                angular_axes=[newton.ModelBuilder.JointDofConfig(axis=axis) for axis in axes],
+                parent_xform=wp.transform(
+                    wp.vec3(0.0), wp.quat_from_axis_angle(wp.normalize(wp.vec3(1.0, 2.0, -1.0)), 0.6)
+                ),
+                child_xform=wp.transform(
+                    wp.vec3(0.0), wp.quat_from_axis_angle(wp.normalize(wp.vec3(-2.0, 1.0, 1.0)), -0.3)
+                ),
             )
             builder.add_articulation([joint])
             model = builder.finalize(device=device)
             state = model.state()
-            state.joint_q.assign(q[:n])
-            state.joint_qd.assign(qd[:n])
-            newton.eval_fk(model, state.joint_q, state.joint_qd, state)
-
             coordinates = wp.zeros(n, dtype=float, device=device)
             velocities = wp.zeros(n, dtype=float, device=device)
-            wp.launch(
-                _eval_mimic_coordinates,
-                dim=n,
-                inputs=[
-                    state.body_q,
-                    state.body_qd,
-                    model.body_com,
-                    model.joint_type,
-                    model.joint_parent,
-                    model.joint_child,
-                    model.joint_X_p,
-                    model.joint_X_c,
-                    model.joint_qd_start,
-                    model.joint_dof_dim,
-                    model.joint_axis,
-                ],
-                outputs=[coordinates, velocities],
-                device=device,
+            gradients_p = wp.zeros(n, dtype=wp.spatial_vector, device=device)
+            gradients_c = wp.zeros(n, dtype=wp.spatial_vector, device=device)
+
+            def evaluate(
+                use_vbd,
+                n=n,
+                state=state,
+                model=model,
+                coordinates=coordinates,
+                velocities=velocities,
+                gradients_p=gradients_p,
+                gradients_c=gradients_c,
+            ):
+                wp.launch(
+                    _eval_mimic_coordinates,
+                    dim=n,
+                    inputs=[
+                        use_vbd,
+                        state.body_q,
+                        state.body_qd,
+                        model.body_com,
+                        model.joint_type,
+                        model.joint_parent,
+                        model.joint_child,
+                        model.joint_X_p,
+                        model.joint_X_c,
+                        model.joint_qd_start,
+                        model.joint_dof_dim,
+                        model.joint_axis,
+                    ],
+                    outputs=[coordinates, velocities, gradients_p, gradients_c],
+                    device=device,
+                )
+                return coordinates.numpy().copy()
+
+            cases = [[0.5, -0.4, 0.7][:n]]
+            if n == 2:
+                # Neither free angle of a two-axis joint has a singularity at 90 degrees.
+                cases += [[0.5, np.pi / 2], [0.5, 2.0], [0.5, -2.0]]
+            for q in cases:
+                state.joint_q.assign(np.asarray(q, dtype=np.float32))
+                state.joint_qd.assign(qd[:n])
+                newton.eval_fk(model, state.joint_q, state.joint_qd, state)
+                for use_vbd in (False, True):
+                    with test.subTest(q=q, use_vbd=use_vbd):
+                        np.testing.assert_allclose(evaluate(use_vbd), q, atol=1.0e-5)
+                        np.testing.assert_allclose(velocities.numpy(), qd[:n], atol=1.0e-5)
+                        parent_gradient = gradients_p.numpy()[:, 3:].copy()
+                        child_gradient = gradients_c.numpy()[:, 3:].copy()
+                        np.testing.assert_allclose(parent_gradient, -child_gradient, atol=1.0e-6)
+                        # Perturb the world parent frame and child body independently. Rotated
+                        # attachment frames also catch a second, erroneous parent-frame rotation.
+                        epsilon = 1.0e-3
+                        for poses, gradient in (
+                            (model.joint_X_p, parent_gradient),
+                            (state.body_q, child_gradient),
+                        ):
+                            original = poses.numpy().copy()
+                            try:
+                                for axis in range(3):
+                                    samples = []
+                                    for sign in (-1.0, 1.0):
+                                        perturbed = original.copy()
+                                        delta = wp.quat_from_axis_angle(wp.vec3(*np.eye(3)[axis]), sign * epsilon)
+                                        perturbed[0, 3:] = delta * wp.quat(*original[0, 3:])
+                                        poses.assign(perturbed)
+                                        samples.append(evaluate(use_vbd))
+                                    difference = samples[1] - samples[0]
+                                    finite_difference = np.arctan2(np.sin(difference), np.cos(difference)) / (
+                                        2.0 * epsilon
+                                    )
+                                    np.testing.assert_allclose(
+                                        finite_difference, gradient[:, axis], rtol=7.5e-4, atol=7.5e-4
+                                    )
+                            finally:
+                                poses.assign(original)
+
+
+@wp.kernel
+def _eval_vbd_mimic_row_errors(
+    data: JointMimicData,
+    body_q: wp.array[wp.transform],
+    follower: int,
+    errors: wp.array[float],
+):
+    component = wp.tid()
+    row = eval_vbd_mimic_row(data, follower, component, body_q)
+    errors[component] = row.error
+
+
+def test_vbd_mimic_compound_d6_equilibrium(test, device):
+    """A satisfied two-angular mimic must not introduce a coupled reaction above 90 degrees."""
+    with wp.ScopedDevice(device):
+        builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+        joints = []
+        for _ in range(2):
+            body = builder.add_link(mass=1.0, inertia=wp.mat33(np.eye(3)), lock_inertia=True)
+            joints.append(
+                builder.add_joint_d6(
+                    -1,
+                    body,
+                    angular_axes=[
+                        newton.ModelBuilder.JointDofConfig(axis=newton.Axis.X),
+                        newton.ModelBuilder.JointDofConfig(axis=newton.Axis.Y),
+                    ],
+                )
             )
-            np.testing.assert_allclose(coordinates.numpy(), q[:n], atol=1.0e-5)
-            np.testing.assert_allclose(velocities.numpy(), qd[:n], atol=1.0e-5)
+        builder.add_articulation(joints)
+        builder.set_joint_mimic(joints[1], joints[0], coeffs=(0.0, 0.5))
+        builder.color()
+        model = builder.finalize(device=device)
+        state_in, state_out = model.state(), model.state()
+        state_in.joint_q.assign([0.0, 2.0, 0.0, 1.0])
+        state_in.joint_qd.zero_()
+        newton.eval_fk(model, state_in.joint_q, state_in.joint_qd, state_in)
+        solver = newton.solvers.SolverVBD(model, iterations=4, rigid_compliant_alm=True)
+        errors = wp.zeros(2, dtype=float, device=device)
+        wp.launch(
+            _eval_vbd_mimic_row_errors,
+            dim=2,
+            inputs=[solver._joint_mimics, state_in.body_q, joints[1]],
+            outputs=[errors],
+            device=device,
+        )
+        np.testing.assert_allclose(errors.numpy(), 0.0, atol=2.0e-6)
+        initial_pose = state_in.body_q.numpy().copy()
+        solver.step(state_in, state_out, None, None, 1.0 / 600.0)
+        np.testing.assert_allclose(state_out.body_q.numpy(), initial_pose, rtol=0.0, atol=1.0e-5)
+        np.testing.assert_allclose(state_out.body_qd.numpy(), 0.0, atol=2.0e-4)
 
 
 def test_eval_mimic_selection(test, device):
@@ -501,6 +639,12 @@ add_function_test(
     devices=devices,
 )
 add_function_test(TestSolverMimic, "test_vbd_mimic", test_vbd_mimic, devices=devices)
+add_function_test(
+    TestSolverMimic,
+    "test_vbd_mimic_compound_d6_equilibrium",
+    test_vbd_mimic_compound_d6_equilibrium,
+    devices=devices,
+)
 add_function_test(TestSolverMimic, "test_vbd_mimic_load_balance", test_vbd_mimic_load_balance, devices=devices)
 add_function_test(
     TestSolverMimic, "test_vbd_mimic_reset_and_notification", test_vbd_mimic_reset_and_notification, devices=devices
