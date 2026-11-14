@@ -12,6 +12,7 @@ import numpy as np
 import warp as wp
 
 import newton
+from newton import NewtonWarning
 from newton._src.solvers.vbd import rigid_vbd_kkt
 from newton._src.solvers.vbd.rigid_vbd_kernels import (
     compute_kappa_and_jacobian,
@@ -36,7 +37,6 @@ from newton._src.solvers.vbd.rigid_vbd_kkt import (
     linearize_joint_path_rows,
     suppress_nonfinite_correction,
 )
-from newton.exceptions import NewtonWarning
 from newton.tests.unittest_utils import (
     add_function_test,
     get_cuda_test_devices,
@@ -1369,6 +1369,7 @@ def _simulate_ground_drag(
     force=45.0,
     reverse_at=None,
     weight_fraction=None,
+    frames=240,
 ):
     model, pipeline, contacts, solver, bodies, joints, radius = _build_grounded_chain(
         device,
@@ -1386,7 +1387,7 @@ def _simulate_ground_drag(
     initial_center = 0.0
     minimum_z = np.inf
     maximum_center_z = -np.inf
-    for step in range(240 * substeps):
+    for step in range(frames * substeps):
         state_in.clear_forces()
         if step >= 40 * substeps:
             wp.launch(
@@ -2469,6 +2470,18 @@ def _cable_kkt_substeps_preserve_sliding(test, device):
             test.assertLess(result["gap"], 1.0e-4)
 
 
+def _cable_kkt_breaks_away_in_first_loaded_steps(test, device):
+    """Start sliding at once under a load far above the friction capacity."""
+    result = _simulate_ground_drag(device, 1, substeps=4, frames=41)
+    # Four implicit steps from rest travel 10 a h^2. A common shift solved against stick-mode contact
+    # curvature is below float32 position resolution; lost, it leaves the chain where it was.
+    expected = 10.0 * (45.0 / result["mass"] - 0.45 * 9.81) / 2400.0**2
+    test.assertGreater(result["motion"], 0.9 * expected)
+    test.assertLess(result["motion"], 1.1 * expected)
+    test.assertLess(result["penetration"], 2.0e-4)
+    test.assertLess(result["gap"], 1.0e-4)
+
+
 def _cable_kkt_substeps_preserve_static_friction(test, device):
     """Retain static friction under a load inside the Coulomb cone."""
     for substeps in (2, 8):
@@ -2536,8 +2549,8 @@ def _structural_kkt_preserves_free_translation(test, device):
     wp.launch(
         rigid_vbd_kkt.correct_free_translation,
         2,
-        inputs=[islands, enabled, enabled, scale, system, correction, False, False, True, ids],
-        outputs=[None, None],
+        inputs=[islands, enabled, enabled, scale, system, correction, False, False, True, False, None, ids],
+        outputs=[None, None, None, None],
         device=device,
     )
     accepted = 0.5 * correction.numpy()[:, :3]
@@ -2597,8 +2610,8 @@ def _structural_kkt_external_dynamic_contact_blocks_free_translation(test, devic
     wp.launch(
         rigid_vbd_kkt.correct_free_translation,
         2,
-        inputs=[ids, enabled, enabled, scale, system, correction, False, False, True, ids],
-        outputs=[None, None],
+        inputs=[ids, enabled, enabled, scale, system, correction, False, False, True, False, None, ids],
+        outputs=[None, None, None, None],
         device=device,
     )
     np.testing.assert_array_equal(system.numpy()[:, 3, 3], 1.0)
@@ -2612,6 +2625,7 @@ def _structural_kkt_translation_stop_keeps_coupled_step(test, device):
     scale = wp.ones(1, dtype=float, device=device)
     correction = wp.zeros(1, dtype=wp.spatial_vector, device=device)
     system = wp.zeros(1, dtype=wp.mat44d, device=device)
+    support = wp.zeros(1, dtype=rigid_vbd_kkt._TranslationSupport, device=device)
     pending = wp.zeros(1, dtype=int, device=device)
     # Inertia 1e6 N/m. At x = 1 m, 0.2 N in x is within the tolerance (0.238 N). At x = 1024 m the x part
     # of the coupled step (6.7e-6 m) is lost in storage and its y part alone would raise the quadratic.
@@ -2661,8 +2675,13 @@ def _structural_kkt_translation_stop_keeps_coupled_step(test, device):
         wp.launch(
             rigid_vbd_kkt.correct_free_translation,
             1,
-            inputs=[ids, enabled, enabled, scale, system, correction, True, True, True, ids],
-            outputs=[pose, pending],
+            inputs=[ids, enabled, enabled, scale, system, correction, True, True, True, False, support, ids],
+            outputs=[
+                pose,
+                pending,
+                wp.zeros(1, dtype=wp.vec4, device=device),
+                wp.zeros(1, dtype=wp.vec4d, device=device),
+            ],
             device=device,
         )
         moved = pose.numpy()[0, :3] - start[0, :3]
@@ -4889,6 +4908,33 @@ def _structural_kkt_inherits_solver_deterministic_mode(test, device):
     options = wp.get_module_options(module=solver._rigid_vbd_kkt)
     test.assertEqual(options["deterministic"], wp.DeterministicMode.RUN_TO_RUN)
     test.assertEqual(options["deterministic_max_records"], 0)
+    test.assertFalse(options["enable_backward"])
+
+    # Separate kernel modules must follow the active solver, including after
+    # constructing another solver with different deterministic options.
+    other = newton.solvers.SolverVBD(
+        model,
+        iterations=1,
+        rigid_compliant_alm=True,
+        rigid_joint_global_iterations=1,
+        deterministic=wp.DeterministicMode.NOT_GUARANTEED,
+    )
+    backend = solver._rigid_vbd_kkt
+    kernels = (
+        backend.assemble_joint_path_system_rows,
+        backend.reduce_cr_in_place_rows,
+        backend.solve_cr_tail_persistent_rows,
+    )
+    modules = (backend, *(kernel.module for kernel in kernels))
+    for active in (solver, other, solver):
+        active._apply_module_options()
+        for module in modules:
+            options = wp.get_module_options(module=module)
+            test.assertEqual(options["deterministic"], active._rigid_module_options["deterministic"])
+            test.assertEqual(options["deterministic_max_records"], 0)
+        for kernel in kernels:
+            effective = wp.get_module_options(module=kernel.module) | kernel.options
+            test.assertFalse(effective["enable_backward"])
 
 
 def _structural_kkt_default_mode_matches_run_to_run(test, device):
@@ -5790,6 +5836,12 @@ add_function_test(
 )
 add_function_test(
     TestVBDRigidKKT,
+    "test_cable_kkt_breaks_away_in_first_loaded_steps",
+    _cable_kkt_breaks_away_in_first_loaded_steps,
+    devices=get_test_devices(),
+)
+add_function_test(
+    TestVBDRigidKKT,
     "test_cable_kkt_substeps_preserve_static_friction",
     _cable_kkt_substeps_preserve_static_friction,
     devices=get_test_devices(),
@@ -6385,6 +6437,7 @@ def _static_contact_modes(test, device):
             def evaluate(mode=mode):
                 solver._reset_structural_solve_state()
                 backend.translation_system.zero_()
+                backend.translation_support.zero_()
                 solver._refresh_structural_contact_objective(
                     state_in,
                     contacts,
@@ -6396,6 +6449,7 @@ def _static_contact_modes(test, device):
             def snapshot():
                 result = {name: getattr(solver, name).numpy().copy() for name in names}
                 result["translation_system"] = backend.translation_system.numpy().copy()
+                result["translation_support"] = backend.translation_support.numpy().copy()
                 result["island_contact_state"] = backend.island_contact_state.numpy().copy()
                 return result
 
@@ -6424,7 +6478,14 @@ def _static_contact_modes(test, device):
             test.assertTrue(np.all(outputs["translation"][name] == 0))
         for mode in ("full", "forces"):
             test.assertTrue(np.all(outputs[mode]["translation_system"] == 0))
+            test.assertTrue(np.all(outputs[mode]["translation_support"] == 0))
         system = outputs["translation"]["translation_system"]
+        # Per island, from the translation evaluation: friction [0:3], Coulomb capacity [3] and the
+        # support normal weighted by it [4:7]. All contacts lie on one plane here.
+        support = outputs["translation"]["translation_support"]
+        test.assertGreater(support[:, 3].min(), 0.0)
+        np.testing.assert_allclose(np.linalg.norm(support[:, 4:7], axis=1), support[:, 3], rtol=1.0e-6)
+        test.assertTrue(np.all(np.linalg.norm(support[:, 0:3], axis=1) <= (1.0 + 1.0e-6) * support[:, 3]))
         test.assertTrue(np.isfinite(system).all())
         test.assertGreater(np.linalg.norm(system), 0.0)
         # Every contact is against the fixed ground, with COM-centered body frames.
@@ -6438,6 +6499,51 @@ def _static_contact_modes(test, device):
         expected_hessian += mass.sum() * np.eye(3)
         np.testing.assert_allclose(system[:, :3, 3].sum(axis=0), expected_rhs, rtol=1.0e-6, atol=1.0e-5)
         np.testing.assert_allclose(system[:, :3, :3].sum(axis=0), expected_hessian, rtol=1.0e-6, atol=1.0e-5)
+
+        # Reuse the settled contact manifold to test both damping directions.
+        # The local force exporter is independent of the structural gather.
+        contact_force = wp.zeros(contacts.rigid_contact_max, dtype=wp.spatial_vector, device=device)
+        shape_body = model.shape_body.numpy()
+        shape0 = contacts.rigid_contact_shape0.numpy()
+        shape1 = contacts.rigid_contact_shape1.numpy()
+        count = int(contacts.rigid_contact_count.numpy()[0])
+        solver.body_body_contact_material_kd.fill_(10.0)
+        for speed in (-0.1, 0.1):
+            previous = state_in.body_q.numpy().copy()
+            previous[:, 2] -= speed * dt
+            solver.body_q_prev.assign(previous)
+            damping_outputs = []
+            for bidirectional in (False, True):
+                with test.subTest(speed=speed, bidirectional=bidirectional):
+                    solver.rigid_contact_damping_bidirectional = bidirectional
+                    solver._export_body_body_contact_forces(state_in, contacts, dt, contact_force)
+                    local_force = np.zeros((model.body_count, 3))
+                    for contact, wrench in enumerate(contact_force.numpy()[:count]):
+                        for shape, sign in ((shape0[contact], 1.0), (shape1[contact], -1.0)):
+                            body = int(shape_body[shape]) if shape >= 0 else -1
+                            if body >= 0:
+                                local_force[body] += sign * wrench[:3]
+                    solver._reset_structural_solve_state()
+                    solver._refresh_structural_contact_objective(state_in, contacts, dt)
+                    full_force = solver.body_forces.numpy().copy()
+                    np.testing.assert_allclose(full_force, local_force, rtol=1.0e-6, atol=1.0e-5)
+                    damping_outputs.append(full_force)
+                    for mode in ("forces", "translation"):
+                        evaluate(mode)
+                        if device.is_cuda:
+                            with wp.ScopedCapture(device) as capture:
+                                evaluate(mode)
+                            wp.capture_launch(capture.graph)
+                        if mode == "forces":
+                            np.testing.assert_array_equal(solver.body_forces.numpy(), full_force)
+                        else:
+                            rhs = backend.translation_system.numpy()[:, :3, 3].sum(axis=0)
+                            expected = (delta.astype(float) * mass[:, None]).sum(axis=0) + local_force.sum(axis=0)
+                            np.testing.assert_allclose(rhs, expected, rtol=1.0e-6, atol=1.0e-5)
+            if speed < 0.0:
+                np.testing.assert_array_equal(*damping_outputs)
+            else:
+                test.assertGreater(np.linalg.norm(damping_outputs[1] - damping_outputs[0]), 0.01)
 
 
 add_function_test(

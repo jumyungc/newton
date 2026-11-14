@@ -47,23 +47,25 @@ import warp as wp
 from newton._src.core.types import MAXVAL
 from newton._src.math import quat_velocity
 from newton._src.sim import JointType
+from newton._src.solvers.rod_kernels import (
+    RodBendTwistMeasure,
+    _finite_curvature_binormal_derivative,
+    _transported_twist_angle_jacobian_from_measure,
+    assemble_geometric_rod_kappa_z,
+    measure_rod_bend_twist_z,
+    rod_bend_twist_delta,
+)
 
 from .rigid_vbd_kernels import (
     _NUM_CONTACT_THREADS_PER_BODY,
     _SMALL_ANGLE_EPS,
     _SMALL_LENGTH_EPS,
-    RodBendTwistMeasure,
-    _assemble_geometric_rod_kappa_z,
     _compliant_alm_coefficients,
     _evaluate_drive_axis,
     _evaluate_limit_axis,
-    _finite_curvature_binormal_derivative,
     _load_solve_weight,
     _material_force_terms,
-    _measure_rod_bend_twist_z,
     _resolve_active_drive_row,
-    _rod_bend_twist_delta,
-    _transported_twist_angle_jacobian_from_measure,
     _unwrap_hinge_angle,
     build_joint_projectors,
     compute_joint_kappa_and_jacobian,
@@ -73,6 +75,11 @@ from .rigid_vbd_kernels import (
 )
 
 wp.set_module_options({"enable_backward": False})
+
+# Per island, from the first evaluation of a translation pass, for contacts against static or kinematic bodies:
+# the friction part of the island's right-hand side [0:3], their Coulomb capacity, the sum of mu * f_n [3],
+# and their support normal weighted by that capacity [4:7].
+_TranslationSupport = wp.types.vector(length=7, dtype=wp.float64)
 
 
 def _stream_scope(stream):
@@ -539,6 +546,7 @@ def _make_accumulate_structural_contacts(translation_only: bool, forces_only: bo
         body_com: wp.array[wp.vec3],
         body_inv_mass: wp.array[float],
         friction_epsilon: float,
+        contact_damping_bidirectional: bool,
         contact_penalty_k: wp.array[float],
         contact_normal_rho: wp.array[float],
         contact_material_ke: wp.array[float],
@@ -569,6 +577,9 @@ def _make_accumulate_structural_contacts(translation_only: bool, forces_only: bo
         body_mass: wp.array[float],
         island_translation_free: wp.array[int],
         translation_system: wp.array[wp.mat44d],
+        translation_carry: int,
+        translation_remainder: wp.array[wp.vec4],
+        translation_support: wp.array[_TranslationSupport],
         body_contact_buffer_pre_alloc: int,
         body_contact_counts: wp.array[wp.int32],
         body_contact_indices: wp.array[wp.int32],
@@ -601,6 +612,18 @@ def _make_accumulate_structural_contacts(translation_only: bool, forces_only: bo
             return
         if wp.static(translation_only) and island_translation_free[island] == 0:
             return
+        if wp.static(translation_only):
+            # The part of this pass's common shifts, tangential to the island's support plane, that the
+            # body's float32 position could not store. It enters the slip and the inertial term below.
+            carried = wp.vec3(0.0)
+            shifted = bool(False)
+            if translation_carry != 0:
+                kept = translation_remainder[body_slot]
+                carried = wp.vec3(kept[0], kept[1], kept[2])
+                shifted = wp.length_sq(carried) > 0.0
+            friction_acc = wp.vec3(0.0)
+            capacity_acc = float(0.0)
+            support_acc = wp.vec3(0.0)
         contact_count = rigid_contact_count[0]
         force_acc = wp.vec3(0.0)
         torque_acc = wp.vec3(0.0)
@@ -640,6 +663,10 @@ def _make_accumulate_structural_contacts(translation_only: bool, forces_only: bo
                 rigid_contact_margin0[contact],
                 rigid_contact_margin1[contact],
             )
+            if wp.static(translation_only):
+                side = float(1.0)
+                if body != body0:
+                    side = float(-1.0)
 
             other_body = body1 if body == body0 else body0
             dynamic_pair = other_body >= 0 and body_inv_mass[other_body] > 0.0 and body_slot_by_id[other_body] >= 0
@@ -706,6 +733,9 @@ def _make_accumulate_structural_contacts(translation_only: bool, forces_only: bo
             surface_velocity = wp.vec3(0.0)
             if rigid_contact_surface_velocity:
                 surface_velocity = rigid_contact_surface_velocity[contact]
+            if wp.static(translation_only):
+                if shifted:
+                    surface_velocity -= (side / dt) * carried
 
             (
                 force0,
@@ -742,6 +772,7 @@ def _make_accumulate_structural_contacts(translation_only: bool, forces_only: bo
                 contact_compliant_alm,
                 dt,
                 tangent_C0,
+                contact_damping_bidirectional,
             )
 
             if body == body0:
@@ -764,6 +795,18 @@ def _make_accumulate_structural_contacts(translation_only: bool, forces_only: bo
                     dynamic_h_ll_acc += h_ll1
                     dynamic_h_al_acc += h_al1
                     dynamic_h_aa_acc += h_aa1
+            if wp.static(translation_only):
+                if translation_carry == 0:
+                    # Friction is the tangential part of the contact force; mu * f_n bounds it.
+                    applied = force1
+                    if body == body0:
+                        applied = force0
+                    friction_acc += applied - wp.dot(normal, applied) * normal
+                    capacity = contact_material_mu[contact] * wp.max(
+                        normal_primal_k * stabilized_error + multiplier_normal_eff, 0.0
+                    )
+                    capacity_acc += capacity
+                    support_acc += (side * capacity) * normal
             i += _NUM_CONTACT_THREADS_PER_BODY
 
         if wp.static(translation_only):
@@ -771,7 +814,7 @@ def _make_accumulate_structural_contacts(translation_only: bool, forces_only: bo
             # No rotational scratch or body-matrix gather is consumed here.
             contribution = wp.mat44d(0.0)
             com_world = wp.transform_point(body_q[body], body_com[body])
-            inertial_delta = wp.transform_point(body_inertia_q[body], body_com[body]) - com_world
+            inertial_delta = wp.transform_point(body_inertia_q[body], body_com[body]) - com_world - carried
             mass = wp.float64(0.0)
             if contact_thread == 0:
                 mass = wp.float64(body_mass[body]) / (wp.float64(dt) * wp.float64(dt))
@@ -785,6 +828,13 @@ def _make_accumulate_structural_contacts(translation_only: bool, forces_only: bo
                         value += mass
                     contribution[row, column] = value
             wp.atomic_add(translation_system, island, contribution)
+            if capacity_acc > 0.0:
+                supported = _TranslationSupport()
+                for axis in range(3):
+                    supported[axis] = wp.float64(friction_acc[axis])
+                    supported[4 + axis] = wp.float64(support_acc[axis])
+                supported[3] = wp.float64(capacity_acc)
+                wp.atomic_add(translation_support, island, supported)
             return
 
         else:
@@ -1524,23 +1574,23 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
             jc = _set_spatial_block(jc, 0, 0, linear_jacobian)
             jc = _set_spatial_block(jc, 0, 1, -(linear_jacobian * wp.skew(x_c - child_com_world)))
 
-            measure = _measure_rod_bend_twist_z(q_wp, q_wc)
-            kappa = _assemble_geometric_rod_kappa_z(
+            measure = measure_rod_bend_twist_z(q_wp, q_wc)
+            kappa = assemble_geometric_rod_kappa_z(
                 q_wp,
                 measure.kb_world,
                 measure.twist,
                 joint_rod_rest_kb_local[joint],
                 joint_rod_rest_twist[joint],
             )
-            previous_measure = _measure_rod_bend_twist_z(q_wp_prev, q_wc_prev)
-            kappa_prev = _assemble_geometric_rod_kappa_z(
+            previous_measure = measure_rod_bend_twist_z(q_wp_prev, q_wc_prev)
+            kappa_prev = assemble_geometric_rod_kappa_z(
                 q_wp_prev,
                 previous_measure.kb_world,
                 previous_measure.twist,
                 joint_rod_rest_kb_local[joint],
                 joint_rod_rest_twist[joint],
             )
-            delta_kappa = _rod_bend_twist_delta(kappa, kappa_prev)
+            delta_kappa = rod_bend_twist_delta(kappa, kappa_prev)
             C0_ang = joint_C0_ang[joint]
             lambda_ang = joint_lambda_ang[joint]
             sigma = joint_sigma_start[joint]
@@ -2080,7 +2130,7 @@ def _path_row_dot(v: wp.spatial_vector, J: wp.array3d[float], row: int, c: int):
     return value
 
 
-@wp.kernel
+@wp.kernel(module="unique", enable_backward=False)
 def assemble_joint_path_system_rows(
     bounds: wp.array[wp.vec2i],
     bodies: wp.array[wp.vec2i],
@@ -4116,15 +4166,30 @@ def correct_free_translation(
     apply_translation: bool,
     track_pending: bool,
     stop_at_roundoff: bool,
+    carry_remainder: bool,
+    support: wp.array[_TranslationSupport],
     body_ids: wp.array[int],
     body_q: wp.array[wp.transform],
     pending: wp.array[int],
+    remainder: wp.array[wp.vec4],
+    trial: wp.array[wp.vec4d],
 ):
     """Minimize common translation, optionally applying its isolated update."""
     slot = wp.tid()
     island = body_island[slot]
     scale = step_scale[island]
     packed = system[island]
+    # Per body and pass: the unstored tangential shift the system was evaluated with, and whether friction
+    # could not balance the island when the pass started.
+    carried = wp.vec3d(0.0)
+    overloaded = bool(False)
+    if apply_translation:
+        if carry_remainder:
+            state = remainder[slot]
+            carried = wp.vec3d(wp.float64(state[0]), wp.float64(state[1]), wp.float64(state[2]))
+            overloaded = state[3] != 0.0
+        else:
+            remainder[slot] = wp.vec4(0.0)
     if translation_free[island] == 0 or island_state[island] < -1 or packed[3, 3] != wp.float64(0.0) or scale <= 0.0:
         return
     matrix = wp.mat33d(0.0)
@@ -4134,6 +4199,22 @@ def correct_free_translation(
         for column in range(3):
             matrix[row, column] = packed[row, column]
     shift = wp.inverse(matrix) * rhs
+    if apply_translation and not carry_remainder:
+        # With one support plane, friction cannot balance the island at the pose the pass starts from once
+        # the tangential part of the rest of its right-hand side exceeds the Coulomb capacity of its contacts.
+        # A tangential shift below the resolution of the positions must then not round away: the following
+        # contact evaluations of this pass read the unstored part instead of recomputing the same lost step
+        # against stick curvature. Decided once per pass; a trigger, not a convergence certificate.
+        supported = support[island]
+        capacity = supported[3]
+        normal = wp.vec3d(supported[4], supported[5], supported[6])
+        aligned = wp.dot(normal, normal)
+        if capacity > wp.float64(0.0) and aligned >= wp.float64(0.999999) * capacity * capacity:
+            demand = wp.vec3d(rhs[0] - supported[0], rhs[1] - supported[1], rhs[2] - supported[2])
+            tangential = demand - normal * (wp.dot(normal, demand) / aligned)
+            if wp.dot(tangential, tangential) > capacity * capacity:
+                overloaded = bool(True)
+                remainder[slot] = wp.vec4(0.0, 0.0, 0.0, 1.0)
     if apply_translation and stop_at_roundoff:
         # A coordinate is at roundoff when neither the island residual nor the solved step taken
         # through the metric's own diagonal exceeds a relative tolerance of 2^-22 (two float32
@@ -4151,7 +4232,21 @@ def correct_free_translation(
         # Stop when every coordinate is at roundoff, and when the step without the coordinates
         # at roundoff, a model of what a coarse position keeps, does not lower the quadratic.
         if moving == 0 or wp.dot(rhs, kept) <= wp.float64(0.5) * wp.dot(kept, matrix * kept):
+            trial[slot] = wp.vec4d(wp.float64(0.0), wp.float64(0.0), wp.float64(0.0), wp.dot(rhs, rhs))
             return
+    if apply_translation:
+        # Contacts open and close and friction saturates between evaluations, and undamped Newton steps
+        # can cycle between such states. A step after which the island's residual grew is withdrawn by
+        # half; the entry holds that solved step and the squared residual before it. A heuristic: the
+        # last evaluation's step stays unverified, and a withdrawal below position resolution is lost.
+        norm = wp.dot(rhs, rhs)
+        previous = trial[slot]
+        if carry_remainder and norm > previous[3]:
+            half = wp.float64(0.5)
+            shift = wp.vec3d(-half * previous[0], -half * previous[1], -half * previous[2])
+            trial[slot] = wp.vec4d(half * previous[0], half * previous[1], half * previous[2], previous[3])
+        else:
+            trial[slot] = wp.vec4d(shift[0], shift[1], shift[2], norm)
     if wp.isfinite(shift[0]) and wp.isfinite(shift[1]) and wp.isfinite(shift[2]):
         if apply_translation:
             # This path solves only common translation, with unit step scale
@@ -4160,8 +4255,15 @@ def correct_free_translation(
             body = body_ids[slot]
             pose = body_q[body]
             position = wp.transform_get_translation(pose)
-            translated = position + wp.vec3(float(shift[0]), float(shift[1]), float(shift[2]))
+            wanted = shift + carried
+            translated = position + wp.vec3(float(wanted[0]), float(wanted[1]), float(wanted[2]))
             body_q[body] = wp.transform(translated, wp.transform_get_rotation(pose))
+            if overloaded:
+                plane = support[island]
+                unstored = wanted - (wp.vec3d(translated) - wp.vec3d(position))
+                across = wp.vec3d(plane[4], plane[5], plane[6])
+                unstored -= across * (wp.dot(across, unstored) / wp.dot(across, across))
+                remainder[slot] = wp.vec4(float(unstored[0]), float(unstored[1]), float(unstored[2]), 1.0)
             if track_pending and stop_at_roundoff:
                 wp.atomic_max(pending, 0, 1)
         else:
@@ -5445,6 +5547,9 @@ def _shared_structural_payload_bytes(
         + _array_payload_bytes(graph_body_count, wp.spatial_vector)
         + _array_payload_bytes(island_count, wp.int32)
         + _array_payload_bytes(island_count, wp.mat44d)
+        + _array_payload_bytes(island_count, _TranslationSupport)
+        + _array_payload_bytes(graph_body_count, wp.vec4)
+        + _array_payload_bytes(graph_body_count, wp.vec4d)
         + _array_payload_bytes(island_count, wp.int32)
         + _array_payload_bytes(island_count, wp.vec4d)
         + _array_payload_bytes(island_count, wp.spatial_matrixd)
@@ -9777,6 +9882,9 @@ class StructuralGraphKKT:
         self.translation_active = wp.array([int(any(translation_free))], dtype=wp.int32, device=self.device)
         self.island_translation_free = wp.array(translation_free, dtype=wp.int32, device=self.device)
         self.translation_system = wp.zeros(len(components), dtype=wp.mat44d, device=self.device)
+        self.translation_support = wp.zeros(len(components), dtype=_TranslationSupport, device=self.device)
+        self.translation_remainder = wp.zeros(len(graph_body_ids), dtype=wp.vec4, device=self.device)
+        self.translation_trial = wp.zeros(len(graph_body_ids), dtype=wp.vec4d, device=self.device)
         # Material-frame rod residuals are invariant under collective rigid motion.
         # Ordinary world-frame joint duals need their projected rows included.
         rigid_mode_candidates = [
@@ -10321,7 +10429,7 @@ class StructuralGraphKKT:
                 main.wait_stream(contact_side)
 
         def balance_translation(
-            *, apply_translation=False, track_pending=False, stop_at_roundoff=True, restricted_ready=False
+            *, apply_translation=False, track_pending=False, stop_at_roundoff=True, restricted_ready=False, carry=False
         ):
             if self.has_free_translation and not restricted_ready:
                 self.translation_system.zero_()
@@ -10372,9 +10480,11 @@ class StructuralGraphKKT:
                         apply_translation,
                         track_pending,
                         stop_at_roundoff,
+                        carry,
+                        self.translation_support,
                         self.graph_body_ids,
                     ],
-                    outputs=[body_q, self.line_search_pending],
+                    outputs=[body_q, self.line_search_pending, self.translation_remainder, self.translation_trial],
                     device=self.device,
                 )
 
@@ -10403,6 +10513,8 @@ class StructuralGraphKKT:
                     apply_translation=True,
                     track_pending=track_pending,
                     restricted_ready=contacts.rigid_contact_max > 0,
+                    # Only the refreshed restricted objective reads the unstored shifts.
+                    carry=refresh and contacts.rigid_contact_max > 0,
                 )
 
             # One evaluation on the stored objective and at most fifteen refreshed ones, with
