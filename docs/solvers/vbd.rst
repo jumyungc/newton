@@ -830,6 +830,21 @@ separation from previous steps is not added to this residual. Sticky matching
 still replays material anchors, while retained multipliers warm-start their
 contact forces; it does not impose a positional tangential spring.
 
+``rigid_contact_tangent_scale`` is an experimental, runtime-only conditioning
+option. Its default of ``1`` retains the automatic tangent weight. A finite
+value greater than one multiplies that weight for all compliant body-body
+contact rows. The existing same-colour solve metric remains in effect. The same row
+weight is used by both body gathers, the ordinary dual update and contact-force
+reporting; there is no separate owner force or multiplier update. Normal
+material stiffness, damping and the elastic Coulomb bound are unchanged.
+
+This option can improve collective friction convergence on a narrow contact
+patch, but larger weights can slow other modes and are not monotonically
+better. It requires compliant ALM and internal rigid integration when enabled.
+Contact matching/history and an appropriate body solve order remain separate
+choices. Like the iteration count, this is numerical solver configuration,
+not an authored material property; it introduces no USD attribute.
+
 When both contact bodies are dynamic and share a colour, their pose updates
 are simultaneous. The compliant path doubles only the normal and tangential
 positive-semidefinite contact solve blocks to majorize the omitted cross-body

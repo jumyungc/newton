@@ -2291,9 +2291,18 @@ The default ``buffer_fraction`` is ``1.0``, which uses the default capacity
 estimates. Lowering it reduces GPU memory usage but may cause overflow in dense contact scenes.
 If runtime overflow warnings appear, increase ``buffer_fraction`` (or stage-specific
 ``buffer_mult_*`` values) until warnings disappear in your target scenes.
-In deterministic mode, the final iso-voxel buffer has a hard fingerprint-safe
-capacity limit that these settings cannot raise. If that limit overflows, reduce
-the SDF resolution or disable deterministic mode.
+In deterministic mode (also enabled by contact matching), face identities support
+at most 419,430 iso voxels per shape pair. Other pairs do not consume this identity
+budget. The face-contact buffer still has a global limit of 1,048,575 faces across
+all pairs. These two limits cannot be raised with buffer settings: reduce the SDF
+resolution for a per-pair identity overflow, or use fewer worlds for a global
+face-buffer overflow. Disabling both determinism and contact matching removes
+these packing limits.
+
+Deterministic hydroelastic input must contain each unordered shape pair only once.
+Model-based collision pipelines reject repeated or reversed duplicate pairs during
+construction. Callers that launch :class:`~newton.geometry.HydroelasticSDF` directly
+must ensure this uniqueness themselves.
 
 .. _Contact Material Properties:
 
@@ -2585,7 +2594,7 @@ so it uses 20-bit shape fields and raises at launch for more than ``2**20``
 shapes.
 
 Hydroelastic contacts are covered by the same two mechanisms, using the
-marching-cubes voxel and face index as the fingerprint.  They additionally need
+pair-local marching-cubes voxel and face index as the fingerprint. They additionally need
 a third one, because hydroelastic reduction is the only contact path that sums
 contributions across threads:
 
@@ -2713,6 +2722,13 @@ surface. Both metrics are symmetric in shape 0 and shape 1.
 - ``contact_matching_normal_dot_threshold`` — minimum dot product between old
   and new contact normals.  Below this the contact is reported as broken even
   if the key and position match.
+
+At exactly equal distance, matching prefers an identical full contact key.
+For reduced hydroelastic pairs, it next prefers the same normal-bin,
+voxel-bin, or anchor source, preserving coincident histories when face
+fingerprints change. This preference does not override a closer contact or
+the position and normal thresholds. Unreduced and other contact paths retain
+their existing tie behavior.
 
 **Sticky mode**
 

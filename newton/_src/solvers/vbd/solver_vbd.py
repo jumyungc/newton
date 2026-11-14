@@ -495,6 +495,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         # Rigid body - contacts
         rigid_contact_hard: bool | None = None,  # Legacy body-body contact hard/soft mode
         rigid_contact_history: bool | None = None,  # Body-body contact numeric warm-start
+        rigid_contact_tangent_scale: float = 1.0,
         rigid_contact_k_start: float | None = None,  # Legacy AVBD contact penalty ramp seed
         rigid_contact_damping_bidirectional: bool = False,  # Body-body contact damping also while separating
         rigid_body_contact_buffer_size: int = 64,  # Per-body body-body contact list capacity
@@ -673,6 +674,14 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
 
                 .. deprecated:: 1.6
                     Use the default compliant ALM path and author finite contact stiffness.
+            rigid_contact_tangent_scale: Experimental numerical scale for the automatic compliant-ALM
+                tangential contact weight. Must be finite and at least one. Both endpoints and the
+                dual update use the same scaled weight; material stiffness, friction coefficient and
+                Coulomb fixed points are unchanged. The existing simultaneous-body solve metric
+                remains in effect for dynamic bodies in the same color.
+                Larger values are not monotonically better and can slow convergence of other modes.
+                This runtime-only conditioning option requires internal rigid integration and ALM
+                when greater than one; it is not an authored material property or a USD attribute.
             rigid_contact_history: Whether to persist body-body numeric contact state
                 across steps using ``Contacts.rigid_contact_match_index``. Compliant ALM
                 restores the normal and projected tangential multipliers for
@@ -902,6 +911,12 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
 
         if rigid_contact_activation_guard and (not rigid_compliant_alm or integrate_with_external_rigid_solver):
             raise ValueError("rigid_contact_activation_guard requires compliant ALM and internal rigid integration.")
+
+        if not np.isfinite(rigid_contact_tangent_scale) or rigid_contact_tangent_scale < 1.0:
+            raise ValueError("rigid_contact_tangent_scale must be finite and at least one.")
+        if rigid_contact_tangent_scale > 1.0 and (not rigid_compliant_alm or integrate_with_external_rigid_solver):
+            raise ValueError("rigid_contact_tangent_scale > 1 requires compliant ALM and internal rigid integration.")
+        self.rigid_contact_tangent_scale = float(rigid_contact_tangent_scale)
 
         legacy_controls = [
             name
@@ -4212,6 +4227,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 penalty_decay,
                 self.body_body_contact_material_ke,
                 self.rigid_contact_k_start_value,
+                self.rigid_contact_tangent_scale,
             ],
             outputs=[
                 self.body_body_contact_normal_rho,

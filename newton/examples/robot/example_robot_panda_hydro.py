@@ -11,7 +11,11 @@ The experimental VBD option uses compliant joint/contact rows and finite-stiffne
 mimic coupling. It does not implement the authored joint armature or effort limits;
 this example therefore compares task completion, not identical robot dynamics.
 VBD collapses fixed links, initializes its reference pose with forward kinematics,
-and refreshes collision every substep. Its opt-in contact activation guard adds
+and refreshes collision every substep. Latest contact matching retains its
+numerical force estimates. Free objects are solved after the gripper; the
+experimental tangent-weight scale improves the narrow pen patch's friction
+convergence. Linear joint stiffness is increased to reduce hand sag while the
+default one-way contact damping is retained. Its opt-in contact activation guard adds
 one provisional body solve per colour and local iteration. MuJoCo keeps the
 original setup. Equal iteration counts are not equal work or accuracy.
 
@@ -326,6 +330,19 @@ class Example:
         scene.add_ground_plane(cfg=shape_cfg)
         if self.solver_name == "vbd":
             scene.color()
+            # Solve the task's free objects after the articulated gripper so
+            # every replicated world uses the same sequential contact order.
+            free_bodies = {
+                child
+                for joint_type, child in zip(scene.joint_type, scene.joint_child, strict=True)
+                if joint_type == newton.JointType.FREE
+            }
+            groups = [
+                np.array([body for body in group if body not in free_bodies], dtype=np.int32)
+                for group in scene.body_color_groups
+            ]
+            scene.body_color_groups = [group for group in groups if len(group)]
+            scene.body_color_groups.append(np.array(sorted(free_bodies), dtype=np.int32))
 
         self.model = scene.finalize()
         if self.solver_name == "vbd":
@@ -350,6 +367,7 @@ class Example:
             broad_phase="explicit",
             sdf_hydroelastic_config=sdf_hydroelastic_config,
             deterministic=self.deterministic,
+            contact_matching="latest" if self.solver_name == "vbd" else "disabled",
         )
         self.contacts = self.collision_pipeline.contacts()
 
@@ -362,6 +380,9 @@ class Example:
                 iterations=self.sim_iterations,
                 rigid_compliant_alm=True,
                 rigid_contact_activation_guard=True,
+                rigid_contact_history=True,
+                rigid_joint_linear_ke=1.0e6,
+                rigid_contact_tangent_scale=1000.0,
                 rigid_body_contact_buffer_size=4096,
                 deterministic=deterministic_mode,
             )

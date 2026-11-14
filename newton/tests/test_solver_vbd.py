@@ -1642,6 +1642,7 @@ def _rigid_contact_structural_support_conditions_tangent_rho(test, device):
                 1.0,
                 wp.array([1.0e9], dtype=float, device=device),
                 -1.0,
+                1.0,
             ],
             outputs=[
                 normal_rho,

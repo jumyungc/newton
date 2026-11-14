@@ -425,10 +425,13 @@ def eval_rigid_contact_surface_velocities(
 def _record_reduction_overflow(
     insert_failures: wp.array[wp.int32],
     buffer_overflows: wp.array[wp.int32],
+    extra_overflows: wp.array[wp.int32],
     overflow: wp.array[wp.int32],
 ):
-    """Raise the contact stream's overflow flag if the reducer lost contacts; the pass start clears it."""
+    """Latch reducer or generation losses on this stream; the pass start clears the flag."""
     if insert_failures[0] > 0 or buffer_overflows[0] > 0:
+        overflow[0] = 1
+    if extra_overflows.shape[0] > 0 and extra_overflows[0] > 0:
         overflow[0] = 1
 
 
@@ -2669,6 +2672,11 @@ class CollisionPipeline:
                 normal_dot_threshold=contact_matching_normal_dot_threshold,
                 contact_report=contact_report,
                 sticky=matching_sticky,
+                hydroelastic_shape_flags=(
+                    model.shape_flags
+                    if self.hydroelastic_sdf is not None and self.hydroelastic_sdf.config.reduce_contacts
+                    else None
+                ),
                 device=device,
             )
         else:
@@ -3401,16 +3409,24 @@ class CollisionPipeline:
             wp.copy(self._unit_scale_sdf_rescaled_host, self._unit_scale_sdf_rescaled)
 
         # The reducers' counters are reused by the next pass, so latch losses on this contact stream.
-        for reducer in (
-            self.narrow_phase.global_contact_reducer,
-            self.narrow_phase.group_contact_reducer,
-            self.hydroelastic_sdf.contact_reduction.reducer if self.hydroelastic_sdf is not None else None,
+        for reducer, extra_overflows in (
+            (self.narrow_phase.global_contact_reducer, None),
+            (self.narrow_phase.group_contact_reducer, None),
+            (
+                self.hydroelastic_sdf.contact_reduction.reducer if self.hydroelastic_sdf is not None else None,
+                self.hydroelastic_sdf.iso_fingerprint_overflows if self.hydroelastic_sdf is not None else None,
+            ),
         ):
             if reducer is not None:
                 wp.launch(
                     _record_reduction_overflow,
                     dim=1,
-                    inputs=[reducer.ht_insert_failures, reducer.buffer_overflows, contacts._reduction_overflow],
+                    inputs=[
+                        reducer.ht_insert_failures,
+                        reducer.buffer_overflows,
+                        extra_overflows,
+                        contacts._reduction_overflow,
+                    ],
                     device=self.device,
                     record_tape=False,
                 )

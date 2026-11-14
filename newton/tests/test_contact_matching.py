@@ -13,6 +13,7 @@ import newton
 from newton._src.geometry.contact_data import CONTACT_SORT_CONVEX_SUB_KEY_BITS, CONTACT_SORT_SUB_KEY_BITS
 from newton._src.geometry.contact_match import _CLAIM_SENTINEL, MATCH_BROKEN, MATCH_NOT_FOUND, ContactMatcher
 from newton._src.geometry.contact_sort import ContactSorter
+from newton._src.geometry.flags import ShapeFlags
 from newton.tests.unittest_utils import add_function_test, get_cuda_test_devices, get_test_devices
 
 
@@ -84,6 +85,7 @@ def test_first_frame_all_not_found(test, device):
     with wp.ScopedDevice(device):
         model, state = _build_simple_scene(device)
         pipeline = newton.CollisionPipeline(model, broad_phase="nxn", contact_matching="latest")
+        test.assertIsNone(pipeline._contact_matcher._hydroelastic_shape_flags)
         contacts = pipeline.contacts()
 
         count = _collide_once(pipeline, state, contacts)
@@ -163,6 +165,208 @@ def test_save_initializes_next_frame_claims(test, device):
         )
 
         test.assertEqual(_collide_once(pipeline, state, contacts), count)
+
+
+def test_equidistant_contacts_keep_identity(test, device, sticky):
+    """Preserve coincident contact histories without overriding geometric matching."""
+    with wp.ScopedDevice(device):
+        matcher = ContactMatcher(
+            capacity=2,
+            sorter=ContactSorter(2),
+            shape_world=wp.full(2, -1, dtype=wp.int32),
+            world_count=0,
+            shape_index_bits=1,
+            sub_key_bits=4,
+            sticky=sticky,
+            device=device,
+        )
+        count = wp.array([2], dtype=wp.int32)
+        generation = wp.array([1], dtype=wp.int32)
+        matches = wp.empty(2, dtype=wp.int32)
+        match_generation = wp.empty(1, dtype=wp.int32)
+        shape0 = wp.zeros(2, dtype=wp.int32)
+        shape1 = wp.ones(2, dtype=wp.int32)
+        body_q = wp.zeros(0, dtype=wp.transform)
+        shape_body = wp.full(2, -1, dtype=wp.int32)
+        offsets = wp.zeros(2, dtype=wp.vec3)
+        normals = wp.array([(0.0, 0.0, 1.0)] * 2, dtype=wp.vec3)
+
+        def match(old_x, new_x, *, old_keys=(16, 17), new_keys=(16, 17), old_normals=None):
+            """Run the owning history save, candidate search and claim resolution."""
+            old_points = wp.array([(x, 0.0, 0.0) for x in old_x], dtype=wp.vec3)
+            new_points = wp.array([(x, 0.0, 0.0) for x in new_x], dtype=wp.vec3)
+            previous_normals = normals if old_normals is None else wp.array(old_normals, dtype=wp.vec3)
+            matcher.save_sorted_state(
+                wp.array(old_keys, dtype=wp.int64),
+                count,
+                old_points,
+                old_points,
+                shape0,
+                shape1,
+                previous_normals,
+                body_q,
+                shape_body,
+                buffer_id=1,
+                contact_generation=generation,
+                sorted_offset0=offsets,
+                sorted_offset1=offsets,
+                device=device,
+            )
+            matcher.match(
+                wp.array(new_keys, dtype=wp.int64),
+                count,
+                new_points,
+                new_points,
+                shape0,
+                shape1,
+                normals,
+                body_q,
+                shape_body,
+                matches,
+                buffer_id=1,
+                match_generation_out=match_generation,
+                device=device,
+            )
+            return matches.numpy()
+
+        # Distinct provenance at the same location must survive both refreshes.
+        for gen in (1, 2):
+            generation.fill_(gen)
+            np.testing.assert_array_equal(match((0.0, 0.0), (0.0, 0.0)), (0, 1))
+            test.assertEqual(int(match_generation.numpy()[0]), gen)
+
+        # Rotated manifold IDs do not override a strictly closer contact.
+        np.testing.assert_array_equal(match((0.0, 0.0002), (0.0002, 0.0)), (1, 0))
+        # Identical-key history outside the position/normal gate is still rejected.
+        np.testing.assert_array_equal(match((0.001, 0.0), (0.0, 0.001)), (1, 0))
+        np.testing.assert_array_equal(
+            match((0.0, 0.0), (0.0, 0.0), old_normals=((0.0, 0.0, -1.0), (0.0, 0.0, 1.0))),
+            (1, MATCH_BROKEN),
+        )
+        # Duplicate previous keys supply no identity preference; keep the existing
+        # deterministic last-candidate and uniqueness-claim behavior.
+        np.testing.assert_array_equal(match((0.0, 0.0), (0.0, 0.0), old_keys=(16, 16)), (1, MATCH_BROKEN))
+
+
+def test_moving_hydroelastic_coincident_history(test, device, sticky):
+    """Keep source histories when coincident reduced faces change fingerprints."""
+    with wp.ScopedDevice(device):
+        flags = wp.full(2, int(ShapeFlags.HYDROELASTIC), dtype=wp.int32)
+        matcher = ContactMatcher(
+            capacity=3,
+            sorter=ContactSorter(3),
+            shape_world=wp.full(2, -1, dtype=wp.int32),
+            world_count=0,
+            shape_index_bits=1,
+            sub_key_bits=CONTACT_SORT_SUB_KEY_BITS,
+            sticky=sticky,
+            hydroelastic_shape_flags=flags,
+            device=device,
+        )
+        count = wp.zeros(1, dtype=wp.int32)
+        generation = wp.array([1], dtype=wp.int32)
+        matches = wp.empty(3, dtype=wp.int32)
+        match_generation = wp.empty(1, dtype=wp.int32)
+        shape0 = wp.zeros(3, dtype=wp.int32)
+        shape1 = wp.ones(3, dtype=wp.int32)
+        shape_body = wp.full(2, -1, dtype=wp.int32)
+        body_q = wp.zeros(0, dtype=wp.transform)
+        offsets = wp.zeros(3, dtype=wp.vec3)
+        normals = wp.array([(0.0, 0.0, 1.0)] * 3, dtype=wp.vec3)
+        pair_prefix = 1 << CONTACT_SORT_SUB_KEY_BITS
+
+        def match(old_subkeys, new_subkeys, *, old_x=None, new_x=None, old_normals=None):
+            size = len(old_subkeys)
+            test.assertEqual(size, len(new_subkeys))
+            count.fill_(size)
+            old_x = [0.0] * size if old_x is None else old_x
+            new_x = [0.0001] * size if new_x is None else new_x
+            old_points = wp.array([(x, 0.0, 0.0) for x in old_x], dtype=wp.vec3)
+            new_points = wp.array([(x, 0.0, 0.0) for x in new_x], dtype=wp.vec3)
+            previous_normals = normals if old_normals is None else wp.array(old_normals, dtype=wp.vec3)
+            matcher.save_sorted_state(
+                wp.array([pair_prefix | key for key in old_subkeys], dtype=wp.int64),
+                count,
+                old_points,
+                old_points,
+                shape0,
+                shape1,
+                previous_normals,
+                body_q,
+                shape_body,
+                buffer_id=1,
+                contact_generation=generation,
+                sorted_offset0=offsets,
+                sorted_offset1=offsets,
+                device=device,
+            )
+            matcher.match(
+                wp.array([pair_prefix | key for key in new_subkeys], dtype=wp.int64),
+                count,
+                new_points,
+                new_points,
+                shape0,
+                shape1,
+                normals,
+                body_q,
+                shape_body,
+                matches,
+                buffer_id=1,
+                match_generation_out=match_generation,
+                device=device,
+            )
+            return matches.numpy()[:size]
+
+        # Two moving generations: normal/voxel face IDs and the anchor bin all
+        # change. An anchor's low bit is a bin bit, not a voxel source marker.
+        old_keys = (17252, 17253, 0x400004)
+        for gen, keys in enumerate(((17262, 17263, 0x400005), (17232, 17233, 0x400006)), 1):
+            generation.fill_(gen)
+            np.testing.assert_array_equal(match(old_keys, keys), (0, 1, 2))
+            test.assertEqual(int(match_generation.numpy()[0]), gen)
+            old_keys = keys
+
+        # Exact keys outrank another row of the same source class.
+        np.testing.assert_array_equal(match((10, 12, 13), (10, 12, 13)), (0, 1, 2))
+        # Source preference must not override a strictly nearer different source.
+        np.testing.assert_array_equal(match((10, 11), (20, 21), old_x=(0.0, 0.0002), new_x=(0.0002, 0.0)), (1, 0))
+        # Nor may it bypass either compatibility gate.
+        np.testing.assert_array_equal(match((10, 11), (20, 21), old_x=(0.001, 0.0), new_x=(0.0, 0.001)), (1, 0))
+        np.testing.assert_array_equal(
+            match((10, 11), (20, 21), old_normals=((0.0, 0.0, -1.0), (0.0, 0.0, 1.0))),
+            (1, MATCH_BROKEN),
+        )
+        # The same source class is not an invented per-face identity. When both
+        # keys in history are identical, retain the existing last-row fallback.
+        np.testing.assert_array_equal(match((10, 10), (20, 21)), (1, MATCH_BROKEN))
+        # Hydro/non-hydro pairs share the generic contact path. An odd sub-key
+        # there must not be interpreted as hydroelastic source provenance.
+        for values in ((int(ShapeFlags.HYDROELASTIC), 0), (0, int(ShapeFlags.HYDROELASTIC))):
+            flags.assign(np.array(values, dtype=np.int32))
+            np.testing.assert_array_equal(match((10, 11), (20, 21)), (1, MATCH_BROKEN))
+        # Reduced-path metadata is absent for unreduced and ordinary contacts.
+        matcher._hydroelastic_shape_flags = None
+        np.testing.assert_array_equal(match((10, 11), (20, 21)), (1, MATCH_BROKEN))
+
+        # With a narrower custom key layout, full-key bit 22 belongs to shape0,
+        # not to the hydro anchor namespace. Decode only the masked sub-key.
+        flags = wp.full(258, int(ShapeFlags.HYDROELASTIC), dtype=wp.int32)
+        matcher = ContactMatcher(
+            capacity=3,
+            sorter=ContactSorter(3),
+            shape_world=wp.full(258, -1, dtype=wp.int32),
+            world_count=0,
+            shape_index_bits=10,
+            sub_key_bits=4,
+            sticky=sticky,
+            hydroelastic_shape_flags=flags,
+            device=device,
+        )
+        shape0 = wp.full(3, 256, dtype=wp.int32)
+        shape1 = wp.full(3, 257, dtype=wp.int32)
+        shape_body = wp.full(258, -1, dtype=wp.int32)
+        pair_prefix = (256 << 14) | (257 << 4)
+        np.testing.assert_array_equal(match((2, 3), (4, 5)), (0, 1))
 
 
 def test_masked_reset_restarts_only_selected_contact_history(test, device):
@@ -1391,6 +1595,19 @@ add_function_test(
     test_save_initializes_next_frame_claims,
     devices=devices,
 )
+for sticky in (False, True):
+    add_function_test(
+        TestContactMatching,
+        f"test_equidistant_contacts_keep_identity_{'sticky' if sticky else 'latest'}",
+        partial(test_equidistant_contacts_keep_identity, sticky=sticky),
+        devices=devices,
+    )
+    add_function_test(
+        TestContactMatching,
+        f"test_moving_hydroelastic_coincident_history_{'sticky' if sticky else 'latest'}",
+        partial(test_moving_hydroelastic_coincident_history, sticky=sticky),
+        devices=devices,
+    )
 add_function_test(
     TestContactMatching,
     "test_masked_reset_restarts_only_selected_contact_history",

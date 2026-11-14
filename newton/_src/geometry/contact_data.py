@@ -20,6 +20,20 @@ CONTACT_SORT_CONVEX_SUB_KEY_BITS = 3
 CONTACT_SORT_DEFAULT_SHAPE_INDEX_BITS = 20
 
 
+@wp.func
+def hydroelastic_contact_source_class(sort_sub_key: wp.int64) -> int:
+    """Decode a deterministic reduced hydroelastic sub-key's export source.
+
+    Requires a masked, source-tagged sub-key from deterministic reduction;
+    fast reduced exports use raw fingerprints instead. Face exports encode
+    their normal/voxel source in bit 0; anchors reserve bit 22 and use their
+    remaining bits for a normal-bin index, not a face source.
+    """
+    if (sort_sub_key & wp.int64(0x400000)) != wp.int64(0):
+        return 2
+    return int(sort_sub_key & wp.int64(1))
+
+
 def contact_sort_shape_index_bits(shape_count: int, sub_key_bits: int) -> int:
     """Return the shape-index bit width of a contact sort key for ``shape_count`` shapes.
 
@@ -124,10 +138,10 @@ def make_contact_sort_key(shape_a: int, shape_b: int, sort_sub_key: int, shape_i
     - SDF contacts: ``(edge_idx << 2) | (mode << 1)`` — 21 effective bits
       for ``edge_idx`` (~2M edges).  After multi-contact expansion
       (``<< 3``), 18 effective bits (~262K edges).
-    - Hydroelastic contacts: ``((voxel_idx * 5 + face_idx) << 1) | source``,
+    - Hydroelastic contacts: ``((pair_voxel_idx * 5 + face_idx) << 1) | source``,
       with bit 0 distinguishing normal-bin and voxel-bin winners and bit 22
       reserved for reduction anchors — 21 effective fingerprint bits (~419K
-      iso voxels).
+      iso voxels per shape pair).
     """
     return make_contact_sort_key_with_bits(
         shape_a,

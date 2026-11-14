@@ -1,0 +1,1 @@
+Preserve separate contact histories for coincident hydroelastic reduction rows when previous contacts are equally close, preferring an identical key and then the same reduction source when a moving face's fingerprint changes. Closer geometric matches and position/normal rejection remain unchanged.

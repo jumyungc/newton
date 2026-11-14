@@ -35,6 +35,13 @@ in place.  Matching on the full key would mark these contacts broken
 every frame.  Pair counts are small (a few manifold points per pair),
 so the linear scan inside the pair range is cheap.
 
+At exactly equal distance, prefer the previous contact with the same full
+key. Reduced hydroelastic pairs additionally prefer the same declared source
+class (normal-bin, voxel-bin, or anchor) when neither key matches exactly.
+This preserves coincident normal-bin and voxel-bin histories even when a
+moving face's fingerprint changes. A closer contact still wins even when
+its sub-key or source differs; other contact paths retain their tie behavior.
+
 One-to-one match via packed atomic_min
 --------------------------------------
 A pair-range scan can have multiple new contacts pick the same prev
@@ -101,7 +108,9 @@ import warp as wp
 
 from ..core.reset import reset_world_selected
 from ..core.types import Devicelike
+from .contact_data import hydroelastic_contact_source_class
 from .contact_sort import SORT_KEY_SENTINEL
+from .flags import ShapeFlags
 
 if TYPE_CHECKING:
     from .contact_sort import ContactSorter
@@ -236,6 +245,7 @@ class _MatchData:
     prev_frame: wp.array[wp.int32]
     reset_world_mask: wp.array[wp.bool]
     shape_world: wp.array[wp.int32]
+    hydroelastic_shape_flags: wp.array[wp.int32]
     world_count: int
 
     # Current frame (sorted).
@@ -303,6 +313,12 @@ def _match_contacts_kernel(data: _MatchData):
         return
 
     target_key = data.new_keys[tid]
+    target_source = int(-1)
+    if data.hydroelastic_shape_flags.shape[0] > 0:
+        if (data.hydroelastic_shape_flags[shape0] & ShapeFlags.HYDROELASTIC) != 0 and (
+            data.hydroelastic_shape_flags[shape1] & ShapeFlags.HYDROELASTIC
+        ) != 0:
+            target_source = hydroelastic_contact_source_class(target_key & data.pair_sub_key_mask)
 
     p0 = data.new_point0[tid]
     p1 = data.new_point1[tid]
@@ -352,6 +368,18 @@ def _match_contacts_kernel(data: _MatchData):
             old_n = data.prev_normal[old_idx]
             ndot = wp.dot(new_n, old_n)
             if ndot >= data.normal_dot_threshold:
+                # Full identity takes priority over source provenance. Both are
+                # tie preferences only: geometry and normal gates remain first.
+                if best_idx >= 0 and dist_sq == best_dist_sq:
+                    best_key = data.prev_keys[best_idx]
+                    old_key = data.prev_keys[old_idx]
+                    if best_key == target_key and old_key != target_key:
+                        continue
+                    if best_key != target_key and old_key != target_key and target_source >= 0:
+                        if hydroelastic_contact_source_class(best_key & data.pair_sub_key_mask) == target_source and (
+                            hydroelastic_contact_source_class(old_key & data.pair_sub_key_mask) != target_source
+                        ):
+                            continue
                 best_dist_sq = dist_sq
                 best_idx = old_idx
 
@@ -670,6 +698,11 @@ class ContactMatcher:
             :meth:`replay_matched`, which replays the owned previous normal.
             When ``False`` these attributes are ``None`` and no extra kernel
             launches are added.
+        hydroelastic_shape_flags: Borrowed per-shape flags, supplied only when
+            deterministic reduced hydroelastic contacts with source-tagged
+            sub-keys are enabled. Both shapes must carry ``HYDROELASTIC`` for
+            source-class tie preferences. ``None`` disables this preference,
+            including for unreduced or fast-mode hydroelastic contacts.
         device: Device to allocate on.
     """
 
@@ -686,6 +719,7 @@ class ContactMatcher:
         normal_dot_threshold: float = 0.995,
         contact_report: bool = False,
         sticky: bool = False,
+        hydroelastic_shape_flags: wp.array[wp.int32] | None = None,
         device: Devicelike = None,
     ):
         with wp.ScopedDevice(device):
@@ -694,6 +728,7 @@ class ContactMatcher:
             self._normal_dot_threshold = normal_dot_threshold
             self._sorter = sorter
             self._shape_world = shape_world
+            self._hydroelastic_shape_flags = hydroelastic_shape_flags
             self._world_count = int(world_count)
             self._shape_index_bits = int(shape_index_bits)
             self._sub_key_bits = int(sub_key_bits)
@@ -869,6 +904,7 @@ class ContactMatcher:
         data.prev_frame = self._prev_frame
         data.reset_world_mask = self._reset_world_mask
         data.shape_world = self._shape_world
+        data.hydroelastic_shape_flags = self._hydroelastic_shape_flags
         data.world_count = self._world_count
         data.new_keys = sort_keys
         data.new_point0 = point0

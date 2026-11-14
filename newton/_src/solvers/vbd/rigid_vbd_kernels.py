@@ -4746,6 +4746,7 @@ def step_body_body_contact_C0_lambda(
     penalty_decay: float,
     contact_material_ke: wp.array[float],
     k_start: float,
+    tangent_scale: float,
     # In/out
     contact_normal_rho: wp.array[float],
     contact_penalty_k: wp.array[float],
@@ -4836,6 +4837,9 @@ def step_body_body_contact_C0_lambda(
                 contact_normal_rho[i],
                 structural_support,
             )
+            # One numerical weight is shared by both primal endpoints, the
+            # ordinary dual update and force reporting.
+            contact_tangent_rho[i] *= tangent_scale
 
     lam = contact_lambda[i]
     if contact_compliant_alm == 0:

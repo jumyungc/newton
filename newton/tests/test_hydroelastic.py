@@ -19,7 +19,6 @@ from newton._src.geometry.contact_reduction_hydroelastic import (
     _to_fixed,
 )
 from newton._src.geometry.sdf_hydroelastic import (
-    _MAX_DETERMINISTIC_ISO_VOXELS,
     _extract_mc_corner_pair,
     _mc_corner_offset,
     classify_hydroelastic_contact,
@@ -1159,6 +1158,38 @@ def _build_margin_gap_boxes(device, gaps=(0.03, 0.05)):
     return model, state, body_b
 
 
+def test_deterministic_hydroelastic_rejects_duplicate_pairs(test, device):
+    """Reject repeated explicit pairs before allocating deterministic hydroelastic buffers."""
+    model, _, _ = _build_margin_gap_boxes(device)
+    config = HydroelasticSDF.Config(reduce_contacts=False, buffer_fraction=0.01)
+    for pairs in (((0, 1), (0, 1)), ((0, 1), (1, 0))):
+        expected = np.asarray(pairs, dtype=np.int32)
+        model.shape_contact_pairs = wp.array(expected, dtype=wp.vec2i, device=device)
+        for kwargs in ({"deterministic": True}, {"contact_matching": "latest"}):
+            with test.subTest(pairs=pairs, mode=kwargs):
+                with test.assertRaisesRegex(ValueError, "require unique unordered shape pairs"):
+                    newton.CollisionPipeline(
+                        model,
+                        broad_phase="explicit",
+                        sdf_hydroelastic_config=config,
+                        **kwargs,
+                    )
+        np.testing.assert_array_equal(model.shape_contact_pairs.numpy(), expected)
+
+    # Fast mode retains its existing explicit-input contract, without deduplicating.
+    fast = newton.CollisionPipeline(model, broad_phase="explicit", sdf_hydroelastic_config=config)
+    test.assertFalse(fast.deterministic)
+    np.testing.assert_array_equal(fast.shape_pairs_filtered.numpy(), expected)
+
+    # A unique pair in reverse order is valid and must remain in its authored order.
+    unique_pair = np.array([[1, 0]], dtype=np.int32)
+    model.shape_contact_pairs = wp.array(unique_pair, dtype=wp.vec2i, device=device)
+    pipeline = newton.CollisionPipeline(
+        model, broad_phase="explicit", deterministic=True, sdf_hydroelastic_config=config
+    )
+    np.testing.assert_array_equal(pipeline.shape_pairs_filtered.numpy(), unique_pair)
+
+
 def _get_contact_distances(contacts, model, state):
     """Return public contact distances reconstructed in world space."""
     count = int(contacts.rigid_contact_count.numpy()[0])
@@ -1204,6 +1235,70 @@ def test_hydroelastic_pre_prune_writes_contact_fingerprints(test, device):
     fingerprints = reducer.contact_fingerprints.numpy()[1 : face_count + 1]
     test.assertFalse(np.any(fingerprints == unwritten_fingerprint))
     test.assertEqual(len(np.unique(fingerprints)), face_count)
+
+
+def test_hydroelastic_coincident_history(test, device):
+    """Retain both reduced copies of a face without changing their aggregate force."""
+    model, state, body_b = _build_margin_gap_boxes(device)
+    wp.launch(_set_body_z_kernel, dim=1, inputs=[state.body_q, body_b, 1.10], device=device)
+    pipeline = newton.CollisionPipeline(
+        model,
+        broad_phase="explicit",
+        rigid_contact_max=20000,
+        contact_matching="latest",
+        sdf_hydroelastic_config=HydroelasticSDF.Config(
+            reduce_contacts=True,
+            normal_matching=False,
+            buffer_fraction=1.0,
+        ),
+    )
+    contacts = pipeline.contacts()
+    hydro = pipeline.hydroelastic_sdf
+    test.assertIs(pipeline._contact_matcher._hydroelastic_shape_flags, model.shape_flags)
+    unreduced_pipeline = newton.CollisionPipeline(
+        model,
+        broad_phase="explicit",
+        rigid_contact_max=20000,
+        contact_matching="latest",
+        sdf_hydroelastic_config=HydroelasticSDF.Config(reduce_contacts=False, buffer_fraction=0.01),
+    )
+    test.assertIsNotNone(unreduced_pipeline.hydroelastic_sdf)
+    test.assertIsNone(unreduced_pipeline._contact_matcher._hydroelastic_shape_flags)
+    del unreduced_pipeline
+    test.assertTrue(pipeline.deterministic)
+    test.assertTrue(hydro.contact_reduction.deterministic)
+    previous_force = None
+    for generation in range(3):
+        pipeline.collide(state, contacts)
+        count = int(contacts.rigid_contact_count.numpy()[0])
+        keys = pipeline._contact_sorter.sorted_keys_view.numpy()[:count]
+        test.assertEqual(len(np.unique(keys)), count)
+        subkeys = keys & ((1 << pipeline._contact_sort_sub_key_bits) - 1)
+        fingerprints, copies = np.unique(subkeys >> 1, return_counts=True)
+        duplicated_faces = fingerprints[copies == 2]
+        test.assertGreater(len(duplicated_faces), 0, "Exercise actual normal-bin and voxel-bin copies")
+        points = contacts.rigid_contact_point0.numpy()[:count]
+        points1 = contacts.rigid_contact_point1.numpy()[:count]
+        normals = contacts.rigid_contact_normal.numpy()[:count]
+        stiffness = contacts.rigid_contact_stiffness.numpy()[:count]
+        for fingerprint in duplicated_faces:
+            twins = np.flatnonzero((subkeys >> 1) == fingerprint)
+            np.testing.assert_array_equal(subkeys[twins] & 1, (0, 1))
+            np.testing.assert_array_equal(points[twins[0]], points[twins[1]])
+            np.testing.assert_array_equal(points1[twins[0]], points1[twins[1]])
+            np.testing.assert_array_equal(normals[twins[0]], normals[twins[1]])
+            test.assertEqual(stiffness[twins[0]], stiffness[twins[1]])
+
+        force = _compute_net_force(contacts, model, state)
+        aggregate = hydro.contact_reduction.reducer.agg_force.numpy().sum(axis=0)
+        test.assertGreater(np.linalg.norm(force), 0.0)
+        np.testing.assert_allclose(np.linalg.norm(force), np.linalg.norm(aggregate), rtol=3e-5)
+        if generation > 0:
+            np.testing.assert_array_equal(
+                contacts.rigid_contact_match_index.numpy()[:count], np.arange(count, dtype=np.int32)
+            )
+            np.testing.assert_array_equal(force, previous_force)
+        previous_force = force
 
 
 def test_deterministic_hydroelastic_speculative_contacts(test, device):
@@ -1529,8 +1624,8 @@ def test_reduced_vs_unreduced_contact_forces(test, device, anchor_contact=False,
         model, [cfg_reduced, cfg_unreduced], [500, 20000], deterministic=deterministic
     )
     if deterministic:
-        test.assertLessEqual(pipe_red.hydroelastic_sdf.max_num_iso_voxels, _MAX_DETERMINISTIC_ISO_VOXELS)
-        test.assertLessEqual(pipe_unr.hydroelastic_sdf.max_num_iso_voxels, _MAX_DETERMINISTIC_ISO_VOXELS)
+        test.assertLessEqual(pipe_red.hydroelastic_sdf.max_num_face_contacts, (1 << 20) - 1)
+        test.assertLessEqual(pipe_unr.hydroelastic_sdf.max_num_face_contacts, (1 << 20) - 1)
 
     anchor_label = "with anchor" if anchor_contact else "without anchor"
 
@@ -1589,8 +1684,8 @@ def test_reduced_vs_unreduced_contact_moments(test, device, deterministic=False)
         model, [cfg_reduced, cfg_unreduced], [500, 20000], deterministic=deterministic
     )
     if deterministic:
-        test.assertLessEqual(pipe_red.hydroelastic_sdf.max_num_iso_voxels, _MAX_DETERMINISTIC_ISO_VOXELS)
-        test.assertLessEqual(pipe_unr.hydroelastic_sdf.max_num_iso_voxels, _MAX_DETERMINISTIC_ISO_VOXELS)
+        test.assertLessEqual(pipe_red.hydroelastic_sdf.max_num_face_contacts, (1 << 20) - 1)
+        test.assertLessEqual(pipe_unr.hydroelastic_sdf.max_num_face_contacts, (1 << 20) - 1)
 
     # Filter to the cube-sphere shape pair (shape 1=cube, shape 2=sphere).
     sp = (1, 2)
@@ -2833,6 +2928,20 @@ add_function_test(
     devices=cuda_devices,
 )
 
+add_function_test(
+    TestHydroelastic,
+    "test_deterministic_hydroelastic_rejects_duplicate_pairs",
+    test_deterministic_hydroelastic_rejects_duplicate_pairs,
+    devices=cuda_devices,
+)
+
+add_function_test(
+    TestHydroelastic,
+    "test_hydroelastic_coincident_history",
+    test_hydroelastic_coincident_history,
+    devices=cuda_devices,
+    check_output=False,
+)
 add_function_test(
     TestHydroelastic,
     "test_deterministic_hydroelastic_speculative_contacts",

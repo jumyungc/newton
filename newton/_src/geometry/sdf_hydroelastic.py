@@ -82,9 +82,9 @@ from .utils import _scan_scratch_size, scan_with_total
 vec8f = wp.types.vector(length=8, dtype=wp.float32)
 PRE_PRUNE_MAX_PENETRATING = 2
 
-# Marching cubes emits at most 5 triangles per voxel, so ``tid * 5 + fi``
-# uniquely identifies a generated face.  That value is used both as the
-# reduction fingerprint and as the contact sort sub-key.
+# Marching cubes emits at most 5 triangles per voxel. Deterministic face
+# identities use the voxel ordinal within its shape pair, followed by the face
+# index; the reduction and contact-sort keys already contain the shape pair.
 MAX_MC_FACES_PER_VOXEL = 5
 
 # Keep the texture-heavy count kernel small enough for multiple resident blocks.
@@ -112,7 +112,24 @@ def _hydro_rsqrt_approx(value: float) -> float:
 # 0 for the normal/voxel reduction source. Face fingerprints are shifted left
 # by one during export, so they must stay below bit 21.
 _MAX_FACE_FINGERPRINT = 0x200000
-_MAX_DETERMINISTIC_ISO_VOXELS = _MAX_FACE_FINGERPRINT // MAX_MC_FACES_PER_VOXEL
+_MAX_DETERMINISTIC_ISO_VOXELS_PER_PAIR = _MAX_FACE_FINGERPRINT // MAX_MC_FACES_PER_VOXEL
+
+
+@wp.func
+def _hydroelastic_voxel_face_base(
+    voxel_idx: int,
+    pair_start: int,
+    deterministic: int,
+    fingerprint_overflows: wp.array[int],
+) -> int:
+    """Return a voxel's first face identity, or reject an unrepresentable pair-local ordinal."""
+    if deterministic != 0:
+        voxel_idx -= pair_start
+        if voxel_idx >= _MAX_DETERMINISTIC_ISO_VOXELS_PER_PAIR:
+            wp.atomic_add(fingerprint_overflows, 0, 1)
+            return -1
+    return voxel_idx * MAX_MC_FACES_PER_VOXEL
+
 
 # Empirical per-level bounds relative to the narrow-band subgrids of the SDF
 # traversed by each pair. Hydroelastic traversal must inspect the full dense
@@ -408,9 +425,10 @@ class HydroelasticSDF:
         The pipeline automatically extracts the required SDF data and shape
         information from the simulation :class:`~newton.Model`.
 
-        Contact IDs are packed into 32-bit integers using 9 bits per voxel axis coordinate.
-        For SDF grids larger than 512 voxels per axis, contact ID collisions may occur,
-        which can affect contact matching accuracy for warm-starting physics solvers.
+        Deterministic face identities support 419,430 iso voxels per shape pair.
+        Each unordered shape pair must occur only once in the input stream.
+        Model-based construction validates this requirement; direct callers of
+        :meth:`launch` must provide unique pairs themselves.
 
     See Also:
         :class:`HydroelasticSDF.Config`: Configuration options for this class.
@@ -435,10 +453,11 @@ class HydroelasticSDF:
         buffers from their default estimated capacities before applying stage
         multipliers. Lower values reduce memory usage and may cause overflows in
         dense scenes. Overflows are bounds-safe and emit warnings; increase this
-        value when warnings appear. In deterministic mode, the final iso-voxel
-        capacity has a hard fingerprint-safe limit that buffer fractions and
-        multipliers cannot raise. If that limit overflows, reduce the SDF
-        resolution or disable deterministic mode.
+        value when warnings appear. Deterministic identities support at most
+        419,430 iso voxels per shape pair, and the face buffer supports at most
+        1,048,575 faces across all pairs. Buffer multipliers cannot raise these
+        limits. Reduce SDF resolution for a per-pair overflow or use fewer
+        worlds for a face-buffer overflow.
         """
         buffer_mult_broad: int = 1
         """Multiplier for the preallocated broadphase buffer that stores overlapping
@@ -446,7 +465,7 @@ class HydroelasticSDF:
         buffer_mult_iso: int = 1
         """Multiplier for preallocated iso-surface extraction buffers used during
         hierarchical octree refinement (subblocks and voxels). Increase only if an iso buffer overflow warning is issued.
-        The final voxel buffer remains subject to the deterministic fingerprint-safe limit."""
+        Deterministic face identities remain limited to 419,430 voxels per shape pair."""
         buffer_mult_contact: int = 1
         """Multiplier for the preallocated face contact buffer that stores contact
         positions, normals, depths, and areas. Increase only if a face contact overflow warning is issued."""
@@ -628,11 +647,6 @@ class HydroelasticSDF:
         # Output buffer sizes for each octree level (subblocks 8x8x8 -> 4x4x4 -> 2x2x2 -> voxels)
         refinement_base = self.config.buffer_mult_iso * self.total_num_active_tiles * frac
         iso_max_dims = [max(int(mult * refinement_base), 64) for mult in _ISO_REFINEMENT_MULTIPLIERS]
-        if deterministic:
-            # A face fingerprint is ``voxel_id * MAX_MC_FACES_PER_VOXEL + face_id``.
-            # Bound the final refinement buffer so every generated face remains
-            # below the anchor bit reserved by deterministic contact sort keys.
-            iso_max_dims[3] = min(iso_max_dims[3], _MAX_DETERMINISTIC_ISO_VOXELS)
         self.iso_max_dims = tuple(iso_max_dims)
         self.max_num_iso_voxels = self.iso_max_dims[3]
         # Input buffer sizes for each octree level
@@ -661,6 +675,8 @@ class HydroelasticSDF:
             self.block_broad_collide_count = self.iso_buffer_counts[0]
             self.iso_voxel_count = self.iso_buffer_counts[4]
             self.iso_voxel_records = self.iso_buffer_records[4]
+            self.iso_pair_start = wp.empty((self.max_num_shape_pairs,), dtype=wp.int32)
+            self.iso_fingerprint_overflows = wp.zeros((1,), dtype=wp.int32)
 
             # Broadphase buffers
             self.block_start_prefix = wp.zeros((self.max_num_shape_pairs,), dtype=wp.int32)
@@ -839,6 +855,14 @@ class HydroelasticSDF:
         if num_hydroelastic_pairs == 0:
             return None
 
+        if deterministic:
+            canonical_pairs = np.sort(hydroelastic_pairs, axis=1)
+            if len(np.unique(canonical_pairs, axis=0)) != num_hydroelastic_pairs:
+                raise ValueError(
+                    "Deterministic hydroelastic contacts require unique unordered shape pairs; "
+                    "remove duplicate or reversed entries."
+                )
+
         shape_sdf_index = model._shape_sdf_index.numpy()
         texture_sdf_data = model._texture_sdf_data.numpy()
         shape_scale = model.shape_scale.numpy()
@@ -949,6 +973,8 @@ class HydroelasticSDF:
             shape_collision_aabb_upper: Per-shape collision AABB upper bounds.
             shape_voxel_resolution: Per-shape voxel grid resolution.
             shape_pairs_sdf_sdf: Pairs of shape indices to check for collision.
+                Deterministic mode requires unique unordered pairs, including
+                when this method is called directly without a model-based pipeline.
             shape_pairs_sdf_sdf_count: Number of valid shape pairs.
             writer_data: Contact data writer for output.
             shape_sdf_data_prepared: Whether finalized per-shape SDF descriptors were cached upstream.
@@ -1015,6 +1041,7 @@ class HydroelasticSDF:
                 self.iso_max_dims[2],
                 self.iso_voxel_count,
                 self.max_num_iso_voxels,
+                self.iso_fingerprint_overflows,
                 self.contact_reduction.contact_count,
                 self.max_num_face_contacts,
                 writer_data.contact_count,
@@ -1185,6 +1212,7 @@ class HydroelasticSDF:
                 ],
                 outputs=[
                     self.iso_buffer_records[i + 1],
+                    self.iso_pair_start,
                 ],
                 device=self.device,
                 record_tape=False,
@@ -1208,6 +1236,7 @@ class HydroelasticSDF:
         provided so the kernel can populate the hashtable and gate buffer writes.
         """
         self.contact_reduction.clear()
+        self.iso_fingerprint_overflows.zero_()
         reducer_data = self.contact_reduction.get_data_struct()
 
         # Placeholder arrays for the pre-prune parameters when not used
@@ -1230,6 +1259,8 @@ class HydroelasticSDF:
                 shape_transform_inverse,
                 self.pressure_data,
                 self.iso_voxel_records,
+                self.iso_pair_start,
+                self.iso_fingerprint_overflows,
                 self.normalized_shape_pairs,
                 self.mc_tables[0],
                 self.mc_tables[4],
@@ -1699,6 +1730,7 @@ def scatter_iso_subblock(
     max_num_iso_subblocks: int,
     # outputs
     out_iso_subblock_records: wp.array[wp.vec3ui],
+    iso_pair_start: wp.array[wp.int32],
 ):
     offset = wp.tid()
     num_items = wp.min(in_iso_subblock_count[0], max_input_buffer_size)
@@ -1707,6 +1739,12 @@ def scatter_iso_subblock(
         subblock_idx = in_iso_subblock_idx[tid]
         record = in_iso_subblock_records[tid]
         pair_idx = wp.int32(record[2])
+        # Ordered scans/scatters keep each pair contiguous. The first parent
+        # gives its output start even when that parent has no surviving child.
+        # Write before the capacity guard; the next kernel reads these offsets.
+        if subblock_size == 1:
+            if tid == 0 or in_iso_subblock_records[tid - 1][2] != record[2]:
+                iso_pair_start[pair_idx] = write_idx
         bc = unpack_hydro_voxel_coords(record)
         if write_idx >= max_num_iso_subblocks:
             continue
@@ -2013,6 +2051,8 @@ def get_generate_contacts_kernel(
         shape_transform_inverse: wp.array[wp.transform],
         pressure_data: Any,
         iso_voxel_records: wp.array[wp.vec3ui],
+        iso_pair_start: wp.array[wp.int32],
+        iso_fingerprint_overflows: wp.array[wp.int32],
         normalized_shape_pairs: wp.array[wp.vec2i],
         tri_range_table: wp.array[wp.int32],
         flat_edge_verts_table: wp.array[wp.vec2ub],
@@ -2034,6 +2074,11 @@ def get_generate_contacts_kernel(
         for tid in range(offset, num_voxels, grid_size):
             record = iso_voxel_records[tid]
             pair_idx = wp.int32(record[2])
+            face_base = _hydroelastic_voxel_face_base(
+                tid, iso_pair_start[pair_idx], reducer_data.deterministic, iso_fingerprint_overflows
+            )
+            if reducer_data.deterministic != 0 and face_base < 0:
+                continue
             pair = normalized_shape_pairs[pair_idx]
             shape_a = pair[0]
             shape_b = pair[1]
@@ -2128,7 +2173,7 @@ def get_generate_contacts_kernel(
             best_nonpen_v1 = wp.vec3(0.0, 0.0, 0.0)
             best_nonpen_v2 = wp.vec3(0.0, 0.0, 0.0)
             for fi in range(num_faces):
-                face_fingerprint = tid * MAX_MC_FACES_PER_VOXEL + fi
+                face_fingerprint = face_base + fi
                 force_area, geometric_area, normal, face_center, adjusted_sdf_shape_b, pair_separation, face_verts = (
                     mc_calc_face_texture(
                         flat_edge_verts_table,
@@ -2190,7 +2235,7 @@ def get_generate_contacts_kernel(
                         pair_separation,
                         stored_area,
                         face_pressure,
-                        tid * MAX_MC_FACES_PER_VOXEL + fi,
+                        face_fingerprint,
                         reducer_data,
                     )
                     if wp.static(output_vertices) and contact_id >= 0:
@@ -2348,6 +2393,7 @@ def verify_collision_step(
     max_num_iso_subblocks_2: int,
     num_iso_voxels: wp.array[int],
     max_num_iso_voxels: int,
+    iso_fingerprint_overflows: wp.array[int],
     face_contact_count: wp.array[int],
     max_face_contact_count: int,
     contact_count: wp.array[int],
@@ -2388,20 +2434,20 @@ def verify_collision_step(
         )
         has_overflow = True
     if num_iso_voxels[0] > max_num_iso_voxels:
-        if deterministic and max_num_iso_voxels == _MAX_DETERMINISTIC_ISO_VOXELS:
-            wp.printf(
-                "  [hydroelastic] iso voxel overflow: %d > %d, the deterministic limit. "
-                "Use fewer worlds or disable deterministic mode.\n",
-                num_iso_voxels[0],
-                max_num_iso_voxels,
-            )
-            at_deterministic_limit = True
-        else:
-            wp.printf(
-                "  [hydroelastic] iso voxel overflow: %d > %d. Increase buffer_fraction or buffer_mult_iso.\n",
-                num_iso_voxels[0],
-                max_num_iso_voxels,
-            )
+        wp.printf(
+            "  [hydroelastic] iso voxel overflow: %d > %d. Increase buffer_fraction or buffer_mult_iso.\n",
+            num_iso_voxels[0],
+            max_num_iso_voxels,
+        )
+        has_overflow = True
+    if iso_fingerprint_overflows[0] > 0:
+        wp.printf(
+            "  [hydroelastic] iso voxel identity overflow: %d voxels skipped beyond the deterministic "
+            "limit of %d per shape pair. Reduce SDF resolution or disable determinism and contact matching.\n",
+            iso_fingerprint_overflows[0],
+            _MAX_DETERMINISTIC_ISO_VOXELS_PER_PAIR,
+        )
+        at_deterministic_limit = True
         has_overflow = True
     if face_contact_count[0] > max_face_contact_count:
         wp.printf(
@@ -2415,7 +2461,7 @@ def verify_collision_step(
         if deterministic and max_face_contact_count == (1 << int(CONTACT_ID_BITS)) - 1:
             wp.printf(
                 "  [hydroelastic] face contact overflow: %d faces dropped at the deterministic limit of %d. "
-                "Use fewer worlds or disable deterministic mode.\n",
+                "Use fewer worlds or disable determinism and contact matching.\n",
                 face_contact_overflows[0],
                 max_face_contact_count,
             )

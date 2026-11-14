@@ -257,8 +257,8 @@ class Contacts:
             # Sliced view for the rigid counter (no additional allocation)
             self.rigid_contact_count = self.contact_counters[0:1]
             # Nonzero when the collision pass that filled this buffer dropped contact candidates
-            # inside global contact reduction (reducer buffer or hashtable full). Owned by this
-            # contact stream rather than aliased to a pipeline's reusable reducer counters.
+            # during generation or global reduction (identity, buffer, or hashtable limits).
+            # Owned by this contact stream rather than aliased to reusable pipeline counters.
             self._reduction_overflow = self.contact_counters[2:3]
             # Coupling packs stored rows and loses the source count's overflow sentinel.
             # Preserve that loss so force consumers keep the source's overflow policy.

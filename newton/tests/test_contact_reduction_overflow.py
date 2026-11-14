@@ -74,6 +74,7 @@ def test_buffer_exhaustion_is_reported_and_cleared(test, device):
                 dim=1,
                 inputs=[zero, 1] * 5
                 + [
+                    zero,
                     reducer.contact_count,
                     reducer.capacity,
                     zero,
