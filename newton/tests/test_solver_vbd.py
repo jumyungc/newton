@@ -4661,6 +4661,9 @@ def _rigid_reset_replays_captured_step(test, device):
     builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
     builder.add_world(template)
     builder.add_world(template, xform=wp.transform(wp.vec3(2.0, 0.0, 0.0), wp.quat_identity()))
+    # More world slots than bodies exercises the fused finalization clear's extent.
+    for _ in range(3):
+        builder.add_world(newton.ModelBuilder())
     builder.color()
     model = builder.finalize(device=device)
 
@@ -4681,10 +4684,13 @@ def _rigid_reset_replays_captured_step(test, device):
         solver.step(state_in, state_out, control, None, dt)
     graph = capture.graph
     test.assertIsNotNone(graph)
+    np.testing.assert_array_equal(
+        solver._rigid_pose_rebaseline_mask.numpy(), np.zeros(model.world_count + 1, dtype=bool)
+    )
 
     # reset() runs after capture. Its device-side mask write must be visible when
     # replaying the graph, while post-reset pose preparation remains authoritative.
-    world_mask = wp.array([True, False, False], dtype=wp.bool, device=device)
+    world_mask = wp.array([True] + [False] * model.world_count, dtype=wp.bool, device=device)
     solver.reset(state_in, world_mask=world_mask, flags=0)
     reset_q = model.body_q.numpy()
     reset_q[:, 0] += 1.0
@@ -9540,14 +9546,16 @@ def test_rigid_velocity_correction_preserves_com_and_kinematics(test, device):
     no_pair_contacts = wp.zeros(2, dtype=int, device=device)
     seed_roundoff = wp.array([wp.vec3(1.0e-6, -2.0e-6, 3.0e-6)] * 2, dtype=wp.vec3, device=device)
     roundoff = wp.clone(seed_roundoff)
+    rebaseline_mask = wp.ones(3, dtype=wp.bool, device=device)
 
     def run():
+        rebaseline_mask.fill_(True)
         wp.copy(prev, seed_prev)
         wp.copy(mirror, seed_velocity)
         wp.copy(roundoff, seed_roundoff)
         wp.launch(
             update_body_velocity,
-            dim=2,
+            dim=3,
             inputs=[
                 dt,
                 poses,
@@ -9565,7 +9573,7 @@ def test_rigid_velocity_correction_preserves_com_and_kinematics(test, device):
                 None,
                 None,
             ],
-            outputs=[prev, output, mirror, pose_output],
+            outputs=[prev, output, mirror, pose_output, rebaseline_mask],
             device=device,
         )
 
@@ -9594,6 +9602,7 @@ def test_rigid_velocity_correction_preserves_com_and_kinematics(test, device):
     np.testing.assert_array_equal(pose_output.numpy(), poses.numpy())
     np.testing.assert_array_equal(prev.numpy(), poses.numpy())
     np.testing.assert_array_equal(roundoff.numpy(), np.zeros((2, 3)))
+    np.testing.assert_array_equal(rebaseline_mask.numpy(), np.zeros(3, dtype=bool))
 
 
 add_function_test(

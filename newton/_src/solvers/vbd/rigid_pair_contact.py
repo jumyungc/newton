@@ -28,11 +28,25 @@ _TANGENT_EPS = wp.constant(1.0e-6)
 
 @wp.struct
 class ContactConstants:
-    """Sweep-invariant terms prepared alongside each contact's inertial response."""
+    """One contact as the solve reads it: geometry, material and step-start terms.
 
+    The geometry is packed with the manifolds at every collision refresh; material and
+    step-start terms are refreshed at the start of each step.
+    Points and anchors are body-local (world-space for a world endpoint).
+    Subtract the live center of mass in the solve so inertial-property updates
+    do not invalidate cached collision geometry.
+    """
+
+    normal: wp.vec3
+    point0: wp.vec3
+    point1: wp.vec3
+    anchor0: wp.vec3
+    anchor1: wp.vec3
     anchor0_prev: wp.vec3
     anchor1_prev: wp.vec3
     surface_displacement: wp.vec3
+    margin: float
+    friction: float
     previous_penetration: float
     compliance: float
     damping_fraction: float
@@ -555,346 +569,114 @@ def accumulate_constraint_contact_forces_per_body(
 
 
 @wp.func
-def _constraint_body_response(
-    body: int,
-    pose: wp.transform,
-    point_world: wp.vec3,
-    force_world: wp.vec3,
-    dt: float,
-    body_com: wp.array[wp.vec3],
-    body_inv_mass: wp.array[float],
-    body_inv_inertia: wp.array[wp.mat33],
-):
-    """Return the inertial-metric pose response to a unit force."""
-    translation = wp.vec3(0.0)
-    rotation = wp.vec3(0.0)
-    if body >= 0 and body_inv_mass[body] > 0.0:
-        center = wp.transform_point(pose, body_com[body])
-        torque = wp.cross(point_world - center, force_world)
-        q = wp.transform_get_rotation(pose)
-        dt_sq = dt * dt
-        translation = dt_sq * body_inv_mass[body] * force_world
-        rotation = dt_sq * wp.quat_rotate(
-            q,
-            body_inv_inertia[body] * wp.quat_rotate_inv(q, torque),
-        )
-    return translation, rotation
-
-
-@wp.func
 def _apply_constraint_pose_increment(
-    dynamic: bool,
     pose: wp.transform,
+    center: wp.vec3,
     translation: wp.vec3,
-    rotation: wp.vec3,
+    turn: wp.vec3,
     com: wp.vec3,
 ):
-    """Apply a unit-scale SE(3) increment using preloaded body properties."""
-    if not dynamic:
-        return pose
+    """Move a pose by a translation and a small turn about its center of mass."""
     q = wp.transform_get_rotation(pose)
-    center = wp.transform_point(pose, com)
-    half_w = 0.5 * rotation
+    half_turn = 0.5 * turn
     # Normalizing the product also removes the increment quaternion's scale.
-    dq = wp.quat(half_w[0], half_w[1], half_w[2], 1.0)
+    dq = wp.quat(half_turn[0], half_turn[1], half_turn[2], 1.0)
     q_new = wp.normalize(wp.mul(dq, q))
-    center_new = center + translation
-    origin_new = center_new - wp.quat_rotate(q_new, com)
-    return wp.transform(origin_new, q_new)
+    return wp.transform(center + translation - wp.quat_rotate(q_new, com), q_new)
 
 
-@wp.func
-def _constraint_direction_response(
-    body0: int,
-    body1: int,
-    pose0: wp.transform,
-    pose1: wp.transform,
-    point0: wp.vec3,
-    point1: wp.vec3,
-    direction: wp.vec3,
-    dt: float,
-    body_com: wp.array[wp.vec3],
-    body_inv_mass: wp.array[float],
-    body_inv_inertia: wp.array[wp.mat33],
-):
-    """Return endpoint responses and relative point motion for a unit pair force."""
-    x0, w0 = _constraint_body_response(
-        body0,
-        pose0,
-        point0,
-        -direction,
-        dt,
-        body_com,
-        body_inv_mass,
-        body_inv_inertia,
-    )
-    x1, w1 = _constraint_body_response(
-        body1,
-        pose1,
-        point1,
-        direction,
-        dt,
-        body_com,
-        body_inv_mass,
-        body_inv_inertia,
-    )
-
-    point_delta0 = wp.vec3(0.0)
-    point_delta1 = wp.vec3(0.0)
-    if body0 >= 0 and body_inv_mass[body0] > 0.0:
-        center0 = wp.transform_point(pose0, body_com[body0])
-        point_delta0 = x0 + wp.cross(w0, point0 - center0)
-    if body1 >= 0 and body_inv_mass[body1] > 0.0:
-        center1 = wp.transform_point(pose1, body_com[body1])
-        point_delta1 = x1 + wp.cross(w1, point1 - center1)
-    return x0, w0, x1, w1, point_delta1 - point_delta0
-
-
-@wp.func
-def _prepare_constraint_contact_block(
-    contact: int,
-    dt: float,
-    refresh_constants: bool,
-    contact_compliant_alm: int,
-    contact_damping_bidirectional: bool,
-    body_q_prev: wp.array[wp.transform],
-    contact_material_ke: wp.array[float],
-    contact_material_kd: wp.array[float],
-    contact_shape0: wp.array[wp.int32],
-    contact_shape1: wp.array[wp.int32],
+@wp.kernel
+def pack_constraint_contact_geometry(
+    contact_count: wp.array[wp.int32],
     contact_point0: wp.array[wp.vec3],
     contact_point1: wp.array[wp.vec3],
-    contact_surface_velocity: wp.array[wp.vec3],
     contact_offset0: wp.array[wp.vec3],
     contact_offset1: wp.array[wp.vec3],
     contact_normal: wp.array[wp.vec3],
     contact_margin0: wp.array[float],
     contact_margin1: wp.array[float],
-    shape_body: wp.array[wp.int32],
-    body_q: wp.array[wp.transform],
-    body_com: wp.array[wp.vec3],
-    body_inv_mass: wp.array[float],
-    body_inv_inertia: wp.array[wp.mat33],
-    tangent0: wp.array[wp.vec3],
-    tangent1: wp.array[wp.vec3],
-    response0_normal: wp.array[wp.spatial_vector],
-    response1_normal: wp.array[wp.spatial_vector],
-    response0_tangent0: wp.array[wp.spatial_vector],
-    response1_tangent0: wp.array[wp.spatial_vector],
-    response0_tangent1: wp.array[wp.spatial_vector],
-    response1_tangent1: wp.array[wp.spatial_vector],
-    normal_support: wp.array[float],
-    tangent_support: wp.array[wp.mat22],
     contact_constants: wp.array[ContactConstants],
 ):
-    """Linearize one contact's inertial Delassus response at the current poses.
+    """Pack each contact's geometry into its record; it changes only with the contact set."""
+    contact = wp.tid()
+    if contact >= contact_count[0]:
+        return
+    contact_constants[contact].normal = contact_normal[contact]
+    contact_constants[contact].point0 = contact_point0[contact]
+    contact_constants[contact].point1 = contact_point1[contact]
+    contact_constants[contact].anchor0 = contact_point0[contact] + contact_offset0[contact]
+    contact_constants[contact].anchor1 = contact_point1[contact] + contact_offset1[contact]
+    contact_constants[contact].margin = contact_margin0[contact] + contact_margin1[contact]
 
-    Material and step-start anchors are refreshed only when ``refresh_constants`` is set.
+
+@wp.kernel
+def prepare_constraint_contact_constants(
+    dt: float,
+    contact_damping_bidirectional: bool,
+    body_q_prev: wp.array[wp.transform],
+    contact_material_ke: wp.array[float],
+    contact_material_kd: wp.array[float],
+    contact_material_mu: wp.array[float],
+    contact_count: wp.array[wp.int32],
+    contact_shape0: wp.array[wp.int32],
+    contact_shape1: wp.array[wp.int32],
+    contact_surface_velocity: wp.array[wp.vec3],
+    shape_body: wp.array[wp.int32],
+    contact_constants: wp.array[ContactConstants],
+):
+    """Refresh each contact's material and step-start terms in its record.
+
+    They stay fixed between collision refreshes within a step. The geometry
+    was packed with the manifolds, and the inertial responses depend on the
+    current poses and are evaluated by the solve.
     """
+    contact = wp.tid()
+    if contact >= contact_count[0]:
+        return
     shape0 = contact_shape0[contact]
     shape1 = contact_shape1[contact]
     body0 = shape_body[shape0] if shape0 >= 0 else -1
     body1 = shape_body[shape1] if shape1 >= 0 else -1
-    pose0 = body_q[body0] if body0 >= 0 else wp.transform_identity()
-    pose1 = body_q[body1] if body1 >= 0 else wp.transform_identity()
-    skeleton0 = wp.transform_point(pose0, contact_point0[contact]) if body0 >= 0 else contact_point0[contact]
-    skeleton1 = wp.transform_point(pose1, contact_point1[contact]) if body1 >= 0 else contact_point1[contact]
-    anchor0 = (
-        contact_surface_point(pose0, contact_point0[contact], contact_offset0[contact])
-        if body0 >= 0
-        else contact_point0[contact] + contact_offset0[contact]
-    )
-    anchor1 = (
-        contact_surface_point(pose1, contact_point1[contact], contact_offset1[contact])
-        if body1 >= 0
-        else contact_point1[contact] + contact_offset1[contact]
-    )
-    n = contact_normal[contact]
-    t0, t1 = orthonormal_basis(n)
-    x0_n, w0_n, x1_n, w1_n, relative_n = _constraint_direction_response(
-        body0,
-        body1,
-        pose0,
-        pose1,
-        skeleton0,
-        skeleton1,
-        n,
-        dt,
-        body_com,
-        body_inv_mass,
-        body_inv_inertia,
-    )
-    x0_t0, w0_t0, x1_t0, w1_t0, relative_t0 = _constraint_direction_response(
-        body0,
-        body1,
-        pose0,
-        pose1,
-        anchor0,
-        anchor1,
-        t0,
-        dt,
-        body_com,
-        body_inv_mass,
-        body_inv_inertia,
-    )
-    x0_t1, w0_t1, x1_t1, w1_t1, relative_t1 = _constraint_direction_response(
-        body0,
-        body1,
-        pose0,
-        pose1,
-        anchor0,
-        anchor1,
-        t1,
-        dt,
-        body_com,
-        body_inv_mass,
-        body_inv_inertia,
-    )
-    W00 = wp.dot(t0, relative_t0)
-    W11 = wp.dot(t1, relative_t1)
-    W01 = 0.5 * (wp.dot(t1, relative_t0) + wp.dot(t0, relative_t1))
-    tangent0[contact] = t0
-    tangent1[contact] = t1
-    response0_normal[contact] = wp.spatial_vector(x0_n, w0_n)
-    response1_normal[contact] = wp.spatial_vector(x1_n, w1_n)
-    response0_tangent0[contact] = wp.spatial_vector(x0_t0, w0_t0)
-    response1_tangent0[contact] = wp.spatial_vector(x1_t0, w1_t0)
-    response0_tangent1[contact] = wp.spatial_vector(x0_t1, w0_t1)
-    response1_tangent1[contact] = wp.spatial_vector(x1_t1, w1_t1)
-    normal_support[contact] = wp.dot(n, relative_n)
-    tangent_support[contact] = wp.mat22(W00, W01, W01, W11)
-    # Material and previous anchors stay fixed between collision refreshes
-    # within a step; the current-pose responses above still change each sweep.
-    if not refresh_constants:
-        return
+    geometry = contact_constants[contact]
     # Keep the two previous anchors separate to preserve the slip subtraction order.
-    constants = ContactConstants()
-    anchor0_local = contact_point0[contact] + contact_offset0[contact]
-    anchor1_local = contact_point1[contact] + contact_offset1[contact]
-    prev_pose0 = body_q_prev[body0] if body0 >= 0 else wp.transform_identity()
-    prev_pose1 = body_q_prev[body1] if body1 >= 0 else wp.transform_identity()
-    anchor0_prev = (
-        contact_surface_point(prev_pose0, contact_point0[contact], contact_offset0[contact])
-        if body0 >= 0
-        else anchor0_local
-    )
-    anchor1_prev = (
-        contact_surface_point(prev_pose1, contact_point1[contact], contact_offset1[contact])
-        if body1 >= 0
-        else anchor1_local
-    )
+    point0_prev = geometry.point0
+    point1_prev = geometry.point1
+    anchor0_prev = geometry.anchor0
+    anchor1_prev = geometry.anchor1
+    if body0 >= 0:
+        prev_pose0 = body_q_prev[body0]
+        point0_prev = wp.transform_point(prev_pose0, point0_prev)
+        anchor0_prev = wp.transform_point(prev_pose0, anchor0_prev)
+    if body1 >= 0:
+        prev_pose1 = body_q_prev[body1]
+        point1_prev = wp.transform_point(prev_pose1, point1_prev)
+        anchor1_prev = wp.transform_point(prev_pose1, anchor1_prev)
     compliance = float(0.0)
     damping_fraction = float(0.0)
-    # The pair lane runs only for compliant ALM or legacy hard contacts.
-    use_finite_material = contact_compliant_alm == 1
-    elastic_compliance = float(0.0)
-    effective_stiffness = float(0.0)
-    if use_finite_material:
-        stiffness = contact_material_ke[contact]
-        elastic_compliance = 1.0 / stiffness if stiffness > 0.0 else -1.0
-        damping_rate = contact_material_kd[contact] / dt
-        effective_stiffness = stiffness + damping_rate
-        if effective_stiffness > 0.0:
-            compliance = 1.0 / effective_stiffness
-            damping_fraction = damping_rate / effective_stiffness
+    stiffness = contact_material_ke[contact]
+    elastic_compliance = 1.0 / stiffness if stiffness > 0.0 else -1.0
+    damping_rate = contact_material_kd[contact] / dt
+    effective_stiffness = stiffness + damping_rate
+    if effective_stiffness > 0.0:
+        compliance = 1.0 / effective_stiffness
+        damping_fraction = damping_rate / effective_stiffness
 
     # Damping uses step-start poses, not C0: collision refreshes may rebase
     # the ALM contact frame at a predicted or intermediate iterate.
-    point0_prev = wp.transform_point(prev_pose0, contact_point0[contact])
-    point1_prev = wp.transform_point(prev_pose1, contact_point1[contact])
-    constants.previous_penetration = -contact_surface_separation(
-        point0_prev, point1_prev, contact_normal[contact], contact_margin0[contact], contact_margin1[contact]
+    contact_constants[contact].previous_penetration = -contact_surface_separation(
+        point0_prev, point1_prev, geometry.normal, geometry.margin, 0.0
     )
-    constants.anchor0_prev = anchor0_prev
-    constants.anchor1_prev = anchor1_prev
+    contact_constants[contact].friction = contact_material_mu[contact]
+    contact_constants[contact].anchor0_prev = anchor0_prev
+    contact_constants[contact].anchor1_prev = anchor1_prev
     # Match the collision pipeline's relative surface-velocity convention.
-    constants.surface_displacement = (
+    contact_constants[contact].surface_displacement = (
         dt * contact_surface_velocity[contact] if contact_surface_velocity else wp.vec3(0.0)
     )
-    constants.compliance = compliance if not use_finite_material or effective_stiffness > 0.0 else -1.0
-    constants.damping_fraction = damping_fraction
-    constants.elastic_compliance = elastic_compliance
-    constants.damping_bidirectional = contact_damping_bidirectional
-    contact_constants[contact] = constants
-
-
-@wp.kernel
-def prepare_constraint_contact_blocks(
-    dt: float,
-    refresh_constants: bool,
-    contact_compliant_alm: int,
-    contact_damping_bidirectional: bool,
-    body_q_prev: wp.array[wp.transform],
-    contact_material_ke: wp.array[float],
-    contact_material_kd: wp.array[float],
-    contact_count: wp.array[wp.int32],
-    contact_shape0: wp.array[wp.int32],
-    contact_shape1: wp.array[wp.int32],
-    contact_point0: wp.array[wp.vec3],
-    contact_point1: wp.array[wp.vec3],
-    contact_surface_velocity: wp.array[wp.vec3],
-    contact_offset0: wp.array[wp.vec3],
-    contact_offset1: wp.array[wp.vec3],
-    contact_normal: wp.array[wp.vec3],
-    contact_margin0: wp.array[float],
-    contact_margin1: wp.array[float],
-    shape_body: wp.array[wp.int32],
-    body_q: wp.array[wp.transform],
-    body_com: wp.array[wp.vec3],
-    body_inv_mass: wp.array[float],
-    body_inv_inertia: wp.array[wp.mat33],
-    tangent0: wp.array[wp.vec3],
-    tangent1: wp.array[wp.vec3],
-    response0_normal: wp.array[wp.spatial_vector],
-    response1_normal: wp.array[wp.spatial_vector],
-    response0_tangent0: wp.array[wp.spatial_vector],
-    response1_tangent0: wp.array[wp.spatial_vector],
-    response0_tangent1: wp.array[wp.spatial_vector],
-    response1_tangent1: wp.array[wp.spatial_vector],
-    normal_support: wp.array[float],
-    tangent_support: wp.array[wp.mat22],
-    contact_constants: wp.array[ContactConstants],
-):
-    """Linearize each contact's inertial Delassus response at the current poses."""
-    contact = wp.tid()
-    if contact >= contact_count[0]:
-        return
-    _prepare_constraint_contact_block(
-        contact,
-        dt,
-        refresh_constants,
-        contact_compliant_alm,
-        contact_damping_bidirectional,
-        body_q_prev,
-        contact_material_ke,
-        contact_material_kd,
-        contact_shape0,
-        contact_shape1,
-        contact_point0,
-        contact_point1,
-        contact_surface_velocity,
-        contact_offset0,
-        contact_offset1,
-        contact_normal,
-        contact_margin0,
-        contact_margin1,
-        shape_body,
-        body_q,
-        body_com,
-        body_inv_mass,
-        body_inv_inertia,
-        tangent0,
-        tangent1,
-        response0_normal,
-        response1_normal,
-        response0_tangent0,
-        response1_tangent0,
-        response0_tangent1,
-        response1_tangent1,
-        normal_support,
-        tangent_support,
-        contact_constants,
-    )
+    contact_constants[contact].compliance = compliance if effective_stiffness > 0.0 else -1.0
+    contact_constants[contact].damping_fraction = damping_fraction
+    contact_constants[contact].elastic_compliance = elastic_compliance
+    contact_constants[contact].damping_bidirectional = contact_damping_bidirectional
 
 
 @wp.func
@@ -941,31 +723,15 @@ def _project_sliding_friction(W00: float, W01: float, W11: float, c0: float, c1:
 @wp.func
 def _solve_constraint_contact_group(
     group: int,
+    dt: float,
     group_start: wp.array[wp.int32],
     group_end: wp.array[wp.int32],
     group_body0: wp.array[wp.int32],
     group_body1: wp.array[wp.int32],
-    contact_point0: wp.array[wp.vec3],
-    contact_point1: wp.array[wp.vec3],
-    contact_offset0: wp.array[wp.vec3],
-    contact_offset1: wp.array[wp.vec3],
-    contact_normal: wp.array[wp.vec3],
-    contact_margin0: wp.array[float],
-    contact_margin1: wp.array[float],
-    contact_material_mu: wp.array[float],
-    contact_tangent0: wp.array[wp.vec3],
-    contact_tangent1: wp.array[wp.vec3],
-    response0_normal: wp.array[wp.spatial_vector],
-    response1_normal: wp.array[wp.spatial_vector],
-    response0_tangent0: wp.array[wp.spatial_vector],
-    response1_tangent0: wp.array[wp.spatial_vector],
-    response0_tangent1: wp.array[wp.spatial_vector],
-    response1_tangent1: wp.array[wp.spatial_vector],
-    contact_normal_support: wp.array[float],
-    contact_tangent_support: wp.array[wp.mat22],
     contact_constants: wp.array[ContactConstants],
     body_com: wp.array[wp.vec3],
     body_inv_mass: wp.array[float],
+    body_inv_inertia: wp.array[wp.mat33],
     body_q: wp.array[wp.transform],
     contact_lambda: wp.array[wp.vec3],
 ):
@@ -976,9 +742,15 @@ def _solve_constraint_contact_group(
     Tangential force minimizes the local
     two-dimensional quadratic over the Coulomb disk using a bounded root solve.
 
-    The contacts form one serial chain through the two poses, so every contact
-    input is read before the dependent pose arithmetic, and endpoint data once
-    per manifold.
+    Each endpoint moves by a translation and a small turn about its center of
+    mass, accumulated over the rows and written to its pose once. Every row is
+    linearized where it is solved: its arms follow the accumulated turn to
+    first order, and the frames and world inverse inertias are those of the
+    poses on entry.
+
+    The contacts form one serial chain through the two endpoints, so each
+    contact is one packed record read before the dependent arithmetic, and
+    endpoint data is read once per manifold.
     """
     body0 = group_body0[group]
     body1 = group_body1[group]
@@ -988,100 +760,93 @@ def _solve_constraint_contact_group(
     dynamic1 = False
     com0 = wp.vec3(0.0)
     com1 = wp.vec3(0.0)
+    center0 = wp.vec3(0.0)
+    center1 = wp.vec3(0.0)
+    frame0 = wp.identity(n=3, dtype=float)
+    frame1 = wp.identity(n=3, dtype=float)
+    mobility0 = float(0.0)
+    mobility1 = float(0.0)
+    inertia0 = wp.mat33(0.0)
+    inertia1 = wp.mat33(0.0)
+    dt_sq = dt * dt
     if body0 >= 0:
         pose0 = body_q[body0]
-        dynamic0 = body_inv_mass[body0] > 0.0
         com0 = body_com[body0]
+        frame0 = wp.quat_to_matrix(wp.transform_get_rotation(pose0))
+        center0 = wp.transform_point(pose0, com0)
+        dynamic0 = body_inv_mass[body0] > 0.0
+        if dynamic0:
+            mobility0 = dt_sq * body_inv_mass[body0]
+            inertia0 = dt_sq * frame0 * body_inv_inertia[body0] * wp.transpose(frame0)
     if body1 >= 0:
         pose1 = body_q[body1]
-        dynamic1 = body_inv_mass[body1] > 0.0
         com1 = body_com[body1]
+        frame1 = wp.quat_to_matrix(wp.transform_get_rotation(pose1))
+        center1 = wp.transform_point(pose1, com1)
+        dynamic1 = body_inv_mass[body1] > 0.0
+        if dynamic1:
+            mobility1 = dt_sq * body_inv_mass[body1]
+            inertia1 = dt_sq * frame1 * body_inv_inertia[body1] * wp.transpose(frame1)
+    mobility = mobility0 + mobility1
+    center_offset = center1 - center0
+    translation0 = wp.vec3(0.0)
+    translation1 = wp.vec3(0.0)
+    turn0 = wp.vec3(0.0)
+    turn1 = wp.vec3(0.0)
 
     for contact in range(group_start[group], group_end[group]):
-        n = contact_normal[contact]
-        point0 = contact_point0[contact]
-        point1 = contact_point1[contact]
-        offset0 = contact_offset0[contact]
-        offset1 = contact_offset1[contact]
-        margin0 = contact_margin0[contact]
-        margin1 = contact_margin1[contact]
-        old_lambda = contact_lambda[contact]
         constants = contact_constants[contact]
-        response0_n = response0_normal[contact]
-        response1_n = response1_normal[contact]
-        normal_support = contact_normal_support[contact]
-        t0 = contact_tangent0[contact]
-        t1 = contact_tangent1[contact]
-        response0_t0 = response0_tangent0[contact]
-        response1_t0 = response1_tangent0[contact]
-        response0_t1 = response0_tangent1[contact]
-        response1_t1 = response1_tangent1[contact]
-        tangent_W = contact_tangent_support[contact]
-        mu = contact_material_mu[contact]
+        old_lambda = contact_lambda[contact]
+        n = constants.normal
+        mu = constants.friction
 
-        skeleton0 = wp.transform_point(pose0, point0) if body0 >= 0 else point0
-        skeleton1 = wp.transform_point(pose1, point1) if body1 >= 0 else point1
-        penetration = -contact_surface_separation(
-            skeleton0,
-            skeleton1,
-            n,
-            margin0,
-            margin1,
-        )
+        # A unit force along d on endpoint 1 and its reaction on endpoint 0 turn
+        # them by inertia * cross(arm, d), with opposite signs.
+        arm0 = frame0 * (constants.point0 - com0)
+        arm1 = frame1 * (constants.point1 - com1)
+        arm0 += wp.cross(turn0, arm0)
+        arm1 += wp.cross(turn1, arm1)
+        offset = center_offset + (translation1 - translation0)
+        penetration = constants.margin - wp.dot(n, offset + (arm1 - arm0))
+        lever0_n = wp.cross(arm0, n)
+        lever1_n = wp.cross(arm1, n)
+        spin0_n = inertia0 * lever0_n
+        spin1_n = inertia1 * lever1_n
+        normal_support = mobility + wp.dot(lever0_n, spin0_n) + wp.dot(lever1_n, spin1_n)
 
         old_normal = wp.max(wp.dot(old_lambda, n), 0.0)
         old_tangent = old_lambda - n * wp.dot(old_lambda, n)
         compliance = constants.compliance
         damping_fraction = constants.damping_fraction
 
-        normal_residual = penetration - damping_fraction * constants.previous_penetration - compliance * old_normal
-        x0_n = wp.spatial_top(response0_n)
-        w0_n = wp.spatial_bottom(response0_n)
-        x1_n = wp.spatial_top(response1_n)
-        w1_n = wp.spatial_bottom(response1_n)
-        new_normal = float(0.0)
-        denominator = normal_support + compliance
-        if denominator > 0.0 and compliance >= 0.0:
-            new_normal = wp.max(old_normal + normal_residual / denominator, 0.0)
-        if not constants.damping_bidirectional and damping_fraction > 0.0:
-            # Select the piecewise damper from the solved displacement. Testing
-            # only the current pose can choose the wrong branch across reversal.
-            solved_penetration = penetration - normal_support * (new_normal - old_normal)
-            if solved_penetration <= constants.previous_penetration:
-                elastic_compliance = constants.elastic_compliance
-                denominator = normal_support + elastic_compliance
-                new_normal = 0.0
-                if elastic_compliance >= 0.0 and denominator > 0.0:
-                    new_normal = wp.max(
-                        old_normal + (penetration - elastic_compliance * old_normal) / denominator,
-                        0.0,
-                    )
-        delta_normal = new_normal - old_normal
-
         # Evaluate the two tangential rows at the same linearization point as
         # the normal row, then apply their combined 3-DOF contact increment.
-        anchor0_local = point0 + offset0
-        anchor1_local = point1 + offset1
-        anchor0 = contact_surface_point(pose0, point0, offset0) if body0 >= 0 else anchor0_local
-        anchor1 = contact_surface_point(pose1, point1, offset1) if body1 >= 0 else anchor1_local
-        anchor0_prev = constants.anchor0_prev
-        anchor1_prev = constants.anchor1_prev
-        relative_motion = (anchor1 - anchor1_prev) - (anchor0 - anchor0_prev) + constants.surface_displacement
+        # They do not depend on the new normal force; only the friction limit does.
+        anchor_arm0 = frame0 * (constants.anchor0 - com0)
+        anchor_arm1 = frame1 * (constants.anchor1 - com1)
+        anchor_arm0 += wp.cross(turn0, anchor_arm0)
+        anchor_arm1 += wp.cross(turn1, anchor_arm1)
+        anchor0 = center0 + translation0 + anchor_arm0
+        anchor1 = center1 + translation1 + anchor_arm1
+        relative_motion = (
+            (anchor1 - constants.anchor1_prev) - (anchor0 - constants.anchor0_prev) + constants.surface_displacement
+        )
 
         slip = relative_motion - n * wp.dot(n, relative_motion)
         tangent_drive = -slip
 
-        x0_t0 = wp.spatial_top(response0_t0)
-        w0_t0 = wp.spatial_bottom(response0_t0)
-        x1_t0 = wp.spatial_top(response1_t0)
-        w1_t0 = wp.spatial_bottom(response1_t0)
-        x0_t1 = wp.spatial_top(response0_t1)
-        w0_t1 = wp.spatial_bottom(response0_t1)
-        x1_t1 = wp.spatial_top(response1_t1)
-        w1_t1 = wp.spatial_bottom(response1_t1)
-        W00 = tangent_W[0, 0]
-        W01 = tangent_W[0, 1]
-        W11 = tangent_W[1, 1]
+        t0, t1 = orthonormal_basis(n)
+        lever0_t0 = wp.cross(anchor_arm0, t0)
+        lever1_t0 = wp.cross(anchor_arm1, t0)
+        lever0_t1 = wp.cross(anchor_arm0, t1)
+        lever1_t1 = wp.cross(anchor_arm1, t1)
+        spin0_t0 = inertia0 * lever0_t0
+        spin1_t0 = inertia1 * lever1_t0
+        spin0_t1 = inertia0 * lever0_t1
+        spin1_t1 = inertia1 * lever1_t1
+        W00 = mobility + wp.dot(lever0_t0, spin0_t0) + wp.dot(lever1_t0, spin1_t0)
+        W11 = mobility + wp.dot(lever0_t1, spin0_t1) + wp.dot(lever1_t1, spin1_t1)
+        W01 = wp.dot(lever0_t0, spin0_t1) + wp.dot(lever1_t0, spin1_t1)
         determinant = W00 * W11 - W01 * W01
         support_product = W00 * W11
         candidate_tangent = wp.vec3(0.0)
@@ -1091,6 +856,29 @@ def _solve_constraint_contact_group(
             delta0 = (W11 * rhs0 - W01 * rhs1) / determinant
             delta1 = (W00 * rhs1 - W01 * rhs0) / determinant
             candidate_tangent = old_tangent + t0 * delta0 + t1 * delta1
+
+        normal_residual = penetration - damping_fraction * constants.previous_penetration - compliance * old_normal
+        denominator = normal_support + compliance
+        compliant_valid = denominator > 0.0 and compliance >= 0.0
+        new_normal = wp.where(compliant_valid, wp.max(old_normal + normal_residual / denominator, 0.0), 0.0)
+        # Select the piecewise damper from the solved displacement. Testing
+        # only the current pose can choose the wrong branch across reversal.
+        # Both candidates are evaluated; the selection matches the branches.
+        solved_penetration = penetration - normal_support * (new_normal - old_normal)
+        elastic_compliance = constants.elastic_compliance
+        elastic_denominator = normal_support + elastic_compliance
+        elastic_valid = elastic_compliance >= 0.0 and elastic_denominator > 0.0
+        elastic_normal = wp.where(
+            elastic_valid,
+            wp.max(old_normal + (penetration - elastic_compliance * old_normal) / elastic_denominator, 0.0),
+            0.0,
+        )
+        opening = not constants.damping_bidirectional and damping_fraction > 0.0
+        new_normal = wp.where(
+            opening and solved_penetration <= constants.previous_penetration, elastic_normal, new_normal
+        )
+        delta_normal = new_normal - old_normal
+
         friction_limit = mu * new_normal
         candidate_length = wp.length(candidate_tangent)
         if candidate_length > friction_limit:
@@ -1105,26 +893,17 @@ def _solve_constraint_contact_group(
         delta_tangent = candidate_tangent - old_tangent
         delta_t0 = wp.dot(delta_tangent, t0)
         delta_t1 = wp.dot(delta_tangent, t1)
-        pose0 = _apply_constraint_pose_increment(
-            dynamic0,
-            pose0,
-            x0_n * delta_normal + x0_t0 * delta_t0 + x0_t1 * delta_t1,
-            w0_n * delta_normal + w0_t0 * delta_t0 + w0_t1 * delta_t1,
-            com0,
-        )
-        pose1 = _apply_constraint_pose_increment(
-            dynamic1,
-            pose1,
-            x1_n * delta_normal + x1_t0 * delta_t0 + x1_t1 * delta_t1,
-            w1_n * delta_normal + w1_t0 * delta_t0 + w1_t1 * delta_t1,
-            com1,
-        )
+        impulse = n * delta_normal + t0 * delta_t0 + t1 * delta_t1
+        translation0 -= mobility0 * impulse
+        translation1 += mobility1 * impulse
+        turn0 -= spin0_n * delta_normal + spin0_t0 * delta_t0 + spin0_t1 * delta_t1
+        turn1 += spin1_n * delta_normal + spin1_t0 * delta_t0 + spin1_t1 * delta_t1
         contact_lambda[contact] = n * new_normal + candidate_tangent
 
     if dynamic0:
-        body_q[body0] = pose0
+        body_q[body0] = _apply_constraint_pose_increment(pose0, center0, translation0, turn0, com0)
     if dynamic1:
-        body_q[body1] = pose1
+        body_q[body1] = _apply_constraint_pose_increment(pose1, center1, translation1, turn1, com1)
 
 
 @wp.kernel(grid_stride=False)
@@ -1134,31 +913,15 @@ def solve_constraint_contact_color(
     color_counts: wp.array[wp.int32],
     color_offsets: wp.array[wp.int32],
     group_list: wp.array[wp.int32],
+    dt: float,
     group_start: wp.array[wp.int32],
     group_end: wp.array[wp.int32],
     group_body0: wp.array[wp.int32],
     group_body1: wp.array[wp.int32],
-    contact_point0: wp.array[wp.vec3],
-    contact_point1: wp.array[wp.vec3],
-    contact_offset0: wp.array[wp.vec3],
-    contact_offset1: wp.array[wp.vec3],
-    contact_normal: wp.array[wp.vec3],
-    contact_margin0: wp.array[float],
-    contact_margin1: wp.array[float],
-    contact_material_mu: wp.array[float],
-    contact_tangent0: wp.array[wp.vec3],
-    contact_tangent1: wp.array[wp.vec3],
-    response0_normal: wp.array[wp.spatial_vector],
-    response1_normal: wp.array[wp.spatial_vector],
-    response0_tangent0: wp.array[wp.spatial_vector],
-    response1_tangent0: wp.array[wp.spatial_vector],
-    response0_tangent1: wp.array[wp.spatial_vector],
-    response1_tangent1: wp.array[wp.spatial_vector],
-    contact_normal_support: wp.array[float],
-    contact_tangent_support: wp.array[wp.mat22],
     contact_constants: wp.array[ContactConstants],
     body_com: wp.array[wp.vec3],
     body_inv_mass: wp.array[float],
+    body_inv_inertia: wp.array[wp.mat33],
     body_q: wp.array[wp.transform],
     contact_lambda: wp.array[wp.vec3],
 ):
@@ -1169,31 +932,15 @@ def solve_constraint_contact_color(
         group = group_list[offset + slot]
         _solve_constraint_contact_group(
             group,
+            dt,
             group_start,
             group_end,
             group_body0,
             group_body1,
-            contact_point0,
-            contact_point1,
-            contact_offset0,
-            contact_offset1,
-            contact_normal,
-            contact_margin0,
-            contact_margin1,
-            contact_material_mu,
-            contact_tangent0,
-            contact_tangent1,
-            response0_normal,
-            response1_normal,
-            response0_tangent0,
-            response1_tangent0,
-            response0_tangent1,
-            response1_tangent1,
-            contact_normal_support,
-            contact_tangent_support,
             contact_constants,
             body_com,
             body_inv_mass,
+            body_inv_inertia,
             body_q,
             contact_lambda,
         )
@@ -1268,6 +1015,7 @@ def build_pair_overflow_waves(
 
 @wp.kernel
 def solve_constraint_contact_colors_fused(
+    sweeps: int,
     first_color: int,
     color_count: int,
     color_counts: wp.array[wp.int32],
@@ -1276,161 +1024,102 @@ def solve_constraint_contact_colors_fused(
     wave_offsets: wp.array[wp.int32],
     wave_groups: wp.array[wp.int32],
     group_list: wp.array[wp.int32],
+    dt: float,
     group_start: wp.array[wp.int32],
     group_end: wp.array[wp.int32],
     group_body0: wp.array[wp.int32],
     group_body1: wp.array[wp.int32],
-    contact_point0: wp.array[wp.vec3],
-    contact_point1: wp.array[wp.vec3],
-    contact_offset0: wp.array[wp.vec3],
-    contact_offset1: wp.array[wp.vec3],
-    contact_normal: wp.array[wp.vec3],
-    contact_margin0: wp.array[float],
-    contact_margin1: wp.array[float],
-    contact_material_mu: wp.array[float],
-    contact_tangent0: wp.array[wp.vec3],
-    contact_tangent1: wp.array[wp.vec3],
-    response0_normal: wp.array[wp.spatial_vector],
-    response1_normal: wp.array[wp.spatial_vector],
-    response0_tangent0: wp.array[wp.spatial_vector],
-    response1_tangent0: wp.array[wp.spatial_vector],
-    response0_tangent1: wp.array[wp.spatial_vector],
-    response1_tangent1: wp.array[wp.spatial_vector],
-    contact_normal_support: wp.array[float],
-    contact_tangent_support: wp.array[wp.mat22],
     contact_constants: wp.array[ContactConstants],
     body_com: wp.array[wp.vec3],
     body_inv_mass: wp.array[float],
+    body_inv_inertia: wp.array[wp.mat33],
     body_q: wp.array[wp.transform],
     contact_lambda: wp.array[wp.vec3],
 ):
-    """Solve exact colors and dependency-preserving overflow waves on one block."""
+    """Run ``sweeps`` passes over exact colors and dependency-preserving overflow waves on one block."""
     lane = wp.tid()
-    color = first_color
-    while color < color_count + wave_count[0]:
-        count = int(0)
-        offset = int(0)
-        slot = lane
-        stride = _FUSED_THREADS
-        if color >= color_count:
-            level = color - color_count
-            offset = wave_offsets[level]
-            count = wave_offsets[level + 1] - offset
-        else:
-            count = color_counts[color]
-            # The greedy palette is contiguous; skip empty colors, but not overflow.
-            if count == 0:
-                color = color_count
-                continue
-            offset = color_offsets[color]
-        while slot < count:
-            group = int(0)
+    # Overflow waves are built before this launch and stay fixed during it.
+    color_end = color_count + wave_count[0]
+    for _sweep in range(sweeps):
+        color = first_color
+        while color < color_end:
+            count = int(0)
+            offset = int(0)
+            slot = lane
+            stride = _FUSED_THREADS
             if color >= color_count:
-                group = wave_groups[offset + slot]
+                level = color - color_count
+                offset = wave_offsets[level]
+                count = wave_offsets[level + 1] - offset
             else:
-                group = group_list[offset + slot]
-            _solve_constraint_contact_group(
-                group,
-                group_start,
-                group_end,
-                group_body0,
-                group_body1,
-                contact_point0,
-                contact_point1,
-                contact_offset0,
-                contact_offset1,
-                contact_normal,
-                contact_margin0,
-                contact_margin1,
-                contact_material_mu,
-                contact_tangent0,
-                contact_tangent1,
-                response0_normal,
-                response1_normal,
-                response0_tangent0,
-                response1_tangent0,
-                response0_tangent1,
-                response1_tangent1,
-                contact_normal_support,
-                contact_tangent_support,
-                contact_constants,
-                body_com,
-                body_inv_mass,
-                body_q,
-                contact_lambda,
-            )
-            slot += stride
-        _sync_cuda_block()
-        color += 1
+                count = color_counts[color]
+                # The greedy palette is contiguous; skip empty colors, but not overflow.
+                if count == 0:
+                    color = color_count
+                    continue
+                offset = color_offsets[color]
+            while slot < count:
+                group = int(0)
+                if color >= color_count:
+                    group = wave_groups[offset + slot]
+                else:
+                    group = group_list[offset + slot]
+                _solve_constraint_contact_group(
+                    group,
+                    dt,
+                    group_start,
+                    group_end,
+                    group_body0,
+                    group_body1,
+                    contact_constants,
+                    body_com,
+                    body_inv_mass,
+                    body_inv_inertia,
+                    body_q,
+                    contact_lambda,
+                )
+                slot += stride
+            _sync_cuda_block()
+            color += 1
 
 
 @wp.kernel
 def solve_constraint_contacts_serial(
+    sweeps: int,
     group_capacity: int,
     group_color: wp.array[wp.int32],
+    dt: float,
     group_start: wp.array[wp.int32],
     group_end: wp.array[wp.int32],
     group_body0: wp.array[wp.int32],
     group_body1: wp.array[wp.int32],
-    contact_point0: wp.array[wp.vec3],
-    contact_point1: wp.array[wp.vec3],
-    contact_offset0: wp.array[wp.vec3],
-    contact_offset1: wp.array[wp.vec3],
-    contact_normal: wp.array[wp.vec3],
-    contact_margin0: wp.array[float],
-    contact_margin1: wp.array[float],
-    contact_material_mu: wp.array[float],
-    contact_tangent0: wp.array[wp.vec3],
-    contact_tangent1: wp.array[wp.vec3],
-    response0_normal: wp.array[wp.spatial_vector],
-    response1_normal: wp.array[wp.spatial_vector],
-    response0_tangent0: wp.array[wp.spatial_vector],
-    response1_tangent0: wp.array[wp.spatial_vector],
-    response0_tangent1: wp.array[wp.spatial_vector],
-    response1_tangent1: wp.array[wp.spatial_vector],
-    contact_normal_support: wp.array[float],
-    contact_tangent_support: wp.array[wp.mat22],
     contact_constants: wp.array[ContactConstants],
     body_com: wp.array[wp.vec3],
     body_inv_mass: wp.array[float],
+    body_inv_inertia: wp.array[wp.mat33],
     body_q: wp.array[wp.transform],
     contact_lambda: wp.array[wp.vec3],
 ):
-    """Solve all active groups in contact order on the CPU."""
+    """Run ``sweeps`` passes over all active groups in contact order on the CPU."""
     if wp.tid() != 0:
         return
-    for group in range(group_capacity):
-        if group_color[group] >= -1:
-            _solve_constraint_contact_group(
-                group,
-                group_start,
-                group_end,
-                group_body0,
-                group_body1,
-                contact_point0,
-                contact_point1,
-                contact_offset0,
-                contact_offset1,
-                contact_normal,
-                contact_margin0,
-                contact_margin1,
-                contact_material_mu,
-                contact_tangent0,
-                contact_tangent1,
-                response0_normal,
-                response1_normal,
-                response0_tangent0,
-                response1_tangent0,
-                response0_tangent1,
-                response1_tangent1,
-                contact_normal_support,
-                contact_tangent_support,
-                contact_constants,
-                body_com,
-                body_inv_mass,
-                body_q,
-                contact_lambda,
-            )
+    for _sweep in range(sweeps):
+        for group in range(group_capacity):
+            if group_color[group] >= -1:
+                _solve_constraint_contact_group(
+                    group,
+                    dt,
+                    group_start,
+                    group_end,
+                    group_body0,
+                    group_body1,
+                    contact_constants,
+                    body_com,
+                    body_inv_mass,
+                    body_inv_inertia,
+                    body_q,
+                    contact_lambda,
+                )
 
 
 class RigidPairContact:
@@ -1480,17 +1169,31 @@ class RigidPairContact:
         self.overflow_group_level = wp.zeros(capacity, dtype=wp.int32, device=self.device)
         self.overflow_wave_offsets = wp.zeros(capacity + 1, dtype=wp.int32, device=self.device)
         self.overflow_wave_groups = wp.zeros(capacity, dtype=wp.int32, device=self.device)
-        self.tangent0 = wp.zeros(capacity, dtype=wp.vec3, device=self.device)
-        self.tangent1 = wp.zeros(capacity, dtype=wp.vec3, device=self.device)
-        self.response0_normal = wp.zeros(capacity, dtype=wp.spatial_vector, device=self.device)
-        self.response1_normal = wp.zeros(capacity, dtype=wp.spatial_vector, device=self.device)
-        self.response0_tangent0 = wp.zeros(capacity, dtype=wp.spatial_vector, device=self.device)
-        self.response1_tangent0 = wp.zeros(capacity, dtype=wp.spatial_vector, device=self.device)
-        self.response0_tangent1 = wp.zeros(capacity, dtype=wp.spatial_vector, device=self.device)
-        self.response1_tangent1 = wp.zeros(capacity, dtype=wp.spatial_vector, device=self.device)
-        self.normal_support = wp.zeros(capacity, dtype=float, device=self.device)
-        self.tangent_support = wp.zeros(capacity, dtype=wp.mat22, device=self.device)
         self.constants = wp.zeros(capacity, dtype=ContactConstants, device=self.device)
+
+    def pack_geometry(self, contacts) -> None:
+        """Pack each contact's geometry for the solve; required whenever the contact set changes."""
+        capacity = contacts.rigid_contact_max
+        if capacity <= 0:
+            return
+        self.resize(capacity)
+        wp.launch(
+            kernel=pack_constraint_contact_geometry,
+            dim=capacity,
+            inputs=[
+                contacts.rigid_contact_count,
+                contacts.rigid_contact_point0,
+                contacts.rigid_contact_point1,
+                contacts.rigid_contact_offset0,
+                contacts.rigid_contact_offset1,
+                contacts.rigid_contact_normal,
+                contacts.rigid_contact_margin0,
+                contacts.rigid_contact_margin1,
+            ],
+            outputs=[self.constants],
+            device=self.device,
+            block_dim=_select_rigid_block_dim(capacity, self.device),
+        )
 
     def build(self, contacts) -> None:
         """Build body-pair manifolds and a deterministic conflict-free schedule."""
@@ -1668,112 +1371,10 @@ class RigidPairContact:
                 block_dim=1,
             )
 
-    def solve(
-        self,
-        body_q: wp.array,
-        body_q_prev: wp.array,
-        contacts,
-        dt: float,
-        contact_material_ke: wp.array,
-        contact_material_kd: wp.array,
-        contact_material_mu: wp.array,
-        contact_lambda: wp.array,
-        contact_compliant_alm: bool,
-        parallel_tail: bool | None = None,
-        refresh_constants: bool = True,
-        contact_damping_bidirectional: bool = False,
-    ) -> None:
-        """Apply one sweep; an optional enclosing graph branch selects the tail."""
-        capacity = contacts.rigid_contact_max
-        if capacity <= 0:
-            return
-        model = self.model
-        wp.launch(
-            kernel=prepare_constraint_contact_blocks,
-            dim=capacity,
-            inputs=[
-                dt,
-                refresh_constants,
-                int(contact_compliant_alm),
-                contact_damping_bidirectional,
-                body_q_prev,
-                contact_material_ke,
-                contact_material_kd,
-                contacts.rigid_contact_count,
-                contacts.rigid_contact_shape0,
-                contacts.rigid_contact_shape1,
-                contacts.rigid_contact_point0,
-                contacts.rigid_contact_point1,
-                contacts.rigid_contact_surface_velocity,
-                contacts.rigid_contact_offset0,
-                contacts.rigid_contact_offset1,
-                contacts.rigid_contact_normal,
-                contacts.rigid_contact_margin0,
-                contacts.rigid_contact_margin1,
-                model.shape_body,
-                body_q,
-                model.body_com,
-                self.body_inv_mass,
-                self.body_inv_inertia,
-            ],
-            outputs=[
-                self.tangent0,
-                self.tangent1,
-                self.response0_normal,
-                self.response1_normal,
-                self.response0_tangent0,
-                self.response1_tangent0,
-                self.response0_tangent1,
-                self.response1_tangent1,
-                self.normal_support,
-                self.tangent_support,
-                self.constants,
-            ],
-            device=self.device,
-            block_dim=_select_rigid_block_dim(capacity, self.device),
-        )
-
-        contact_inputs = [
-            self.group_start,
-            self.group_end,
-            self.group_body0,
-            self.group_body1,
-            contacts.rigid_contact_point0,
-            contacts.rigid_contact_point1,
-            contacts.rigid_contact_offset0,
-            contacts.rigid_contact_offset1,
-            contacts.rigid_contact_normal,
-            contacts.rigid_contact_margin0,
-            contacts.rigid_contact_margin1,
-            contact_material_mu,
-            self.tangent0,
-            self.tangent1,
-            self.response0_normal,
-            self.response1_normal,
-            self.response0_tangent0,
-            self.response1_tangent0,
-            self.response0_tangent1,
-            self.response1_tangent1,
-            self.normal_support,
-            self.tangent_support,
-            self.constants,
-            model.body_com,
-            self.body_inv_mass,
-        ]
-        # One exact color contains at most one group per pair-routed body.
-        launch_dim = max(1, min(capacity, max(self.pair_body_count, 128)))
-        block_dim = _select_rigid_block_dim(launch_dim, self.device)
+    def _direct_color_count(self) -> int:
+        """Return how many leading colors get their own launch on this device."""
         if not self.device.is_cuda:
-            wp.launch(
-                kernel=solve_constraint_contacts_serial,
-                dim=1,
-                inputs=[capacity, self.group_color, *contact_inputs],
-                outputs=[body_q, contact_lambda],
-                device=self.device,
-                block_dim=1,
-            )
-            return
-
+            return 0
         # An exact edge color contains at most one group per dynamic body, so
         # each color can be launched independently. Graph capture amortizes the
         # direct launches, while eager execution favors the one-block fused sweep
@@ -1784,9 +1385,85 @@ class RigidPairContact:
             if self.device.is_capturing
             else _EAGER_DIRECT_COLOR_MIN_BODIES_PER_SM
         )
-        direct_color_count = (
-            0 if self.pair_body_count <= min_bodies_per_sm * self.device.sm_count else _DIRECT_COLOR_COUNT
-        )
+        return 0 if self.pair_body_count <= min_bodies_per_sm * self.device.sm_count else _DIRECT_COLOR_COUNT
+
+    def sweeps_on_one_block(self) -> bool:
+        """Return whether one launch covers every color, so that it can also run every sweep."""
+        return self._direct_color_count() == 0
+
+    def solve(
+        self,
+        body_q: wp.array,
+        body_q_prev: wp.array,
+        contacts,
+        dt: float,
+        contact_material_ke: wp.array,
+        contact_material_kd: wp.array,
+        contact_material_mu: wp.array,
+        contact_lambda: wp.array,
+        parallel_tail: bool | None = None,
+        refresh_constants: bool = True,
+        contact_damping_bidirectional: bool = False,
+        sweeps: int = 1,
+    ) -> None:
+        """Apply ``sweeps`` sweeps; an optional enclosing graph branch selects the tail.
+
+        More than one sweep per call requires :meth:`sweeps_on_one_block`.
+        """
+        capacity = contacts.rigid_contact_max
+        if capacity <= 0:
+            return
+        model = self.model
+        if refresh_constants:
+            wp.launch(
+                kernel=prepare_constraint_contact_constants,
+                dim=capacity,
+                inputs=[
+                    dt,
+                    contact_damping_bidirectional,
+                    body_q_prev,
+                    contact_material_ke,
+                    contact_material_kd,
+                    contact_material_mu,
+                    contacts.rigid_contact_count,
+                    contacts.rigid_contact_shape0,
+                    contacts.rigid_contact_shape1,
+                    contacts.rigid_contact_surface_velocity,
+                    model.shape_body,
+                ],
+                outputs=[self.constants],
+                device=self.device,
+                block_dim=_select_rigid_block_dim(capacity, self.device),
+            )
+
+        contact_inputs = [
+            dt,
+            self.group_start,
+            self.group_end,
+            self.group_body0,
+            self.group_body1,
+            self.constants,
+            model.body_com,
+            self.body_inv_mass,
+            self.body_inv_inertia,
+        ]
+        # One exact color contains at most one group per pair-routed body.
+        launch_dim = max(1, min(capacity, max(self.pair_body_count, 128)))
+        block_dim = _select_rigid_block_dim(launch_dim, self.device)
+        if not self.device.is_cuda:
+            wp.launch(
+                kernel=solve_constraint_contacts_serial,
+                dim=1,
+                inputs=[sweeps, capacity, self.group_color, *contact_inputs],
+                outputs=[body_q, contact_lambda],
+                device=self.device,
+                block_dim=1,
+            )
+            return
+
+        direct_color_count = self._direct_color_count()
+        if sweeps != 1 and direct_color_count:
+            raise ValueError("Several sweeps per call require a one-block schedule.")
 
         def solve_direct(first: int, last: int) -> None:
             for color in range(first, last):
@@ -1813,6 +1490,7 @@ class RigidPairContact:
                 kernel=solve_constraint_contact_colors_fused,
                 dim=_FUSED_THREADS,
                 inputs=[
+                    sweeps,
                     first_color,
                     _COLOR_COUNT,
                     self.color_counts,

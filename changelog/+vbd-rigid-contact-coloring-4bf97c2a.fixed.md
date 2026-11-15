@@ -10,3 +10,6 @@ including for sub-epsilon tangential forces.
 Use the same non-attractive spring-damper law for compliant body and pair contacts,
 honoring the closing-only default and optional bidirectional damping, with a
 friction bound based on the total normal reaction.
+
+Include initially kinematic bodies in refined contact schedules after they become
+dynamic, including replay of a previously captured CUDA graph with contact refresh.

@@ -5405,8 +5405,9 @@ def init_body_body_contacts_alm(
         contact_penalty_k[i] = k_floor
 
 
-@wp.kernel
-def snapshot_body_body_contact_history(
+@wp.func
+def _snapshot_body_body_contact_history_row(
+    i: int,
     rigid_contact_count: wp.array[int],
     rigid_contact_normal: wp.array[wp.vec3],
     contact_lambda: wp.array[wp.vec3],
@@ -5425,7 +5426,6 @@ def snapshot_body_body_contact_history(
     ``history_frame`` on the device, so captured graphs replay it; restoring checks
     that the match indices refer to this set (:func:`_contact_history_slot`).
     """
-    i = wp.tid()
     if i == 0:
         history_frame[0] = contact_buffer_id
         history_frame[1] = contact_generation[0]
@@ -5435,6 +5435,36 @@ def snapshot_body_body_contact_history(
     prev_lambda[i] = contact_lambda[i]
     prev_penalty_k[i] = contact_penalty_k[i]
     prev_normal[i] = rigid_contact_normal[i]
+
+
+@wp.kernel
+def snapshot_body_body_contact_history(
+    rigid_contact_count: wp.array[int],
+    rigid_contact_normal: wp.array[wp.vec3],
+    contact_lambda: wp.array[wp.vec3],
+    contact_penalty_k: wp.array[float],
+    contact_generation: wp.array[wp.int32],
+    contact_buffer_id: int,
+    # Persistent outputs, in RigidContactHistory order
+    prev_lambda: wp.array[wp.vec3],
+    prev_penalty_k: wp.array[float],
+    prev_normal: wp.array[wp.vec3],
+    history_frame: wp.array[wp.int32],
+):
+    """Kernel form of :func:`_snapshot_body_body_contact_history_row`."""
+    _snapshot_body_body_contact_history_row(
+        wp.tid(),
+        rigid_contact_count,
+        rigid_contact_normal,
+        contact_lambda,
+        contact_penalty_k,
+        contact_generation,
+        contact_buffer_id,
+        prev_lambda,
+        prev_penalty_k,
+        prev_normal,
+        history_frame,
+    )
 
 
 @wp.kernel
@@ -8155,8 +8185,9 @@ def update_duals_body_particle_contacts(
 # -----------------------------
 # Post-iteration kernels (after all iterations)
 # -----------------------------
-@wp.kernel
-def update_body_velocity(
+@wp.func
+def _update_body_velocity_row(
+    tid: int,
     dt: float,
     body_q: wp.array[wp.transform],
     body_com: wp.array[wp.vec3],
@@ -8176,6 +8207,7 @@ def update_body_velocity(
     body_qd: wp.array[wp.spatial_vector],
     body_qd_mirror: wp.array[wp.spatial_vector],
     body_q_out: wp.array[wp.transform],
+    pose_rebaseline_mask: wp.array[wp.bool],
 ):
     """
     Update body velocities after the VBD iterations (world frame).
@@ -8217,8 +8249,14 @@ def update_body_velocity(
             next step's forward integrator sees the finalized velocity even when the
             caller's Python-level state swap is not recorded in a captured CUDA graph.
         body_q_out: Output body transforms (state_out), fused copy of body_q.
+        pose_rebaseline_mask: Per-world pose resets consumed during initialization.
     """
-    tid = wp.tid()
+
+    # Clear all world slots, including empty worlds, after initialization's readers.
+    if tid < pose_rebaseline_mask.shape[0]:
+        pose_rebaseline_mask[tid] = False
+    if tid >= body_q.shape[0]:
+        return
 
     # Read transforms
     pose = body_q[tid]
@@ -8269,6 +8307,134 @@ def update_body_velocity(
     body_q_prev[tid] = pose
 
     body_q_out[tid] = pose
+
+
+@wp.kernel
+def update_body_velocity(
+    dt: float,
+    body_q: wp.array[wp.transform],
+    body_com: wp.array[wp.vec3],
+    body_inertia_q: wp.array[wp.transform],
+    body_inertia_v: wp.array[wp.vec3],
+    body_position_roundoff: wp.array[wp.vec3],
+    body_inv_mass: wp.array[float],
+    body_uses_pair_contacts: wp.array[wp.int32],
+    body_contact_buffer_size: int,
+    body_contact_counts: wp.array[wp.int32],
+    body_contact_indices: wp.array[wp.int32],
+    contact_count: wp.array[wp.int32],
+    contact_shape0: wp.array[wp.int32],
+    shape_body: wp.array[wp.int32],
+    contact_lambda: wp.array[wp.vec3],
+    body_q_prev: wp.array[wp.transform],
+    body_qd: wp.array[wp.spatial_vector],
+    body_qd_mirror: wp.array[wp.spatial_vector],
+    body_q_out: wp.array[wp.transform],
+    pose_rebaseline_mask: wp.array[wp.bool],
+):
+    """Kernel form of :func:`_update_body_velocity_row`."""
+    _update_body_velocity_row(
+        wp.tid(),
+        dt,
+        body_q,
+        body_com,
+        body_inertia_q,
+        body_inertia_v,
+        body_position_roundoff,
+        body_inv_mass,
+        body_uses_pair_contacts,
+        body_contact_buffer_size,
+        body_contact_counts,
+        body_contact_indices,
+        contact_count,
+        contact_shape0,
+        shape_body,
+        contact_lambda,
+        body_q_prev,
+        body_qd,
+        body_qd_mirror,
+        body_q_out,
+        pose_rebaseline_mask,
+    )
+
+
+@wp.kernel
+def snapshot_history_and_update_body_velocity(
+    snapshot_dim: int,
+    snapshot_rigid_contact_count: wp.array[int],
+    snapshot_rigid_contact_normal: wp.array[wp.vec3],
+    snapshot_contact_lambda: wp.array[wp.vec3],
+    snapshot_contact_penalty_k: wp.array[float],
+    snapshot_contact_generation: wp.array[wp.int32],
+    snapshot_contact_buffer_id: int,
+    snapshot_prev_lambda: wp.array[wp.vec3],
+    snapshot_prev_penalty_k: wp.array[float],
+    snapshot_prev_normal: wp.array[wp.vec3],
+    snapshot_history_frame: wp.array[wp.int32],
+    dt: float,
+    body_q: wp.array[wp.transform],
+    body_com: wp.array[wp.vec3],
+    body_inertia_q: wp.array[wp.transform],
+    body_inertia_v: wp.array[wp.vec3],
+    body_position_roundoff: wp.array[wp.vec3],
+    body_inv_mass: wp.array[float],
+    body_uses_pair_contacts: wp.array[wp.int32],
+    body_contact_buffer_size: int,
+    body_contact_counts: wp.array[wp.int32],
+    body_contact_indices: wp.array[wp.int32],
+    contact_count: wp.array[wp.int32],
+    contact_shape0: wp.array[wp.int32],
+    shape_body: wp.array[wp.int32],
+    contact_lambda: wp.array[wp.vec3],
+    body_q_prev: wp.array[wp.transform],
+    body_qd: wp.array[wp.spatial_vector],
+    body_qd_mirror: wp.array[wp.spatial_vector],
+    body_q_out: wp.array[wp.transform],
+    pose_rebaseline_mask: wp.array[wp.bool],
+):
+    """Snapshot contact history and update body velocities in one launch.
+
+    Both read the final iterate and write disjoint arrays; threads below
+    ``snapshot_dim`` also run the snapshot of their contact row.
+    """
+    tid = wp.tid()
+    if tid < snapshot_dim:
+        _snapshot_body_body_contact_history_row(
+            tid,
+            snapshot_rigid_contact_count,
+            snapshot_rigid_contact_normal,
+            snapshot_contact_lambda,
+            snapshot_contact_penalty_k,
+            snapshot_contact_generation,
+            snapshot_contact_buffer_id,
+            snapshot_prev_lambda,
+            snapshot_prev_penalty_k,
+            snapshot_prev_normal,
+            snapshot_history_frame,
+        )
+    _update_body_velocity_row(
+        tid,
+        dt,
+        body_q,
+        body_com,
+        body_inertia_q,
+        body_inertia_v,
+        body_position_roundoff,
+        body_inv_mass,
+        body_uses_pair_contacts,
+        body_contact_buffer_size,
+        body_contact_counts,
+        body_contact_indices,
+        contact_count,
+        contact_shape0,
+        shape_body,
+        contact_lambda,
+        body_q_prev,
+        body_qd,
+        body_qd_mirror,
+        body_q_out,
+        pose_rebaseline_mask,
+    )
 
 
 @wp.kernel

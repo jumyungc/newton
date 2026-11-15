@@ -61,7 +61,13 @@ def test_sliding_friction_projection_matches_metric_disk(test, device):
     data = np.column_stack((a, b, d, length * np.cos(direction), length * np.sin(direction), radius)).astype(np.float32)
     # Small positive normal force must still produce a feasible friction force.
     stress = np.asarray(
-        [[1.0e-8, 0.0, 1.0e-8, 1.0, 1.0, 1.0e-10], [1.0e-5, 1.0e-6, 2.0e-5, 1.0e4, -1.0e4, 1.0e-10]], dtype=np.float32
+        [
+            [1.0e-8, 0.0, 1.0e-8, 1.0, 1.0, 1.0e-10],
+            [1.0e-5, 1.0e-6, 2.0e-5, 1.0e4, -1.0e4, 1.0e-10],
+            # A finite SPD metric must not overflow projection intermediates.
+            [1.0, 0.0, 1.0e-30, 0.5, 1.0e15, 1.0],
+        ],
+        dtype=np.float32,
     )
     data = np.concatenate((data, stress), axis=0)
     count = len(data)
@@ -97,8 +103,8 @@ def test_sliding_friction_projection_matches_metric_disk(test, device):
     )
     eigen_max = 0.5 * (a + d + np.hypot(a - d, 2.0 * b))
     eigen_min = (a * d - b * b) / eigen_max
-    # A 16-step bracket has width initial_upper / 2**16. Above the
-    # exact root, ||dx/deta|| <= radius / (lambda_min + eta).
+    # Allow the error of a 16-step bisection bracket (width initial_upper / 2**16;
+    # above the exact root, ||dx/deta|| <= radius / (lambda_min + eta)).
     rounding = 32.0 * np.finfo(np.float32).eps * eigen_max / eigen_min
     error_bound = initial_upper / (2**16 * (eigen_min + lower)) + rounding
     relative_error = np.linalg.norm(actual - expected, axis=1) / radius
@@ -138,6 +144,7 @@ def test_pair_preparation_refreshes_material_and_previous_pose(test, device):
         rigid_contact_margin1=wp.full(1, 0.1, dtype=float, device=device),
     )
     pair.build(contacts)
+    pair.pack_geometry(contacts)
     seed = wp.array([[0.02, 0.0, 0.09, 0.0, 0.0, 0.0, 1.0]], dtype=wp.transform, device=device)
     pose = wp.clone(seed)
     previous_pose = wp.clone(seed)
@@ -159,7 +166,6 @@ def test_pair_preparation_refreshes_material_and_previous_pose(test, device):
             damping,
             friction,
             multiplier,
-            True,
             contact_damping_bidirectional=True,
         )
         # Later sweeps reuse constants, but must still solve from the current pose.
@@ -174,7 +180,6 @@ def test_pair_preparation_refreshes_material_and_previous_pose(test, device):
             damping,
             friction,
             multiplier,
-            True,
             refresh_constants=False,
             contact_damping_bidirectional=True,
         )
@@ -185,6 +190,8 @@ def test_pair_preparation_refreshes_material_and_previous_pose(test, device):
         with wp.ScopedCapture(device=device) as capture:
             sweep()
         graph = capture.graph
+    # COM changes do not change body-local collision geometry, including on replay.
+    model.body_com.assign(np.asarray([[0.03, -0.02, 0.04]], dtype=np.float32))
     for ke, kd, previous_x, gap, surface_velocity, mu, mass_scale in [
         (1000.0, 0.0, 0.0, 0.01, (0.0, 0.0, 0.0), 1.0e6, 1.0),
         (2000.0, 10.0, 0.01, 0.004, (0.5, 0.0, 1.0), 1.0e6, 1.0),
@@ -611,7 +618,7 @@ def test_pair_primal_is_seeded_once_and_colors_reused(test, device):
     pair_build = solver._rigid_pair_contacts.build
 
     def record_iteration(*args, **kwargs):
-        include_pair_primal.append(kwargs["include_pair_primal"])
+        include_pair_primal.append((kwargs["include_pair_primal"], kwargs["pair_sweeps"]))
         return solve_iteration(*args, **kwargs)
 
     def record_pair_build(*args, **kwargs):
@@ -634,20 +641,64 @@ def test_pair_primal_is_seeded_once_and_colors_reused(test, device):
                 for call in launch.call_args_list
             )
         )
-    test.assertEqual(include_pair_primal, [True, False, False])
+    test.assertEqual(include_pair_primal, [(True, 3)])
     test.assertEqual(pair_build_count, 1)
 
     include_pair_primal.clear()
     solver.set_rigid_history_update(False)
     solver.step(state_out, state_in, model.control(), contacts, 1.0 / 120.0)
-    test.assertEqual(include_pair_primal, [True, False, False])
+    test.assertEqual(include_pair_primal, [(True, 3)])
     test.assertEqual(pair_build_count, 1)
 
     include_pair_primal.clear()
     pipeline.collide(state_in, contacts)
     solver.step(state_in, state_out, model.control(), contacts, 1.0 / 120.0)
-    test.assertEqual(include_pair_primal, [True, False, False])
+    test.assertEqual(include_pair_primal, [(True, 3)])
     test.assertEqual(pair_build_count, 2)
+
+
+def test_pair_sweeps_in_one_launch_match_separate_sweeps(test, device):
+    """Run every sweep of a one-block world in one launch without changing its result."""
+
+    def run(separate_sweeps):
+        builder = newton.ModelBuilder(gravity=(0.0, 0.0, -9.81))
+        cfg = newton.ModelBuilder.ShapeConfig(density=1000.0, ke=1.0e6, kd=1.0e2, mu=0.5)
+        for level in range(4):
+            xform = wp.transform(wp.vec3(0.03 * level, 0.0, 0.1 + 0.2 * level), wp.quat_identity())
+            builder.add_shape_box(builder.add_body(xform=xform), hx=0.1, hy=0.1, hz=0.1, cfg=cfg)
+        builder.add_ground_plane()
+        builder.color()
+        model = builder.finalize(device=device)
+        pipeline = _make_pipeline(model, 256)
+        contacts = pipeline.contacts()
+        solver = newton.solvers.SolverVBD(model, iterations=4, rigid_compliant_alm=True, rigid_contact_history=True)
+        pair = solver._rigid_pair_contacts
+        test.assertTrue(pair.sweeps_on_one_block())
+        if separate_sweeps:
+            pair.sweeps_on_one_block = lambda: False
+        state_in, state_out, control = model.state(), model.state(), model.control()
+        with patch.object(wp, "launch", wraps=wp.launch) as launch:
+            for step in range(6):
+                if step % 2 == 0:
+                    pipeline.collide(state_in, contacts)
+                else:
+                    solver.set_rigid_history_update(False)
+                solver.step(state_in, state_out, control, contacts, 1.0 / 240.0)
+                state_in, state_out = state_out, state_in
+        sweep_kernels = (
+            rigid_pair_contact.solve_constraint_contact_colors_fused,
+            rigid_pair_contact.solve_constraint_contacts_serial,
+        )
+        launches = sum(call.kwargs.get("kernel") in sweep_kernels for call in launch.call_args_list)
+        return launches, state_in.body_q.numpy(), solver.body_body_contact_lambda.numpy()
+
+    fused_launches, fused_q, fused_lambda = run(False)
+    separate_launches, separate_q, separate_lambda = run(True)
+    test.assertEqual(fused_launches, 6)
+    test.assertEqual(separate_launches, 24)
+    test.assertGreater(np.abs(fused_lambda).max(), 0.0)
+    np.testing.assert_array_equal(fused_q, separate_q)
+    np.testing.assert_array_equal(fused_lambda, separate_lambda)
 
 
 def _parallel_chain_snapshot(device):
@@ -1819,6 +1870,138 @@ def test_history_disabled_free_contacts_use_body_coloring(test, device):
                 np.testing.assert_array_equal(qd.view(np.uint8), expected_qd.view(np.uint8))
 
 
+def test_refined_body_schedule_tracks_kinematic_activation(test, device):
+    """Keep activated bodies in captured schedules and conserve applied impulse."""
+    dt = 1.0 / 240.0
+    steps = 4
+
+    def run(history, constructed_dynamic, all_kinematic):
+        builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+        root = builder.add_link(mass=1.0, inertia=wp.mat33(np.eye(3)), is_kinematic=True)
+        tip = builder.add_link(
+            xform=wp.transform(wp.vec3(1.0, 0.0, 0.0), wp.quat_identity()),
+            mass=1.0,
+            inertia=wp.mat33(np.eye(3)),
+            is_kinematic=all_kinematic,
+        )
+        free = builder.add_joint_free(root)
+        if all_kinematic:
+            # Kinematic bodies must be articulation roots, not joint children.
+            builder.add_articulation([free])
+            builder.add_articulation([builder.add_joint_free(tip)])
+        else:
+            fixed = builder.add_joint_fixed(
+                root, tip, parent_xform=wp.transform(wp.vec3(1.0, 0.0, 0.0), wp.quat_identity())
+            )
+            builder.add_articulation([free, fixed])
+        builder.color()
+        model = builder.finalize(device=device)
+        flags = model.body_flags.numpy().copy()
+        if constructed_dynamic:
+            flags[root] = int(newton.BodyFlags.DYNAMIC)
+            flags[tip] = int(newton.BodyFlags.DYNAMIC)
+            model.body_flags.assign(flags)
+        pipeline = newton.CollisionPipeline(model, rigid_contact_max=32, contact_matching=history, deterministic=True)
+        contacts = pipeline.contacts()
+        solver = newton.solvers.SolverVBD(
+            model,
+            iterations=40,
+            rigid_compliant_alm=True,
+            rigid_contact_history=history != "disabled",
+            rigid_contact_coloring="refined",
+            deterministic=wp.DeterministicMode.RUN_TO_RUN,
+        )
+        # The reference differs only in its construction-time eligibility.
+        flags[root] = int(newton.BodyFlags.KINEMATIC)
+        flags[tip] = int(newton.BodyFlags.KINEMATIC if all_kinematic else newton.BodyFlags.DYNAMIC)
+        model.body_flags.assign(flags)
+        state, out = model.state(), model.state()
+        control = model.control()
+
+        def step(refresh):
+            solver.notify_model_changed(newton.ModelFlags.BODY_PROPERTIES)
+            if refresh:
+                pipeline.collide(state, contacts)
+            solver.set_rigid_history_update(refresh)
+            solver.step(state, out, control, contacts, dt)
+            wp.copy(state.body_q, out.body_q)
+            wp.copy(state.body_qd, out.body_qd)
+
+        step(True)
+        step(False)
+        graphs = {}
+        if device.is_cuda:
+            for refresh in (True, False):
+                with wp.ScopedCapture(device=device) as capture:
+                    step(refresh)
+                graphs[refresh] = capture.graph
+
+        mass = model.body_mass.numpy()
+        records = []
+        for phase, dynamic in (("activate", True), ("deactivate", False), ("reactivate", True)):
+            flags[root] = int(newton.BodyFlags.DYNAMIC if dynamic else newton.BodyFlags.KINEMATIC)
+            flags[tip] = int(newton.BodyFlags.DYNAMIC)
+            model.body_flags.assign(flags)
+            if not dynamic:
+                velocity = state.body_qd.numpy().copy()
+                velocity[root] = 0.0
+                state.body_qd.assign(velocity)
+                out.body_qd.assign(velocity)
+            root_before = state.body_q.numpy()[root].copy()
+            momentum_before = float(np.sum(mass * state.body_qd.numpy()[:, 0]))
+            force = np.zeros((2, 6), dtype=np.float32)
+            force[root, 0] = 100.0 if dynamic else 0.0
+            state.body_f.assign(force)
+            # Solvability changes require one refresh before frozen-buffer reuse.
+            for index in range(steps):
+                refresh = index == 0
+                if graphs:
+                    wp.capture_launch(graphs[refresh])
+                else:
+                    step(refresh)
+            q, qd = state.body_q.numpy().copy(), state.body_qd.numpy().copy()
+            ends = solver._rigid_body_color_starts.numpy()
+            count = int(ends[solver._rigid_body_color_budget])
+            records.append(
+                {
+                    "phase": phase,
+                    "dynamic": dynamic,
+                    "q": q,
+                    "qd": qd,
+                    "impulse": float(np.sum(mass * qd[:, 0])) - momentum_before,
+                    "root_before": root_before,
+                    "ids": solver._rigid_body_ids_by_color.numpy()[:count].copy(),
+                    "colors": solver._rigid_body_colors.numpy().copy(),
+                    "inv_mass": solver.body_inv_mass_effective.numpy().copy(),
+                }
+            )
+        return records
+
+    # Empty contacts isolate schedule correctness; existing tests cover numeric history.
+    # One all-kinematic case covers initially empty schedules without duplicating the matrix.
+    cases = [("disabled", False), ("latest", False), ("sticky", False), ("disabled", True)]
+    for history, all_kinematic in cases:
+        with test.subTest(history=history, all_kinematic=all_kinematic):
+            observed = run(history, False, all_kinematic)
+            expected = run(history, True, all_kinematic)
+            for actual, reference in zip(observed, expected, strict=True):
+                with test.subTest(phase=actual["phase"]):
+                    for row in (actual, reference):
+                        test.assertTrue(np.isfinite(row["q"]).all() and np.isfinite(row["qd"]).all())
+                        if row["dynamic"]:
+                            test.assertAlmostEqual(row["impulse"], 100.0 * dt * steps, delta=1.0e-3)
+                            if not all_kinematic:
+                                test.assertNotEqual(row["colors"][0], row["colors"][1])
+                        else:
+                            np.testing.assert_array_equal(row["q"][0], row["root_before"])
+                            np.testing.assert_array_equal(row["qd"][0], np.zeros(6))
+                        dynamic_ids = np.array([0, 1] if row["dynamic"] else [1])
+                        np.testing.assert_array_equal(np.sort(row["ids"]), dynamic_ids)
+                        np.testing.assert_array_equal(np.flatnonzero(row["inv_mass"] > 0.0), dynamic_ids)
+                    np.testing.assert_array_equal(actual["q"], reference["q"])
+                    np.testing.assert_array_equal(actual["qd"], reference["qd"])
+
+
 def test_contact_color_growth_replays_every_body(test, device):
     """Solve newly required high colors on the first replay after graph growth."""
     builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
@@ -2566,6 +2749,12 @@ add_function_test(
 )
 add_function_test(
     TestVBDRigidPairContact,
+    "test_refined_body_schedule_tracks_kinematic_activation",
+    test_refined_body_schedule_tracks_kinematic_activation,
+    devices=devices,
+)
+add_function_test(
+    TestVBDRigidPairContact,
     "test_serial_pair_coloring_reuses_capacity_safely",
     test_serial_pair_coloring_reuses_capacity_safely,
     devices=devices,
@@ -2652,6 +2841,12 @@ add_function_test(
     TestVBDRigidPairContact,
     "test_pair_primal_is_seeded_once_and_colors_reused",
     test_pair_primal_is_seeded_once_and_colors_reused,
+    devices=devices,
+)
+add_function_test(
+    TestVBDRigidPairContact,
+    "test_pair_sweeps_in_one_launch_match_separate_sweeps",
+    test_pair_sweeps_in_one_launch_match_separate_sweeps,
     devices=devices,
 )
 add_function_test(
