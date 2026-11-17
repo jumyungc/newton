@@ -105,7 +105,7 @@ def create_accumulate_inactive_contact_metric(threads_per_body: int):
             C = -contact_surface_separation(x if self_is_a else y, y if self_is_a else x, n, margin0[row], margin1[row])
             lam = wp.dot(contact_lambda[row], n)
             shift = alpha * wp.dot(contact_C0[row], n)
-            k, lam_eff = _material_force_terms(contact_rho[row], contact_ke[row], lam, 1)
+            k, lam_eff = _material_force_terms(contact_rho[row], contact_ke[row], lam)
             # Mirror the existing compliant normal-force activation, including positive warm multipliers.
             if not ((C <= _SMALL_LENGTH_EPS and lam <= 0.0) or k * (C - shift) + lam_eff <= 0.0):
                 continue

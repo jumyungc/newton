@@ -99,8 +99,10 @@ def test_departure_and_capture(test, device):
     dt = 1.0 / 600.0
     expected = (1.0e5 * 0.01 - 9.81) / (1.0 / dt**2 + 1.0e5)
     poses = []
+    residual_histories = []
     for guard in (False, True):
         solver = newton.solvers.SolverVBD(model, iterations=4, rigid_contact_activation_guard=guard)
+        observables = solver.observables({solver.ObservableKind.SOLVER_RESIDUAL_HISTORY})
         if not guard:
             test.assertIsNone(solver._rigid_contact_trial_q)
             test.assertEqual(solver._contact_activation_kernels, ())
@@ -112,15 +114,20 @@ def test_departure_and_capture(test, device):
             state.body_qd.zero_()
             solver.reset(state)
 
-        def step(state=state, out=out, solver=solver, control=control):
+        def step(state=state, out=out, solver=solver, control=control, observables=observables):
             pipeline.collide(state, contacts)
-            solver.step(state, out, control, contacts, dt)
+            solver.step(state, out, control, contacts, dt, observables=observables)
 
         step()
         reset()
         step()
         eager = out.body_q.numpy().copy()
         poses.append(eager)
+        history = observables.solver_residual_history.numpy().copy()
+        test.assertTrue(np.all(np.isfinite(history)))
+        test.assertTrue(np.all(history >= 0.0))
+        test.assertGreater(float(history[0].max()), 0.0)
+        residual_histories.append(history)
         test.assertAlmostEqual(float(eager[body, 2] - model.body_q.numpy()[body, 2]), expected, delta=2.0e-7)
         if device.is_cuda:
             reset()
@@ -130,7 +137,11 @@ def test_departure_and_capture(test, device):
                 reset()
                 wp.capture_launch(capture.graph)
                 np.testing.assert_allclose(out.body_q.numpy(), eager, rtol=0.0, atol=2.0e-7)
+                np.testing.assert_allclose(
+                    observables.solver_residual_history.numpy(), history, rtol=1.0e-5, atol=1.0e-12
+                )
     np.testing.assert_allclose(poses[0], poses[1], rtol=0.0, atol=2.0e-7)
+    np.testing.assert_allclose(residual_histories[0], residual_histories[1], rtol=1.0e-5, atol=1.0e-12)
 
 
 def test_pair_rotations_and_offset_com(test, device):
@@ -216,9 +227,12 @@ class TestRigidContactActivation(unittest.TestCase):
         builder.add_body(mass=1.0, inertia=wp.mat33(np.eye(3)))
         builder.color()
         model = builder.finalize(device="cpu")
-        for kwargs in ({"rigid_compliant_alm": False}, {"integrate_with_external_rigid_solver": True}):
-            with self.assertRaisesRegex(ValueError, "requires compliant ALM and internal"):
-                newton.solvers.SolverVBD(model, rigid_contact_activation_guard=True, **kwargs)
+        with self.assertRaisesRegex(ValueError, "requires compliant ALM and internal"):
+            newton.solvers.SolverVBD(
+                model, rigid_contact_activation_guard=True, integrate_with_external_rigid_solver=True
+            )
+        with self.assertRaisesRegex(ValueError, "legacy AVBD.*removed"):
+            newton.solvers.SolverVBD(model, rigid_contact_activation_guard=True, rigid_compliant_alm=False)
 
 
 for test_name, test_function in (

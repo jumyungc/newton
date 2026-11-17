@@ -109,7 +109,6 @@ def _test_solver_mimic(test, device, solver_name):
                 solver = newton.solvers.SolverVBD(
                     model,
                     iterations=4,
-                    rigid_compliant_alm=True,
                 )
                 generalized = False
             else:
@@ -277,7 +276,7 @@ def test_vbd_mimic_load_balance(test, device):
         model.joint_q.assign([0.02, 0.02])
         newton.eval_fk(model, model.joint_q, model.joint_qd, model)
         state_in, state_out = model.state(), model.state()
-        solver = newton.solvers.SolverVBD(model, iterations=40, rigid_compliant_alm=True)
+        solver = newton.solvers.SolverVBD(model, iterations=40)
         force = np.zeros((2, 6), dtype=np.float32)
         force[1, 0] = 20.0
         for _ in range(360):
@@ -307,7 +306,7 @@ def test_vbd_mimic_reset_and_notification(test, device):
                 builder.end_world()
         builder.color()
         model = builder.finalize(device=device)
-        solver = newton.solvers.SolverVBD(model, rigid_compliant_alm=True)
+        solver = newton.solvers.SolverVBD(model)
         state = model.state()
         pose = state.body_q.numpy().copy()
         data = solver._joint_mimics
@@ -495,7 +494,7 @@ def test_vbd_mimic_compound_d6_equilibrium(test, device):
         state_in.joint_q.assign([0.0, 2.0, 0.0, 1.0])
         state_in.joint_qd.zero_()
         newton.eval_fk(model, state_in.joint_q, state_in.joint_qd, state_in)
-        solver = newton.solvers.SolverVBD(model, iterations=4, rigid_compliant_alm=True)
+        solver = newton.solvers.SolverVBD(model, iterations=4)
         errors = wp.zeros(2, dtype=float, device=device)
         wp.launch(
             _eval_vbd_mimic_row_errors,

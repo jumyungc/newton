@@ -127,8 +127,6 @@ def _evaluate_damping(
         lam[row],
         0.5,
         0.01,
-        0,
-        1,
         0.1,
         wp.vec3(0.0),
         bidirectional,
@@ -201,13 +199,13 @@ def test_compliant_damping_modes(test, device):
                 wp.launch(
                     compute_rigid_contact_forces,
                     count,
-                    inputs=[0.1, *geometry, rho, rho, rho, kd, mu, rho, lam, points, 0.0, 0, 1, 0.01, bidirectional],
+                    inputs=[0.1, *geometry, rho, rho, kd, mu, rho, lam, points, 0.0, 0.01, bidirectional],
                     outputs=exported,
                 )
                 wp.launch(
                     update_duals_body_body_contacts,
                     count,
-                    inputs=[*geometry, 0.1, mu, points, 0.0, 0, 1, rho, kd, rho, rho, 0.0, bidirectional, rho, lam],
+                    inputs=[*geometry, 0.1, mu, points, 0.0, rho, kd, rho, rho, bidirectional, lam],
                 )
 
             def check(expected_force=expected_force, expected_dual=expected_dual, expected_metric=expected_metric):

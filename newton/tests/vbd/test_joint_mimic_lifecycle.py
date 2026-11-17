@@ -41,7 +41,6 @@ def test_mimic_reference_notify_recapture(test, device):
             return newton.solvers.SolverVBD(
                 model,
                 iterations=8,
-                rigid_compliant_alm=True,
                 rigid_contact_activation_guard=True,
                 deterministic=wp.DeterministicMode.RUN_TO_RUN,
             )

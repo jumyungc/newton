@@ -39,7 +39,7 @@ def _conditioned_solver(model, contacts, dt, **kwargs):
     solver = newton.solvers.SolverVBD(model, iterations=1, rigid_contact_history=False, **kwargs)
     # Use the owning prologue without moving the prescribed contact geometry.
     solver._refresh_rigid_contact_state(contacts, True)
-    solver._step_body_body_contact_frame(contacts, model.body_q, dt, 1.0, 1.0)
+    solver._step_body_body_contact_frame(contacts, model.body_q, dt, 1.0)
     return solver
 
 
@@ -130,15 +130,11 @@ def test_tangent_scale_preserves_loaded_coulomb_state(test, device):
                             solver.body_body_contact_material_mu,
                             solver.body_body_contact_C0,
                             solver.rigid_contact_alpha,
-                            solver.rigid_contact_hard,
-                            solver.rigid_compliant_alm,
                             solver.body_body_contact_material_ke,
                             solver.body_body_contact_material_kd,
                             solver.body_body_contact_tangent_rho,
                             solver.body_body_contact_normal_rho,
-                            solver.rigid_linear_beta,
                             solver.rigid_contact_damping_bidirectional,
-                            solver.body_body_contact_penalty_k,
                             solver.body_body_contact_lambda,
                         ],
                     )
@@ -156,15 +152,14 @@ def test_tangent_scale_validation(test, device):
         for scale in (0.0, 0.5, -1.0, float("nan"), float("inf"), -float("inf")):
             with test.subTest(scale=scale), test.assertRaisesRegex(ValueError, "rigid_contact_tangent_scale"):
                 newton.solvers.SolverVBD(model, rigid_contact_tangent_scale=scale)
-        for mode in ({"rigid_compliant_alm": False}, {"integrate_with_external_rigid_solver": True}):
-            with test.subTest(mode=mode), test.assertRaisesRegex(ValueError, "rigid_contact_tangent_scale"):
-                newton.solvers.SolverVBD(model, rigid_contact_tangent_scale=300.0, **mode)
-            # The neutral default remains valid for both existing solver modes.
-            if mode.get("rigid_compliant_alm") is False:
-                with test.assertWarnsRegex(newton.NewtonDeprecationWarning, "rigid_compliant_alm=False"):
-                    newton.solvers.SolverVBD(model, rigid_contact_tangent_scale=1.0, **mode)
-            else:
-                newton.solvers.SolverVBD(model, rigid_contact_tangent_scale=1.0, **mode)
+        with test.assertRaisesRegex(ValueError, "rigid_contact_tangent_scale"):
+            newton.solvers.SolverVBD(
+                model, rigid_contact_tangent_scale=300.0, integrate_with_external_rigid_solver=True
+            )
+        # The neutral default remains valid when an external solver owns the bodies.
+        newton.solvers.SolverVBD(model, rigid_contact_tangent_scale=1.0, integrate_with_external_rigid_solver=True)
+        with test.assertRaisesRegex(ValueError, "legacy AVBD.*removed"):
+            newton.solvers.SolverVBD(model, rigid_contact_tangent_scale=1.0, rigid_compliant_alm=False)
 
 
 class TestRigidContactTangentScale(unittest.TestCase):

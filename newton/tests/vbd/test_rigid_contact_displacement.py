@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 The Newton Developers
 # SPDX-License-Identifier: Apache-2.0
 
-"""A frozen contact's small friction force must not depend on world translation."""
+"""Rigid contact point motion: small slips survive world translation, and rolling creates no energy."""
 
 import unittest
 
@@ -9,11 +9,22 @@ import numpy as np
 import warp as wp
 
 import newton
+from newton._src.solvers.vbd.rigid_vbd_kernels import _body_rotation_increment
 from newton.tests.unittest_utils import add_function_test, get_test_devices
 
 
+@wp.kernel
+def _contact_rotation_increments(q: wp.array[wp.quat], q_prev: wp.array[wp.quat], rotation: wp.array[wp.vec3]):
+    """Evaluate the production contact rotation map for a small quaternion batch."""
+    i = wp.tid()
+    increment, _jacobian_t = _body_rotation_increment(
+        wp.transform(wp.vec3(0.0), q[i]), wp.transform(wp.vec3(0.0), q_prev[i])
+    )
+    rotation[i] = increment
+
+
 def test_small_rotation_contact_force_is_translation_invariant(test, device):
-    """Preserve a 2^-28 m tangential slip through both force-reporting paths."""
+    """Preserve small rotational slip and exact zero increments at nonidentity orientations."""
     radius = 2.0**-10
     angle = 2.0**-18
     penetration = 2.0**-10
@@ -29,7 +40,7 @@ def test_small_rotation_contact_force_is_translation_invariant(test, device):
         shape1 = builder.add_ground_plane(cfg=cfg)
         builder.color()
         model = builder.finalize()
-        solver = newton.solvers.SolverVBD(model, iterations=4, rigid_compliant_alm=True)
+        solver = newton.solvers.SolverVBD(model, iterations=4)
         contacts = newton.Contacts(1, 0, device=device)
         contacts.rigid_contact_count.fill_(1)
         contacts.rigid_contact_shape0.fill_(shape0)
@@ -79,6 +90,75 @@ def test_small_rotation_contact_force_is_translation_invariant(test, device):
         if len(reported) == 2:
             np.testing.assert_allclose(reported[1], reported[0], rtol=2.0e-5, atol=1.0e-10)
 
+        # An identity baseline hides cancellation in q * inverse(q_prev), especially under CUDA FMA.
+        # Exercise exact zero and a tiny increment at a generic baseline, including q versus -q.
+        baseline = np.array([1.0, 2.0, 3.0, 4.0])
+        baseline /= np.linalg.norm(baseline)
+        axis = np.array([2.0, -1.0, 3.0])
+        axis /= np.linalg.norm(axis)
+        dv = axis * np.sin(0.5e-6)
+        dw = np.cos(0.5e-6)
+        tiny = np.concatenate(
+            (dw * baseline[:3] + baseline[3] * dv + np.cross(dv, baseline[:3]), [dw * baseline[3] - dv @ baseline[:3]])
+        ).astype(np.float32)
+        baseline = baseline.astype(np.float32)
+        # Independent Hamilton product in float64, using the encoded inputs rather than the requested angle.
+        a, b = tiny.astype(np.float64), baseline.astype(np.float64)
+        expected_increment = 2.0 * (b[3] * a[:3] - a[3] * b[:3] - np.cross(a[:3], b[:3]))
+        rotations = wp.zeros(4, dtype=wp.vec3, device=device)
+        wp.launch(
+            _contact_rotation_increments,
+            dim=4,
+            inputs=[
+                wp.array([baseline, -baseline, tiny, -tiny], dtype=wp.quat, device=device),
+                wp.array([baseline] * 4, dtype=wp.quat, device=device),
+            ],
+            outputs=[rotations],
+            device=device,
+        )
+        increments = rotations.numpy()
+        np.testing.assert_array_equal(increments[:2], np.zeros((2, 3)))
+        np.testing.assert_allclose(increments[2:], np.tile(expected_increment, (2, 1)), rtol=5.0e-7, atol=1.0e-14)
+
+
+def test_rolling_cylinder_keeps_its_speed(test, device):
+    """Contact points on a curved surface must not feed energy into a rolling body."""
+    radius, half_height, speed, dt, steps = 0.1, 0.1, 1.0, 1.0 / 120.0, 30
+    with wp.ScopedDevice(device):
+        builder = newton.ModelBuilder(gravity=(0.0, 0.0, -9.81))
+        cfg = builder.ShapeConfig(density=0.0, mu=1.0, mu_torsional=0.0, mu_rolling=0.0)
+        builder.add_ground_plane(cfg=cfg)
+        transverse = (3.0 * radius**2 + (2.0 * half_height) ** 2) / 12.0
+        body = builder.add_body(
+            # The cylinder axis (body z) lies along world y, so the body rolls along x.
+            xform=wp.transform(
+                wp.vec3(0.0, 0.0, radius - 1.0e-4), wp.quat_from_axis_angle(wp.vec3(1.0, 0.0, 0.0), 0.5 * np.pi)
+            ),
+            mass=1.0,
+            inertia=wp.mat33(np.diag([transverse, transverse, 0.5 * radius**2])),
+            lock_inertia=True,
+        )
+        builder.add_shape_cylinder(body, radius=radius, half_height=half_height, cfg=cfg)
+        builder.color()
+        model = builder.finalize()
+        solver = newton.solvers.SolverVBD(model, iterations=10)
+        pipeline = newton.CollisionPipeline(model, broad_phase="nxn")
+        contacts = pipeline.contacts()
+        state, out = model.state(), model.state()
+        velocity = state.body_qd.numpy()
+        velocity[0, 0] = speed
+        velocity[0, 4] = speed / radius
+        state.body_qd.assign(velocity)
+        for _ in range(steps):
+            state.clear_forces()
+            pipeline.collide(state, contacts)
+            solver.step(state, out, None, contacts, dt)
+            state, out = out, state
+        # No rolling resistance is modelled and nothing drives the cylinder, so its speed is conserved.
+        # Carrying the witness points around the axis with a fixed normal opens the gap ahead of the
+        # contact and accelerates the roll by g * omega * dt / 1.5, which is +14 % over these steps.
+        test.assertAlmostEqual(float(state.body_qd.numpy()[0, 0]), speed, delta=0.03 * speed)
+
 
 class TestRigidContactDisplacement(unittest.TestCase):
     pass
@@ -88,6 +168,14 @@ add_function_test(
     TestRigidContactDisplacement,
     "test_small_rotation_contact_force_is_translation_invariant",
     test_small_rotation_contact_force_is_translation_invariant,
+    devices=get_test_devices(),
+)
+
+
+add_function_test(
+    TestRigidContactDisplacement,
+    "test_rolling_cylinder_keeps_its_speed",
+    test_rolling_cylinder_keeps_its_speed,
     devices=get_test_devices(),
 )
 

@@ -383,7 +383,6 @@ class Example:
             self.solver = newton.solvers.SolverVBD(
                 self.model,
                 iterations=self.sim_iterations,
-                rigid_compliant_alm=True,
                 rigid_contact_activation_guard=True,
                 rigid_contact_history=use_contact_history,
                 rigid_joint_linear_ke=1.0e6,
