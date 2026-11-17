@@ -314,6 +314,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
           Compliant ALM solves coupled finite-stiffness rows within each body sweep,
           using ``rigid_joint_linear_ke`` or ``rigid_joint_angular_ke`` according to
           the follower coordinate. The legacy path keeps its post-sweep projection.
+          A D6 with three angular axes is measured in Euler coordinates, so its mimic
+          rows are not defined at gimbal lock (middle angle of ``+/-90`` degrees on either joint).
 
         See :ref:`Joint feature support` for the full comparison across solvers.
 
@@ -616,12 +618,15 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                     release. Explicit ``False`` emits a
                     :class:`~newton.NewtonDeprecationWarning` for all models.
                     Use the default compliant ALM path instead.
-            rigid_contact_activation_guard: Experimental, constructor-only stabilization of inactive rigid contact rows
+            rigid_contact_activation_guard: Constructor-only stabilization of inactive rigid contact rows
                 crossed by the actual body Newton trial. Requires compliant ALM and internal
                 rigid integration. Per colour and local iteration with a rigid contact buffer,
                 adds one provisional body solve, one normal-metric gather and one pose copy.
                 Forces, materials and the number of dual updates are unchanged. Extra scratch
-                is one transform per body. Defaults to False; this is not a convergence guarantee.
+                is one transform per body. Defaults to ``False``; this is not a convergence guarantee.
+
+                .. experimental::
+                    ``rigid_contact_activation_guard`` may change or be removed without prior notice.
             rigid_avbd_alpha: C0 stabilization strength (``C_stab = C - alpha * C0``). Range: [0, 1].
                 Controls both joints and body-body contacts when neither class-specific
                 override (``rigid_avbd_joint_alpha`` / ``rigid_avbd_contact_alpha``) is set.
@@ -674,14 +679,17 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
 
                 .. deprecated:: 1.6
                     Use the default compliant ALM path and author finite contact stiffness.
-            rigid_contact_tangent_scale: Experimental numerical scale for the automatic compliant-ALM
-                tangential contact weight. Must be finite and at least one. Both endpoints and the
+            rigid_contact_tangent_scale: Numerical scale for the automatic compliant-ALM
+                tangential contact weight [dimensionless]. Must be finite and at least one. Both endpoints and the
                 dual update use the same scaled weight; material stiffness, friction coefficient and
                 Coulomb fixed points are unchanged. The existing simultaneous-body solve metric
                 remains in effect for dynamic bodies in the same color.
                 Larger values are not monotonically better and can slow convergence of other modes.
                 This runtime-only conditioning option requires internal rigid integration and ALM
                 when greater than one; it is not an authored material property or a USD attribute.
+
+                .. experimental::
+                    ``rigid_contact_tangent_scale`` may change or be removed without prior notice.
             rigid_contact_history: Whether to persist body-body numeric contact state
                 across steps using ``Contacts.rigid_contact_match_index``. Compliant ALM
                 restores the normal and projected tangential multipliers for
@@ -1270,9 +1278,9 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 "joint_mimic_joint",
                 "joint_mimic_coeffs",
                 "body_com",
-                "body_colors",
             ):
                 setattr(self._joint_mimics, name, getattr(model, name))
+            self._joint_mimics.body_colors = self._body_colors
             self._joint_mimics.linear_ke = self.rigid_joint_linear_ke
             self._joint_mimics.angular_ke = self.rigid_joint_angular_ke
             self._joint_mimics.lambda_ = wp.zeros((model.joint_count, 6), dtype=float, device=self.device)
@@ -1513,7 +1521,13 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         # -------------------------------------------------------------
         # Rigid-only solver state (used when SolverVBD integrates bodies)
         # -------------------------------------------------------------
+        self._body_colors_host = np.full(model.body_count, -1, dtype=np.int32)
+        for color, group in enumerate(model.body_color_groups):
+            indices = group.numpy() if isinstance(group, wp.array) else np.asarray(group, dtype=np.int32)
+            self._body_colors_host[indices] = color
+        self._body_colors = None
         if self._integrates_rigid_bodies:
+            self._body_colors = wp.array(self._body_colors_host, dtype=wp.int32, device=self.device)
             # The first step's State establishes pose history; reset marks selected
             # worlds for a new baseline. Final slot: entities without a world.
             history_mask_size = model.world_count + 1
@@ -1801,9 +1815,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         mimic_ref = model.joint_mimic_joint.numpy()
         parents = model.joint_parent.numpy()
         children = model.joint_child.numpy()
-        colors = (
-            model.body_colors.numpy() if model.body_colors is not None else np.zeros(model.body_count, dtype=np.int32)
-        )
+        colors = self._body_colors_host
         num_colors = len(model.body_color_groups)
         by_color = [[] for _ in range(num_colors)]
         for follower, ref in enumerate(mimic_ref):
@@ -2832,9 +2844,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         """Build CSR adjacency for authored and possible dynamic bypass segments."""
         adjacency = TendonForceElementAdjacencyInfo()
         body_segments = [set() for _ in range(model.body_count)]
-        body_colors = np.full(model.body_count, -1, dtype=np.int32)
-        for color, group in enumerate(model.body_color_groups):
-            body_colors[group.numpy()] = color
+        body_colors = self._body_colors_host
 
         if model.tendon_segment_count > 0:
             guide_bodies = model.tendon_guide_body.numpy()
@@ -5057,7 +5067,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                         state_in.body_q,
                         model.body_com,
                         self.body_inv_mass_effective,
-                        model.body_colors,
+                        self._body_colors,
                         self.friction_epsilon,
                         self.rigid_contact_damping_bidirectional,
                         self.body_body_contact_penalty_k,
@@ -5193,7 +5203,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                         self._rigid_contact_trial_q,
                         model.body_com,
                         self.body_inv_mass_effective,
-                        model.body_colors,
+                        self._body_colors,
                         self.body_body_contact_normal_rho,
                         self.body_body_contact_material_ke,
                         self.body_body_contact_material_kd,

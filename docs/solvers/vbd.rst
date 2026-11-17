@@ -575,7 +575,9 @@ majorize frozen-gradient cross terms. Multipliers advance after the sweep and
 are cleared in reset-selected worlds. This replaces the compliant path's
 post-sweep pose projection; legacy contacts/joints keep that projection.
 A small mimic coordinate error does not certify force balance at a finite
-iteration budget. These rows do not add armature or effort-limit support.
+iteration budget. Three-angular-axis D6 mimic rows use Euler coordinates and
+are undefined at gimbal lock (:math:`\pm 90^\circ` middle angle). These rows do
+not add armature or effort-limit support.
 
 The deprecated legacy path (``rigid_compliant_alm=False``) replaces the
 finite-material rows with ramped penalties and hard or soft slots.

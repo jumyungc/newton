@@ -160,7 +160,11 @@ def test_tangent_scale_validation(test, device):
             with test.subTest(mode=mode), test.assertRaisesRegex(ValueError, "rigid_contact_tangent_scale"):
                 newton.solvers.SolverVBD(model, rigid_contact_tangent_scale=300.0, **mode)
             # The neutral default remains valid for both existing solver modes.
-            newton.solvers.SolverVBD(model, rigid_contact_tangent_scale=1.0, **mode)
+            if mode.get("rigid_compliant_alm") is False:
+                with test.assertWarnsRegex(newton.NewtonDeprecationWarning, "rigid_compliant_alm=False"):
+                    newton.solvers.SolverVBD(model, rigid_contact_tangent_scale=1.0, **mode)
+            else:
+                newton.solvers.SolverVBD(model, rigid_contact_tangent_scale=1.0, **mode)
 
 
 class TestRigidContactTangentScale(unittest.TestCase):

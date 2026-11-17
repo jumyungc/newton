@@ -40,7 +40,8 @@ key. Reduced hydroelastic pairs additionally prefer the same declared source
 class (normal-bin, voxel-bin, or anchor) when neither key matches exactly.
 This preserves coincident normal-bin and voxel-bin histories even when a
 moving face's fingerprint changes. A closer contact still wins even when
-its sub-key or source differs; other contact paths retain their tie behavior.
+its sub-key or source differs; other contact paths use only the same-key
+preference.
 
 One-to-one match via packed atomic_min
 --------------------------------------

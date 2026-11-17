@@ -11,8 +11,12 @@ The experimental VBD option uses compliant joint/contact rows and finite-stiffne
 mimic coupling. It does not implement the authored joint armature or effort limits;
 this example therefore compares task completion, not identical robot dynamics.
 VBD collapses fixed links, initializes its reference pose with forward kinematics,
-and refreshes collision every substep. Latest contact matching retains its
-numerical force estimates. Free objects are solved after the gripper; the
+and refreshes collision every substep. With ``--deterministic`` (the default),
+latest contact matching retains numerical force estimates across substeps;
+passing ``--no-deterministic`` disables contact matching and history, which
+lifts the scene-wide deterministic face limit. The cube task passes without
+them at larger world counts; the pen task needs them and is not reliable with
+``--no-deterministic``. Free objects are solved after the gripper; the
 experimental tangent-weight scale improves the narrow pen patch's friction
 convergence. Linear joint stiffness is increased to reduce hand sag while the
 default one-way contact damping is retained. Its opt-in contact activation guard adds
@@ -361,13 +365,14 @@ class Example:
         sdf_hydroelastic_config = HydroelasticSDF.Config(
             output_contact_surface=hasattr(viewer, "renderer"),  # Compile in if viewer supports it
         )
+        use_contact_history = self.solver_name == "vbd" and self.deterministic
         self.collision_pipeline = newton.CollisionPipeline(
             self.model,
             reduce_contacts=True,
             broad_phase="explicit",
             sdf_hydroelastic_config=sdf_hydroelastic_config,
             deterministic=self.deterministic,
-            contact_matching="latest" if self.solver_name == "vbd" else "disabled",
+            contact_matching="latest" if use_contact_history else "disabled",
         )
         self.contacts = self.collision_pipeline.contacts()
 
@@ -380,7 +385,7 @@ class Example:
                 iterations=self.sim_iterations,
                 rigid_compliant_alm=True,
                 rigid_contact_activation_guard=True,
-                rigid_contact_history=True,
+                rigid_contact_history=use_contact_history,
                 rigid_joint_linear_ke=1.0e6,
                 rigid_contact_tangent_scale=1000.0,
                 rigid_body_contact_buffer_size=4096,
@@ -674,7 +679,11 @@ class Example:
             default=True,
             help=(
                 "Make contact generation and ordering reproducible across runs on the same GPU. "
-                "Enabled by default to keep the pick-and-place sequence stable; performance cost depends on the scene."
+                "Enabled by default to keep the pick-and-place sequence stable; performance cost depends on the scene. "
+                "Deterministic mode caps hydroelastic faces at 2^20 scene-wide, "
+                "roughly 18 worlds (cube) or 37 worlds (pen). With --solver vbd, --no-deterministic also "
+                "disables contact matching and history: use it for the cube above that limit; "
+                "the pen task is not reliable without them."
             ),
         )
         parser.add_argument(

@@ -2732,8 +2732,8 @@ At exactly equal distance, matching prefers an identical full contact key.
 For reduced hydroelastic pairs, it next prefers the same normal-bin,
 voxel-bin, or anchor source, preserving coincident histories when face
 fingerprints change. This preference does not override a closer contact or
-the position and normal thresholds. Unreduced and other contact paths retain
-their existing tie behavior.
+the position and normal thresholds. Unreduced and other contact paths use only
+the identical-key preference.
 
 **Sticky mode**
 

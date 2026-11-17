@@ -527,9 +527,9 @@ class Example:
             action=argparse.BooleanOptionalAction,
             default=False,
             help=(
-                "Additionally make the solver bit-exact. Separate from --deterministic because "
-                "it instruments every atomic scatter in the solver and costs ~7x step time, "
-                "while contact ordering is what varies between runs."
+                "Additionally request run-to-run deterministic solver kernels. "
+                "Separate from deterministic contact generation and ordering; "
+                "performance cost depends on the scene and solver backend."
             ),
         )
         parser.add_argument(

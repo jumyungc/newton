@@ -10089,6 +10089,58 @@ add_function_test(
 )
 
 
+def test_post_finalize_body_color_groups_without_body_colors(test, device):
+    """Derive solver body colors from body_color_groups when Model.body_colors is None."""
+    with wp.ScopedDevice(device):
+        builder = newton.ModelBuilder(gravity=(0.0, 0.0, -9.81))
+        cfg = builder.ShapeConfig(density=0.0, ke=1.0e5, kd=10.0, mu=0.5, margin=0.0, gap=0.02)
+        joints = []
+        for z in (0.0, 0.195):
+            body = builder.add_link(
+                xform=wp.transform(wp.vec3(0.0, 0.0, z), wp.quat_identity()),
+                mass=1.0,
+                inertia=wp.mat33(np.eye(3) * 0.01),
+                lock_inertia=True,
+            )
+            builder.add_shape_sphere(body, radius=0.1, cfg=cfg)
+            joints.append(
+                builder.add_joint_prismatic(
+                    -1,
+                    body,
+                    axis=newton.Axis.Z,
+                    parent_xform=wp.transform(wp.vec3(0.0, 0.0, z), wp.quat_identity()),
+                )
+            )
+        builder.add_articulation(joints)
+        builder.set_joint_mimic(joints[1], joints[0], coeffs=(0.0, 1.0))
+        model = builder.finalize(device=device)
+        test.assertIsNone(model.body_colors)
+        model.body_color_groups = [wp.array([0, 1], dtype=wp.int32, device=device)]
+
+        pipeline = newton.CollisionPipeline(model, broad_phase="nxn")
+        contacts = pipeline.contacts()
+        state_in, state_out = model.state(), model.state()
+        pipeline.collide(state_in, contacts)
+        test.assertGreater(int(contacts.rigid_contact_count.numpy()[0]), 0)
+
+        solver = newton.solvers.SolverVBD(
+            model,
+            iterations=4,
+            rigid_compliant_alm=True,
+            rigid_contact_activation_guard=True,
+        )
+        solver.step(state_in, state_out, model.control(), contacts, 1.0 / 240.0)
+        test.assertTrue(np.all(np.isfinite(state_out.body_q.numpy())))
+
+
+add_function_test(
+    TestSolverVBD,
+    "test_post_finalize_body_color_groups_without_body_colors",
+    test_post_finalize_body_color_groups_without_body_colors,
+    devices=devices,
+)
+
+
 class TestVBDRigidContactHistoryProvenance(unittest.TestCase):
     pass
 
