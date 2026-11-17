@@ -229,7 +229,7 @@ def test_pair_preparation_refreshes_material_and_previous_pose(test, device):
 def test_pair_contacts_are_limited_to_free_body_systems(test, device):
     """Keep pair contacts exclusive to joint-free collision worlds."""
 
-    def make_solver(jointed, compliant=True, history=True, hard=None):
+    def make_solver(jointed, history=True):
         builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
         bodies = []
         for x in (0.0, 2.0):
@@ -243,9 +243,7 @@ def test_pair_contacts_are_limited_to_free_body_systems(test, device):
         return newton.solvers.SolverVBD(
             model,
             iterations=1,
-            rigid_compliant_alm=compliant,
             rigid_contact_history=history,
-            rigid_contact_hard=hard,
         )
 
     free = make_solver(jointed=False)
@@ -255,10 +253,6 @@ def test_pair_contacts_are_limited_to_free_body_systems(test, device):
     no_history = make_solver(jointed=False, history=False)
     test.assertIsNone(no_history._rigid_pair_contacts)
     test.assertFalse(no_history._pair_contacts_enabled_this_step)
-    for hard in (False, True):
-        legacy = make_solver(jointed=False, compliant=False, hard=hard)
-        test.assertIsNone(legacy._rigid_pair_contacts)
-        np.testing.assert_array_equal(legacy.body_uses_pair_contacts.numpy(), np.zeros(2, dtype=np.int32))
 
 
 def test_mixed_joint_and_free_bodies_share_per_body_world(test, device):
@@ -283,7 +277,6 @@ def test_mixed_joint_and_free_bodies_share_per_body_world(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=4,
-        rigid_compliant_alm=True,
         rigid_contact_history=True,
     )
     state_in = model.state()
@@ -324,7 +317,7 @@ def test_world_partition_keeps_pair_contacts_in_joint_free_worlds(test, device):
     model = builder.finalize(device=device)
     pipeline = _make_pipeline(model, 32)
     contacts = pipeline.contacts()
-    solver = newton.solvers.SolverVBD(model, iterations=1, rigid_compliant_alm=True, rigid_contact_history=True)
+    solver = newton.solvers.SolverVBD(model, iterations=1, rigid_contact_history=True)
     state_in = model.state()
     state_out = model.state()
 
@@ -348,8 +341,8 @@ def test_world_partition_keeps_pair_contacts_in_joint_free_worlds(test, device):
     test.assertTrue(np.isfinite(state_out.body_q.numpy()).all())
 
 
-def test_legacy_iteration_collision_keeps_complete_body_schedule(test, device):
-    """Keep every legacy body scheduled when collision geometry refreshes inside iterations."""
+def test_history_disabled_iteration_collision_keeps_complete_body_schedule(test, device):
+    """Keep every history-disabled body scheduled when collision geometry refreshes inside iterations."""
     builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
     cfg = newton.ModelBuilder.ShapeConfig(density=1000.0, ke=1.0e6, kd=1.0e3, mu=0.0)
 
@@ -381,8 +374,7 @@ def test_legacy_iteration_collision_keeps_complete_body_schedule(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=2,
-        rigid_compliant_alm=False,
-        rigid_contact_hard=True,
+        rigid_contact_history=False,
         rigid_contact_coloring="refined",
         collision_pipeline=pipeline,
         collision_frequency={slot: 1},
@@ -423,7 +415,6 @@ def test_per_body_contact_lists_are_sorted_without_pair_manager(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=1,
-        rigid_compliant_alm=False,
         rigid_body_contact_buffer_size=64,
     )
     test.assertIsNone(solver._rigid_pair_contacts)
@@ -450,7 +441,7 @@ def test_pair_warmstart_respects_normal_and_tangent_moment_arms(test, device):
     model = builder.finalize(device=device)
     pipeline = _make_pipeline(model, 16)
     contacts = pipeline.contacts()
-    solver = newton.solvers.SolverVBD(model, iterations=1, rigid_compliant_alm=True, rigid_contact_history=True)
+    solver = newton.solvers.SolverVBD(model, iterations=1, rigid_contact_history=True)
     state_in, state_out = model.state(), model.state()
     control = model.control()
     dt = 1.0 / 120.0
@@ -480,7 +471,7 @@ def test_pair_warmstart_respects_normal_and_tangent_moment_arms(test, device):
             solver._body_contact_scratch.fill_(float("nan"))
             wp.copy(state_in.body_q, q_seed)
             wp.copy(solver.body_body_contact_lambda, seed)
-            solver._solve_rigid_body_iteration(state_in, state_out, control, contacts, dt)
+            solver._solve_rigid_body_iteration(state_in, control, contacts, dt)
 
         primal()
         test.assertTrue(np.isfinite(solver._body_contact_scratch.numpy()).all())
@@ -606,7 +597,6 @@ def test_pair_primal_is_seeded_once_and_colors_reused(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=3,
-        rigid_compliant_alm=True,
         rigid_contact_history=True,
     )
     state_in = model.state()
@@ -671,7 +661,7 @@ def test_pair_sweeps_in_one_launch_match_separate_sweeps(test, device):
         model = builder.finalize(device=device)
         pipeline = _make_pipeline(model, 256)
         contacts = pipeline.contacts()
-        solver = newton.solvers.SolverVBD(model, iterations=4, rigid_compliant_alm=True, rigid_contact_history=True)
+        solver = newton.solvers.SolverVBD(model, iterations=4, rigid_contact_history=True)
         pair = solver._rigid_pair_contacts
         test.assertTrue(pair.sweeps_on_one_block())
         if separate_sweeps:
@@ -716,7 +706,6 @@ def _parallel_chain_snapshot(device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=1,
-        rigid_compliant_alm=True,
         rigid_contact_history=True,
     )
     state_in = model.state()
@@ -776,7 +765,6 @@ def _overflow_snapshot(device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=2,
-        rigid_compliant_alm=True,
         rigid_contact_history=True,
     )
     state_in = model.state()
@@ -838,7 +826,6 @@ def _make_jointed_contact_lattice(device, ny, nz):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=1,
-        rigid_compliant_alm=True,
         rigid_contact_history=False,
         rigid_body_contact_buffer_size=128,
         rigid_contact_coloring="auto",
@@ -971,7 +958,6 @@ def test_jointed_contact_refinement_overflow_is_complete(test, device):
             model,
             iterations=2,
             rigid_contact_history=False,
-            rigid_compliant_alm=True,
             rigid_contact_coloring="refined",
             rigid_body_contact_buffer_size=64,
         )
@@ -1741,7 +1727,6 @@ def test_rigid_determinism_survives_particle_module_reuse(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=2,
-        rigid_compliant_alm=True,
         rigid_contact_history=True,
         rigid_body_contact_buffer_size=128,
         deterministic=wp.DeterministicMode.RUN_TO_RUN,
@@ -1771,9 +1756,7 @@ def test_rigid_determinism_survives_particle_module_reuse(test, device):
     builder.add_particle(pos=wp.vec3(0.0, 0.0, 2.0), vel=wp.vec3(0.0), mass=1.0)
     builder.color()
     coupled_model = builder.finalize(device=device)
-    coupled = newton.solvers.SolverVBD(
-        coupled_model, iterations=1, rigid_compliant_alm=True, deterministic=wp.DeterministicMode.RUN_TO_RUN
-    )
+    coupled = newton.solvers.SolverVBD(coupled_model, iterations=1, deterministic=wp.DeterministicMode.RUN_TO_RUN)
     coupled.step(coupled_model.state(), coupled_model.state(), None, None, 1.0 / 600.0)
     test.assertEqual(wp.get_module_options(module=rigid_vbd_kernels)["deterministic"], wp.DeterministicMode.RUN_TO_RUN)
     restore()
@@ -1818,7 +1801,6 @@ def test_history_disabled_free_contacts_use_body_coloring(test, device):
             solver = newton.solvers.SolverVBD(
                 model,
                 iterations=2,
-                rigid_compliant_alm=True,
                 rigid_contact_history=False,
                 rigid_contact_coloring=policy,
                 deterministic=wp.DeterministicMode.RUN_TO_RUN,
@@ -1906,7 +1888,6 @@ def test_refined_body_schedule_tracks_kinematic_activation(test, device):
         solver = newton.solvers.SolverVBD(
             model,
             iterations=40,
-            rigid_compliant_alm=True,
             rigid_contact_history=history != "disabled",
             rigid_contact_coloring="refined",
             deterministic=wp.DeterministicMode.RUN_TO_RUN,
@@ -2019,7 +2000,6 @@ def test_contact_color_growth_replays_every_body(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=2,
-        rigid_compliant_alm=True,
         rigid_contact_history=False,
         rigid_contact_coloring="refined",
         deterministic=wp.DeterministicMode.RUN_TO_RUN,
@@ -2113,7 +2093,6 @@ def test_mixed_world_force_query_keeps_each_contact_law(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=1,
-        rigid_compliant_alm=True,
         rigid_contact_history=True,
         deterministic=wp.DeterministicMode.RUN_TO_RUN,
     )
@@ -2169,7 +2148,6 @@ def test_zero_compliant_contact_material_is_not_hard(test, device):
             solver = newton.solvers.SolverVBD(
                 model,
                 iterations=2,
-                rigid_compliant_alm=True,
                 rigid_contact_history=matching != "disabled",
                 deterministic=wp.DeterministicMode.RUN_TO_RUN,
             )
@@ -2191,13 +2169,12 @@ def test_body_contact_color_budget_is_bounded_and_joint_safe(test, device):
     model, pipeline, contacts, _ = _make_jointed_contact_lattice(device, ny=4, nz=2)
     for invalid in (0, -1, 33, 4.5, True):
         with test.assertRaisesRegex(ValueError, "rigid_body_contact_color_budget"):
-            newton.solvers.SolverVBD(model, rigid_compliant_alm=True, rigid_body_contact_color_budget=invalid)
+            newton.solvers.SolverVBD(model, rigid_body_contact_color_budget=invalid)
     for budget in (1, 4, 5, 7, 8, 17, 32):
         with test.subTest(budget=budget):
             solver = newton.solvers.SolverVBD(
                 model,
                 iterations=2,
-                rigid_compliant_alm=True,
                 rigid_contact_history=True,
                 rigid_contact_coloring="refined",
                 rigid_body_contact_buffer_size=64,
@@ -2295,12 +2272,10 @@ def test_joint_force_gather_matches_xpbd_wrenches(test, device):
     model = builder.finalize(device=device)
     test.assertFalse(
         newton.solvers.SolverVBD(
-            model, iterations=1, rigid_compliant_alm=True, deterministic=wp.DeterministicMode.NOT_GUARANTEED
+            model, iterations=1, deterministic=wp.DeterministicMode.NOT_GUARANTEED
         )._gather_joint_forces
     )
-    solver = newton.solvers.SolverVBD(
-        model, iterations=1, rigid_compliant_alm=True, deterministic=wp.DeterministicMode.RUN_TO_RUN
-    )
+    solver = newton.solvers.SolverVBD(model, iterations=1, deterministic=wp.DeterministicMode.RUN_TO_RUN)
     state = model.state()
     rng = np.random.default_rng(3)
     model.joint_q.assign(
@@ -2419,9 +2394,7 @@ def test_disjoint_joint_mimics_skip_ordered_reduction(test, device):
             builder.set_joint_mimic(joints[4], joints[3], coeffs=(0.0, 1.0))
         builder.color()
         model = builder.finalize(device=device)
-        solver = newton.solvers.SolverVBD(
-            model, iterations=1, rigid_compliant_alm=True, deterministic=wp.DeterministicMode.RUN_TO_RUN
-        )
+        solver = newton.solvers.SolverVBD(model, iterations=1, deterministic=wp.DeterministicMode.RUN_TO_RUN)
         expected = wp.DeterministicMode.RUN_TO_RUN if shared else wp.DeterministicMode.NOT_GUARANTEED
         test.assertEqual(
             wp.get_module_options(module=xpbd_kernels.solve_joint_mimics.module)["deterministic"], expected
@@ -2461,9 +2434,7 @@ def test_disjoint_joint_mimics_skip_ordered_reduction(test, device):
             return eager
 
         actual = replay(solver)
-        reference = newton.solvers.SolverVBD(
-            model, iterations=1, rigid_compliant_alm=True, deterministic=wp.DeterministicMode.RUN_TO_RUN
-        )
+        reference = newton.solvers.SolverVBD(model, iterations=1, deterministic=wp.DeterministicMode.RUN_TO_RUN)
         options = reference._module_options[xpbd_kernels.solve_joint_mimics.module]
         reference._set_module_options(
             options | {"deterministic": wp.DeterministicMode.RUN_TO_RUN},
@@ -2478,9 +2449,7 @@ def test_disjoint_joint_mimics_skip_ordered_reduction(test, device):
             wp.get_module_options(module=xpbd_kernels.solve_joint_mimics.module)["deterministic"], expected
         )
         if device.is_cuda:
-            strict = newton.solvers.SolverVBD(
-                model, iterations=1, rigid_compliant_alm=True, deterministic=wp.DeterministicMode.GPU_TO_GPU
-            )
+            strict = newton.solvers.SolverVBD(model, iterations=1, deterministic=wp.DeterministicMode.GPU_TO_GPU)
             for kernel in (xpbd_kernels.solve_joint_mimics, xpbd_kernels.apply_joint_mimic_deltas):
                 test.assertEqual(
                     wp.get_module_options(module=kernel.module)["deterministic"], wp.DeterministicMode.GPU_TO_GPU
@@ -2492,7 +2461,6 @@ def test_pair_sticky_warm_start_is_row_local(test, device):
     """Pair friction retains numeric history without changing per-body sticky rows in another world."""
     history = rigid_vbd_kernels.RigidContactHistory()
     history.lambda_ = wp.array([[0.4, 0.0, 1.0]] * 4, dtype=wp.vec3, device=device)
-    history.penalty_k = wp.full(4, 20.0, dtype=float, device=device)
     history.normal = wp.array([[0.0, 0.0, 1.0]] * 4, dtype=wp.vec3, device=device)
     shape_body = wp.array([-1, 0, 1, 2, 3], dtype=int, device=device)
     pair_bodies = wp.array([1, 1, 0, 0], dtype=int, device=device)
@@ -2506,8 +2474,6 @@ def test_pair_sticky_warm_start_is_row_local(test, device):
         wp.full(5, 100.0, dtype=float, device=device),
         wp.zeros(5, dtype=float, device=device),
         friction,
-        0,
-        1,
         0,  # sticky: body rows retain their material anchor, not lambda_t
         wp.array([0, 1, 2, 3, -1], dtype=int, device=device),
         wp.array([4], dtype=int, device=device),
@@ -2521,9 +2487,8 @@ def test_pair_sticky_warm_start_is_row_local(test, device):
         shape_body,
         None,
         pair_bodies,
-        10.0,
     ]
-    outputs = [wp.zeros(5, dtype=float, device=device), output]
+    outputs = [output]
     outputs += [wp.zeros(5, dtype=float, device=device) for _ in range(3)]
 
     def restore():
@@ -2603,7 +2568,6 @@ def test_pair_tail_dispatch_is_once_per_substep(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=3,
-        rigid_compliant_alm=True,
         rigid_contact_history=True,
         deterministic=wp.DeterministicMode.RUN_TO_RUN,
     )
@@ -2815,8 +2779,8 @@ add_function_test(
 )
 add_function_test(
     TestVBDRigidPairContact,
-    "test_legacy_iteration_collision_keeps_complete_body_schedule",
-    test_legacy_iteration_collision_keeps_complete_body_schedule,
+    "test_history_disabled_iteration_collision_keeps_complete_body_schedule",
+    test_history_disabled_iteration_collision_keeps_complete_body_schedule,
     devices=devices,
 )
 add_function_test(
@@ -2967,7 +2931,6 @@ def test_pair_sliding_incline_preserves_momentum(test, device):
                 solver = newton.solvers.SolverVBD(
                     model,
                     iterations=8,
-                    rigid_compliant_alm=True,
                     rigid_contact_history=True,
                     deterministic=wp.DeterministicMode.RUN_TO_RUN,
                 )
@@ -3266,7 +3229,6 @@ def test_tendon_contact_partition_preserves_authored_schedule(test, device):
                 solver = newton.solvers.SolverVBD(
                     model,
                     iterations=6,
-                    rigid_compliant_alm=True,
                     rigid_contact_history=history,
                     rigid_contact_coloring=policy,
                     deterministic=wp.DeterministicMode.RUN_TO_RUN,
@@ -3467,8 +3429,6 @@ def _eval_compliant_contact_damping_force(
         multiplier,
         0.5,
         0.01,
-        0,
-        1,
         dt,
         wp.vec3(0.0),
         bidirectional,
@@ -3563,7 +3523,6 @@ def test_compliant_contact_damping_route_consistency(test, device):
                 solver = newton.solvers.SolverVBD(
                     model,
                     iterations=80,
-                    rigid_compliant_alm=True,
                     rigid_contact_damping_bidirectional=bidirectional,
                     rigid_contact_history=history != "disabled",
                     rigid_contact_coloring="refined",
