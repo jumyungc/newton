@@ -43,7 +43,7 @@ from ..solver import SolverBase
 from ..tendon_kernels import solve_tendon_material, update_tendon_attachments
 from ..tendon_state import TendonStateMixin
 from ..xpbd import kernels as xpbd_kernels
-from ..xpbd.kernels import apply_joint_forces, project_joint_mimics
+from ..xpbd.kernels import apply_joint_forces
 from . import particle_vbd_kernels, rigid_vbd_kernels, vbd_coupling_kernels
 from .joint_mimic_kernels import JointMimicData, accumulate_joint_mimics, update_joint_mimic_duals
 from .particle_vbd_kernels import (
@@ -1135,11 +1135,9 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         self._attachment_particle_body_lambda = wp.zeros(attachment_count, dtype=wp.vec3, device=self.device)
         self._attachment_particle_body_rho = wp.zeros(attachment_count, dtype=float, device=self.device)
 
-        self._has_joint_mimics = self._integrates_rigid_bodies and has_supported_joint_mimics(model, "SolverVBD")
-        self._mimic_body_deltas = None
         self._joint_mimics = None
         self._mimic_followers_by_color = ()
-        if self._has_joint_mimics:
+        if self._integrates_rigid_bodies and has_supported_joint_mimics(model, "SolverVBD"):
             self._set_module_options(options, module=accumulate_joint_mimics.module)
             self._joint_mimics = JointMimicData()
             for name in (
@@ -1162,10 +1160,6 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             self._joint_mimics.angular_ke = self.rigid_joint_angular_ke
             self._joint_mimics.lambda_ = wp.zeros((model.joint_count, 6), dtype=float, device=self.device)
             self._refresh_joint_mimic_color_groups()
-        elif self._has_joint_mimics:
-            for kernel in (xpbd_kernels.solve_joint_mimics, xpbd_kernels.apply_joint_mimic_deltas):
-                self._set_module_options(options, module=kernel.module)
-            self._mimic_body_deltas = wp.zeros_like(model.body_qd)
 
         # Initialize rigid penetration-free (DAT) truncation state
         self._init_rigid_penetration_free(model, rigid_soft_dat_use_interval_arithmetic)
@@ -4858,16 +4852,6 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 dim=model.joint_count,
                 inputs=[self._joint_mimics, state_in.body_q],
                 device=self.device,
-            )
-        elif self._has_joint_mimics:
-            project_joint_mimics(
-                model,
-                state_in.body_q,
-                state_in.body_qd,
-                self.body_inv_mass_effective,
-                self.body_inv_inertia_effective,
-                self._mimic_body_deltas,
-                dt,
             )
 
         if contacts is not None and contacts.rigid_contact_max > 0 and model.shape_count > 0:

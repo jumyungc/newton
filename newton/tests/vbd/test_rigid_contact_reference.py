@@ -11,7 +11,7 @@ import warp as wp
 from newton._src.solvers.vbd.rigid_vbd_kernels import (
     _body_step_kinematics,
     _compliant_contact_normal_response,
-    _first_order_point,
+    _first_order_displacement,
     compute_rigid_contact_forces,
     contact_surface_separation,
     update_duals_body_body_contacts,
@@ -36,13 +36,14 @@ def _reference(
     xb, cb0, cb, wb, _jb = _body_step_kinematics(b, q, prev, com)
     pa = wp.transform_point(xa, wp.vec3(0.0))
     pb = wp.transform_point(xb, wp.vec3(0.0))
-    an = _first_order_point(pa, ca0, ca, wa)
-    bn = _first_order_point(pb, cb0, cb, wb)
+    da = _first_order_displacement(pa, ca0, ca, wa)
+    db = _first_order_displacement(pb, cb0, cb, wb)
     n = normal[i]
     shift = alpha * wp.dot(n, c0[i])
-    current = -contact_surface_separation(an, bn, n, 0.1, 0.0) - shift
     # Evaluate the fixed geometry directly, not current + a cancelling displacement.
-    start = -contact_surface_separation(pa, pb, n, 0.1, 0.0) - shift
+    start_raw = -contact_surface_separation(pa, pb, n, 0.1, 0.0)
+    current = start_raw + wp.dot(n, da - db) - shift
+    start = start_raw - shift
     force, _elastic, _metric = _compliant_contact_normal_response(
         current, start, 5.0e6, 5.0e3, 1.0e5, wp.dot(n, lam[i]), 1.0 / 1920.0
     )

@@ -851,6 +851,14 @@ metric are given by ``_compliant_contact_normal_response``, rather than the
 undamped formulas above. The primal and dual friction disks use only the elastic
 part of that normal response, not the total damped normal force.
 
+At a finite iteration budget, the eliminated compression can differ from the
+geometric penetration. A cold row can therefore have no damping even while
+the geometric compression increases; the formula above holds at the dual
+fixed point. Strongly damped soft contacts can require more iterations to
+resolve loading accurately. Check trajectory and force convergence as the
+iteration count increases; a stable trajectory alone does not establish that
+the authored damping has been resolved.
+
 The optional constructor setting ``rigid_contact_activation_guard=True``
 stabilizes contact activation using the actual body Newton trial, including
 joint and other applied forces. It computes a provisional pose, adds normal

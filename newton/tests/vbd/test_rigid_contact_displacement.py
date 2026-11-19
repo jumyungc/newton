@@ -9,7 +9,14 @@ import numpy as np
 import warp as wp
 
 import newton
-from newton._src.solvers.vbd.rigid_vbd_kernels import _body_rotation_increment
+from newton._src.solvers.vbd.rigid_contact_activation import create_accumulate_inactive_contact_metric
+from newton._src.solvers.vbd.rigid_vbd_kernels import (
+    _body_rotation_increment,
+    compute_body_body_contact_forces,
+    compute_rigid_contact_forces,
+    create_accumulate_body_body_contacts_per_body,
+    update_duals_body_body_contacts,
+)
 from newton.tests.unittest_utils import add_function_test, get_test_devices
 
 
@@ -160,6 +167,181 @@ def test_rolling_cylinder_keeps_its_speed(test, device):
         test.assertAlmostEqual(float(state.body_qd.numpy()[0, 0]), speed, delta=0.03 * speed)
 
 
+def test_small_normal_rotation_is_translation_invariant(test, device):
+    """Preserve tiny normal motion in the solve, history, reports and activation guard."""
+    radius, dt, stiffness, penalty = 2.0**-10, 0.01, 1.0e6, 1.0e6
+    cases = [
+        (angle, height, seeded, body_a)
+        for angle in (0.0, 2.0**-18)
+        for height in (0.0, 1.0)
+        for seeded in (False, True)
+        for body_a in (False, True)
+    ]
+    count = len(cases)
+    quaternions = np.array([[0.0, np.sin(a / 2.0), 0.0, np.cos(a / 2.0)] for a, _, _, _ in cases], dtype=np.float32)
+    # Independent first-order map of the encoded quaternion: the point (r,0,0)
+    # moves down by r*2*q_y. This is below the float32 ULP at world height 1 m.
+    compression = radius * 2.0 * quaternions[:, 1].astype(np.float64)
+    sign = np.array([-1.0 if body_a else 1.0 for _, _, _, body_a in cases])
+    seeded = np.array([warm for _, _, warm, _ in cases])
+    with wp.ScopedDevice(device):
+        q = wp.array(
+            [wp.transform((0.0, 0.0, h), wp.quat(*rot)) for (_, h, _, _), rot in zip(cases, quaternions, strict=True)],
+            dtype=wp.transform,
+        )
+        previous = wp.array(
+            [wp.transform((0.0, 0.0, h), wp.quat_identity()) for _, h, _, _ in cases], dtype=wp.transform
+        )
+        vectors = wp.zeros(count, dtype=wp.vec3)
+        zeros = wp.zeros(count)
+        body_ids = wp.array(np.arange(count), dtype=int)
+        colors = wp.zeros(count, dtype=int)
+        inverse_mass = wp.ones(count)
+        rho = wp.full(count, penalty)
+        ke = wp.full(count, stiffness)
+        kd = wp.zeros(count)
+        lam = wp.zeros(count, dtype=wp.vec3)
+        normals = wp.array(np.column_stack((np.zeros((count, 2)), sign)), dtype=wp.vec3)
+        shape_body = wp.array(
+            [b for i, (_, _, _, a) in enumerate(cases) for b in ((i, -1) if a else (-1, i))], dtype=int
+        )
+        geometry = [
+            wp.array([count], dtype=int),
+            wp.array(np.arange(count) * 2, dtype=int),
+            wp.array(np.arange(count) * 2 + 1, dtype=int),
+            wp.array([(radius, 0.0, 0.0 if a else h) for _, h, _, a in cases], dtype=wp.vec3),
+            wp.array([(radius, 0.0, h if a else 0.0) for _, h, _, a in cases], dtype=wp.vec3),
+            vectors,
+            vectors,
+            vectors,
+            normals,
+            zeros,
+            zeros,
+        ]
+        material = [rho, ke, kd, zeros, zeros, lam, vectors, 0.0]
+        adjacency = [1, wp.ones(count, dtype=int), body_ids]
+        for damping, bidirectional in ((0.0, False), (1.0e4, False), (1.0e4, True)):
+            kd.fill_(damping)
+            dashpot = damping / dt
+            row_stiffness = stiffness if bidirectional else stiffness + dashpot
+            initial_lambda = seeded * row_stiffness * compression
+            lam.assign(np.column_stack((np.zeros((count, 2)), sign * initial_lambda)))
+            expected_dual = row_stiffness / (row_stiffness + penalty) * (penalty * compression + initial_lambda)
+            expected_force = expected_dual + (dashpot * compression if bidirectional else 0.0)
+            report_inputs = [dt, *geometry, shape_body, q, previous, vectors, *material, 0.01, bidirectional]
+            reported = [wp.empty(count, dtype=t) for t in (int, int, wp.vec3, wp.vec3, wp.vec3)]
+            wrench = wp.empty(count, dtype=wp.spatial_vector)
+            wp.launch(compute_rigid_contact_forces, count, inputs=report_inputs, outputs=reported)
+            wp.launch(compute_body_body_contact_forces, count, inputs=report_inputs, outputs=[wrench])
+            with test.subTest(damping=damping, bidirectional=bidirectional):
+                np.testing.assert_allclose(reported[-1].numpy()[:, 2] * sign, expected_force, rtol=2.0e-6, atol=1.0e-10)
+                np.testing.assert_allclose(-wrench.numpy()[:, 2] * sign, expected_force, rtol=2.0e-6, atol=1.0e-10)
+            for width in (4, 32):
+                gathered = [wp.zeros(count, dtype=t) for t in (wp.vec3, wp.vec3, wp.mat33, wp.mat33, wp.mat33)]
+                wp.launch(
+                    create_accumulate_body_body_contacts_per_body(width),
+                    count * width,
+                    inputs=[
+                        dt,
+                        body_ids,
+                        previous,
+                        q,
+                        vectors,
+                        inverse_mass,
+                        colors,
+                        0.01,
+                        bidirectional,
+                        *material,
+                        *geometry,
+                        shape_body,
+                        *adjacency,
+                    ],
+                    outputs=gathered,
+                )
+                with test.subTest(damping=damping, bidirectional=bidirectional, width=width):
+                    np.testing.assert_allclose(gathered[0].numpy()[:, 2], expected_force, rtol=2.0e-6, atol=1.0e-10)
+            wp.launch(
+                update_duals_body_body_contacts,
+                count,
+                inputs=[
+                    *geometry,
+                    shape_body,
+                    q,
+                    previous,
+                    vectors,
+                    dt,
+                    zeros,
+                    vectors,
+                    0.0,
+                    ke,
+                    kd,
+                    zeros,
+                    rho,
+                    bidirectional,
+                    lam,
+                ],
+            )
+            np.testing.assert_allclose(lam.numpy()[:, 2] * sign, expected_dual, rtol=2.0e-6, atol=1.0e-10)
+
+            # The zero-increment controls must not activate; the tiny trial must
+            # activate at either height without adding a physical force.
+            lam.zero_()
+            metric = penalty * row_stiffness / (penalty + row_stiffness)
+            if bidirectional:
+                metric += dashpot
+            for width in (4, 32):
+                guarded = [wp.zeros(count, dtype=wp.mat33) for _ in range(3)]
+                activated = wp.zeros(count, dtype=int)
+                guard_inputs = [
+                    dt,
+                    body_ids,
+                    previous,
+                    previous,
+                    q,
+                    vectors,
+                    inverse_mass,
+                    colors,
+                    rho,
+                    ke,
+                    kd,
+                    lam,
+                    vectors,
+                    0.0,
+                    bidirectional,
+                    *geometry[:5],
+                    normals,
+                    zeros,
+                    zeros,
+                    shape_body,
+                    *adjacency,
+                ]
+                wp.launch(
+                    create_accumulate_inactive_contact_metric(width),
+                    count * width,
+                    inputs=guard_inputs,
+                    outputs=[*guarded, activated],
+                )
+                np.testing.assert_array_equal(activated.numpy(), compression > 0.0)
+                np.testing.assert_allclose(
+                    guarded[0].numpy()[:, 2, 2], (compression > 0.0) * metric, rtol=2.0e-6, atol=1.0e-6
+                )
+
+                # With the same tiny rotation already in the current iterate,
+                # its ordinary contact block must not receive another guard metric.
+                guard_inputs[3] = q
+                for output in (*guarded, activated):
+                    output.zero_()
+                wp.launch(
+                    create_accumulate_inactive_contact_metric(width),
+                    count * width,
+                    inputs=guard_inputs,
+                    outputs=[*guarded, activated],
+                )
+                with test.subTest(damping=damping, bidirectional=bidirectional, width=width, current_active=True):
+                    for output in (*guarded, activated):
+                        np.testing.assert_array_equal(output.numpy(), 0)
+
+
 class TestRigidContactDisplacement(unittest.TestCase):
     pass
 
@@ -168,6 +350,14 @@ add_function_test(
     TestRigidContactDisplacement,
     "test_small_rotation_contact_force_is_translation_invariant",
     test_small_rotation_contact_force_is_translation_invariant,
+    devices=get_test_devices(),
+)
+
+
+add_function_test(
+    TestRigidContactDisplacement,
+    "test_small_normal_rotation_is_translation_invariant",
+    test_small_normal_rotation_is_translation_invariant,
     devices=get_test_devices(),
 )
 

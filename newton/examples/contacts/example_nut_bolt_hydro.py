@@ -518,7 +518,7 @@ class Example:
             default=False,
             help=(
                 "Make contact generation and ordering reproducible across runs on the same GPU. "
-                "Costs a few percent of step time. Needs a world count small enough to keep the "
+                "The performance cost depends on the scene. Needs a world count small enough to keep the "
                 "hydroelastic face-contact buffer under the 2^20 deterministic contact-id limit."
             ),
         )

@@ -1452,24 +1452,35 @@ def _body_rotation_increment(X: wp.transform, X_prev: wp.transform):
 
 
 @wp.func
-def _first_order_point(point_prev: wp.vec3, com_prev: wp.vec3, com_now: wp.vec3, rotation: wp.vec3):
-    """Move a step-start body point by the body's first-order increment ``dc + omega x (x_prev - c_prev)``.
-
-    Linear in the COM translation and rotation vector, so its gradient with respect to ``rotation`` uses the
-    step-start lever ``x_prev - c_prev``. The solver's angular update additionally needs ``J^T`` from
-    ``_body_rotation_increment``. Equal to ``x_prev`` at the step start.
-    """
-    return point_prev + (com_now - com_prev) + wp.cross(rotation, point_prev - com_prev)
-
-
-@wp.func
 def _first_order_displacement(point_prev: wp.vec3, com_prev: wp.vec3, com_now: wp.vec3, rotation: wp.vec3):
     """Return a point's first-order displacement without rounding it through a world position.
 
-    Algebraically ``_first_order_point(...) - point_prev``. Keeping the increment
-    separate preserves small tangential slip, particularly across narrow patches.
+    Linear in the COM translation and rotation vector, so its gradient uses the
+    step-start lever ``point_prev - com_prev``. The angular update additionally
+    needs ``J^T`` from ``_body_rotation_increment``. Keeping the increment separate
+    preserves small motion, particularly across narrow patches.
     """
     return (com_now - com_prev) + wp.cross(rotation, point_prev - com_prev)
+
+
+@wp.func
+def _first_order_contact_penetration(
+    point_a_prev: wp.vec3,
+    point_b_prev: wp.vec3,
+    displacement_a: wp.vec3,
+    displacement_b: wp.vec3,
+    normal: wp.vec3,
+    margin_a: float,
+    margin_b: float,
+):
+    """Return current penetration, step-start penetration and their direct increment.
+
+    Add the relative increment to the step-start gap instead of reconstructing
+    world points, which can round small normal motion away before subtraction.
+    """
+    previous = -contact_surface_separation(point_a_prev, point_b_prev, normal, margin_a, margin_b)
+    increment = wp.dot(normal, displacement_a - displacement_b)
+    return previous + increment, previous, increment
 
 
 @wp.func
@@ -1515,10 +1526,7 @@ def _contact_lever_blocks(
 
 @wp.func
 def _rigid_contact_row_response(
-    x_s_a_prev: wp.vec3,
-    x_s_a_now: wp.vec3,
-    x_s_b_prev: wp.vec3,
-    x_s_b_now: wp.vec3,
+    normal_increment: float,
     relative_surface_displacement: wp.vec3,
     contact_surface_velocity: wp.vec3,
     contact_normal: wp.vec3,
@@ -1545,7 +1553,7 @@ def _rigid_contact_row_response(
     Normal damping acts on a closing gap only, or in both directions when
     ``contact_damping_bidirectional`` is set.
 
-    ``x_s`` are geometric (skeleton) points at the step start and after each body's first-order increment.
+    ``normal_increment`` is the increase in penetration from the geometric points' direct first-order motion.
     The surface-anchor displacement of B relative to A is supplied directly, preserving small slip without
     subtracting rounded absolute positions. Body A takes the reaction.
     """
@@ -1605,8 +1613,7 @@ def _rigid_contact_row_response(
     elif contact_kd > 0.0 and f_n > 0.0:
         # Preserve signed velocity damping in both directions when requested, including
         # its metric at zero velocity. Friction remains bounded by the elastic normal force.
-        v_rel_n = (x_s_b_now - x_s_b_prev - x_s_a_now + x_s_a_prev) / dt
-        v_dot_n = wp.dot(contact_normal, v_rel_n)
+        v_dot_n = -normal_increment / dt
         if contact_damping_bidirectional or v_dot_n < 0.0:
             f_damp = -contact_kd * v_dot_n
             apply_velocity_damping = True
@@ -1695,10 +1702,11 @@ def evaluate_rigid_contact_from_collision(
     x_c_a_prev = contact_surface_point(X_wa_prev, contact_point_a_local, contact_offset_a_local)
     x_c_b_prev = contact_surface_point(X_wb_prev, contact_point_b_local, contact_offset_b_local)
     f_n_vec, f_t_vec, K_n, K_t = _rigid_contact_row_response(
-        x_s_a_prev,
-        _first_order_point(x_s_a_prev, x_com_a_prev, x_com_a_now, rotation_a),
-        x_s_b_prev,
-        _first_order_point(x_s_b_prev, x_com_b_prev, x_com_b_now, rotation_b),
+        wp.dot(
+            contact_normal,
+            _first_order_displacement(x_s_a_prev, x_com_a_prev, x_com_a_now, rotation_a)
+            - _first_order_displacement(x_s_b_prev, x_com_b_prev, x_com_b_now, rotation_b),
+        ),
         _first_order_displacement(x_c_b_prev, x_com_b_prev, x_com_b_now, rotation_b)
         - _first_order_displacement(x_c_a_prev, x_com_a_prev, x_com_a_now, rotation_a),
         contact_surface_velocity,
@@ -4760,11 +4768,11 @@ def create_accumulate_body_body_contacts_per_body(threads_per_body: int = _NUM_C
             # for the radial extent, so adding the offset here would double-count it.
             x_s_a_prev = wp.transform_point(X_a_prev, cp0_local)
             x_s_b_prev = wp.transform_point(X_b_prev, cp1_local)
-            x_s_a_now = _first_order_point(x_s_a_prev, com_a_prev, com_a_now, rotation_a)
-            x_s_b_now = _first_order_point(x_s_b_prev, com_b_prev, com_b_now, rotation_b)
-            C_n = -contact_surface_separation(
-                x_s_a_now,
-                x_s_b_now,
+            C_n, previous_penetration, normal_increment = _first_order_contact_penetration(
+                x_s_a_prev,
+                x_s_b_prev,
+                _first_order_displacement(x_s_a_prev, com_a_prev, com_a_now, rotation_a),
+                _first_order_displacement(x_s_b_prev, com_b_prev, com_b_now, rotation_b),
                 contact_normal,
                 rigid_contact_margin0[contact_idx],
                 rigid_contact_margin1[contact_idx],
@@ -4798,27 +4806,13 @@ def create_accumulate_body_body_contacts_per_body(threads_per_body: int = _NUM_C
             if rigid_contact_surface_velocity:
                 surface_velocity = rigid_contact_surface_velocity[contact_idx]
 
-            previous_penetration = float(0.0)
-            if contact_kd > 0.0:
-                previous_penetration = (
-                    -contact_surface_separation(
-                        x_s_a_prev,
-                        x_s_b_prev,
-                        contact_normal,
-                        rigid_contact_margin0[contact_idx],
-                        rigid_contact_margin1[contact_idx],
-                    )
-                    - normal_shift
-                )
+            previous_penetration -= normal_shift
 
             # Friction uses the surface anchors.
             x_c_a_prev = contact_surface_point(X_a_prev, cp0_local, cp0_offset_local)
             x_c_b_prev = contact_surface_point(X_b_prev, cp1_local, cp1_offset_local)
             f_n_vec, f_t_vec, K_n, K_t = _rigid_contact_row_response(
-                x_s_a_prev,
-                x_s_a_now,
-                x_s_b_prev,
-                x_s_b_now,
+                normal_increment,
                 _first_order_displacement(x_c_b_prev, com_b_prev, com_b_now, rotation_b)
                 - _first_order_displacement(x_c_a_prev, com_a_prev, com_a_now, rotation_a),
                 surface_velocity,
@@ -4939,8 +4933,8 @@ def _evaluate_body_body_contact_slot(
     # for the radial extent, so adding the offset here would double-count it.
     X_0_prev, com_0_prev, com_0_now, rot_0, _jac_0 = _body_step_kinematics(b0, body_q, body_q_prev, body_com)
     X_1_prev, com_1_prev, com_1_now, rot_1, _jac_1 = _body_step_kinematics(b1, body_q, body_q_prev, body_com)
-    cp0_world = _first_order_point(wp.transform_point(X_0_prev, cp0_local), com_0_prev, com_0_now, rot_0)
-    cp1_world = _first_order_point(wp.transform_point(X_1_prev, cp1_local), com_1_prev, com_1_now, rot_1)
+    cp0_prev = wp.transform_point(X_0_prev, cp0_local)
+    cp1_prev = wp.transform_point(X_1_prev, cp1_local)
     point0_world = (
         wp.transform_point(body_q[b0], cp0_local + cp0_offset_local) if b0 >= 0 else cp0_local + cp0_offset_local
     )
@@ -4948,8 +4942,14 @@ def _evaluate_body_body_contact_slot(
         wp.transform_point(body_q[b1], cp1_local + cp1_offset_local) if b1 >= 0 else cp1_local + cp1_offset_local
     )
 
-    C_n = -contact_surface_separation(
-        cp0_world, cp1_world, contact_normal, rigid_contact_margin0[contact_idx], rigid_contact_margin1[contact_idx]
+    C_n, previous_penetration, _normal_increment = _first_order_contact_penetration(
+        cp0_prev,
+        cp1_prev,
+        _first_order_displacement(cp0_prev, com_0_prev, com_0_now, rot_0),
+        _first_order_displacement(cp1_prev, com_1_prev, com_1_now, rot_1),
+        contact_normal,
+        rigid_contact_margin0[contact_idx],
+        rigid_contact_margin1[contact_idx],
     )
 
     normal_solve_weight = contact_normal_rho[contact_idx]
@@ -4970,18 +4970,7 @@ def _evaluate_body_body_contact_slot(
 
     contact_kd = contact_material_kd[contact_idx]
     contact_mu = contact_material_mu[contact_idx]
-    previous_penetration = float(0.0)
-    if contact_kd > 0.0:
-        previous_penetration = (
-            -contact_surface_separation(
-                wp.transform_point(X_0_prev, cp0_local),
-                wp.transform_point(X_1_prev, cp1_local),
-                contact_normal,
-                rigid_contact_margin0[contact_idx],
-                rigid_contact_margin1[contact_idx],
-            )
-            - normal_shift
-        )
+    previous_penetration -= normal_shift
 
     surface_velocity = wp.vec3(0.0)
     if rigid_contact_surface_velocity:
@@ -6560,16 +6549,20 @@ def create_update_duals_body_body_contacts():
         X_1_prev, com_1_prev, com_1_now, rot_1, _jac_1 = _body_step_kinematics(body_id_1, body_q, body_q_prev, body_com)
         p0_prev = wp.transform_point(X_0_prev, cp0_local)
         p1_prev = wp.transform_point(X_1_prev, cp1_local)
-        p0_world = _first_order_point(p0_prev, com_0_prev, com_0_now, rot_0)
-        p1_world = _first_order_point(p1_prev, com_1_prev, com_1_now, rot_1)
         a0_prev = wp.transform_point(X_0_prev, anchor0_local)
         a1_prev = wp.transform_point(X_1_prev, anchor1_local)
         a0_displacement = _first_order_displacement(a0_prev, com_0_prev, com_0_now, rot_0)
         a1_displacement = _first_order_displacement(a1_prev, com_1_prev, com_1_now, rot_1)
 
         n = rigid_contact_normal[idx]
-        C_n_raw = -contact_surface_separation(
-            p0_world, p1_world, n, rigid_contact_margin0[idx], rigid_contact_margin1[idx]
+        C_n_raw, previous_penetration, _normal_increment = _first_order_contact_penetration(
+            p0_prev,
+            p1_prev,
+            _first_order_displacement(p0_prev, com_0_prev, com_0_now, rot_0),
+            _first_order_displacement(p1_prev, com_1_prev, com_1_now, rot_1),
+            n,
+            rigid_contact_margin0[idx],
+            rigid_contact_margin1[idx],
         )
 
         rho_n = contact_normal_rho[idx]
@@ -6594,10 +6587,7 @@ def create_update_duals_body_body_contacts():
         tangent_residual = tangential_disp
 
         if contact_material_kd[idx] > 0.0 and not contact_damping_bidirectional:
-            previous_penetration = (
-                -contact_surface_separation(p0_prev, p1_prev, n, rigid_contact_margin0[idx], rigid_contact_margin1[idx])
-                - normal_shift
-            )
+            previous_penetration -= normal_shift
             old_n = wp.dot(lam_vec, n)
             new_n, elastic_n, _metric = _compliant_contact_normal_response(
                 C_stab_n, previous_penetration, material_k, contact_material_kd[idx], rho_n, old_n, dt

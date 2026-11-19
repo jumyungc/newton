@@ -16,9 +16,9 @@ from .rigid_vbd_kernels import (
     _body_step_kinematics,
     _compliant_contact_normal_response,
     _contact_lever_blocks,
-    _first_order_point,
+    _first_order_contact_penetration,
+    _first_order_displacement,
     _material_force_terms,
-    contact_surface_separation,
 )
 
 
@@ -99,10 +99,18 @@ def create_accumulate_inactive_contact_metric(threads_per_body: int):
             )
             x_prev = wp.transform_point(X_prev, point0[row] if self_is_a else point1[row])
             y_prev = wp.transform_point(X_other_prev, point1[row] if self_is_a else point0[row])
-            x = _first_order_point(x_prev, com_prev, com_now, rotation)
-            y = _first_order_point(y_prev, com_other_prev, com_other, rotation_other)
+            dx = _first_order_displacement(x_prev, com_prev, com_now, rotation)
+            dy = _first_order_displacement(y_prev, com_other_prev, com_other, rotation_other)
             n = normal[row]
-            C = -contact_surface_separation(x if self_is_a else y, y if self_is_a else x, n, margin0[row], margin1[row])
+            C, Cp, _increment = _first_order_contact_penetration(
+                x_prev if self_is_a else y_prev,
+                y_prev if self_is_a else x_prev,
+                dx if self_is_a else dy,
+                dy if self_is_a else dx,
+                n,
+                margin0[row],
+                margin1[row],
+            )
             lam = wp.dot(contact_lambda[row], n)
             shift = alpha * wp.dot(contact_C0[row], n)
             k, lam_eff = _material_force_terms(contact_rho[row], contact_ke[row], lam)
@@ -115,16 +123,19 @@ def create_accumulate_inactive_contact_metric(threads_per_body: int):
             _X_other_trial, _cp_other, ct_other, rt_other, _Jt_other = _body_step_kinematics(
                 other, body_q_trial, body_q_prev, body_com
             )
-            xt = _first_order_point(x_prev, com_prev, com_trial, rotation_trial)
-            yt = _first_order_point(y_prev, com_other_prev, ct_other, rt_other)
-            Ct = -contact_surface_separation(
-                xt if self_is_a else yt, yt if self_is_a else xt, n, margin0[row], margin1[row]
+            dxt = _first_order_displacement(x_prev, com_prev, com_trial, rotation_trial)
+            dyt = _first_order_displacement(y_prev, com_other_prev, ct_other, rt_other)
+            Ct, _previous, _trial_increment = _first_order_contact_penetration(
+                x_prev if self_is_a else y_prev,
+                y_prev if self_is_a else x_prev,
+                dxt if self_is_a else dyt,
+                dyt if self_is_a else dxt,
+                n,
+                margin0[row],
+                margin1[row],
             )
             if (Ct <= _SMALL_LENGTH_EPS and lam <= 0.0) or k * (Ct - shift) + lam_eff <= 0.0:
                 continue
-            Cp = -contact_surface_separation(
-                x_prev if self_is_a else y_prev, y_prev if self_is_a else x_prev, n, margin0[row], margin1[row]
-            )
             force = k * (Ct - shift) + lam_eff
             metric = k
             if contact_damping_bidirectional:
