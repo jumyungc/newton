@@ -3494,6 +3494,8 @@ def refresh_joint_material_params(
 def forward_step_rigid_bodies(
     # Inputs
     dt: float,
+    adaptive_start: int,
+    step_dt_prev: wp.array[float],
     gravity: wp.array[wp.vec3],
     body_world: wp.array[wp.int32],
     pose_rebaseline_mask: wp.array[wp.bool],
@@ -3504,6 +3506,7 @@ def forward_step_rigid_bodies(
     body_inv_inertia: wp.array[wp.mat33],
     body_q: wp.array[wp.transform],
     body_qd: wp.array[wp.spatial_vector],
+    body_qd_prev: wp.array[wp.spatial_vector],
     body_q_prev: wp.array[wp.transform],
     body_inertia_q: wp.array[wp.transform],
 ):
@@ -3512,6 +3515,9 @@ def forward_step_rigid_bodies(
 
     Args:
         dt: Time step [s].
+        adaptive_start: Nonzero to project the previous realized linear acceleration onto the applied
+            acceleration for the starting position; zero starts at the inertial target. Rotation is unchanged.
+        step_dt_prev: Previous step's time step [s], one element; zero before the first step.
         gravity: Gravity vector array (world frame).
         body_world: World index for each body.
         pose_rebaseline_mask: Per-world flags for the ``body_q_prev`` rebaseline below.
@@ -3522,6 +3528,8 @@ def forward_step_rigid_bodies(
         body_inv_inertia: Inverse inertia tensors (local body frame).
         body_q: Body transforms (input: start-of-step pose, output: integrated pose).
         body_qd: Body velocities (input: start-of-step velocity, output: integrated velocity).
+        body_qd_prev: Velocity at the previous step's start (input), replaced by this step's start
+            velocity (output) [m/s, rad/s]. Updated whenever allocated, including steps without iterations.
         body_q_prev: Previous body transforms (output). Rebaselined to the current
             pre-step pose for worlds selected by ``pose_rebaseline_mask`` (first step
             after construction or reset); left unchanged otherwise.
@@ -3531,7 +3539,8 @@ def forward_step_rigid_bodies(
 
     world_idx = body_world[tid]
     q_current = body_q[tid]
-    if _world_selected(world_idx, pose_rebaseline_mask):
+    first_step = _world_selected(world_idx, pose_rebaseline_mask)
+    if first_step:
         # The constructor or reset() may precede state pose preparation.
         body_q_prev[tid] = q_current
 
@@ -3539,6 +3548,8 @@ def forward_step_rigid_bodies(
     inv_m = body_inv_mass[tid]
     if inv_m == 0.0:
         body_inertia_q[tid] = q_current
+        if body_qd_prev.shape[0] > 0:
+            body_qd_prev[tid] = body_qd[tid]
         return
 
     # Read body state (only for dynamic bodies)
@@ -3563,8 +3574,45 @@ def forward_step_rigid_bodies(
         dt,
     )
 
+    # The inertial target keeps gravity and applied wrenches. With adaptive initialization the sweeps
+    # start the center of mass between its carried position and its free-flight position: the applied
+    # linear acceleration keeps its direction and takes the previous realized acceleration's component
+    # along it, clamped between zero and the applied magnitude (particle VBD initialization, Chen et al.
+    # 2024). A stationary body supported against gravity starts at its current center-of-mass position.
+    # Steady free fall and the full rotational prediction retain their free-flight values.
+    q_start = q_new
+    if adaptive_start != 0:
+        dt_prev = step_dt_prev[0]
+        if not first_step and dt_prev > 0.0:
+            qd_prev = body_qd_prev[tid]
+            a_applied = world_g + wp.spatial_top(f_current) * inv_m
+            a_realized = (wp.spatial_top(qd_current) - wp.spatial_top(qd_prev)) / dt_prev
+            a_size = wp.length(a_applied)
+            a_start = wp.vec3(0.0)
+            a_kept = a_size
+            if a_size > 0.0:
+                a_direction = a_applied / a_size
+                a_kept = wp.clamp(wp.dot(a_realized, a_direction), 0.0, a_size)
+                a_start = a_kept * a_direction
+            # Keep the full angular prediction, including torque/gyroscopic balance.
+            if a_kept < a_size:
+                q_start, _qd_start = integrate_rigid_body(
+                    q_current,
+                    qd_current,
+                    wp.spatial_vector(wp.vec3(0.0), wp.spatial_bottom(f_current)),
+                    com_local,
+                    I_local,
+                    inv_m,
+                    inv_I,
+                    a_start,
+                    0.0,
+                    dt,
+                )
+    if body_qd_prev.shape[0] > 0:
+        body_qd_prev[tid] = qd_current
+
     # Update current transform, velocity, and set inertial target
-    body_q[tid] = q_new
+    body_q[tid] = q_start
     body_qd[tid] = qd_new
     body_inertia_q[tid] = q_new
 
@@ -6627,6 +6675,7 @@ def update_body_velocity(
     body_qd: wp.array[wp.spatial_vector],
     body_qd_mirror: wp.array[wp.spatial_vector],
     body_q_out: wp.array[wp.transform],
+    step_dt_prev: wp.array[float],
 ):
     """
     Update body velocities from position changes (world frame).
@@ -6682,6 +6731,10 @@ def update_body_velocity(
     body_q_prev[tid] = pose
 
     body_q_out[tid] = pose
+
+    # Adaptive initialization divides the next step's velocity change by this step's dt.
+    if tid == 0:
+        step_dt_prev[0] = dt
 
 
 @wp.kernel

@@ -19,7 +19,8 @@ them at larger world counts; the pen task needs them and is not reliable with
 ``--no-deterministic``. Free objects are solved after the gripper; the
 experimental tangent-weight scale improves the narrow pen patch's friction
 convergence. Linear joint stiffness is increased to reduce hand sag while the
-default one-way contact damping is retained. Its opt-in contact activation guard adds
+default one-way contact damping is retained. The experimental adaptive initialization
+reduces the pen's rotation in the grip. Its opt-in contact activation guard adds
 one provisional body solve per colour and local iteration. MuJoCo keeps the
 original setup. Equal iteration counts are not equal work or accuracy.
 
@@ -384,6 +385,7 @@ class Example:
                 self.model,
                 iterations=self.sim_iterations,
                 rigid_contact_activation_guard=True,
+                rigid_adaptive_initialization=True,
                 rigid_contact_history=use_contact_history,
                 rigid_joint_linear_ke=1.0e6,
                 rigid_contact_tangent_scale=1000.0,

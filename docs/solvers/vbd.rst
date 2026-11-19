@@ -830,6 +830,36 @@ Contact matching/history and an appropriate body solve order remain separate
 choices. Like the iteration count, this is numerical solver configuration,
 not an authored material property; it introduces no USD attribute.
 
+``rigid_adaptive_initialization`` is an experimental, constructor-only choice of
+the pose from which the rigid iterations start. By default every dynamic body
+starts a step at its free-flight pose, which is also its inertial target. A
+body that joints or contacts hold in place is then moved as if it were free and
+has to be brought back by the iterations; with a fixed iteration count the
+part that is not recovered accumulates as drift, for example an object that
+slowly rotates in a friction grip or a loaded joint that settles away from
+force balance. With the option enabled, the applied linear acceleration
+(gravity and applied force) keeps its direction for the starting pose. Its
+magnitude is the component of the previous step's realized acceleration along
+that direction, clamped between zero and the applied magnitude. This applies
+the adaptive initialization of particle VBD (Chen et al. 2024) to each rigid
+body's center of mass. The rotational prediction retains the full applied
+torque and gyroscopic motion. A stationary body supported against gravity
+starts with its current center-of-mass position, while steady free fall keeps
+the free-flight prediction. The first step after construction or reset starts
+as by default. The inertial target, forces and materials are unchanged. For a
+fixed contact set this changes the initial iterate, not the equations being
+solved; it does not guarantee the same nonlinear solution or contact trajectory.
+
+The option suits bodies that are held or move slowly at small time steps. It
+is not a general improvement: with large time steps and few iterations it
+slows jointed bodies that swing freely and delays the response of a jointed
+group to a newly applied load or to the removal of its support, because the
+applied acceleration it removes from the starting pose must then be rebuilt by
+the iterations. It does not adapt the angular starting motion or address drift
+driven solely by applied torque. It requires internal rigid integration and
+does not support coupled solvers that restart a step; that combination is
+rejected. It stores one spatial vector per body.
+
 When both contact bodies are dynamic and share a colour, their pose updates
 are simultaneous. The compliant path doubles only the normal and tangential
 positive-semidefinite contact solve blocks to majorize the omitted cross-body

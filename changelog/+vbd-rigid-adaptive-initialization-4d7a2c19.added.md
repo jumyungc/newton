@@ -1,0 +1,1 @@
+Add experimental `SolverVBD.rigid_adaptive_initialization` to adapt the initial center-of-mass positions of the rigid iterations, which can reduce drift in held-body tasks at a fixed iteration count. Rotational prediction and the default remain unchanged. The Panda hydroelastic example enables it.

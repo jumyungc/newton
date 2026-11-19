@@ -473,6 +473,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         # Rigid body - constraint formulation and stabilization
         rigid_compliant_alm: bool = _DEPRECATED_RIGID_COMPLIANT_ALM_UNSET,
         rigid_contact_activation_guard: bool = False,
+        rigid_adaptive_initialization: bool = False,
         rigid_avbd_alpha: float | None = None,  # Shared alpha override; None uses zero
         rigid_avbd_joint_alpha: float | None = None,  # Joint alpha override
         rigid_avbd_contact_alpha: float | None = None,  # Body-body contact alpha override
@@ -598,6 +599,27 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
 
                 .. experimental::
                     ``rigid_contact_activation_guard`` may change or be removed without prior notice.
+            rigid_adaptive_initialization: Constructor-only choice of the pose from which the rigid
+                iterations start each step. By default they start at the free-flight pose (current
+                velocity, gravity and applied wrench). When ``True``, the applied linear acceleration
+                (gravity and applied force) keeps its direction for the starting pose. Its magnitude is
+                the component of the previous step's realized acceleration along that direction, clamped
+                between zero and the applied magnitude. This applies particle VBD's adaptive initialization
+                to each rigid body's center of mass; the rotational prediction retains the full applied
+                torque and gyroscopic motion. A stationary body supported against gravity starts with its
+                current center-of-mass position, while steady free fall keeps the free-flight prediction.
+                The inertial target, forces and materials are
+                unchanged. For a fixed contact set this changes the initial iterate, not the equations
+                being solved; it does not guarantee the same nonlinear solution or contact trajectory.
+                It can reduce drift of held bodies. With large time steps and few iterations it slows
+                jointed bodies that swing freely and delays the response of a jointed group to a newly
+                applied load or to the removal of its support. It does not adapt angular starting motion
+                or address drift driven solely by applied torque. Requires internal rigid integration and
+                rejects coupled solvers that restart a step. Extra state is one spatial vector per body.
+                Defaults to ``False``.
+
+                .. experimental::
+                    ``rigid_adaptive_initialization`` may change or be removed without prior notice.
             rigid_avbd_alpha: C0 stabilization strength (``C_stab = C - alpha * C0``). Range: [0, 1].
                 Controls both joints and body-body contacts when neither class-specific
                 override (``rigid_avbd_joint_alpha`` / ``rigid_avbd_contact_alpha``) is set.
@@ -828,6 +850,9 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
 
         if rigid_contact_activation_guard and integrate_with_external_rigid_solver:
             raise ValueError("rigid_contact_activation_guard requires compliant ALM and internal rigid integration.")
+        if rigid_adaptive_initialization and integrate_with_external_rigid_solver:
+            raise ValueError("rigid_adaptive_initialization requires internal rigid integration.")
+        self.rigid_adaptive_initialization = bool(rigid_adaptive_initialization)
 
         if not np.isfinite(rigid_contact_tangent_scale) or rigid_contact_tangent_scale < 1.0:
             raise ValueError("rigid_contact_tangent_scale must be finite and at least one.")
@@ -1385,6 +1410,13 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             self.body_q_prev = wp.clone(model.body_q, device=self.device)
             self._coupling_body_q_prev_snapshot = wp.clone(model.body_q, device=self.device)
             self.body_inertia_q = wp.zeros_like(model.body_q, device=self.device)  # inertial target poses
+            # Previous step's length and start-of-step velocity, for adaptive initialization.
+            self._rigid_step_dt_prev = wp.zeros(1, dtype=float, device=self.device)
+            self._body_qd_prev = wp.zeros(
+                model.body_count if self.rigid_adaptive_initialization else 0,
+                dtype=wp.spatial_vector,
+                device=self.device,
+            )
             if self.rigid_contact_activation_guard:
                 self._rigid_contact_trial_q = wp.empty_like(model.body_q, device=self.device)
                 self._rigid_contact_activated = wp.zeros(model.body_count, dtype=wp.int32, device=self.device)
@@ -1671,6 +1703,12 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
     @override
     def coupling_supports_full_surface_soft_contacts(self) -> bool:
         return True
+
+    @override
+    def coupling_notify_iteration_restarts(self, enabled: bool) -> None:
+        """Reject adaptive initialization when a coupler repeats the same step interval."""
+        if enabled and self.rigid_adaptive_initialization:
+            raise ValueError("rigid_adaptive_initialization does not support coupling iteration restarts.")
 
     def coupling_notify_input_state_update(
         self,
@@ -3970,6 +4008,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 kernel=forward_step_rigid_bodies,
                 inputs=[
                     dt,
+                    int(self.rigid_adaptive_initialization and self.iterations > 0),
+                    self._rigid_step_dt_prev,
                     model.gravity,
                     model.body_world,
                     self._rigid_pose_rebaseline_mask,
@@ -3980,6 +4020,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                     self.body_inv_inertia_effective,
                     state_in.body_q,  # input/output
                     state_in.body_qd,  # input/output
+                    self._body_qd_prev,  # input/output with adaptive initialization
                 ],
                 outputs=[
                     self.body_q_prev,  # rebaselined for flagged worlds (first step / reset)
@@ -5232,7 +5273,13 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 state_in.body_q,
                 model.body_com,
             ],
-            outputs=[self.body_q_prev, state_out.body_qd, state_in.body_qd, state_out.body_q],
+            outputs=[
+                self.body_q_prev,
+                state_out.body_qd,
+                state_in.body_qd,
+                state_out.body_q,
+                self._rigid_step_dt_prev,
+            ],
             dim=model.body_count,
             block_dim=self._rigid_body_block_dim,
             device=self.device,
