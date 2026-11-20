@@ -17,6 +17,7 @@ from ...core._warnings import _external_warning_stacklevel
 from ...core.types import override
 from ...exceptions import NewtonDeprecationWarning
 from ...geometry import ParticleFlags
+from ...geometry.sdf_planar_recovery import MeshRecoveryData, empty_mesh_recovery
 from ...geometry.soft_contacts_mesh import _make_soft_contact_filter_data
 from ...geometry.tri_mesh_collision import (
     TriMeshCollisionDetector,
@@ -438,7 +439,6 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         particle_self_contact_radius: float | None = None,
         particle_self_contact_margin: float | None = None,
         particle_self_contact_gap: float | None = None,
-        particle_conservative_bound_relaxation: float | None = None,
         particle_vertex_contact_buffer_size: int = 32,
         particle_edge_contact_buffer_size: int = 64,
         particle_collision_detection_interval: int | None = None,
@@ -523,10 +523,6 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             particle_self_contact_gap: Additional detection-only distance [m]; self-contact detection
                 queries use ``margin + gap``, mirroring the ``ShapeConfig.margin`` / ``gap`` convention.
                 Defaults to 0. Give it ~0.5-1x the margin of slack to avoid missing contacts.
-            particle_conservative_bound_relaxation: Deprecated; use ``dat_conservative_bound_relaxation``
-                instead. When set, it overrides ``dat_conservative_bound_relaxation``.
-
-                .. deprecated:: 1.7
             particle_vertex_contact_buffer_size: Preallocation size for each vertex's vertex-triangle collision
                 buffer. Pairs beyond this capacity are silently dropped during detection.
             particle_edge_contact_buffer_size: Preallocation size for each edge's edge-edge collision buffer. Pairs
@@ -861,20 +857,9 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             )
         self._deprecated_particle_interval = particle_collision_detection_interval
 
-        # Shared DAT relaxation; the deprecated particle-only name overrides it with a warning.
-        if particle_conservative_bound_relaxation is not None:
-            dat_conservative_bound_relaxation = particle_conservative_bound_relaxation
-        # Validate before warning so warnings-as-errors cannot mask the ValueError.
         if not (0.0 < dat_conservative_bound_relaxation < 1.0):
             raise ValueError(
                 f"dat_conservative_bound_relaxation must be in (0, 1), got {dat_conservative_bound_relaxation}"
-            )
-        if particle_conservative_bound_relaxation is not None:
-            warnings.warn(
-                "particle_conservative_bound_relaxation is deprecated and overrides "
-                "dat_conservative_bound_relaxation; pass only dat_conservative_bound_relaxation.",
-                NewtonDeprecationWarning,
-                stacklevel=_external_warning_stacklevel(),
             )
         self.dat_conservative_bound_relaxation = dat_conservative_bound_relaxation
         # Set before super().__init__: _default_collision_frequency_type (AUTO
@@ -903,6 +888,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             collision_frequency=collision_frequency,
             collision_frequency_type=collision_frequency_type,
         )
+        self._empty_mesh_recovery = empty_mesh_recovery(model.device.alias)
         # The solver's warm-start setting is authoritative for an owned pipeline:
         # multiplier restores ride the pipeline's matched contact indices, so
         # history without matching silently cold-starts every refresh (k times per
@@ -1010,6 +996,11 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         # participate in particle-rigid interaction on the particle side.
         self.integrate_with_external_rigid_solver = integrate_with_external_rigid_solver
         self._integrates_rigid_bodies = integrates_rigid_bodies
+        self._recovery_step_start_q = None
+        self._recovery_body = None
+        if integrates_rigid_bodies and model._texture_sdf_data is not None and model._texture_sdf_data.shape[0] > 0:
+            self._recovery_step_start_q = wp.empty_like(model.body_q)
+            self._recovery_body = wp.zeros(model.body_count, dtype=int, device=model.device)
 
         # Initialize particle system
         self._init_particle_system(
@@ -3716,12 +3707,19 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                     )
             self._particle_contact_adjacency_initialized = True
 
+    def _mesh_recovery_data(self, contacts: Contacts) -> MeshRecoveryData:
+        recovery = contacts._mesh_recovery_contacts
+        return recovery or self._empty_mesh_recovery
+
     def _step_body_body_contact_frame(
         self,
         contacts: Contacts,
         body_q: wp.array[wp.transform],
         dt: float,
         lambda_retention: float,
+        *,
+        mid_step: bool = False,
+        recovery_body: wp.array | None = None,
     ) -> None:
         """Update rigid-contact C0, conditioning, and lambda state."""
         if not self._integrates_rigid_bodies or contacts.rigid_contact_max == 0:
@@ -3752,6 +3750,11 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 lambda_retention,
                 1.0 / (dt * dt),
                 self.body_body_contact_material_ke,
+                self.rigid_contact_alpha,
+                self._mesh_recovery_data(contacts),
+                contacts.contact_generation,
+                self._recovery_step_start_q if mid_step else body_q,
+                recovery_body,
                 self.body_body_contact_material_mu,
             ],
             outputs=[
@@ -3823,12 +3826,24 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
 
             # Per-step lambda retention, C0, and ALM auto-rho
             # (body_q is still collide frame here).
+            recovery_body = None
+            refresh_recovery = False
+            if contacts is not None and contacts._mesh_recovery_contacts is not None:
+                mode = self._rigid_mode_this_step
+                frequency = self.CollisionFrequencyType
+                refresh_recovery = mode in (frequency.PRE_POST_INIT, frequency.ITERATIONS)
+                redetect_before_solve = mode == frequency.PRE_POST_INIT or (
+                    mode == frequency.ITERATIONS and self._rigid_freq_this_step == 1
+                )
+                if self.iterations > 0 and not redetect_before_solve:
+                    recovery_body = self._recovery_body
             if contacts is not None and contacts.rigid_contact_max > 0:
                 self._step_body_body_contact_frame(
                     contacts,
                     state_in.body_q,
                     dt,
                     self.rigid_avbd_gamma,
+                    recovery_body=recovery_body,
                 )
 
             # Accumulate joint_f into body wrenches (scratch buffer avoids mutating user state).
@@ -3880,6 +3895,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 outputs=[
                     self.body_q_prev,  # rebaselined for flagged worlds (first step / reset)
                     self.body_inertia_q,
+                    self._recovery_step_start_q if refresh_recovery else None,
+                    recovery_body,
                 ],
                 dim=model.body_count,
                 block_dim=self._rigid_body_block_dim,
@@ -4537,8 +4554,12 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                         self.body_body_contact_lambda,
                         self.body_body_contact_lambda_angular,
                         self.body_body_contact_C0,
+                        self._mesh_recovery_data(contacts),
+                        contacts.contact_generation,
                         self.rigid_contact_alpha,
                         contacts.rigid_contact_count,
+                        contacts.rigid_contact_shape0,
+                        contacts.rigid_contact_shape1,
                         contacts.rigid_contact_point0,
                         contacts.rigid_contact_point1,
                         contacts.rigid_contact_surface_velocity,
@@ -4687,6 +4708,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                     dt,
                     self.body_body_contact_material_mu,
                     self.body_body_contact_C0,
+                    self._mesh_recovery_data(contacts),
+                    contacts.contact_generation,
                     self.rigid_contact_alpha,
                     self.body_body_contact_material_ke,
                     self.body_body_contact_tangent_rho,
@@ -4805,6 +4828,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 self.body_body_contact_lambda,
                 self.body_body_contact_lambda_angular,
                 self.body_body_contact_C0,
+                self._mesh_recovery_data(contacts),
+                contacts.contact_generation,
                 self.rigid_contact_alpha,
                 self.rigid_contact_damping_bidirectional,
             ],
@@ -4993,6 +5018,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 self.body_body_contact_lambda,
                 self.body_body_contact_lambda_angular,
                 self.body_body_contact_C0,
+                self._mesh_recovery_data(contacts),
+                contacts.contact_generation,
                 self.rigid_contact_alpha,
                 self.rigid_contact_damping_bidirectional,
             ],
@@ -5195,7 +5222,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         )
         if rigid_due:
             self._refresh_rigid_contact_state(contacts, refresh=True, restore_history=preserve_history)
-            self._step_body_body_contact_frame(contacts, collision_state.body_q, dt, 1.0)
+            self._step_body_body_contact_frame(contacts, collision_state.body_q, dt, 1.0, mid_step=True)
             self._refresh_body_particle_contact_state(contacts, refresh=True)
 
     def _validate_dat_collision_schedules(self) -> None:

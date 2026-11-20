@@ -16,6 +16,7 @@ import warp as wp
 
 import newton
 from newton import NewtonDeprecationWarning
+from newton._src.geometry.sdf_planar_recovery import MeshRecoveryData
 from newton._src.geometry.soft_contacts_mesh import _SoftContactFilterData
 from newton._src.geometry.tri_mesh_collision import build_tri_mesh_collision_info
 from newton._src.solvers.vbd import particle_vbd_kernels, rigid_vbd_kernels
@@ -2027,6 +2028,11 @@ def _rigid_contact_structural_support_conditions_tangent_rho(test, device):
                 1.0,
                 100.0,
                 wp.array([1.0e9], dtype=float, device=device),
+                0.0,
+                MeshRecoveryData(),
+                wp.zeros(1, dtype=int, device=device),
+                wp.array([wp.transform_identity()], dtype=wp.transform, device=device),
+                None,
                 wp.zeros(1, dtype=wp.vec3, device=device),
             ],
             outputs=[
@@ -2356,6 +2362,8 @@ def _rigid_contact_dual_update_computes_lambda(test, device):
                 0.01,
                 contact_mu,
                 zeros3,
+                MeshRecoveryData(),
+                wp.zeros(1, dtype=int, device=device),
                 0.0,
                 contact_ke,
                 wp.array([wp.mat22(10.0, 10.0, 1.0, 0.0)] * 2, dtype=wp.mat22, device=device),
@@ -3425,6 +3433,8 @@ def _body_body_contact_damping_ignores_rho(test, device):
                 contact_lambda,
                 wp.zeros(4, dtype=wp.vec3, device=device),
                 contact_c0,
+                MeshRecoveryData(),
+                wp.zeros(1, dtype=int, device=device),
                 0.95,
                 False,
             ],
@@ -9313,25 +9323,6 @@ def test_rigid_dat_validates_conservative_bound_relaxation(test, device):
             test.assertEqual(solver.dat_conservative_bound_relaxation, relaxation)
 
 
-def test_dat_conservative_bound_relaxation_deprecated_alias(test, device):
-    """The deprecated particle-only name still sets the shared relaxation, with a warning."""
-    builder = newton.ModelBuilder(gravity=wp.vec3(0.0))
-    model = builder.finalize(device=device)
-
-    with test.assertWarnsRegex(DeprecationWarning, "particle_conservative_bound_relaxation is deprecated") as caught:
-        solver = newton.solvers.SolverVBD(model, particle_conservative_bound_relaxation=0.5)
-    test.assertEqual(caught.filename, __file__)
-    test.assertEqual(solver.dat_conservative_bound_relaxation, 0.5)
-
-    with test.assertWarnsRegex(DeprecationWarning, "overrides dat_conservative_bound_relaxation"):
-        solver = newton.solvers.SolverVBD(
-            model,
-            dat_conservative_bound_relaxation=0.7,
-            particle_conservative_bound_relaxation=0.5,
-        )
-    test.assertEqual(solver.dat_conservative_bound_relaxation, 0.5)
-
-
 def test_rigid_dat_rejects_missing_body_pose(test, device):
     """A null body pose is valid only for static-world geometry, never for a model with bodies."""
     builder = newton.ModelBuilder(gravity=wp.vec3(0.0))
@@ -9966,12 +9957,6 @@ add_function_test(
     TestVBDRigidDAT,
     "test_rigid_dat_validates_conservative_bound_relaxation",
     test_rigid_dat_validates_conservative_bound_relaxation,
-    devices=devices,
-)
-add_function_test(
-    TestVBDRigidDAT,
-    "test_dat_conservative_bound_relaxation_deprecated_alias",
-    test_dat_conservative_bound_relaxation_deprecated_alias,
     devices=devices,
 )
 add_function_test(
