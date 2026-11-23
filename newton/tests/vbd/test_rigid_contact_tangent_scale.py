@@ -9,6 +9,7 @@ import numpy as np
 import warp as wp
 
 import newton
+from newton._src.geometry.sdf_planar_recovery import MeshRecoveryData
 from newton._src.solvers.vbd.rigid_vbd_kernels import update_duals_body_body_contacts
 from newton.tests.unittest_utils import add_function_test, get_test_devices
 
@@ -16,7 +17,8 @@ from newton.tests.unittest_utils import add_function_test, get_test_devices
 def _make_contact_fixture(device):
     """Static, kinematic, different-color, and same-color partners, in that order."""
     builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
-    cfg = builder.ShapeConfig(ke=2.0**10, kd=0.0, mu=0.5, density=0.0)
+    # Sliding friction only: the angular channels have their own conditioning.
+    cfg = builder.ShapeConfig(ke=2.0**10, kd=0.0, mu=0.5, mu_torsional=0.0, mu_rolling=0.0, density=0.0)
     shapes = []
     for i in range(7):
         body = builder.add_body(mass=1.0, inertia=wp.mat33(np.eye(3)), lock_inertia=True, is_kinematic=i == 1)
@@ -51,18 +53,17 @@ def test_tangent_scale_eligibility(test, device):
         default = _conditioned_solver(model, contacts, dt)
         unit = _conditioned_solver(model, contacts, dt, rigid_contact_tangent_scale=1.0)
         scaled = _conditioned_solver(model, contacts, dt, rigid_contact_tangent_scale=300.0)
+        # Packed tangent metric per contact: row 0 holds the two eigenvalues, row 1 the tangent direction.
         base_rho = default.body_body_contact_tangent_rho.numpy()[:4]
-        test.assertTrue(np.all(base_rho > 0.0))
+        test.assertTrue(np.all(base_rho[:, 0] > 0.0))
         test.assertEqual(float(default.body_inv_mass_effective.numpy()[1]), 0.0)
         colors = model.body_colors.numpy()
         test.assertNotEqual(colors[3], colors[4])
         test.assertEqual(colors[5], colors[6])
         np.testing.assert_array_equal(unit.body_body_contact_tangent_rho.numpy()[:4], base_rho)
-        np.testing.assert_allclose(
-            scaled.body_body_contact_tangent_rho.numpy()[:4] / base_rho,
-            [300.0, 300.0, 300.0, 300.0],
-            rtol=2.0e-6,
-        )
+        scaled_rho = scaled.body_body_contact_tangent_rho.numpy()[:4]
+        np.testing.assert_allclose(scaled_rho[:, 0] / base_rho[:, 0], 300.0, rtol=2.0e-6)
+        np.testing.assert_array_equal(scaled_rho[:, 1], base_rho[:, 1])
         for name in ("normal_rho", "material_ke", "material_kd", "material_mu"):
             np.testing.assert_array_equal(
                 getattr(scaled, "body_body_contact_" + name).numpy()[:4],
@@ -91,8 +92,9 @@ def test_tangent_scale_preserves_loaded_coulomb_state(test, device):
         for scale in (1.0, 300.0):
             solver = _conditioned_solver(model, contacts, dt, rigid_contact_tangent_scale=scale)
             solver.body_q_prev.assign(previous)
+            solver._build_body_body_contact_step_levers(contacts)
             solver.body_body_contact_C0.zero_()
-            rho_by_scale.append(solver.body_body_contact_tangent_rho.numpy()[:4])
+            rho_by_scale.append(solver.body_body_contact_tangent_rho.numpy()[:4, 0])
             for tangent_seed in (0.125, 1.0):
                 with test.subTest(scale=scale, tangent_seed=tangent_seed):
                     initial = np.zeros((*solver.body_body_contact_lambda.shape, 3), dtype=np.float32)
@@ -114,28 +116,33 @@ def test_tangent_scale_preserves_loaded_coulomb_state(test, device):
                             contacts.rigid_contact_count,
                             contacts.rigid_contact_shape0,
                             contacts.rigid_contact_shape1,
-                            contacts.rigid_contact_point0,
-                            contacts.rigid_contact_point1,
                             contacts.rigid_contact_surface_velocity,
-                            contacts.rigid_contact_offset0,
-                            contacts.rigid_contact_offset1,
                             contacts.rigid_contact_normal,
-                            contacts.rigid_contact_margin0,
-                            contacts.rigid_contact_margin1,
+                            solver.body_body_contact_lever_s0,
+                            solver.body_body_contact_lever_c0,
+                            solver.body_body_contact_lever_s1,
+                            solver.body_body_contact_lever_c1,
+                            solver.body_body_contact_start_penetration,
                             model.shape_body,
                             state.body_q,
                             solver.body_q_prev,
                             model.body_com,
+                            solver.body_contact_free_angular_compliance,
+                            0,
                             dt,
                             solver.body_body_contact_material_mu,
                             solver.body_body_contact_C0,
-                            solver.rigid_contact_alpha,
+                            MeshRecoveryData(),
+                            contacts.contact_generation,
                             solver.body_body_contact_material_ke,
                             solver.body_body_contact_material_kd,
                             solver.body_body_contact_tangent_rho,
                             solver.body_body_contact_normal_rho,
+                            solver.body_body_contact_torsional_rho,
+                            solver.body_body_contact_rolling_rho,
                             solver.rigid_contact_damping_bidirectional,
                             solver.body_body_contact_lambda,
+                            solver.body_body_contact_lambda_angular,
                         ],
                     )
                     np.testing.assert_allclose(
@@ -176,7 +183,7 @@ def test_tangent_scale_secant_metric_converges(test, device):
     with wp.ScopedDevice(device):
         builder = newton.ModelBuilder(gravity=(0.0, 0.0, -9.81))
         builder.begin_world()
-        cfg = builder.ShapeConfig(ke=1.0e5, kd=100.0, mu=1.0, density=0.0)
+        cfg = builder.ShapeConfig(ke=1.0e5, kd=100.0, mu=1.0, mu_torsional=0.0, mu_rolling=0.0, density=0.0)
         body = builder.add_body(
             xform=wp.transform(wp.vec3(0.0, 0.0, 0.03 - 9.81e-6), wp.quat_identity()),
             mass=0.1,

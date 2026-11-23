@@ -11,15 +11,15 @@ import functools
 
 import warp as wp
 
+from ...geometry.sdf_planar_recovery import MeshRecoveryData
 from .rigid_vbd_kernels import (
     _SMALL_LENGTH_EPS,
     _body_step_motion,
-    _compliant_contact_normal_response,
     _contact_lever_blocks,
-    _contact_step_levers,
-    _lever_displacement,
-    _material_force_terms,
-    _step_start_penetration,
+    _first_order_lever_displacement,
+    _normal_material,
+    _recovery_slot,
+    _rigid_contact_normal_law,
 )
 
 
@@ -38,27 +38,25 @@ def create_accumulate_inactive_contact_metric(threads_per_body: int):
         body_q: wp.array[wp.transform],
         body_q_trial: wp.array[wp.transform],
         body_com: wp.array[wp.vec3],
-        body_inv_mass: wp.array[float],
-        body_colors: wp.array[int],
         contact_rho: wp.array[float],
         contact_ke: wp.array[float],
         contact_kd: wp.array[float],
         contact_lambda: wp.array[wp.vec3],
         contact_C0: wp.array[wp.vec3],
-        alpha: float,
+        recovery: MeshRecoveryData,
+        contact_generation: wp.array[int],
         contact_damping_bidirectional: bool,
         contact_count: wp.array[int],
         shape0: wp.array[int],
         shape1: wp.array[int],
-        point0: wp.array[wp.vec3],
-        point1: wp.array[wp.vec3],
         normal: wp.array[wp.vec3],
-        margin0: wp.array[float],
-        margin1: wp.array[float],
-        shape_body: wp.array[int],
+        contact_lever_s0: wp.array[wp.vec3],
+        contact_lever_s1: wp.array[wp.vec3],
+        contact_start_penetration: wp.array[float],
         capacity: int,
         body_contact_counts: wp.array[int],
         body_contact_indices: wp.array[int],
+        body_contact_bodies: wp.array[wp.vec3i],
         body_h_ll: wp.array[wp.mat33],
         body_h_al: wp.array[wp.mat33],
         body_h_aa: wp.array[wp.mat33],
@@ -67,12 +65,13 @@ def create_accumulate_inactive_contact_metric(threads_per_body: int):
         tid = wp.tid()
         body = body_ids[tid // wp.static(threads_per_body)]
         lane = tid % wp.static(threads_per_body)
+        # Contacts are listed only under dynamic bodies: an immovable body has a zero count.
         count = wp.min(body_contact_counts[body], capacity)
-        if body_inv_mass[body] == 0.0 or lane >= count:
+        if lane >= count:
             return
 
-        X_prev, com_disp, rotation, jacobian_t = _body_step_motion(body, body_q, body_q_prev, body_com)
-        _X_trial, com_disp_trial, rotation_trial, _J_trial = _body_step_motion(
+        translation, rotation, jacobian_t = _body_step_motion(body, body_q, body_q_prev, body_com)
+        translation_trial, rotation_trial, _jacobian_t_trial = _body_step_motion(
             body, body_q_trial, body_q_prev, body_com
         )
         h_ll = wp.mat33(0.0)
@@ -81,76 +80,95 @@ def create_accumulate_inactive_contact_metric(threads_per_body: int):
         has_inactive = int(0)
         i = lane
         while i < count:
-            row = body_contact_indices[body * capacity + i]
+            # The list entry carries the contact's two bodies and the same-color flag.
+            slot = body * capacity + i
+            row = body_contact_indices[slot]
+            bodies = body_contact_bodies[slot]
             i += wp.static(threads_per_body)
             if row >= contact_count[0]:
                 continue
             s0 = shape0[row]
             s1 = shape1[row]
-            if s0 < 0 or s1 < 0:
-                continue
-            b0 = shape_body[s0]
-            b1 = shape_body[s1]
-            if b0 != body and b1 != body:
+            b0 = bodies[0]
+            b1 = bodies[1]
+            n = normal[row]
+            rec_slot = _recovery_slot(recovery, contact_generation, s0, s1, b0, b1, body_q, n)
+            if (b0 != body and b1 != body) or rec_slot < -1:
                 continue
             self_is_a = b0 == body
             other = b1 if self_is_a else b0
-            X_other_prev, com_disp_other, rotation_other, _J_other = _body_step_motion(
+            lever_self = contact_lever_s0[row] if self_is_a else contact_lever_s1[row]
+            lever_other = contact_lever_s1[row] if self_is_a else contact_lever_s0[row]
+            # Penetration grows with the approach of endpoint 0 toward endpoint 1 along the normal.
+            approach_sign = 1.0 if self_is_a else -1.0
+            translation_other, rotation_other, _jacobian_t_other = _body_step_motion(
                 other, body_q, body_q_prev, body_com
             )
-            pt_a = point0[row]
-            pt_b = point1[row]
-            lever_self, _ = _contact_step_levers(body, X_prev, body_com, pt_a if self_is_a else pt_b, wp.vec3(0.0))
-            lever_other, _ = _contact_step_levers(
-                other, X_other_prev, body_com, pt_b if self_is_a else pt_a, wp.vec3(0.0)
-            )
-            dx = _lever_displacement(com_disp, rotation, lever_self)
-            dy = _lever_displacement(com_disp_other, rotation_other, lever_other)
-            n = normal[row]
-            Cp = _step_start_penetration(
-                b0,
-                X_prev if self_is_a else X_other_prev,
-                pt_a,
-                b1,
-                X_other_prev if self_is_a else X_prev,
-                pt_b,
+            start_penetration = contact_start_penetration[row]
+            C = start_penetration + approach_sign * wp.dot(
                 n,
-                margin0[row],
-                margin1[row],
+                _first_order_lever_displacement(translation, rotation, lever_self)
+                - _first_order_lever_displacement(translation_other, rotation_other, lever_other),
             )
-            C = Cp + wp.dot(n, (dx - dy) if self_is_a else (dy - dx))
-            lam = wp.dot(contact_lambda[row], n)
-            shift = alpha * wp.dot(contact_C0[row], n)
-            k, lam_eff = _material_force_terms(contact_rho[row], contact_ke[row], lam)
-            # Mirror the existing compliant normal-force activation, including positive warm multipliers.
-            if not ((C <= _SMALL_LENGTH_EPS and lam <= 0.0) or k * (C - shift) + lam_eff <= 0.0):
-                continue
-            if k <= 0.0:
-                continue
+            lam_vec = contact_lambda[row]
+            lam = wp.dot(lam_vec, n)
+            shift = wp.dot(contact_C0[row], n)
+            kd = contact_kd[row]
+            previous_penetration = float(0.0)
+            if kd > 0.0:
+                previous_penetration = start_penetration - shift
+            ke_now = _normal_material(contact_ke[row], rec_slot)
 
-            _X_other_trial, ct_disp_other, rt_other, _Jt_other = _body_step_motion(
+            # Rows the body solve already carries need no guard: mirror its activity rule and normal law.
+            if not (C <= _SMALL_LENGTH_EPS and lam <= 0.0):
+                _metric_now, _elastic_now, force_now, _lam_n_now, _lam_eff_now = _rigid_contact_normal_law(
+                    C - shift,
+                    previous_penetration,
+                    contact_rho[row],
+                    ke_now,
+                    kd,
+                    lam_vec,
+                    n,
+                    dt,
+                    contact_damping_bidirectional,
+                )
+                if force_now > 0.0:
+                    continue
+
+            rec_slot_trial = _recovery_slot(recovery, contact_generation, s0, s1, b0, b1, body_q_trial, n)
+            if rec_slot_trial < -1:
+                continue
+            ke_trial = _normal_material(contact_ke[row], rec_slot_trial)
+            translation_other_trial, rotation_other_trial, _jacobian_t_other_trial = _body_step_motion(
                 other, body_q_trial, body_q_prev, body_com
             )
-            dxt = _lever_displacement(com_disp_trial, rotation_trial, lever_self)
-            dyt = _lever_displacement(ct_disp_other, rt_other, lever_other)
-            Ct = Cp + wp.dot(n, (dxt - dyt) if self_is_a else (dyt - dxt))
-            if (Ct <= _SMALL_LENGTH_EPS and lam <= 0.0) or k * (Ct - shift) + lam_eff <= 0.0:
+            C_trial = start_penetration + approach_sign * wp.dot(
+                n,
+                _first_order_lever_displacement(translation_trial, rotation_trial, lever_self)
+                - _first_order_lever_displacement(translation_other_trial, rotation_other_trial, lever_other),
+            )
+            if C_trial <= _SMALL_LENGTH_EPS and lam <= 0.0:
                 continue
-            force = k * (Ct - shift) + lam_eff
-            metric = k
+            metric, _elastic, force, _lam_n, _lam_eff = _rigid_contact_normal_law(
+                C_trial - shift,
+                previous_penetration,
+                contact_rho[row],
+                ke_trial,
+                kd,
+                lam_vec,
+                n,
+                dt,
+                contact_damping_bidirectional,
+            )
+            if force <= 0.0 or metric <= 0.0:
+                continue
             if contact_damping_bidirectional:
                 # The explicit velocity damper does not enter the elastic ALM multiplier.
                 # Its metric is active even at zero normal velocity.
-                metric += wp.max(contact_kd[row], 0.0) / dt
-            else:
-                force, _elastic, metric = _compliant_contact_normal_response(
-                    Ct - shift, Cp - shift, contact_ke[row], contact_kd[row], contact_rho[row], lam, dt
-                )
-            if force <= 0.0 or metric <= 0.0:
-                continue
-            if b0 >= 0 and b1 >= 0:
-                if body_inv_mass[b0] > 0.0 and body_inv_mass[b1] > 0.0 and body_colors[b0] == body_colors[b1]:
-                    metric *= 2.0
+                metric += wp.max(kd, 0.0) / dt
+            if bodies[2] == 1:
+                # Same bound as the body solve for two dynamic bodies of one color.
+                metric *= 2.0
             K = metric * wp.outer(n, n)
             _torque, H_al, H_aa = _contact_lever_blocks(
                 wp.vec3(0.0), wp.vec3(0.0), K, wp.mat33(0.0), lever_self, wp.vec3(0.0), jacobian_t

@@ -30,6 +30,7 @@ import warp as wp
 
 from newton._src.core.types import MAXVAL
 from newton._src.geometry.kernels import triangle_closest_point
+from newton._src.geometry.sdf_planar_recovery import MeshRecoveryData, active_recovery_contact, recovery_step_depth
 from newton._src.geometry.soft_contacts_mesh import _soft_contact_force_enabled, _SoftContactFilterData
 from newton._src.math import orthonormal_basis, quat_velocity
 from newton._src.sim import JointType
@@ -67,6 +68,15 @@ _DRIVE_LIMIT_MODE_DRIVE = wp.constant(3)
 
 _SMALL_LENGTH_EPS = wp.constant(1.0e-9)
 """Small length tolerance (e.g., segment length checks)"""
+
+_METRIC_RELATIVE_EIGENGAP_TOLERANCE = wp.constant(8.0 * 1.1920929e-7)
+"""Trace-relative eigenvalue-gap cutoff for approximating a contact tangent metric as isotropic."""
+
+_SQRT3_UPPER = wp.constant(1.7320509)
+"""Float32 upper bound on sqrt(3), used for the quick friction-limit check."""
+
+_FLOAT32_MIN_NORMAL = wp.constant(1.1754944e-38)
+"""Smallest positive normal float32 value."""
 
 _USE_SMALL_ANGLE_APPROX = wp.constant(True)
 """If True use first-order small-angle rotation approximation; if False use closed-form rotation update.
@@ -207,12 +217,18 @@ def _contact_auto_normal_rho(
 
 @wp.func
 def _contact_auto_tangent_rho(
-    tangent_support: float,
+    tangent_support: wp.mat22,
     normal_rho: float,
     structural_support: float,
 ):
-    """Use tangent support, strengthened by pair structure up to the normal rho."""
-    return wp.max(tangent_support, wp.min(normal_rho, structural_support))
+    """Apply the structural floor to both cached tangent eigenvalues."""
+    floor = wp.min(normal_rho, structural_support)
+    return wp.mat22(
+        wp.max(tangent_support[0, 0], floor),
+        wp.max(tangent_support[0, 1], floor),
+        tangent_support[1, 0],
+        tangent_support[1, 1],
+    )
 
 
 # ---------------------------------
@@ -223,6 +239,7 @@ def _contact_auto_tangent_rho(
 @wp.struct
 class RigidContactHistory:
     lambda_: wp.array[wp.vec3]
+    lambda_angular: wp.array[wp.vec3]
     normal: wp.array[wp.vec3]
 
 
@@ -397,6 +414,80 @@ def ldlt6_solve(h_ll: wp.mat33, h_aa: wp.mat33, h_al: wp.mat33, rhs_lin: wp.vec3
     x1 = z1 - L21 * x2 - L31 * x3 - L41 * x4 - L51 * x5 - L61 * x6
 
     return wp.vec3(x1, x2, x3), wp.vec3(x4, x5, x6)
+
+
+@wp.func
+def _angular_compliance_from_hessian(h_ll: wp.mat33, h_aa: wp.mat33, h_al: wp.mat33) -> wp.mat33:
+    """Return ``[H^-1]_aa`` for ``H=[[h_ll, h_al.T], [h_al, h_aa]]``.
+
+    A single LDL^T factorization recovers the angular compliance while
+    retaining linear-angular coupling, avoiding three full spatial solves.
+    This uses the same 6x6 LDL^T factorization as ``ldlt6_solve()``.
+    """
+    A11 = h_ll[0, 0]
+    A21 = h_ll[1, 0]
+    A22 = h_ll[1, 1]
+    A31 = h_ll[2, 0]
+    A32 = h_ll[2, 1]
+    A33 = h_ll[2, 2]
+    A41 = h_al[0, 0]
+    A42 = h_al[0, 1]
+    A43 = h_al[0, 2]
+    A44 = h_aa[0, 0]
+    A51 = h_al[1, 0]
+    A52 = h_al[1, 1]
+    A53 = h_al[1, 2]
+    A54 = h_aa[1, 0]
+    A55 = h_aa[1, 1]
+    A61 = h_al[2, 0]
+    A62 = h_al[2, 1]
+    A63 = h_al[2, 2]
+    A64 = h_aa[2, 0]
+    A65 = h_aa[2, 1]
+    A66 = h_aa[2, 2]
+
+    L21 = A21 / A11
+    L31 = A31 / A11
+    L41 = A41 / A11
+    L51 = A51 / A11
+    L61 = A61 / A11
+
+    D2 = A22 - L21 * L21 * A11
+
+    L32 = (A32 - L21 * L31 * A11) / D2
+    L42 = (A42 - L21 * L41 * A11) / D2
+    L52 = (A52 - L21 * L51 * A11) / D2
+    L62 = (A62 - L21 * L61 * A11) / D2
+
+    D3 = A33 - (L31 * L31 * A11 + L32 * L32 * D2)
+
+    L43 = (A43 - L31 * L41 * A11 - L32 * L42 * D2) / D3
+    L53 = (A53 - L31 * L51 * A11 - L32 * L52 * D2) / D3
+    L63 = (A63 - L31 * L61 * A11 - L32 * L62 * D2) / D3
+
+    D4 = A44 - (L41 * L41 * A11 + L42 * L42 * D2 + L43 * L43 * D3)
+
+    L54 = (A54 - L41 * L51 * A11 - L42 * L52 * D2 - L43 * L53 * D3) / D4
+    L64 = (A64 - L41 * L61 * A11 - L42 * L62 * D2 - L43 * L63 * D3) / D4
+
+    D5 = A55 - (L51 * L51 * A11 + L52 * L52 * D2 + L53 * L53 * D3 + L54 * L54 * D4)
+
+    L65 = (A65 - L51 * L61 * A11 - L52 * L62 * D2 - L53 * L63 * D3 - L54 * L64 * D4) / D5
+
+    D6 = A66 - (L61 * L61 * A11 + L62 * L62 * D2 + L63 * L63 * D3 + L64 * L64 * D4 + L65 * L65 * D5)
+
+    # Recover only the inverse's angular block.
+    inv_D4 = 1.0 / D4
+    inv_D5 = 1.0 / D5
+    inv_D6 = 1.0 / D6
+    L_inv_20 = L54 * L65 - L64
+    C00 = inv_D4 + L54 * L54 * inv_D5 + L_inv_20 * L_inv_20 * inv_D6
+    C01 = -L54 * inv_D5 - L_inv_20 * L65 * inv_D6
+    C02 = L_inv_20 * inv_D6
+    C11 = inv_D5 + L65 * L65 * inv_D6
+    C12 = -L65 * inv_D6
+    C22 = inv_D6
+    return wp.mat33(C00, C01, C02, C01, C11, C12, C02, C12, C22)
 
 
 @wp.func
@@ -608,6 +699,30 @@ def _average_contact_material(
 
 
 @wp.func
+def _average_rigid_contact_material(
+    ke0: float,
+    kd0: float,
+    mu0: float,
+    mu_torsional0: float,
+    mu_rolling0: float,
+    ke1: float,
+    kd1: float,
+    mu1: float,
+    mu_torsional1: float,
+    mu_rolling1: float,
+):
+    """Average material properties for a rigid contact pair.
+
+    ke, kd: arithmetic mean.
+    mu, mu_torsional, mu_rolling: geometric mean.
+    """
+    avg_ke, avg_kd, avg_mu = _average_contact_material(ke0, kd0, mu0, ke1, kd1, mu1)
+    avg_mu_torsional = wp.sqrt(mu_torsional0) * wp.sqrt(mu_torsional1)
+    avg_mu_rolling = wp.sqrt(mu_rolling0) * wp.sqrt(mu_rolling1)
+    return avg_ke, avg_kd, avg_mu, avg_mu_torsional, avg_mu_rolling
+
+
+@wp.func
 def _compliant_contact_normal_response(
     penetration: float,
     previous_penetration: float,
@@ -666,6 +781,8 @@ def _rigid_contact_material(
     shape_material_ke: wp.array[float],
     shape_material_kd: wp.array[float],
     shape_material_mu: wp.array[float],
+    shape_material_mu_torsional: wp.array[float],
+    shape_material_mu_rolling: wp.array[float],
     rigid_contact_stiffness: wp.array[float],
     rigid_contact_damping: wp.array[float],
     rigid_contact_friction: wp.array[float],
@@ -674,14 +791,19 @@ def _rigid_contact_material(
 
     Hydroelastic quadrature supplies per-contact stiffness and a friction
     scale. Zero entries mean unset, including ordinary contacts in mixed buffers.
+    The friction scale applies to the sliding coefficient only.
     """
-    ke, kd, mu = _average_contact_material(
+    ke, kd, mu, mu_torsional, mu_rolling = _average_rigid_contact_material(
         shape_material_ke[shape0],
         shape_material_kd[shape0],
         shape_material_mu[shape0],
+        shape_material_mu_torsional[shape0],
+        shape_material_mu_rolling[shape0],
         shape_material_ke[shape1],
         shape_material_kd[shape1],
         shape_material_mu[shape1],
+        shape_material_mu_torsional[shape1],
+        shape_material_mu_rolling[shape1],
     )
     if rigid_contact_stiffness:
         contact_ke = rigid_contact_stiffness[contact_index]
@@ -699,7 +821,7 @@ def _rigid_contact_material(
         friction_scale = rigid_contact_friction[contact_index]
         if friction_scale > 0.0:
             mu = mu * friction_scale
-    return ke, kd, mu
+    return ke, kd, mu, mu_torsional, mu_rolling
 
 
 @wp.func
@@ -725,7 +847,7 @@ def _compliant_contact_dual_step(
     material_k: float,
     mu: float,
     rho_n: float,
-    rho_t: float,
+    rho_t: wp.mat22,
 ):
     """Advance a finite-normal/ideal-Coulomb contact multiplier.
 
@@ -737,10 +859,8 @@ def _compliant_contact_dual_step(
 
     lam_n_new = wp.max(_alm_relaxed_ascent(lam_n_old, normal_residual, material_k, rho_n), 0.0)
 
-    lam_t_trial = lam_t_old + rho_t * tangent_residual
-    tangent_trial_length = wp.length(lam_t_trial)
     cone_limit = mu * lam_n_new
-    lam_t_new = _project_coulomb_tangent(lam_t_trial, tangent_trial_length, cone_limit)
+    lam_t_new = _project_friction_update_force_only(lam_t_old, tangent_residual, normal, rho_t, cone_limit)
 
     return normal * lam_n_new + lam_t_new
 
@@ -952,11 +1072,7 @@ def _contact_tangent_conditioning_scale(
     body_inv_inertia: wp.array[wp.mat33],
     inv_dt_sq: float,
 ):
-    """Return the minimum pair inertial stiffness over all tangent directions.
-
-    Endpoint Delassus blocks add before taking the largest eigenvalue, which is
-    the pair's most compliant tangent direction.
-    """
+    """Return the pair's inverse tangent response as a packed metric (see :func:`_pack_tangent_metric`)."""
     tangent_0, tangent_1 = orthonormal_basis(n)
     w = _contact_body_tangent_block(
         shape_id_0,
@@ -979,14 +1095,393 @@ def _contact_tangent_conditioning_scale(
         body_inv_mass,
         body_inv_inertia,
     )
-    trace = w[0] + w[2]
-    if trace <= 0.0:
-        return 0.0
-    discriminant = wp.sqrt(wp.max((w[0] - w[2]) * (w[0] - w[2]) + 4.0 * w[1] * w[1], 0.0))
-    w_max = 0.5 * (trace + discriminant)
-    # Direction-agnostic structural support enters separately through
-    # _contact_auto_tangent_rho, capped by the normal rho.
-    return inv_dt_sq / w_max
+    return _tangent_response_rho(w[0], w[1], w[2], inv_dt_sq)
+
+
+@wp.func
+def _contact_body_angular_block(
+    body_id: int,
+    body_q: wp.array[wp.transform],
+    body_inv_mass: wp.array[float],
+    body_inv_inertia: wp.array[wp.mat33],
+) -> wp.mat33:
+    """Return one dynamic body's world-space angular Delassus block.
+
+    The block ``R * I^-1 * R^T`` maps world torque to angular acceleration.
+    World, static, and kinematic endpoints return zero.
+    """
+    if body_id < 0 or body_inv_mass[body_id] <= 0.0:
+        return wp.mat33(0.0)
+    rot = wp.transform_get_rotation(body_q[body_id])
+    R = wp.quat_to_matrix(rot)
+    return R * body_inv_inertia[body_id] * wp.transpose(R)
+
+
+@wp.func
+def _pack_tangent_metric(R: wp.mat22):
+    """Cache a tangent metric as [[rho_high, rho_low], [axis_x, axis_y]].
+
+    The axis is expressed in ``orthonormal_basis(normal)``. Diagonalization
+    happens when rho is refreshed, not during each friction evaluation.
+    """
+    a = R[0, 0]
+    b = R[0, 1]
+    c = R[1, 1]
+    # Scale by the largest entry so the squared terms below stay within float32 range.
+    magnitude = wp.max(wp.abs(a), wp.max(wp.abs(b), wp.abs(c)))
+    if magnitude == 0.0:
+        return wp.mat22(0.0, 0.0, 1.0, 0.0)
+    a /= magnitude
+    b /= magnitude
+    c /= magnitude
+    determinant = a * c - b * b
+    gap = wp.sqrt(wp.max((a - c) * (a - c) + 4.0 * b * b, 0.0))
+    high = wp.max(a, c) + 0.5 * (gap - wp.abs(a - c))
+    if high <= 0.0:
+        return wp.mat22(high * magnitude, high * magnitude, 1.0, 0.0)
+
+    low = (determinant / high) * magnitude
+    # Recover cancellation or underflow from the original entries.
+    if determinant <= _FLOAT32_MIN_NORMAL or (b != 0.0 and determinant <= 1.0e-3 * (b * b)):
+        low = float(
+            (wp.float64(R[0, 0]) * wp.float64(R[1, 1]) - wp.float64(R[0, 1]) * wp.float64(R[0, 1]))
+            / (wp.float64(high) * wp.float64(magnitude))
+        )
+    high *= magnitude
+    # Approximate near-isotropic SPD conditioning with high*I.
+    # The cutoff gives about 2e-6 relative spectral error in exact arithmetic.
+    if gap <= _METRIC_RELATIVE_EIGENGAP_TOLERANCE * (a + c) or low <= 0.0:
+        return wp.mat22(high, high, 1.0, 0.0)
+    low = wp.min(high, low)
+    axis = wp.vec2(0.5 * (gap + wp.abs(a - c)), b)
+    if c > a:
+        axis = wp.vec2(b, 0.5 * (gap + wp.abs(a - c)))
+    axis = wp.normalize(axis / wp.max(wp.abs(axis[0]), wp.abs(axis[1])))
+    return wp.mat22(high, low, axis[0], axis[1])
+
+
+@wp.func
+def _tangent_metric_axes(R: wp.mat22, n: wp.vec3):
+    """Return a cached tangent metric's world-space high and low eigenaxes."""
+    t0, t1 = orthonormal_basis(n)
+    return t0 * R[1, 0] + t1 * R[1, 1], -t0 * R[1, 1] + t1 * R[1, 0]
+
+
+@wp.func
+def _world_tangent_metric(R: wp.mat22, eh: wp.vec3, el: wp.vec3):
+    """Expand a cached tangent metric into world space."""
+    return R[0, 0] * wp.outer(eh, eh) + R[0, 1] * wp.outer(el, el)
+
+
+@wp.func
+def _tangent_response_rho(a: float, b: float, c: float, scale: float):
+    """Invert [[a, b], [b, c]] and cache rho's eigenvalues and tangent-frame axis."""
+    # Invert the eigenvalues without forming a potentially overflowing determinant.
+    mobility = _pack_tangent_metric(wp.mat22(a, b, b, c))
+    if mobility[0, 1] > 0.0:
+        return wp.mat22(scale / mobility[0, 1], scale / mobility[0, 0], -mobility[1, 1], mobility[1, 0])
+    return wp.mat22(0.0)
+
+
+@wp.func
+def _project_friction_disk_metric(trial: wp.vec3, n: wp.vec3, R: wp.mat22, limit: float):
+    """Project onto the Coulomb disk in the inverse conditioning metric.
+
+    ``R`` is packed by :func:`_pack_tangent_metric`. Return the projected
+    reaction and a positive-semidefinite secant metric for the body solve.
+    """
+    eh, el = _tangent_metric_axes(R, n)
+    return _project_friction_disk_axes(trial, n, R, eh, el, limit)
+
+
+@wp.func
+def _project_friction_update(lam: wp.vec3, displacement: wp.vec3, n: wp.vec3, R: wp.mat22, limit: float):
+    """Project the ALM friction trial ``lam + R displacement`` onto the Coulomb disk in the ``R^-1`` metric.
+
+    Return the projected reaction (force or torque) and a positive-semidefinite
+    secant metric for the body solve.
+    One tangent basis serves the trial, the projection and the secant metric.
+    """
+    if limit <= 0.0:
+        return wp.vec3(0.0), wp.mat33(0.0)
+    eh, el = _tangent_metric_axes(R, n)
+    trial = lam + (eh * (R[0, 0] * wp.dot(eh, displacement)) + el * (R[0, 1] * wp.dot(el, displacement)))
+    return _project_friction_disk_axes(trial, n, R, eh, el, limit)
+
+
+@wp.func
+def _solve_friction_disk_root(vh: float, vl: float, bound: float, ratio: float, root: float):
+    """Advance the scaled disk multiplier from its lower bound; return the final axis quotients and root."""
+    ih = float(0.0)
+    ql = float(0.0)
+    stopped = bool(False)
+    for _ in range(24):
+        ih = 1.0 / (bound + root)
+        dl = bound + root * ratio
+        ql = vl / dl
+        th = (vh * ih) * (vh * ih)
+        tl = ql * ql
+        norm_sq = th + tl
+        residual = norm_sq - 1.0
+        if wp.abs(residual) <= 4.0e-7:
+            stopped = True
+            break
+        slope = th * ih + tl * (ratio / dl)
+        next_root = root + norm_sq * residual / ((wp.sqrt(norm_sq) + 1.0) * slope)
+        if next_root <= root:
+            stopped = True
+            break
+        root = next_root
+    if not stopped:
+        ih = 1.0 / (bound + root)
+        ql = vl / (bound + root * ratio)
+    return ih, ql, root
+
+
+@wp.func
+def _project_friction_update_force_only(lam: wp.vec3, displacement: wp.vec3, n: wp.vec3, R: wp.mat22, limit: float):
+    """Return the projected reaction of :func:`_project_friction_update` without its secant metric.
+
+    An exactly isotropic response uses radial clipping.
+    Callers remove normal displacement first; the isotropic branch projects it again before
+    scaling by rho to suppress residual normal roundoff.
+    """
+    if limit <= 0.0:
+        return wp.vec3(0.0)
+    if R[0, 0] == R[0, 1]:
+        rho_iso = R[0, 0]
+        disp_t = displacement - n * wp.dot(n, displacement)
+        lam_t = lam - n * wp.dot(n, lam)
+        tangent_iso = lam_t + rho_iso * disp_t
+        largest_iso = wp.max(wp.abs(tangent_iso[0]), wp.max(wp.abs(tangent_iso[1]), wp.abs(tangent_iso[2])))
+        if _SQRT3_UPPER * largest_iso <= limit:
+            return tangent_iso
+        mag_iso = wp.max(limit, largest_iso)
+        sc_iso = tangent_iso / mag_iso
+        bnd_iso = limit / mag_iso
+        lsq_iso = wp.length_sq(sc_iso)
+        if lsq_iso <= bnd_iso * bnd_iso:
+            return tangent_iso
+        return (bnd_iso / wp.sqrt(lsq_iso)) * tangent_iso
+    eh, el = _tangent_metric_axes(R, n)
+    trial = lam + (eh * (R[0, 0] * wp.dot(eh, displacement)) + el * (R[0, 1] * wp.dot(el, displacement)))
+    tangent = trial - n * wp.dot(n, trial)
+    largest = wp.max(wp.abs(tangent[0]), wp.max(wp.abs(tangent[1]), wp.abs(tangent[2])))
+    if _SQRT3_UPPER * largest <= limit:
+        return tangent
+    magnitude = wp.max(limit, largest)
+    scaled = tangent / magnitude
+    bound = limit / magnitude
+    length_sq = wp.length_sq(scaled)
+    if length_sq <= bound * bound:
+        return tangent
+    high = R[0, 0]
+    low = R[0, 1]
+    if high == low or low <= 0.0:
+        return (bound / wp.sqrt(length_sq)) * tangent
+    ratio = low / high
+    vh = wp.dot(eh, scaled)
+    vl = wp.dot(el, scaled)
+    high_sq = vh * vh
+    low_sq = vl * vl
+    total = high_sq + low_sq
+    if total <= bound * bound:
+        return magnitude * (eh * vh + el * vl)
+    mean_ratio = (high_sq + ratio * low_sq) / total
+    root = wp.max(wp.max((wp.sqrt(total) - bound) / mean_ratio, (wp.abs(vl) - bound) / ratio), 0.0)
+    ih, ql, _root = _solve_friction_disk_root(vh, vl, bound, ratio, root)
+    unit_force = eh * (vh * ih) + el * ql
+    unit_force *= 1.0 / wp.max(1.0, wp.length(unit_force))
+    return limit * unit_force
+
+
+@wp.func
+def _project_friction_disk_axes(trial: wp.vec3, n: wp.vec3, R: wp.mat22, eh: wp.vec3, el: wp.vec3, limit: float):
+    """Project ``trial`` onto the Coulomb disk in the ``R^-1`` metric, given ``R``'s world eigenaxes ``eh``, ``el``.
+
+    Return the projected reaction and a positive-semidefinite secant metric for the body solve.
+    Normalize force/torque units before squaring, so the scaled root stays
+    bounded as a positive ``limit`` decays toward zero.
+    """
+    if limit <= 0.0:
+        return wp.vec3(0.0), wp.mat33(0.0)
+    tangent = trial - n * wp.dot(n, trial)
+    largest = wp.max(wp.abs(tangent[0]), wp.max(wp.abs(tangent[1]), wp.abs(tangent[2])))
+    # ||t|| <= sqrt(3) * max|t_i| allows an early return without division.
+    if _SQRT3_UPPER * largest <= limit:
+        return tangent, _world_tangent_metric(R, eh, el)
+    magnitude = wp.max(limit, largest)
+    scaled = tangent / magnitude
+    bound = limit / magnitude
+    length_sq = wp.length_sq(scaled)
+    if length_sq <= bound * bound:
+        return tangent, _world_tangent_metric(R, eh, el)
+    high = R[0, 0]
+    low = R[0, 1]
+    if high == low or low <= 0.0:
+        scale = bound / wp.sqrt(length_sq)
+        return scale * tangent, scale * _world_tangent_metric(R, eh, el)
+    # In the metric's eigenbasis, vh/vl are the scaled trial components. The projection multiplier
+    # alpha gives f_i = v_i / (1 + alpha * rho_i); with root = alpha * high * bound and ratio = low / high,
+    # f_h / limit = vh / (bound + root) and f_l / limit = vl / (bound + root * ratio).
+    ratio = low / high
+    vh = wp.dot(eh, scaled)
+    vl = wp.dot(el, scaled)
+    high_sq = vh * vh
+    low_sq = vl * vl
+    total = high_sq + low_sq
+    # Rounded bases can remove a tiny normal leakage from the initial tangent.
+    if total <= bound * bound:
+        return magnitude * (eh * vh + el * vl), _world_tangent_metric(R, eh, el)
+    mean_ratio = (high_sq + ratio * low_sq) / total
+    # Initialize with the larger lower bound from Jensen's inequality and |f_l| <= limit.
+    root = wp.max(wp.max((wp.sqrt(total) - bound) / mean_ratio, (wp.abs(vl) - bound) / ratio), 0.0)
+    # Advance from the lower bound with Newton's method on 1 / sqrt(norm_sq(root)) - 1 = 0; 24 is only a cap.
+    # Root only grows, so both denominators stay bounded below:
+    # bound + root >= sqrt(total) > bound and bound + root * ratio >= max(bound, |vl|).
+    ih, ql, root = _solve_friction_disk_root(vh, vl, bound, ratio, root)
+    dl = bound + root * ratio
+    unit_force = eh * (vh * ih) + el * ql
+    # Enforce the limit after the finite-precision solve.
+    unit_force *= 1.0 / wp.max(1.0, wp.length(unit_force))
+    # Avoid 1/dl overflow and low*bound underflow by forming the bounded low-axis quotient first.
+    metric = (high * bound * ih) * wp.outer(eh, eh) + (low * (bound / dl)) * wp.outer(el, el)
+    return limit * unit_force, metric
+
+
+@wp.func
+def _contact_angular_conditioning_scales_from_mobility(W: wp.mat33, n: wp.vec3, stiffness_scale: float):
+    """Return torsional and rolling rho as ``stiffness_scale / directional_response``.
+
+    Use ``inv_dt_sq`` for inverse-inertia mobility and one for an already
+    timestep-discretized compliance.
+    """
+    w_torsional = wp.dot(n, W * n)
+    torsional_rho = float(0.0)
+    if w_torsional > 0.0:
+        torsional_rho = stiffness_scale / w_torsional
+
+    tangent_0, tangent_1 = orthonormal_basis(n)
+    w00 = wp.dot(tangent_0, W * tangent_0)
+    w01 = wp.dot(tangent_0, W * tangent_1)
+    w11 = wp.dot(tangent_1, W * tangent_1)
+    return torsional_rho, _tangent_response_rho(w00, w01, w11, stiffness_scale)
+
+
+@wp.func
+def _contact_angular_conditioning_scales(
+    body_id_0: int,
+    body_id_1: int,
+    n: wp.vec3,
+    body_q: wp.array[wp.transform],
+    body_inv_mass: wp.array[float],
+    body_inv_inertia: wp.array[wp.mat33],
+    inv_dt_sq: float,
+):
+    """Return the pair inertial stiffnesses for torsional and rolling rows.
+
+    Endpoint angular Delassus blocks add to form the pair's relative angular
+    mobility. Torsion uses its normal-axis mobility; rolling inverts the
+    tangent-plane response to retain directional conditioning.
+    """
+    W = _contact_body_angular_block(body_id_0, body_q, body_inv_mass, body_inv_inertia) + _contact_body_angular_block(
+        body_id_1, body_q, body_inv_mass, body_inv_inertia
+    )
+    return _contact_angular_conditioning_scales_from_mobility(W, n, inv_dt_sq)
+
+
+@wp.func
+def _body_angular_displacement(
+    body_id: int,
+    body_q: wp.array[wp.transform],
+    body_q_prev: wp.array[wp.transform],
+) -> wp.vec3:
+    """Return the shortest-path world-space angular displacement from the step baseline."""
+    if body_id < 0:
+        return wp.vec3(0.0)
+    q = wp.transform_get_rotation(body_q[body_id])
+    q_prev = wp.transform_get_rotation(body_q_prev[body_id])
+    # The vector part and dot product share the scale |q| |q_prev|, which cancels from
+    # the angle and axis. Avoid intermediate normalizations for small rotations.
+    if wp.dot(q, q_prev) < 0.0:
+        q_prev = wp.quat(-q_prev[0], -q_prev[1], -q_prev[2], -q_prev[3])
+    # Subtract first so identical orientations give exactly zero.
+    difference = wp.mul(q - q_prev, wp.quat(-q_prev[0], -q_prev[1], -q_prev[2], q_prev[3]))
+    v = wp.vec3(difference[0], difference[1], difference[2])
+    v_length = wp.length(v)
+    if v_length == 0.0:
+        return wp.vec3(0.0)
+    return v * (2.0 * wp.atan2(v_length, wp.dot(q, q_prev)) / v_length)
+
+
+@wp.func
+def _relative_angular_displacement(
+    body_id_0: int,
+    body_id_1: int,
+    body_q: wp.array[wp.transform],
+    body_q_prev: wp.array[wp.transform],
+) -> wp.vec3:
+    """Return body1-minus-body0 world-space angular displacement from the step baseline [rad]."""
+    return _body_angular_displacement(body_id_1, body_q, body_q_prev) - _body_angular_displacement(
+        body_id_0, body_q, body_q_prev
+    )
+
+
+@wp.func
+def _project_angular_friction(
+    torque_trial: wp.vec3,
+    n: wp.vec3,
+    torsional_limit: float,
+    rolling_limit: float,
+) -> wp.vec3:
+    """Project an angular reaction onto separate torsional and rolling Coulomb bounds."""
+    torsional_trial = wp.dot(torque_trial, n)
+    torsional = n * wp.clamp(torsional_trial, -torsional_limit, torsional_limit)
+    rolling = torque_trial - n * torsional_trial
+    rolling = _project_coulomb_tangent(rolling, wp.length(rolling), rolling_limit)
+    return torsional + rolling
+
+
+@wp.func
+def evaluate_rigid_contact_angular_friction(
+    body_id_0: int,
+    body_id_1: int,
+    body_q: wp.array[wp.transform],
+    body_q_prev: wp.array[wp.transform],
+    n: wp.vec3,
+    normal_load: float,
+    mu_torsional: float,
+    mu_rolling: float,
+    torsional_rho: float,
+    rolling_rho: wp.mat22,
+    contact_lam_angular: wp.vec3,
+):
+    """Evaluate the ALM torsional/rolling torque on body1 and its PSD rotational solve metric.
+
+    With ``d`` the rotation of body0 relative to body1 since ``body_q_prev``, torsion clamps
+    ``n . lambda + rho_t (n . d)`` to ``mu_t N`` and rolling projects the tangent part of
+    ``lambda + R_r d`` onto ``||tau|| <= mu_r N`` in the ``R_r^-1`` metric.
+    """
+    if normal_load <= 0.0 or (mu_torsional <= 0.0 and mu_rolling <= 0.0):
+        return wp.vec3(0.0), wp.mat33(0.0)
+
+    angular_disp = -_relative_angular_displacement(body_id_0, body_id_1, body_q, body_q_prev)
+
+    torsional_limit = mu_torsional * normal_load
+    torsional_trial = wp.dot(contact_lam_angular, n) + torsional_rho * wp.dot(angular_disp, n)
+    torsional_metric = float(0.0)
+    if mu_torsional > 0.0 and torsional_rho > 0.0:
+        torsional_metric = torsional_rho
+        if wp.abs(torsional_trial) > torsional_limit:
+            # Use the full trial state so the metric stays finite as the increment vanishes.
+            torsional_metric *= torsional_limit / wp.abs(torsional_trial)
+
+    rolling_torque, rolling_metric = _project_friction_update(
+        contact_lam_angular, angular_disp, n, rolling_rho, mu_rolling * normal_load
+    )
+
+    torque = n * wp.clamp(torsional_trial, -torsional_limit, torsional_limit) + rolling_torque
+    return torque, torsional_metric * wp.outer(n, n) + rolling_metric
 
 
 @wp.func
@@ -1455,64 +1950,91 @@ def _body_rotation_increment(X: wp.transform, X_prev: wp.transform):
 def _body_step_motion(
     body: int, body_q: wp.array[wp.transform], body_q_prev: wp.array[wp.transform], body_com: wp.array[wp.vec3]
 ):
-    """Return step-start transform, translation-invariant COM displacement, rotation increment and ``J^T``."""
+    """Return a body's COM translation, rotation increment and ``J^T`` since the step start.
+
+    The world (``body < 0``) does not move: zero translation and rotation, ``J^T = I``.
+    """
     if body < 0:
-        return wp.transform_identity(), wp.vec3(0.0), wp.vec3(0.0), wp.identity(n=3, dtype=float)
+        return wp.vec3(0.0), wp.vec3(0.0), wp.identity(n=3, dtype=float)
     X = body_q[body]
     X_prev = body_q_prev[body]
-    com_disp = wp.transform_get_translation(X) - wp.transform_get_translation(X_prev)
     com_local = body_com[body]
-    if com_local[0] != 0.0 or com_local[1] != 0.0 or com_local[2] != 0.0:
-        q = wp.transform_get_rotation(X)
-        q_prev = wp.transform_get_rotation(X_prev)
-        com_disp += wp.quat_rotate(q, com_local) - wp.quat_rotate(q_prev, com_local)
     rotation, jacobian_t = _body_rotation_increment(X, X_prev)
-    return X_prev, com_disp, rotation, jacobian_t
+    # Difference the body origins first, then the rotated COM offsets: subtracting two world-space COM
+    # positions rounds the step to the float32 spacing of the body's distance from the world origin.
+    translation = wp.transform_get_translation(X) - wp.transform_get_translation(X_prev)
+    if com_local[0] != 0.0 or com_local[1] != 0.0 or com_local[2] != 0.0:
+        translation += wp.quat_rotate(wp.transform_get_rotation(X), com_local) - wp.quat_rotate(
+            wp.transform_get_rotation(X_prev), com_local
+        )
+    return translation, rotation, jacobian_t
 
 
 @wp.func
 def _contact_step_levers(
     body: int,
-    X_prev: wp.transform,
+    body_q_prev: wp.array[wp.transform],
     body_com: wp.array[wp.vec3],
     point_local: wp.vec3,
     offset_local: wp.vec3,
 ):
-    """Return step-start support and surface levers in world orientation without world-origin subtraction."""
+    """Return a contact endpoint's two step-start levers from the step-start COM, in world orientation.
+
+    The first lever reaches the geometric (support) point, the second the surface anchor (point plus offset).
+    Both are rotated body-local vectors: a difference of two world points would round them to the float32
+    spacing of the body's distance from the world origin. A world endpoint (``body < 0``) is a body at the
+    identity with its COM at the world origin: the solve never moves it, and force reporting takes its moment
+    about the origin.
+    """
     if body < 0:
         return point_local, point_local + offset_local
-    q_prev = wp.transform_get_rotation(X_prev)
-    lever_s = wp.quat_rotate(q_prev, point_local - body_com[body])
-    lever_c = lever_s
-    if offset_local[0] != 0.0 or offset_local[1] != 0.0 or offset_local[2] != 0.0:
-        lever_c = lever_s + wp.quat_rotate(q_prev, offset_local)
-    return lever_s, lever_c
+    q_prev = wp.transform_get_rotation(body_q_prev[body])
+    com_local = body_com[body]
+    return wp.quat_rotate(q_prev, point_local - com_local), wp.quat_rotate(
+        q_prev, (point_local + offset_local) - com_local
+    )
 
 
 @wp.func
-def _lever_displacement(com_disp: wp.vec3, rotation: wp.vec3, lever: wp.vec3):
-    """Return a contact point's first-order displacement from COM displacement and step-start lever."""
-    return com_disp + wp.cross(rotation, lever)
-
-
-@wp.func
-def _step_start_penetration(
-    b0: int,
-    X_0_prev: wp.transform,
+def _contact_step_start_penetration(
+    body0: int,
+    body1: int,
+    body_q_prev: wp.array[wp.transform],
     point0_local: wp.vec3,
-    b1: int,
-    X_1_prev: wp.transform,
     point1_local: wp.vec3,
     normal: wp.vec3,
     margin0: float,
     margin1: float,
 ):
-    """Return step-start normal penetration without large-coordinate world subtraction."""
-    base_0 = wp.transform_get_translation(X_0_prev) if b0 >= 0 else point0_local
-    base_1 = wp.transform_get_translation(X_1_prev) if b1 >= 0 else point1_local
-    rel_0 = wp.quat_rotate(wp.transform_get_rotation(X_0_prev), point0_local) if b0 >= 0 else wp.vec3(0.0)
-    rel_1 = wp.quat_rotate(wp.transform_get_rotation(X_1_prev), point1_local) if b1 >= 0 else wp.vec3(0.0)
-    return -contact_surface_separation(rel_0, (base_1 - base_0) + rel_1, normal, margin0, margin1)
+    """Return a row's penetration at the given poses from the two bodies' relative pose.
+
+    The geometric points exclude offsets: the margins already account for radial extent. Differencing the
+    body origins before adding the rotated body-local points keeps the gap of two nearby bodies independent
+    of their distance from the world origin; a difference of two world points rounds it to the float32
+    spacing of that distance. A world endpoint (``body < 0``) holds its point in world coordinates.
+    """
+    origin0 = point0_local
+    arm0 = wp.vec3(0.0)
+    if body0 >= 0:
+        X_0 = body_q_prev[body0]
+        origin0 = wp.transform_get_translation(X_0)
+        arm0 = wp.quat_rotate(wp.transform_get_rotation(X_0), point0_local)
+    origin1 = point1_local
+    arm1 = wp.vec3(0.0)
+    if body1 >= 0:
+        X_1 = body_q_prev[body1]
+        origin1 = wp.transform_get_translation(X_1)
+        arm1 = wp.quat_rotate(wp.transform_get_rotation(X_1), point1_local)
+    return -contact_surface_separation(arm0, (origin1 - origin0) + arm1, normal, margin0, margin1)
+
+
+@wp.func
+def _first_order_lever_displacement(translation: wp.vec3, rotation: wp.vec3, lever: wp.vec3):
+    """Return the first-order displacement ``dc + omega x lever`` of a body point at a step-start lever.
+
+    Taking the increment directly, without rounding it through a world position, preserves small contact motion.
+    """
+    return translation + wp.cross(rotation, lever)
 
 
 @wp.func
@@ -1540,80 +2062,47 @@ def _contact_lever_blocks(
 
 
 @wp.func
-def _rigid_contact_row_response(
-    normal_increment: float,
-    relative_surface_displacement: wp.vec3,
-    contact_surface_velocity: wp.vec3,
-    contact_normal: wp.vec3,
+def _rigid_contact_normal_law(
     penetration_depth: float,
     previous_penetration: float,
     normal_solve_weight: float,
     contact_material_ke: float,
-    contact_tangent_rho: float,
     contact_kd: float,
     contact_lam: wp.vec3,
-    friction_mu: float,
-    friction_epsilon: float,
+    contact_normal: wp.vec3,
     dt: float,
-    friction_c0: wp.vec3,
-    contact_damping_bidirectional: bool = False,
+    contact_damping_bidirectional: bool,
 ):
-    """Return a rigid contact row's normal and friction forces on body B and their 3x3 stiffness blocks.
+    """Apply the normal law and activity rule of a rigid contact row.
 
-    Compliant damping uses the supplied step-start penetration, evaluated directly
-    from the fixed step-start points with the same stabilization shift as the current gap.
-    Do not reconstruct it from the current iterate and a cancelling displacement.
+    Returns ``(normal_metric, f_n, f_n_total, lam_n, contact_lam_eff)``. ``f_n`` is the elastic normal
+    force, which bounds sliding and angular friction. ``f_n_total`` adds compression-increment damping and
+    ``normal_metric`` is the matching scalar solve stiffness; an inactive row returns ``f_n_total = 0``.
 
-    Contacts use displacement-based projected Coulomb friction.
-    Normal damping acts on a closing gap only, or in both directions when
-    ``contact_damping_bidirectional`` is set.
-
-    ``normal_increment`` is the increase in penetration from the geometric points' direct first-order motion.
-    The surface-anchor displacement of B relative to A is supplied directly, preserving small slip without
-    subtracting rounded absolute positions. Body A takes the reaction.
+    Rows damp the compression increment over the step. The increment is zero at first touch, so the
+    damping force does not jump at activation, and equals ``contact_kd`` times the approach rate under
+    sustained loading; unloading is undamped. ``previous_penetration`` is the penetration of the
+    step-start points with the same stabilization shift as ``penetration_depth``. Callers evaluate it
+    from those points (the current gap minus a displacement loses small increments in float32); it is
+    read only for a positive ``contact_kd`` without ``contact_damping_bidirectional``. Signed velocity
+    damping is separate from the elastic ALM multiplier and is added by
+    :func:`_evaluate_rigid_contact_for_body`.
     """
     normal_primal_k, contact_lam_eff = _contact_force_terms(
         normal_solve_weight, contact_material_ke, contact_lam, contact_normal
     )
-
     lam_n = wp.dot(contact_lam_eff, contact_normal)
 
-    if penetration_depth <= _SMALL_LENGTH_EPS and lam_n <= 0.0:
-        return wp.vec3(0.0), wp.vec3(0.0), wp.mat33(0.0), wp.mat33(0.0)
+    if (penetration_depth <= _SMALL_LENGTH_EPS and lam_n <= 0.0) or normal_primal_k <= 0.0:
+        return 0.0, 0.0, 0.0, 0.0, wp.vec3(0.0)
 
-    f_n = normal_primal_k * penetration_depth + lam_n
-    if normal_primal_k <= 0.0:
-        return wp.vec3(0.0), wp.vec3(0.0), wp.mat33(0.0), wp.mat33(0.0)
-    f_n = wp.max(f_n, 0.0)
-
-    # Release the Hessian so separated contacts do not resist free motion.
+    # Release the metric so separated contacts do not resist free motion.
+    f_n = wp.max(normal_primal_k * penetration_depth + lam_n, 0.0)
     if f_n == 0.0:
-        return wp.vec3(0.0), wp.vec3(0.0), wp.mat33(0.0), wp.mat33(0.0)
+        return 0.0, 0.0, 0.0, 0.0, wp.vec3(0.0)
 
-    n_outer = wp.outer(contact_normal, contact_normal)
-    I3 = wp.identity(n=3, dtype=float)
-
-    # Tangential slip from the surface anchor (required for finite-radius friction).
-    v_rel_t = relative_surface_displacement / dt + contact_surface_velocity
-    v_t = v_rel_t - contact_normal * wp.dot(contact_normal, v_rel_t)
-
-    # Normal block (force + optional normal damping), applied at the geometric lever.
-    f_n_vec = contact_normal * f_n
-    K_n = normal_primal_k * n_outer
-
-    # Approach damping on the compression increment of the penetration rather than on the approach
-    # velocity. The approach velocity includes the free flight before first touch, so the damping force
-    # jumps at activation and the row can have no force balance at all (a(g - g*) = f(g) has no root
-    # when 0 < a(-g*) < kd*g0/dt). The increment starts at zero at first touch and equals kd times the
-    # approach rate under sustained loading; unloading stays undamped. Bidirectional
-    # damping retains the explicit velocity damper, separate from the elastic ALM multiplier.
-    f_damp = float(0.0)
-    apply_velocity_damping = bool(False)
-    if contact_kd > 0.0 and not contact_damping_bidirectional:
-        # The step-start gap is supplied directly: reconstructing it from the
-        # current gap and approach rate makes the damping reference iterate-dependent
-        # in floating point.
-        total_normal, elastic_normal, combined_metric = _compliant_contact_normal_response(
+    if contact_kd > 0.0 and not contact_damping_bidirectional and wp.isfinite(contact_material_ke):
+        f_n_total, f_n_elastic, normal_metric = _compliant_contact_normal_response(
             penetration_depth,
             previous_penetration,
             contact_material_ke,
@@ -1622,48 +2111,97 @@ def _rigid_contact_row_response(
             wp.dot(contact_lam, contact_normal),
             dt,
         )
-        f_n = elastic_normal
-        f_n_vec = total_normal * contact_normal
-        K_n = combined_metric * n_outer
-    elif contact_kd > 0.0 and f_n > 0.0:
-        # Preserve signed velocity damping in both directions when requested, including
-        # its metric at zero velocity. Friction remains bounded by the elastic normal force.
-        v_dot_n = -normal_increment / dt
-        if contact_damping_bidirectional or v_dot_n < 0.0:
-            f_damp = -contact_kd * v_dot_n
-            apply_velocity_damping = True
+        if f_n_total <= 0.0:
+            return 0.0, 0.0, 0.0, 0.0, wp.vec3(0.0)
+        return normal_metric, f_n_elastic, f_n_total, lam_n, contact_lam_eff
+
+    return normal_primal_k, f_n, f_n, lam_n, contact_lam_eff
+
+
+@wp.func
+def _evaluate_rigid_contact_for_body(
+    is_body_a: bool,
+    translation_a: wp.vec3,
+    rotation_a: wp.vec3,
+    translation_b: wp.vec3,
+    rotation_b: wp.vec3,
+    jacobian_t_own: wp.mat33,
+    lever_s_a: wp.vec3,
+    lever_c_a: wp.vec3,
+    lever_s_b: wp.vec3,
+    lever_c_b: wp.vec3,
+    surface_velocity: wp.vec3,
+    contact_normal: wp.vec3,
+    normal_metric: float,
+    f_n: float,
+    f_n_total: float,
+    lam_n: float,
+    contact_lam_eff: wp.vec3,
+    contact_tangent_rho: wp.mat22,
+    contact_kd: float,
+    friction_mu: float,
+    dt: float,
+    contact_damping_bidirectional: bool,
+):
+    """Evaluate normal/sliding contact force, torque, and 3x3 Hessian blocks for one body of an active contact.
+
+    The caller applies :func:`_rigid_contact_normal_law` and passes ``normal_metric``, ``f_n``, ``f_n_total``,
+    ``lam_n`` and ``contact_lam_eff`` with both bodies' step motion (:func:`_body_step_motion`), its own body's
+    ``J^T`` and the row's step-start levers (:func:`_contact_step_levers`), then adds the angular
+    (torsional/rolling) friction torque and metric. The body solve calls this for its own body with the levers
+    stored for the row; :func:`evaluate_rigid_contact_normal_sliding` calls it for both bodies.
+
+    Within a step each row keeps its collision-time normal and body-local points. The points move by the body's
+    first-order increment from the step-start pose and the forces act at step-start levers, chained through the
+    solver's rotation update, preserving virtual work for that point motion. Friction uses the surface anchors'
+    relative displacement over the current step only, taken from the body increments directly, which preserves
+    small slip that subtracting rounded world positions would lose. The blocks are positive-semidefinite solve
+    metrics, not general exact Hessians.
+
+    Returns:
+        5-tuple: (force, torque, H_ll, H_al, H_aa) on body a if ``is_body_a`` else on body b.
+    """
+    # Normal block (force + optional signed velocity damping), applied at the geometric lever.
+    n_outer = wp.outer(contact_normal, contact_normal)
+    f_n_vec = contact_normal * f_n_total
+    K_n = normal_metric * n_outer
+    if contact_kd > 0.0 and contact_damping_bidirectional:
+        # Signed velocity damping in both directions; its metric also applies at zero velocity.
+        # Friction stays bounded by the elastic normal force.
+        normal_displacement = _first_order_lever_displacement(
+            translation_b, rotation_b, lever_s_b
+        ) - _first_order_lever_displacement(translation_a, rotation_a, lever_s_a)
+        v_dot_n = wp.dot(contact_normal, normal_displacement) / dt
+        f_n_vec = f_n_vec - contact_kd * v_dot_n * contact_normal
+        K_n = K_n + (contact_kd / dt) * n_outer
 
     # Tangential friction block, applied at the surface-anchor lever.
     f_t_vec = wp.vec3(0.0)
     K_t = wp.mat33(0.0)
-
     if friction_mu > 0.0 and f_n > 0.0:
-        # Coulomb projection of rho_t*(disp + friction_c0) + lambda_t.
-        # friction_c0 is an optional tangential offset. The body solve and the force report pass
-        # zero, so friction acts on the current-step slip alone.
-        rho_t = contact_tangent_rho
+        # Coulomb projection of the current step's slip and the tangential multiplier.
+        relative_surface_displacement = _first_order_lever_displacement(
+            translation_b, rotation_b, lever_c_b
+        ) - _first_order_lever_displacement(translation_a, rotation_a, lever_c_a)
+        v_rel_t = relative_surface_displacement / dt + surface_velocity
+        v_t = v_rel_t - contact_normal * wp.dot(contact_normal, v_rel_t)
         tangential_disp = -(v_t * dt)
         lam_t = contact_lam_eff - contact_normal * lam_n
-        f_t_vec = rho_t * (tangential_disp + friction_c0) + lam_t
-        f_t_len = wp.length(f_t_vec)
         cone_limit = friction_mu * f_n
-        if f_t_len > cone_limit:
-            # Outside the Coulomb cone, use the continuous isotropic ALM secant metric so
-            # radial and transverse stiffness match at the cone boundary without a cliff.
-            K_t = ((cone_limit / f_t_len) * rho_t) * (I3 - n_outer)
-        else:
-            K_t = rho_t * (I3 - n_outer)
-        f_t_vec = _project_coulomb_tangent(f_t_vec, f_t_len, cone_limit)
+        f_t_vec, K_t = _project_friction_update(lam_t, tangential_disp, contact_normal, contact_tangent_rho, cone_limit)
 
-    if apply_velocity_damping:
-        f_n_vec = f_n_vec + f_damp * contact_normal
-        K_n = K_n + (contact_kd / dt) * n_outer
+    # Geometric lever for the normal block, surface-anchor lever for friction, both at the step start.
+    r_s = lever_s_a if is_body_a else lever_s_b
+    r_c = lever_c_a if is_body_a else lever_c_b
+    f_n_own = -f_n_vec if is_body_a else f_n_vec
+    f_t_own = -f_t_vec if is_body_a else f_t_vec
+    torque_own, h_al, h_aa = _contact_lever_blocks(f_n_own, f_t_own, K_n, K_t, r_s, r_c, jacobian_t_own)
 
-    return f_n_vec, f_t_vec, K_n, K_t
+    return f_n_own + f_t_own, torque_own, K_n + K_t, h_al, h_aa
 
 
 @wp.func
-def evaluate_rigid_contact_from_collision(
+def evaluate_rigid_contact_normal_sliding(
     body_a_index: int,
     body_b_index: int,
     body_q: wp.array[wp.transform],
@@ -1679,67 +2217,102 @@ def evaluate_rigid_contact_from_collision(
     previous_penetration: float,
     normal_solve_weight: float,
     contact_material_ke: float,
-    contact_tangent_rho: float,
+    contact_tangent_rho: wp.mat22,
     contact_kd: float,
     contact_lam: wp.vec3,
     friction_mu: float,
-    friction_epsilon: float,
     dt: float,
-    friction_c0: wp.vec3,
-    contact_damping_bidirectional: bool = False,
+    contact_damping_bidirectional: bool,
 ):
-    """Compute rigid-contact forces and 3x3 Hessian blocks for a contact pair.
+    """Compute normal/sliding contact forces and 3x3 Hessian blocks for a contact pair.
 
-    Within a step each row keeps its collision-time normal and body-local points. The points move by the body's
-    first-order increment from the step-start pose and the forces act at step-start levers, chained through the
-    solver's rotation update, preserving virtual work for that point motion. The blocks are positive-semidefinite
-    solve metrics, not general exact Hessians or a claim that friction has a global potential. A current-pose lever
-    with a frozen normal instead adds an O(h) re-anchored drag along curved sliding surfaces such as threads.
+    Contacts use displacement-based projected Coulomb friction on the current step's slip.
+    Normal damping acts on the compression gained since the step start (``previous_penetration``,
+    see :func:`_rigid_contact_normal_law`), or as signed velocity damping in both directions when
+    ``contact_damping_bidirectional`` is set. Point motion and levers are first order from the
+    step-start pose; see :func:`_evaluate_rigid_contact_for_body`.
 
-    The solver's kernels compose the same helpers inline, to share the levers with the gap evaluation;
-    only unit tests call this function.
+    Torsional and rolling friction contribute separate pure torques;
+    see :func:`evaluate_rigid_contact_angular_friction`.
 
     Returns:
         10-tuple: (force_a, torque_a, H_ll_a, H_al_a, H_aa_a,
                    force_b, torque_b, H_ll_b, H_al_b, H_aa_b)
     """
-    X_wa_prev, com_disp_a, rotation_a, jacobian_t_a = _body_step_motion(body_a_index, body_q, body_q_prev, body_com)
-    X_wb_prev, com_disp_b, rotation_b, jacobian_t_b = _body_step_motion(body_b_index, body_q, body_q_prev, body_com)
-
-    # Normal response uses geometric (skeleton) points; friction uses the surface anchor.
-    lever_s_a, lever_c_a = _contact_step_levers(
-        body_a_index, X_wa_prev, body_com, contact_point_a_local, contact_offset_a_local
-    )
-    lever_s_b, lever_c_b = _contact_step_levers(
-        body_b_index, X_wb_prev, body_com, contact_point_b_local, contact_offset_b_local
-    )
-    f_n_vec, f_t_vec, K_n, K_t = _rigid_contact_row_response(
-        wp.dot(
-            contact_normal,
-            _lever_displacement(com_disp_a, rotation_a, lever_s_a)
-            - _lever_displacement(com_disp_b, rotation_b, lever_s_b),
-        ),
-        _lever_displacement(com_disp_b, rotation_b, lever_c_b) - _lever_displacement(com_disp_a, rotation_a, lever_c_a),
-        contact_surface_velocity,
-        contact_normal,
+    normal_metric, f_n, f_n_total, lam_n, contact_lam_eff = _rigid_contact_normal_law(
         penetration_depth,
         previous_penetration,
         normal_solve_weight,
         contact_material_ke,
-        contact_tangent_rho,
         contact_kd,
         contact_lam,
-        friction_mu,
-        friction_epsilon,
+        contact_normal,
         dt,
-        friction_c0,
         contact_damping_bidirectional,
     )
-    torque_a, h_al_a, h_aa_a = _contact_lever_blocks(-f_n_vec, -f_t_vec, K_n, K_t, lever_s_a, lever_c_a, jacobian_t_a)
-    torque_b, h_al_b, h_aa_b = _contact_lever_blocks(f_n_vec, f_t_vec, K_n, K_t, lever_s_b, lever_c_b, jacobian_t_b)
-    f_total = f_n_vec + f_t_vec
-    K_total = K_n + K_t
-    return (-f_total, torque_a, K_total, h_al_a, h_aa_a, f_total, torque_b, K_total, h_al_b, h_aa_b)
+    if f_n_total <= 0.0:
+        zero_vec = wp.vec3(0.0)
+        zero_mat = wp.mat33(0.0)
+        return (zero_vec, zero_vec, zero_mat, zero_mat, zero_mat, zero_vec, zero_vec, zero_mat, zero_mat, zero_mat)
+
+    translation_a, rotation_a, jacobian_t_a = _body_step_motion(body_a_index, body_q, body_q_prev, body_com)
+    translation_b, rotation_b, jacobian_t_b = _body_step_motion(body_b_index, body_q, body_q_prev, body_com)
+    lever_s_a, lever_c_a = _contact_step_levers(
+        body_a_index, body_q_prev, body_com, contact_point_a_local, contact_offset_a_local
+    )
+    lever_s_b, lever_c_b = _contact_step_levers(
+        body_b_index, body_q_prev, body_com, contact_point_b_local, contact_offset_b_local
+    )
+
+    force_a, torque_a, h_ll, h_al_a, h_aa_a = _evaluate_rigid_contact_for_body(
+        True,
+        translation_a,
+        rotation_a,
+        translation_b,
+        rotation_b,
+        jacobian_t_a,
+        lever_s_a,
+        lever_c_a,
+        lever_s_b,
+        lever_c_b,
+        contact_surface_velocity,
+        contact_normal,
+        normal_metric,
+        f_n,
+        f_n_total,
+        lam_n,
+        contact_lam_eff,
+        contact_tangent_rho,
+        contact_kd,
+        friction_mu,
+        dt,
+        contact_damping_bidirectional,
+    )
+    force_b, torque_b, _h_ll_b, h_al_b, h_aa_b = _evaluate_rigid_contact_for_body(
+        False,
+        translation_a,
+        rotation_a,
+        translation_b,
+        rotation_b,
+        jacobian_t_b,
+        lever_s_a,
+        lever_c_a,
+        lever_s_b,
+        lever_c_b,
+        contact_surface_velocity,
+        contact_normal,
+        normal_metric,
+        f_n,
+        f_n_total,
+        lam_n,
+        contact_lam_eff,
+        contact_tangent_rho,
+        contact_kd,
+        friction_mu,
+        dt,
+        contact_damping_bidirectional,
+    )
+    return (force_a, torque_a, h_ll, h_al_a, h_aa_a, force_b, torque_b, h_ll, h_al_b, h_aa_b)
 
 
 @wp.func
@@ -3516,6 +4089,8 @@ def forward_step_rigid_bodies(
     body_qd_prev: wp.array[wp.spatial_vector],
     body_q_prev: wp.array[wp.transform],
     body_inertia_q: wp.array[wp.transform],
+    recovery_step_start_q: wp.array[wp.transform],
+    recovery_body: wp.array[int],
 ):
     """
     Forward integration step for rigid bodies in SolverVBD.
@@ -3541,11 +4116,20 @@ def forward_step_rigid_bodies(
             pre-step pose for worlds selected by ``pose_rebaseline_mask`` (first step
             after construction or reset); left unchanged otherwise.
         body_inertia_q: Inertial target body transforms for the rigid solve (output).
+        recovery_step_start_q: Optional step-start poses for contact refreshes (output).
+        recovery_body: Bodies whose initial primal iterate is the certified pose.
     """
     tid = wp.tid()
 
     world_idx = body_world[tid]
     q_current = body_q[tid]
+    if recovery_step_start_q:
+        recovery_step_start_q[tid] = q_current
+    hold_pose = False
+    if recovery_body:
+        hold_pose = recovery_body[tid] != 0
+        if hold_pose:
+            recovery_body[tid] = 0
     first_step = _world_selected(world_idx, pose_rebaseline_mask)
     if first_step:
         # The constructor or reset() may precede state pose preparation.
@@ -3618,8 +4202,10 @@ def forward_step_rigid_bodies(
     if body_qd_prev.shape[0] > 0:
         body_qd_prev[tid] = qd_current
 
-    # Update current transform, velocity, and set inertial target
-    body_q[tid] = q_start
+    # Update current transform, velocity, and set inertial target.
+    # Start constrained iterations at the witness when prediction alone could
+    # carry a deeply embedded body past its certified recovery region.
+    body_q[tid] = q_current if hold_pose else q_start
     body_qd[tid] = qd_new
     body_inertia_q[tid] = q_new
 
@@ -3631,9 +4217,11 @@ def build_body_body_contact_lists(
     rigid_contact_shape1: wp.array[int],
     shape_body: wp.array[wp.int32],
     body_inv_mass_effective: wp.array[float],
+    body_colors: wp.array[wp.int32],
     body_contact_buffer_pre_alloc: int,
     body_contact_counts: wp.array[wp.int32],
     body_contact_indices: wp.array[wp.int32],
+    body_contact_bodies: wp.array[wp.vec3i],
     body_contact_overflow_max: wp.array[wp.int32],
 ):
     """
@@ -3641,6 +4229,8 @@ def build_body_body_contact_lists(
 
     Each contact is listed only under its dynamic bodies (effective inverse
     mass > 0); static/kinematic bodies are skipped since VBD never moves them.
+    Each entry also stores the contact's two body indices and whether both are
+    dynamic bodies of one color, so the per-body walk needs no shape or body lookup.
     Overflow is tracked in body_contact_overflow_max for diagnostics.
     """
     t_id = wp.tid()
@@ -3651,11 +4241,19 @@ def build_body_body_contact_lists(
     s1 = rigid_contact_shape1[t_id]
     b0 = shape_body[s0] if s0 >= 0 else -1
     b1 = shape_body[s1] if s1 >= 0 else -1
+    # 1 when both bodies are dynamic and share a color, so one color sweep moves both.
+    same_color_pair = int(0)
+    if b0 >= 0 and b1 >= 0:
+        if body_inv_mass_effective[b0] > 0.0 and body_inv_mass_effective[b1] > 0.0:
+            if body_colors[b0] == body_colors[b1]:
+                same_color_pair = 1
+    entry = wp.vec3i(b0, b1, same_color_pair)
 
     if b0 >= 0 and body_inv_mass_effective[b0] > 0.0:
         idx = wp.atomic_add(body_contact_counts, b0, 1)
         if idx < body_contact_buffer_pre_alloc:
             body_contact_indices[b0 * body_contact_buffer_pre_alloc + idx] = t_id
+            body_contact_bodies[b0 * body_contact_buffer_pre_alloc + idx] = entry
         else:
             wp.atomic_max(body_contact_overflow_max, 0, idx + 1)
 
@@ -3663,6 +4261,7 @@ def build_body_body_contact_lists(
         idx = wp.atomic_add(body_contact_counts, b1, 1)
         if idx < body_contact_buffer_pre_alloc:
             body_contact_indices[b1 * body_contact_buffer_pre_alloc + idx] = t_id
+            body_contact_bodies[b1 * body_contact_buffer_pre_alloc + idx] = entry
         else:
             wp.atomic_max(body_contact_overflow_max, 0, idx + 1)
 
@@ -4193,11 +4792,14 @@ def init_body_body_contact_materials(
     shape_material_ke: wp.array[float],
     shape_material_kd: wp.array[float],
     shape_material_mu: wp.array[float],
+    shape_material_mu_torsional: wp.array[float],
+    shape_material_mu_rolling: wp.array[float],
     rigid_contact_stiffness: wp.array[float],
     rigid_contact_damping: wp.array[float],
     rigid_contact_friction: wp.array[float],
+    # Outputs
     contact_material_kd: wp.array[float],
-    contact_material_mu: wp.array[float],
+    contact_material_mu: wp.array[wp.vec3],
     contact_material_ke: wp.array[float],
 ):
     """Cache the material properties averaged from both shapes.
@@ -4214,20 +4816,22 @@ def init_body_body_contact_materials(
     if shape_id_0 < 0 or shape_id_1 < 0:
         return
 
-    avg_ke, avg_kd, avg_mu = _rigid_contact_material(
+    avg_ke, avg_kd, avg_mu, avg_mu_torsional, avg_mu_rolling = _rigid_contact_material(
         i,
         shape_id_0,
         shape_id_1,
         shape_material_ke,
         shape_material_kd,
         shape_material_mu,
+        shape_material_mu_torsional,
+        shape_material_mu_rolling,
         rigid_contact_stiffness,
         rigid_contact_damping,
         rigid_contact_friction,
     )
 
     contact_material_kd[i] = avg_kd
-    contact_material_mu[i] = avg_mu
+    contact_material_mu[i] = wp.vec3(avg_mu, avg_mu_torsional, avg_mu_rolling)
     contact_material_ke[i] = avg_ke
 
 
@@ -4243,6 +4847,8 @@ def init_body_body_contacts_alm(
     shape_material_ke: wp.array[float],
     shape_material_kd: wp.array[float],
     shape_material_mu: wp.array[float],
+    shape_material_mu_torsional: wp.array[float],
+    shape_material_mu_rolling: wp.array[float],
     rigid_contact_stiffness: wp.array[float],
     rigid_contact_damping: wp.array[float],
     rigid_contact_friction: wp.array[float],
@@ -4261,8 +4867,9 @@ def init_body_body_contacts_alm(
     body_world: wp.array[wp.int32],
     # Outputs
     contact_lambda: wp.array[wp.vec3],
+    contact_lambda_angular: wp.array[wp.vec3],
     contact_material_kd: wp.array[float],
-    contact_material_mu: wp.array[float],
+    contact_material_mu: wp.array[wp.vec3],
     contact_material_ke: wp.array[float],
 ):
     """Warm-start body-body contact state from the snapshotted contact set.
@@ -4271,8 +4878,10 @@ def init_body_body_contacts_alm(
     own row on the same contact set, else its match index when the indices refer to
     the snapshotted set) and starts cold otherwise.
 
-    Restore matched normal and cone-clamped tangential multipliers.
-    Sticky anchors locate the contact; friction uses current-step slip.
+    Restore matched ``lambda_n`` and cone-clamped ``lambda_t``. Sticky
+    anchors locate the contact; the multiplier supplies its force estimate.
+    Friction uses only the current step's tangential slip. Matched contacts
+    restore bounded angular multipliers in the current contact frame.
     C0/retention live in :func:`step_body_body_contact_C0_lambda`.
     """
     i = wp.tid()
@@ -4281,25 +4890,28 @@ def init_body_body_contacts_alm(
 
     # Every unmatched row remains zero; matched multiplier paths overwrite it.
     contact_lambda[i] = wp.vec3(0.0)
+    contact_lambda_angular[i] = wp.vec3(0.0)
     s0 = rigid_contact_shape0[i]
     s1 = rigid_contact_shape1[i]
     if s0 < 0 or s1 < 0:
         return
 
-    avg_ke, avg_kd, avg_mu = _rigid_contact_material(
+    avg_ke, avg_kd, avg_mu, avg_mu_torsional, avg_mu_rolling = _rigid_contact_material(
         i,
         s0,
         s1,
         shape_material_ke,
         shape_material_kd,
         shape_material_mu,
+        shape_material_mu_torsional,
+        shape_material_mu_rolling,
         rigid_contact_stiffness,
         rigid_contact_damping,
         rigid_contact_friction,
     )
     contact_material_ke[i] = avg_ke
     contact_material_kd[i] = avg_kd
-    contact_material_mu[i] = avg_mu
+    contact_material_mu[i] = wp.vec3(avg_mu, avg_mu_torsional, avg_mu_rolling)
 
     slot = _contact_history_slot(i, match_index, match_generation, contact_generation, contact_buffer_id, history_frame)
     # Drop the saved match for reset-selected worlds so they cold-start instead
@@ -4314,17 +4926,26 @@ def init_body_body_contacts_alm(
         n_new = rigid_contact_normal[i]
         n_old = history.normal[slot]
         lam_n = wp.dot(lam_hist, n_old)
-        lam_new = n_new * lam_n
+        normal_load = wp.max(lam_n, 0.0)
         lam_t_old = lam_hist - n_old * lam_n
         lam_t_new = lam_t_old - n_new * wp.dot(lam_t_old, n_new)
         # Restore only a valid Coulomb-cone warm start.
         lam_t_new = _project_coulomb_tangent(
             lam_t_new,
             wp.length(lam_t_new),
-            avg_mu * wp.max(lam_n, 0.0),
+            avg_mu * normal_load,
         )
-        lam_new += lam_t_new
-        contact_lambda[i] = lam_new
+        contact_lambda[i] = n_new * lam_n + lam_t_new
+        lam_angular_hist = history.lambda_angular[slot]
+        lam_torsional = n_new * wp.dot(lam_angular_hist, n_old)
+        lam_rolling = lam_angular_hist - n_old * wp.dot(lam_angular_hist, n_old)
+        lam_rolling = lam_rolling - n_new * wp.dot(lam_rolling, n_new)
+        contact_lambda_angular[i] = _project_angular_friction(
+            lam_torsional + lam_rolling,
+            n_new,
+            avg_mu_torsional * normal_load,
+            avg_mu_rolling * normal_load,
+        )
 
 
 @wp.kernel
@@ -4332,10 +4953,12 @@ def snapshot_body_body_contact_history(
     rigid_contact_count: wp.array[int],
     rigid_contact_normal: wp.array[wp.vec3],
     contact_lambda: wp.array[wp.vec3],
+    contact_lambda_angular: wp.array[wp.vec3],
     contact_generation: wp.array[wp.int32],
     contact_buffer_id: int,
     # Persistent outputs, in RigidContactHistory order
     prev_lambda: wp.array[wp.vec3],
+    prev_lambda_angular: wp.array[wp.vec3],
     prev_normal: wp.array[wp.vec3],
     history_frame: wp.array[wp.int32],
 ):
@@ -4354,6 +4977,7 @@ def snapshot_body_body_contact_history(
 
     prev_lambda[i] = contact_lambda[i]
     prev_normal[i] = rigid_contact_normal[i]
+    prev_lambda_angular[i] = contact_lambda_angular[i]
 
 
 @wp.kernel
@@ -4379,11 +5003,21 @@ def step_body_body_contact_C0_lambda(
     lambda_retention: float,
     inv_dt_sq: float,
     contact_material_ke: wp.array[float],
+    normal_alpha: float,
+    recovery: MeshRecoveryData,
+    contact_generation: wp.array[int],
+    step_start_q: wp.array[wp.transform],
+    recovery_body: wp.array[int],
+    contact_material_mu: wp.array[wp.vec3],
     tangent_scale: float,
+    # In/out
     contact_normal_rho: wp.array[float],
     contact_C0: wp.array[wp.vec3],
     contact_lambda: wp.array[wp.vec3],
-    contact_tangent_rho: wp.array[float],
+    contact_tangent_rho: wp.array[wp.mat22],
+    contact_torsional_rho: wp.array[float],
+    contact_rolling_rho: wp.array[wp.mat22],
+    contact_lambda_angular: wp.array[wp.vec3],
 ):
     """Apply per-step lambda retention and refresh contact C0 and ALM rho.
 
@@ -4395,12 +5029,18 @@ def step_body_body_contact_C0_lambda(
     if i >= rigid_contact_count[0]:
         return
 
-    contact_normal_rho[i] = 0.0
-    contact_tangent_rho[i] = 0.0
-
     ke = contact_material_ke[i]
     s0 = rigid_contact_shape0[i]
     s1 = rigid_contact_shape1[i]
+    lam = contact_lambda[i]
+    # Friction record: (sliding, torsional, rolling).
+    friction_mu = contact_material_mu[i]
+    mu_torsional = friction_mu[1]
+    mu_rolling = friction_mu[2]
+
+    # Every output is written once, at the end, from these locals; nothing stored here is read back.
+    torsional_rho = float(0.0)
+    rolling_rho = wp.mat22(0.0)
 
     # Snapshot the fresh residual before validating warm-start support; the
     # dual uses it to release truly separated rows.
@@ -4411,12 +5051,33 @@ def step_body_body_contact_C0_lambda(
     p1 = rigid_contact_point1[i]
     anchor0_local = p0 + rigid_contact_offset0[i]
     anchor1_local = p1 + rigid_contact_offset1[i]
-    X_0 = body_q[b0] if b0 >= 0 else wp.transform_identity()
-    X_1 = body_q[b1] if b1 >= 0 else wp.transform_identity()
-    C0_n = _step_start_penetration(b0, X_0, p0, b1, X_1, p1, n, rigid_contact_margin0[i], rigid_contact_margin1[i])
-    contact_C0[i] = n * C0_n
+    C0_n = _contact_step_start_penetration(
+        b0, b1, body_q, p0, p1, n, rigid_contact_margin0[i], rigid_contact_margin1[i]
+    )
+    normal_bias = normal_alpha * C0_n
+    if recovery.keys.shape[0] > 0:
+        pose0 = body_q[b0] if b0 >= 0 else wp.transform_identity()
+        pose1 = body_q[b1] if b1 >= 0 else wp.transform_identity()
+        slot = active_recovery_contact(recovery, contact_generation[0], s0, s1, pose0, pose1, n)
+        if slot < -1:
+            contact_C0[i] = wp.vec3()
+            contact_lambda[i] = wp.vec3()
+            contact_lambda_angular[i] = wp.vec3()
+            return
+        if slot >= 0:
+            if recovery_body and ke > 0.0:
+                if b0 >= 0:
+                    wp.atomic_max(recovery_body, b0, 1)
+                if b1 >= 0:
+                    wp.atomic_max(recovery_body, b1, 1)
+            # Mid-iteration detection may refresh the manifold several times
+            # per step. Measure the target from the same initial state.
+            initial = _contact_step_start_penetration(
+                b0, b1, step_start_q, p0, p1, n, rigid_contact_margin0[i], rigid_contact_margin1[i]
+            )
+            target = recovery_step_depth(recovery.contacts[slot].thickness, wp.max(initial, 0.0))
+            normal_bias = initial - target
 
-    # Resolve rho before using it to validate retained history.
     normal_support = _contact_conditioning_scale(
         s0,
         s1,
@@ -4431,7 +5092,7 @@ def step_body_body_contact_C0_lambda(
         body_structural_k,
         inv_dt_sq,
     )
-    contact_normal_rho[i] = _contact_auto_normal_rho(normal_support, ke)
+    normal_rho = _contact_auto_normal_rho(normal_support, ke)
     tangent_support = _contact_tangent_conditioning_scale(
         s0,
         s1,
@@ -4453,20 +5114,52 @@ def step_body_body_contact_C0_lambda(
         body_structural_k,
         proxy_flag,
     )
-    contact_tangent_rho[i] = tangent_scale * _contact_auto_tangent_rho(
-        tangent_support,
-        contact_normal_rho[i],
-        structural_support,
+    tangent_rho = _contact_auto_tangent_rho(tangent_support, normal_rho, structural_support)
+    # Scale the two cached eigenvalues; the second row holds the tangent direction.
+    tangent_rho = wp.mat22(
+        tangent_scale * tangent_rho[0, 0], tangent_scale * tangent_rho[0, 1], tangent_rho[1, 0], tangent_rho[1, 1]
     )
 
-    lam = contact_lambda[i]
+    if mu_torsional > 0.0 or mu_rolling > 0.0:
+        torsional_support, rolling_support = _contact_angular_conditioning_scales(
+            b0,
+            b1,
+            n,
+            body_q,
+            body_inv_mass,
+            body_inv_inertia,
+            inv_dt_sq,
+        )
+        if mu_torsional > 0.0:
+            torsional_rho = torsional_support
+        if mu_rolling > 0.0:
+            rolling_rho = rolling_support
+    # Primal, dual, and readback use the same normal stabilization; friction uses the current step's slip.
+    contact_C0[i] = n * normal_bias
 
-    has_compressive_warmstart = wp.dot(lam, n) > 0.0
-    live = ke > 0.0 and contact_normal_rho[i] > 0.0
-    if has_compressive_warmstart and live and lambda_retention > 0.0:
-        contact_lambda[i] = lam * lambda_retention
+    # Retention needs compressive support on a live row; a channel without friction or rho drops its angular part.
+    lam_new = lam * lambda_retention
+    lam_angular_new = wp.vec3(0.0)
+    if wp.dot(lam, n) > 0.0 and ke > 0.0 and normal_rho > 0.0 and lambda_retention > 0.0:
+        drop_torsional = mu_torsional <= 0.0 or torsional_rho <= 0.0
+        drop_rolling = mu_rolling <= 0.0 or rolling_rho[0, 0] <= 0.0
+        if not (drop_torsional and drop_rolling):
+            lam_angular = contact_lambda_angular[i] * lambda_retention
+            lam_torsional = n * wp.dot(lam_angular, n)
+            lam_rolling = lam_angular - lam_torsional
+            if drop_torsional:
+                lam_torsional = wp.vec3(0.0)
+            if drop_rolling:
+                lam_rolling = wp.vec3(0.0)
+            lam_angular_new = lam_torsional + lam_rolling
     else:
-        contact_lambda[i] = wp.vec3(0.0)
+        lam_new = wp.vec3(0.0)
+    contact_normal_rho[i] = normal_rho
+    contact_tangent_rho[i] = tangent_rho
+    contact_torsional_rho[i] = torsional_rho
+    contact_rolling_rho[i] = rolling_rho
+    contact_lambda[i] = lam_new
+    contact_lambda_angular[i] = lam_angular_new
 
 
 @wp.kernel
@@ -4703,6 +5396,90 @@ def compute_rod_dahl_parameters(
 # -----------------------------
 # Iteration kernels (per color per iteration)
 # -----------------------------
+@wp.kernel
+def build_body_body_contact_step_levers(
+    rigid_contact_count: wp.array[int],
+    rigid_contact_shape0: wp.array[int],
+    rigid_contact_shape1: wp.array[int],
+    rigid_contact_point0: wp.array[wp.vec3],
+    rigid_contact_point1: wp.array[wp.vec3],
+    rigid_contact_offset0: wp.array[wp.vec3],
+    rigid_contact_offset1: wp.array[wp.vec3],
+    rigid_contact_normal: wp.array[wp.vec3],
+    rigid_contact_margin0: wp.array[float],
+    rigid_contact_margin1: wp.array[float],
+    shape_body: wp.array[int],
+    body_q_prev: wp.array[wp.transform],
+    body_com: wp.array[wp.vec3],
+    # Outputs
+    contact_lever_s0: wp.array[wp.vec3],
+    contact_lever_c0: wp.array[wp.vec3],
+    contact_lever_s1: wp.array[wp.vec3],
+    contact_lever_c1: wp.array[wp.vec3],
+    contact_start_penetration: wp.array[float],
+):
+    """Store each rigid contact row's step-start levers and penetration for the body solve and the dual update.
+
+    A row keeps its collision-time points and normal during a step and its bodies keep their step-start pose
+    history, so these values are the same in every iteration (see :func:`_contact_step_levers`). They belong to
+    one set of rows and one ``body_q_prev``: rebuild them after the predictor has fixed the step's pose history
+    and after every contact refresh. Force export and proxy harvest take their own poses and history and do
+    not read them.
+    """
+    i = wp.tid()
+    if i >= rigid_contact_count[0]:
+        return
+    s0 = rigid_contact_shape0[i]
+    s1 = rigid_contact_shape1[i]
+    b0 = shape_body[s0] if s0 >= 0 else -1
+    b1 = shape_body[s1] if s1 >= 0 else -1
+    lever_s0, lever_c0 = _contact_step_levers(
+        b0, body_q_prev, body_com, rigid_contact_point0[i], rigid_contact_offset0[i]
+    )
+    lever_s1, lever_c1 = _contact_step_levers(
+        b1, body_q_prev, body_com, rigid_contact_point1[i], rigid_contact_offset1[i]
+    )
+    contact_lever_s0[i] = lever_s0
+    contact_lever_c0[i] = lever_c0
+    contact_lever_s1[i] = lever_s1
+    contact_lever_c1[i] = lever_c1
+    contact_start_penetration[i] = _contact_step_start_penetration(
+        b0,
+        b1,
+        body_q_prev,
+        rigid_contact_point0[i],
+        rigid_contact_point1[i],
+        rigid_contact_normal[i],
+        rigid_contact_margin0[i],
+        rigid_contact_margin1[i],
+    )
+
+
+@wp.func
+def _recovery_slot(
+    recovery: MeshRecoveryData,
+    generation: wp.array[int],
+    s0: int,
+    s1: int,
+    b0: int,
+    b1: int,
+    body_q: wp.array[wp.transform],
+    normal: wp.vec3,
+) -> int:
+    if recovery.keys.shape[0] == 0:
+        return -1
+    pose0 = body_q[b0] if b0 >= 0 else wp.transform_identity()
+    pose1 = body_q[b1] if b1 >= 0 else wp.transform_identity()
+    return active_recovery_contact(recovery, generation[0], s0, s1, pose0, pose1, normal)
+
+
+@wp.func
+def _normal_material(material_k: float, slot: int):
+    # A verified recovery row has a bounded displacement target. Hard ALM
+    # support lets it resist external loads independently of that small bias.
+    return wp.inf if slot >= 0 and material_k > 0.0 else material_k
+
+
 @functools.cache
 def create_accumulate_body_body_contacts_per_body(threads_per_body: int = _NUM_CONTACT_THREADS_PER_BODY):
     """Create the rigid contact accumulation kernel with ``threads_per_body`` strided lanes per body."""
@@ -4714,33 +5491,33 @@ def create_accumulate_body_body_contacts_per_body(threads_per_body: int = _NUM_C
         body_q_prev: wp.array[wp.transform],
         body_q: wp.array[wp.transform],
         body_com: wp.array[wp.vec3],
-        body_inv_mass: wp.array[float],
-        body_colors: wp.array[wp.int32],
-        friction_epsilon: float,
         contact_damping_bidirectional: bool,
         contact_normal_rho: wp.array[float],
         contact_material_ke: wp.array[float],
         contact_material_kd: wp.array[float],
-        contact_material_mu: wp.array[float],
-        contact_tangent_rho: wp.array[float],
+        contact_material_mu: wp.array[wp.vec3],
+        contact_tangent_rho: wp.array[wp.mat22],
+        contact_torsional_rho: wp.array[float],
+        contact_rolling_rho: wp.array[wp.mat22],
         contact_lambda: wp.array[wp.vec3],
+        contact_lambda_angular: wp.array[wp.vec3],
         contact_C0: wp.array[wp.vec3],
-        stab_alpha: float,
+        recovery: MeshRecoveryData,
+        contact_generation: wp.array[int],
         rigid_contact_count: wp.array[int],
         rigid_contact_shape0: wp.array[int],
         rigid_contact_shape1: wp.array[int],
-        rigid_contact_point0: wp.array[wp.vec3],
-        rigid_contact_point1: wp.array[wp.vec3],
         rigid_contact_surface_velocity: wp.array[wp.vec3],
-        rigid_contact_offset0: wp.array[wp.vec3],
-        rigid_contact_offset1: wp.array[wp.vec3],
         rigid_contact_normal: wp.array[wp.vec3],
-        rigid_contact_margin0: wp.array[float],
-        rigid_contact_margin1: wp.array[float],
-        shape_body: wp.array[wp.int32],
+        contact_lever_s0: wp.array[wp.vec3],
+        contact_lever_c0: wp.array[wp.vec3],
+        contact_lever_s1: wp.array[wp.vec3],
+        contact_lever_c1: wp.array[wp.vec3],
+        contact_start_penetration: wp.array[float],
         body_contact_buffer_pre_alloc: int,
         body_contact_counts: wp.array[wp.int32],
         body_contact_indices: wp.array[wp.int32],
+        body_contact_bodies: wp.array[wp.vec3i],
         body_forces: wp.array[wp.vec3],
         body_torques: wp.array[wp.vec3],
         body_hessian_ll: wp.array[wp.mat33],
@@ -4750,6 +5527,8 @@ def create_accumulate_body_body_contacts_per_body(threads_per_body: int = _NUM_C
         """
         Per-body compliant-ALM contact force/Hessian accumulation
         with ``threads_per_body`` strided threads.
+
+        Row geometry comes from :func:`build_body_body_contact_step_levers`.
         """
         tid = wp.tid()
         body_idx_in_group = tid // wp.static(threads_per_body)
@@ -4759,9 +5538,7 @@ def create_accumulate_body_body_contacts_per_body(threads_per_body: int = _NUM_C
             return
 
         body_id = color_group[body_idx_in_group]
-        if body_inv_mass[body_id] <= 0.0:
-            return
-
+        # Contacts are listed only under dynamic bodies: an immovable body has a zero count and returns below.
         num_contacts = body_contact_counts[body_id]
         if num_contacts > body_contact_buffer_pre_alloc:
             num_contacts = body_contact_buffer_pre_alloc
@@ -4776,141 +5553,144 @@ def create_accumulate_body_body_contacts_per_body(threads_per_body: int = _NUM_C
         h_al_acc = wp.mat33(0.0)
         h_aa_acc = wp.mat33(0.0)
 
-        # This body's step kinematics are the same for all its contacts.
-        X_self_prev, com_disp_self, rotation_self, jacobian_t_self = _body_step_motion(
-            body_id, body_q, body_q_prev, body_com
-        )
+        # This body's step motion is the same for all its contacts.
+        translation_self, rotation_self, jacobian_t_self = _body_step_motion(body_id, body_q, body_q_prev, body_com)
 
         i = thread_id_within_body
         while i < num_contacts:
-            contact_idx = body_contact_indices[body_id * body_contact_buffer_pre_alloc + i]
+            # The list entry carries the contact's two bodies and the same-color flag.
+            slot = body_id * body_contact_buffer_pre_alloc + i
+            contact_idx = body_contact_indices[slot]
+            bodies = body_contact_bodies[slot]
             if contact_idx >= contact_count:
                 i += wp.static(threads_per_body)
                 continue
 
             s0 = rigid_contact_shape0[contact_idx]
             s1 = rigid_contact_shape1[contact_idx]
-            b0 = shape_body[s0] if s0 >= 0 else -1
-            b1 = shape_body[s1] if s1 >= 0 else -1
-
-            if b0 != body_id and b1 != body_id:
+            b0 = bodies[0]
+            b1 = bodies[1]
+            contact_normal = rigid_contact_normal[contact_idx]
+            slot = _recovery_slot(recovery, contact_generation, s0, s1, b0, b1, body_q, contact_normal)
+            if (b0 != body_id and b1 != body_id) or slot < -1:
                 i += wp.static(threads_per_body)
                 continue
-
-            cp0_local = rigid_contact_point0[contact_idx]
-            cp1_local = rigid_contact_point1[contact_idx]
-            cp0_offset_local = rigid_contact_offset0[contact_idx]
-            cp1_offset_local = rigid_contact_offset1[contact_idx]
-            contact_normal = rigid_contact_normal[contact_idx]
-            self_is_a = b0 == body_id
-            other_id = b1 if self_is_a else b0
-            X_o_prev, com_disp_o, rotation_o, _jacobian_t_o = _body_step_motion(other_id, body_q, body_q_prev, body_com)
-            X_a_prev = X_self_prev if self_is_a else X_o_prev
-            com_disp_a = com_disp_self if self_is_a else com_disp_o
-            rotation_a = rotation_self if self_is_a else rotation_o
-            X_b_prev = X_o_prev if self_is_a else X_self_prev
-            com_disp_b = com_disp_o if self_is_a else com_disp_self
-            rotation_b = rotation_o if self_is_a else rotation_self
-
-            # Normal C_n uses the unprojected (skeleton) points: ``thickness`` already accounts
-            # for the radial extent, so adding the offset here would double-count it.
-            lever_s_a, lever_c_a = _contact_step_levers(b0, X_a_prev, body_com, cp0_local, cp0_offset_local)
-            lever_s_b, lever_c_b = _contact_step_levers(b1, X_b_prev, body_com, cp1_local, cp1_offset_local)
-            previous_penetration = _step_start_penetration(
-                b0,
-                X_a_prev,
-                cp0_local,
-                b1,
-                X_b_prev,
-                cp1_local,
-                contact_normal,
-                rigid_contact_margin0[contact_idx],
-                rigid_contact_margin1[contact_idx],
-            )
-            normal_increment = wp.dot(
-                contact_normal,
-                _lever_displacement(com_disp_a, rotation_a, lever_s_a)
-                - _lever_displacement(com_disp_b, rotation_b, lever_s_b),
-            )
-            C_n = previous_penetration + normal_increment
-
-            normal_solve_weight = contact_normal_rho[contact_idx]
-            material_k = contact_material_ke[contact_idx]
-
+            material_k = _normal_material(contact_material_ke[contact_idx], slot)
             lam_vec = contact_lambda[contact_idx]
-            lam_n = wp.dot(lam_vec, contact_normal)
             C0_vec = contact_C0[contact_idx]
-            C0_n = wp.dot(contact_normal, C0_vec)
-            # Stabilize the normal residual; friction uses current-step slip.
-            normal_shift = stab_alpha * C0_n
+
+            is_body_a = body_id == b0
+            translation_o, rotation_o, _jacobian_t_o = _body_step_motion(
+                b1 if is_body_a else b0, body_q, body_q_prev, body_com
+            )
+            translation_a = translation_self if is_body_a else translation_o
+            rotation_a = rotation_self if is_body_a else rotation_o
+            translation_b = translation_o if is_body_a else translation_self
+            rotation_b = rotation_o if is_body_a else rotation_self
+            lever_s_a = contact_lever_s0[contact_idx]
+            lever_s_b = contact_lever_s1[contact_idx]
+            start_penetration = contact_start_penetration[contact_idx]
+
+            # Normal C_n: the step-start penetration of the unprojected (skeleton) points (``thickness``
+            # already accounts for the radial extent) plus the bodies' first-order approach since then.
+            C_n = start_penetration + wp.dot(
+                contact_normal,
+                _first_order_lever_displacement(translation_a, rotation_a, lever_s_a)
+                - _first_order_lever_displacement(translation_b, rotation_b, lever_s_b),
+            )
+
+            lam_n = wp.dot(lam_vec, contact_normal)
+            # C0 stabilization: contact_C0 carries the pre-scaled normal bias;
+            # friction uses only the current step's tangential slip.
+            normal_shift = wp.dot(contact_normal, C0_vec)
             C_eff = C_n - normal_shift
 
             if C_n <= _SMALL_LENGTH_EPS and lam_n <= 0.0:
                 i += wp.static(threads_per_body)
                 continue
 
-            normal_primal_k, lambda_n_eff = _material_force_terms(normal_solve_weight, material_k, lam_n)
-            f_n_check = normal_primal_k * C_eff + lambda_n_eff
-            if f_n_check <= 0.0 and lam_n <= 0.0:
+            contact_kd = contact_material_kd[contact_idx]
+            previous_penetration = float(0.0)
+            if contact_kd > 0.0:
+                previous_penetration = start_penetration - normal_shift
+
+            # Normal law and activity rule shared with evaluate_rigid_contact_normal_sliding.
+            normal_metric, f_n, f_n_total, lam_n_eff, contact_lam_eff = _rigid_contact_normal_law(
+                C_eff,
+                previous_penetration,
+                contact_normal_rho[contact_idx],
+                material_k,
+                contact_kd,
+                lam_vec,
+                contact_normal,
+                dt,
+                contact_damping_bidirectional,
+            )
+            if f_n_total <= 0.0:
                 i += wp.static(threads_per_body)
                 continue
-
-            contact_kd = contact_material_kd[contact_idx]
-            contact_mu = contact_material_mu[contact_idx]
 
             surface_velocity = wp.vec3(0.0)
             if rigid_contact_surface_velocity:
                 surface_velocity = rigid_contact_surface_velocity[contact_idx]
 
-            previous_penetration -= normal_shift
-
-            f_n_vec, f_t_vec, K_n, K_t = _rigid_contact_row_response(
-                normal_increment,
-                _lever_displacement(com_disp_b, rotation_b, lever_c_b)
-                - _lever_displacement(com_disp_a, rotation_a, lever_c_a),
+            # One friction record per contact: (sliding, torsional, rolling).
+            friction_mu = contact_material_mu[contact_idx]
+            mu_torsional = friction_mu[1]
+            mu_rolling = friction_mu[2]
+            force_own, torque_own, h_ll_own, h_al_own, h_aa_own = _evaluate_rigid_contact_for_body(
+                is_body_a,
+                translation_a,
+                rotation_a,
+                translation_b,
+                rotation_b,
+                jacobian_t_self,
+                lever_s_a,
+                contact_lever_c0[contact_idx],
+                lever_s_b,
+                contact_lever_c1[contact_idx],
                 surface_velocity,
                 contact_normal,
-                C_eff,
-                previous_penetration,
-                normal_solve_weight,
-                material_k,
+                normal_metric,
+                f_n,
+                f_n_total,
+                lam_n_eff,
+                contact_lam_eff,
                 contact_tangent_rho[contact_idx],
                 contact_kd,
-                lam_vec,
-                contact_mu,
-                friction_epsilon,
+                friction_mu[0],
                 dt,
-                wp.vec3(0.0),
                 contact_damping_bidirectional,
             )
 
-            # Same-color endpoints move simultaneously. Majorize their PSD contact
-            # metric using ||u + v||_K^2 <= 2 ||u||_K^2 + 2 ||v||_K^2;
-            # otherwise a stiff contact can alternate between penetration and release.
-            # Keep the physical force and the sequential/static-body metric unchanged.
-            if b0 >= 0 and b1 >= 0:
-                if body_inv_mass[b0] > 0.0 and body_inv_mass[b1] > 0.0 and body_colors[b0] == body_colors[b1]:
-                    K_n = 2.0 * K_n
-                    K_t = 2.0 * K_t
+            # Contacts without angular friction skip its rho and multiplier loads.
+            if mu_torsional > 0.0 or mu_rolling > 0.0:
+                pure_torque_b, K_angular = evaluate_rigid_contact_angular_friction(
+                    b0,
+                    b1,
+                    body_q,
+                    body_q_prev,
+                    contact_normal,
+                    f_n,
+                    mu_torsional,
+                    mu_rolling,
+                    contact_torsional_rho[contact_idx],
+                    contact_rolling_rho[contact_idx],
+                    contact_lambda_angular[contact_idx],
+                )
+                torque_own += -pure_torque_b if is_body_a else pure_torque_b
+                h_aa_own += K_angular
 
-            # The row's forces act on body B; body A takes the reaction.
-            if self_is_a:
-                f_n_vec = -f_n_vec
-                f_t_vec = -f_t_vec
-            torque, h_al, h_aa = _contact_lever_blocks(
-                f_n_vec,
-                f_t_vec,
-                K_n,
-                K_t,
-                lever_s_a if self_is_a else lever_s_b,
-                lever_c_a if self_is_a else lever_c_b,
-                jacobian_t_self,
-            )
-            force_acc += f_n_vec + f_t_vec
-            torque_acc += torque
-            h_ll_acc += K_n + K_t
-            h_al_acc += h_al
-            h_aa_acc += h_aa
+            pair_hessian_scale = float(1.0)
+            if bodies[2] == 1:
+                # ||u-v||_K^2 <= 2 ||u||_K^2 + 2 ||v||_K^2 for PSD K.
+                pair_hessian_scale = 2.0
+
+            force_acc += force_own
+            torque_acc += torque_own
+            h_ll_acc += pair_hessian_scale * h_ll_own
+            h_al_acc += pair_hessian_scale * h_al_own
+            h_aa_acc += pair_hessian_scale * h_aa_own
 
             i += wp.static(threads_per_body)
 
@@ -4949,30 +5729,31 @@ def _evaluate_body_body_contact_slot(
     contact_normal_rho: wp.array[float],
     contact_material_ke: wp.array[float],
     contact_material_kd: wp.array[float],
-    contact_material_mu: wp.array[float],
-    contact_tangent_rho: wp.array[float],
+    contact_material_mu: wp.array[wp.vec3],
+    contact_tangent_rho: wp.array[wp.mat22],
     contact_lambda: wp.array[wp.vec3],
+    contact_lambda_angular: wp.array[wp.vec3],
     contact_C0: wp.array[wp.vec3],
-    stab_alpha: float,
-    friction_epsilon: float,
+    recovery: MeshRecoveryData,
+    contact_generation: wp.array[int],
     contact_damping_bidirectional: bool,
 ):
     """Evaluate one active body-body contact slot at the given poses.
 
     Shared by the contact force reporting kernels. Returns ``(body0, body1, point0_world,
-    point1_world, force_0, torque_0, force_1)``: the bodies of shape 0 and shape 1 (``-1`` for a
+    point1_world, force_0, torque_0, force_1, pure_torque_1)``: the bodies of shape 0 and shape 1 (``-1`` for a
     static shape, or both ``-1`` for an invalid slot), the offset-shifted world-space surface
-    points, the force on body 0 with its torque about body 0's COM (the world origin for a static
-    shape), and the force on body 1 -- with the row arithmetic of the body solve. The torque is the
-    physical one, from the levers at the current pose; the body solve's chain through the rotation
-    update stays internal to its gather. Invalid slots return zeros; separated or inactive contacts
-    return zero forces with valid bodies and points.
+    points, the force on body 0 with its physical torque about body 0's current COM (the world
+    origin for a static shape), the force on body 1, and its solved angular-friction couple.
+    Forces use :func:`evaluate_rigid_contact_normal_sliding`; the body solve's chain through the
+    rotation update stays internal to its gather. Invalid slots return zeros; separated or
+    inactive contacts return zero forces with valid bodies and points.
     """
     zero = wp.vec3(0.0)
     s0 = rigid_contact_shape0[contact_idx]
     s1 = rigid_contact_shape1[contact_idx]
     if s0 < 0 or s1 < 0:
-        return wp.int32(-1), wp.int32(-1), zero, zero, zero, zero, zero
+        return wp.int32(-1), wp.int32(-1), zero, zero, zero, zero, zero, zero
 
     b0 = shape_body[s0]
     b1 = shape_body[s1]
@@ -4983,63 +5764,88 @@ def _evaluate_body_body_contact_slot(
     cp1_offset_local = rigid_contact_offset1[contact_idx]
     contact_normal = rigid_contact_normal[contact_idx]
 
+    # Rebuild geometry from the supplied history: proxy reporting can use a different
+    # baseline from the solve's stored rows. Keep normal motion as an increment so it
+    # is not rounded away through world positions before evaluating the shared law.
+    lever_s0, _lever_c0 = _contact_step_levers(b0, body_q_prev, body_com, cp0_local, cp0_offset_local)
+    lever_s1, _lever_c1 = _contact_step_levers(b1, body_q_prev, body_com, cp1_local, cp1_offset_local)
+    translation_0, rotation_0, _jac_0 = _body_step_motion(b0, body_q, body_q_prev, body_com)
+    translation_1, rotation_1, _jac_1 = _body_step_motion(b1, body_q, body_q_prev, body_com)
     point0_world = (
         wp.transform_point(body_q[b0], cp0_local + cp0_offset_local) if b0 >= 0 else cp0_local + cp0_offset_local
     )
     point1_world = (
         wp.transform_point(body_q[b1], cp1_local + cp1_offset_local) if b1 >= 0 else cp1_local + cp1_offset_local
     )
+    slot = _recovery_slot(recovery, contact_generation, s0, s1, b0, b1, body_q, contact_normal)
+    if slot < -1:
+        return b0, b1, point0_world, point1_world, zero, zero, zero, zero
 
-    X_0_prev, com_disp_0, rot_0, _jac_0 = _body_step_motion(b0, body_q, body_q_prev, body_com)
-    X_1_prev, com_disp_1, rot_1, _jac_1 = _body_step_motion(b1, body_q, body_q_prev, body_com)
-    lever_s_0, lever_c_0 = _contact_step_levers(b0, X_0_prev, body_com, cp0_local, cp0_offset_local)
-    lever_s_1, lever_c_1 = _contact_step_levers(b1, X_1_prev, body_com, cp1_local, cp1_offset_local)
-
-    previous_penetration = _step_start_penetration(
+    start_penetration = _contact_step_start_penetration(
         b0,
-        X_0_prev,
-        cp0_local,
         b1,
-        X_1_prev,
+        body_q_prev,
+        cp0_local,
         cp1_local,
         contact_normal,
         rigid_contact_margin0[contact_idx],
         rigid_contact_margin1[contact_idx],
     )
-    normal_increment = wp.dot(
+    C_n = start_penetration + wp.dot(
         contact_normal,
-        _lever_displacement(com_disp_0, rot_0, lever_s_0) - _lever_displacement(com_disp_1, rot_1, lever_s_1),
+        _first_order_lever_displacement(translation_0, rotation_0, lever_s0)
+        - _first_order_lever_displacement(translation_1, rotation_1, lever_s1),
     )
-    C_n = previous_penetration + normal_increment
 
     normal_solve_weight = contact_normal_rho[contact_idx]
-    material_k = contact_material_ke[contact_idx]
+    material_k = _normal_material(contact_material_ke[contact_idx], slot)
 
     lam_vec = contact_lambda[contact_idx]
     lam_n = wp.dot(lam_vec, contact_normal)
     C0_vec = contact_C0[contact_idx]
-    C0_n = wp.dot(contact_normal, C0_vec)
-    # Stabilize the normal residual; friction uses current-step slip.
-    normal_shift = stab_alpha * C0_n
+    # C0 stabilization: contact_C0 carries the pre-scaled normal bias;
+    # friction uses only the current step's tangential slip.
+    normal_shift = wp.dot(contact_normal, C0_vec)
     C_eff = C_n - normal_shift
 
     normal_primal_k, lambda_n_eff = _material_force_terms(normal_solve_weight, material_k, lam_n)
     f_n_check = normal_primal_k * C_eff + lambda_n_eff
     if (C_n <= _SMALL_LENGTH_EPS or f_n_check <= 0.0) and lam_n <= 0.0:
-        return b0, b1, point0_world, point1_world, zero, zero, zero
+        return b0, b1, point0_world, point1_world, zero, zero, zero, zero
 
     contact_kd = contact_material_kd[contact_idx]
-    contact_mu = contact_material_mu[contact_idx]
-    previous_penetration -= normal_shift
+    # Friction record: (sliding, torsional, rolling).
+    friction_mu = contact_material_mu[contact_idx]
+    previous_penetration = float(0.0)
+    if contact_kd > 0.0:
+        previous_penetration = start_penetration - normal_shift
 
     surface_velocity = wp.vec3(0.0)
     if rigid_contact_surface_velocity:
         surface_velocity = rigid_contact_surface_velocity[contact_idx]
 
-    f_n_vec, f_t_vec, _K_n, _K_t = _rigid_contact_row_response(
-        normal_increment,
-        _lever_displacement(com_disp_1, rot_1, lever_c_1) - _lever_displacement(com_disp_0, rot_0, lever_c_0),
+    (
+        force_0,
+        torque_0,
+        _h_ll_0,
+        _h_al_0,
+        _h_aa_0,
+        force_1,
+        _torque_1,
+        _h_ll_1,
+        _h_al_1,
+        _h_aa_1,
+    ) = evaluate_rigid_contact_normal_sliding(
+        int(b0),
+        int(b1),
+        body_q,
+        body_q_prev,
+        body_com,
+        cp0_local,
+        cp1_local,
         surface_velocity,
+        cp0_offset_local,
+        cp1_offset_local,
         contact_normal,
         C_eff,
         previous_penetration,
@@ -5048,20 +5854,32 @@ def _evaluate_body_body_contact_slot(
         contact_tangent_rho[contact_idx],
         contact_kd,
         lam_vec,
-        contact_mu,
-        friction_epsilon,
+        friction_mu[0],
         dt,
-        wp.vec3(0.0),
         contact_damping_bidirectional,
     )
-    # Levers at the current pose: the normal force acts at the geometric point, friction at the anchor.
-    X_0 = X_0_prev
-    if b0 >= 0:
-        X_0 = body_q[b0]
-    lever_n_0, lever_t_0 = _contact_step_levers(b0, X_0, body_com, cp0_local, cp0_offset_local)
-    torque_0 = wp.cross(lever_n_0, -f_n_vec) + wp.cross(lever_t_0, -f_t_vec)
-    force_1 = f_n_vec + f_t_vec
-    return b0, b1, point0_world, point1_world, -force_1, torque_0, force_1
+
+    # Report the solved angular multiplier directly when the elastic normal channel is active;
+    # the final dual update already projected it.
+    pure_torque_1 = wp.vec3(0.0)
+    _normal_metric, f_n_elastic, _f_n_total, _lam_n, _lam_eff = _rigid_contact_normal_law(
+        C_eff,
+        previous_penetration,
+        normal_solve_weight,
+        material_k,
+        contact_kd,
+        lam_vec,
+        contact_normal,
+        dt,
+        contact_damping_bidirectional,
+    )
+    if f_n_elastic > 0.0:
+        pure_torque_1 = contact_lambda_angular[contact_idx]
+    # Levers at the current pose: the normal force acts at the geometric point, sliding at the anchor.
+    lever_n_0, lever_t_0 = _contact_step_levers(b0, body_q, body_com, cp0_local, cp0_offset_local)
+    f_n_0 = contact_normal * wp.dot(contact_normal, force_0)
+    torque_0 = wp.cross(lever_n_0, f_n_0) + wp.cross(lever_t_0, force_0 - f_n_0) - pure_torque_1
+    return b0, b1, point0_world, point1_world, force_0, torque_0, force_1, pure_torque_1
 
 
 @functools.cache
@@ -5092,12 +5910,13 @@ def create_compute_rigid_contact_forces():
         contact_normal_rho: wp.array[float],
         contact_material_ke: wp.array[float],
         contact_material_kd: wp.array[float],
-        contact_material_mu: wp.array[float],
-        contact_tangent_rho: wp.array[float],
+        contact_material_mu: wp.array[wp.vec3],
+        contact_tangent_rho: wp.array[wp.mat22],
         contact_lambda: wp.array[wp.vec3],
+        contact_lambda_angular: wp.array[wp.vec3],
         contact_C0: wp.array[wp.vec3],
-        stab_alpha: float,
-        friction_epsilon: float,
+        recovery: MeshRecoveryData,
+        contact_generation: wp.array[int],
         contact_damping_bidirectional: bool,
         # Outputs (length = rigid_contact_max)
         out_body0: wp.array[wp.int32],
@@ -5105,6 +5924,7 @@ def create_compute_rigid_contact_forces():
         out_point0_world: wp.array[wp.vec3],
         out_point1_world: wp.array[wp.vec3],
         out_force_on_body1: wp.array[wp.vec3],
+        out_pure_torque_on_body1: wp.array[wp.vec3],
     ):
         """Compute per-contact forces in world space."""
         contact_idx = wp.tid()
@@ -5117,9 +5937,10 @@ def create_compute_rigid_contact_forces():
             out_point0_world[contact_idx] = wp.vec3(0.0)
             out_point1_world[contact_idx] = wp.vec3(0.0)
             out_force_on_body1[contact_idx] = wp.vec3(0.0)
+            out_pure_torque_on_body1[contact_idx] = wp.vec3(0.0)
             return
 
-        b0, b1, point0_world, point1_world, _force_0, _torque_0, force_1 = _evaluate_body_body_contact_slot(
+        b0, b1, point0_world, point1_world, _force_0, _torque_0, force_1, couple_1 = _evaluate_body_body_contact_slot(
             contact_idx,
             dt,
             rigid_contact_shape0,
@@ -5142,9 +5963,10 @@ def create_compute_rigid_contact_forces():
             contact_material_mu,
             contact_tangent_rho,
             contact_lambda,
+            contact_lambda_angular,
             contact_C0,
-            stab_alpha,
-            friction_epsilon,
+            recovery,
+            contact_generation,
             contact_damping_bidirectional,
         )
         out_body0[contact_idx] = b0
@@ -5152,6 +5974,7 @@ def create_compute_rigid_contact_forces():
         out_point0_world[contact_idx] = point0_world
         out_point1_world[contact_idx] = point1_world
         out_force_on_body1[contact_idx] = force_1
+        out_pure_torque_on_body1[contact_idx] = couple_1
 
     # ``module="unique"`` kernels do not inherit this file's module options.
     wp.set_module_options({"enable_backward": False}, module=compute_rigid_contact_forces.module)
@@ -5185,12 +6008,13 @@ def compute_body_body_contact_forces(
     contact_normal_rho: wp.array[float],
     contact_material_ke: wp.array[float],
     contact_material_kd: wp.array[float],
-    contact_material_mu: wp.array[float],
-    contact_tangent_rho: wp.array[float],
+    contact_material_mu: wp.array[wp.vec3],
+    contact_tangent_rho: wp.array[wp.mat22],
     contact_lambda: wp.array[wp.vec3],
+    contact_lambda_angular: wp.array[wp.vec3],
     contact_C0: wp.array[wp.vec3],
-    stab_alpha: float,
-    friction_epsilon: float,
+    recovery: MeshRecoveryData,
+    contact_generation: wp.array[int],
     contact_damping_bidirectional: bool,
     # Output (length >= rigid_contact_max)
     contact_force: wp.array[wp.spatial_vector],
@@ -5198,9 +6022,8 @@ def compute_body_body_contact_forces(
     """Evaluate one wrench per body-body contact record at the given poses.
 
     One thread per rigid-contact slot. Each active record is written as the force on body 0 (the
-    body of shape 0) with its torque about that body's COM -- the world origin for a static
-    shape -- in world frame, exactly as the solve applies it (see
-    :func:`_evaluate_body_body_contact_slot`). Slots at or beyond the active count, invalid slots,
+    body of shape 0) with its physical torque about that body's current COM -- the world origin
+    for a static shape -- in world frame (see :func:`_evaluate_body_body_contact_slot`). Slots at or beyond the active count, invalid slots,
     and separated contacts are zero. This is a read-only evaluation: nothing is accumulated into
     solver state.
     """
@@ -5209,7 +6032,7 @@ def compute_body_body_contact_forces(
         contact_force[contact_idx] = wp.spatial_vector()
         return
 
-    _b0, _b1, _point0_world, _point1_world, force_0, torque_0, _force_1 = _evaluate_body_body_contact_slot(
+    _b0, _b1, _point0_world, _point1_world, force_0, torque_0, _force_1, _couple_1 = _evaluate_body_body_contact_slot(
         contact_idx,
         dt,
         rigid_contact_shape0,
@@ -5232,9 +6055,10 @@ def compute_body_body_contact_forces(
         contact_material_mu,
         contact_tangent_rho,
         contact_lambda,
+        contact_lambda_angular,
         contact_C0,
-        stab_alpha,
-        friction_epsilon,
+        recovery,
+        contact_generation,
         contact_damping_bidirectional,
     )
     contact_force[contact_idx] = wp.spatial_vector(force_0, torque_0)
@@ -5692,18 +6516,22 @@ def record_world_residual(world_residual: wp.array[float], world: int, decrement
 
 
 @functools.cache
-def create_solve_rigid_body(has_tendons: bool, resolve_guarded: bool = False):
-    """Specialize the body solve to exclude tendon assembly for tendon-free models.
+def create_solve_rigid_body(has_tendons: bool, has_joint_constraints: bool, resolve_guarded: bool = False):
+    """Specialize tendon and joint assembly and joint-aware contact compliance to the model.
 
-    With ``resolve_guarded`` the kernel is the contact activation guard's second solve: a body whose
-    trial crossed no inactive contact row keeps its trial pose instead of solving again. The caller
-    records the residual in the provisional solve, whose block has no guard metric.
+    Args:
+        has_tendons: Compile tendon assembly.
+        has_joint_constraints: Compile joint assembly and the joint-aware contact compliance refresh.
+        resolve_guarded: Compile the contact activation guard's second solve: a body whose trial
+            crossed no inactive contact row keeps its trial pose instead of solving again. The caller
+            records the residual in the provisional solve, whose block has no guard metric.
     """
 
     # Separate module so SolverVBD can enable fast math; keep small-angle sin/cos out of reachable code
     @wp.kernel(module="unique", enable_backward=False)
     def solve_rigid_body(
         dt: float,
+        refresh_contact_angular_conditioning: int,
         body_ids_in_color: wp.array[wp.int32],
         body_q: wp.array[wp.transform],
         body_q_prev: wp.array[wp.transform],
@@ -5711,8 +6539,10 @@ def create_solve_rigid_body(has_tendons: bool, resolve_guarded: bool = False):
         body_mass: wp.array[float],
         body_inv_mass: wp.array[float],
         body_inertia: wp.array[wp.mat33],
+        body_inv_inertia: wp.array[wp.mat33],
         body_inertia_q: wp.array[wp.transform],
         body_com: wp.array[wp.vec3],
+        body_contact_counts: wp.array[wp.int32],
         adjacency: RigidForceElementAdjacencyInfo,
         # Joint data
         joint_type: wp.array[int],
@@ -5781,6 +6611,7 @@ def create_solve_rigid_body(has_tendons: bool, resolve_guarded: bool = False):
         body_world: wp.array[wp.int32],
         # Output
         body_q_new: wp.array[wp.transform],
+        body_contact_free_angular_compliance: wp.array[wp.mat33],
         # Activation guard state, read and written only with ``resolve_guarded``
         body_q_trial: wp.array[wp.transform],
         body_activated: wp.array[wp.int32],
@@ -5799,14 +6630,17 @@ def create_solve_rigid_body(has_tendons: bool, resolve_guarded: bool = False):
 
         Args:
             dt: Time step.
+            refresh_contact_angular_conditioning: Whether to refresh per-body angular contact compliance.
             body_ids_in_color: Body indices in current color group (for parallel coloring).
             body_q_prev: Previous body transforms (for damping and friction).
             body_q_rest: Rest transforms (for joint targets).
             body_mass: Body masses.
             body_inv_mass: Inverse masses (0 for kinematic bodies).
             body_inertia: Inertia tensors (local body frame).
+            body_inv_inertia: Inverse inertia tensors (local body frame).
             body_inertia_q: Inertial target transforms (from forward integration).
             body_com: Center of mass offsets (local body frame).
+            body_contact_counts: Number of rigid contacts incident on each body.
             adjacency: Body-joint adjacency (CSR format).
             joint_*: Joint configuration arrays.
             joint_sigma_start: Dahl hysteresis state at start of step.
@@ -5818,6 +6652,7 @@ def create_solve_rigid_body(has_tendons: bool, resolve_guarded: bool = False):
             external_hessian_aa: Preaccumulated rigid-contact angular block.
             body_q: Current body transforms (input).
             body_q_new: Updated body transforms (output) for the current solve sweep.
+            body_contact_free_angular_compliance: Angular block of the inverse contact-free body Hessian.
             body_q_trial: Guard trial poses; a re-solved body also writes its new pose here.
             body_activated: Bodies whose trial crossed an inactive contact row; cleared on re-solve.
 
@@ -5836,6 +6671,8 @@ def create_solve_rigid_body(has_tendons: bool, resolve_guarded: bool = False):
 
         # Early exit for kinematic bodies
         if body_inv_mass[body_index] == 0.0:
+            if wp.static(has_joint_constraints) and refresh_contact_angular_conditioning == 1:
+                body_contact_free_angular_compliance[body_index] = wp.mat33(0.0)
             body_q_new[body_index] = q_current
             return
 
@@ -5883,6 +6720,20 @@ def create_solve_rigid_body(has_tendons: bool, resolve_guarded: bool = False):
         I_world = R_cur * I_body * wp.transpose(R_cur)
         angular_hessian = dt_sqr_reciprocal * I_world
 
+        # Joint-free models compile a zero joint count, which removes the joint loop below.
+        num_adj_joints = 0
+        if wp.static(has_joint_constraints):
+            num_adj_joints = get_body_num_adjacent_joints(adjacency, body_index)
+
+        # A joint-free model keeps the inertia seed from contact-frame setup.
+        refresh_body_angular_compliance = bool(False)
+        compute_joint_aware_angular_compliance = bool(False)
+        if wp.static(has_joint_constraints):
+            refresh_body_angular_compliance = (
+                refresh_contact_angular_conditioning == 1 and body_contact_counts[body_index] != 0
+            )
+            compute_joint_aware_angular_compliance = refresh_body_angular_compliance and num_adj_joints > 0
+
         # Accumulate external forces (rigid contacts)
         # Read external contributions
         ext_torque = external_torques[body_index]
@@ -5894,19 +6745,25 @@ def create_solve_rigid_body(has_tendons: bool, resolve_guarded: bool = False):
         f_torque = tau_world + ext_torque
         f_force = f_lin + ext_force
 
-        h_aa = angular_hessian + ext_h_aa
-        h_al = ext_h_al
-        h_ll = wp.mat33(
-            ext_h_ll[0, 0] + inertial_coeff,
-            ext_h_ll[0, 1],
-            ext_h_ll[0, 2],
-            ext_h_ll[1, 0],
-            ext_h_ll[1, 1] + inertial_coeff,
-            ext_h_ll[1, 2],
-            ext_h_ll[2, 0],
-            ext_h_ll[2, 1],
-            ext_h_ll[2, 2] + inertial_coeff,
-        )
+        if compute_joint_aware_angular_compliance:
+            # Exclude contact Hessians so a contact row does not condition itself.
+            h_aa = angular_hessian
+            h_al = wp.mat33(0.0)
+            h_ll = wp.identity(3, float) * inertial_coeff
+        else:
+            h_aa = angular_hessian + ext_h_aa
+            h_al = ext_h_al
+            h_ll = wp.mat33(
+                ext_h_ll[0, 0] + inertial_coeff,
+                ext_h_ll[0, 1],
+                ext_h_ll[0, 2],
+                ext_h_ll[1, 0],
+                ext_h_ll[1, 1] + inertial_coeff,
+                ext_h_ll[1, 2],
+                ext_h_ll[2, 0],
+                ext_h_ll[2, 1],
+                ext_h_ll[2, 2] + inertial_coeff,
+            )
 
         if wp.static(has_tendons):
             tendon_force, tendon_torque, tendon_h_ll, tendon_h_al, tendon_h_aa = evaluate_tendon_force_hessians(
@@ -5939,7 +6796,6 @@ def create_solve_rigid_body(has_tendons: bool, resolve_guarded: bool = False):
             h_aa = h_aa + tendon_h_aa
 
         # Accumulate joint forces (constraints)
-        num_adj_joints = get_body_num_adjacent_joints(adjacency, body_index)
         for joint_counter in range(num_adj_joints):
             joint_idx = get_body_adjacent_joint_id(adjacency, body_index, joint_counter)
             joint_force, joint_torque, joint_H_ll, joint_H_al, joint_H_aa = evaluate_joint_force_hessian(
@@ -5994,6 +6850,25 @@ def create_solve_rigid_body(has_tendons: bool, resolve_guarded: bool = False):
             h_ll = h_ll + joint_H_ll
             h_al = h_al + joint_H_al
             h_aa = h_aa + joint_H_aa
+
+        if compute_joint_aware_angular_compliance:
+            conditioning_h_aa = h_aa
+            # Regularize the contact-free angular block before inversion.
+            conditioning_trace = wp.trace(conditioning_h_aa) / 3.0
+            conditioning_epsilon = 1.0e-9 * (conditioning_trace + 1.0)
+            conditioning_h_aa[0, 0] += conditioning_epsilon
+            conditioning_h_aa[1, 1] += conditioning_epsilon
+            conditioning_h_aa[2, 2] += conditioning_epsilon
+            body_contact_free_angular_compliance[body_index] = _angular_compliance_from_hessian(
+                h_ll, conditioning_h_aa, h_al
+            )
+            h_ll += ext_h_ll
+            h_al += ext_h_al
+            h_aa += ext_h_aa
+        elif refresh_body_angular_compliance:
+            body_contact_free_angular_compliance[body_index] = (
+                dt * dt * R_cur * body_inv_inertia[body_index] * wp.transpose(R_cur)
+            )
 
         # Regularize angular Hessian
         trA = wp.trace(h_aa) / 3.0
@@ -6542,38 +7417,50 @@ def update_duals_joint(
 
 
 @functools.cache
-def create_update_duals_body_body_contacts():
-    """Create the rigid contact dual update kernel."""
+def create_update_duals_body_body_contacts(refresh_angular_conditioning: bool = True):
+    """Create the rigid contact dual update kernel.
+
+    Args:
+        refresh_angular_conditioning: Compile the angular-conditioning refresh selected by the
+            ``refresh_contact_angular_conditioning`` launch flag. The solver sets that flag on one
+            iteration per refresh and launches a ``False`` specialization on the others.
+    """
 
     @wp.kernel(module="unique")
     def update_duals_body_body_contacts(
         rigid_contact_count: wp.array[int],
         rigid_contact_shape0: wp.array[int],
         rigid_contact_shape1: wp.array[int],
-        rigid_contact_point0: wp.array[wp.vec3],
-        rigid_contact_point1: wp.array[wp.vec3],
         rigid_contact_surface_velocity: wp.array[wp.vec3],
-        rigid_contact_offset0: wp.array[wp.vec3],
-        rigid_contact_offset1: wp.array[wp.vec3],
         rigid_contact_normal: wp.array[wp.vec3],
-        rigid_contact_margin0: wp.array[float],
-        rigid_contact_margin1: wp.array[float],
+        contact_lever_s0: wp.array[wp.vec3],
+        contact_lever_c0: wp.array[wp.vec3],
+        contact_lever_s1: wp.array[wp.vec3],
+        contact_lever_c1: wp.array[wp.vec3],
+        contact_start_penetration: wp.array[float],
         shape_body: wp.array[int],
         body_q: wp.array[wp.transform],
         body_q_prev: wp.array[wp.transform],
         body_com: wp.array[wp.vec3],
+        body_contact_free_angular_compliance: wp.array[wp.mat33],
+        refresh_contact_angular_conditioning: int,
         dt: float,
-        contact_material_mu: wp.array[float],
+        contact_material_mu: wp.array[wp.vec3],
         contact_C0: wp.array[wp.vec3],
-        stab_alpha: float,
+        recovery: MeshRecoveryData,
+        contact_generation: wp.array[int],
         contact_material_ke: wp.array[float],
         contact_material_kd: wp.array[float],
-        contact_tangent_rho: wp.array[float],
+        contact_tangent_rho: wp.array[wp.mat22],
         contact_normal_rho: wp.array[float],
+        contact_torsional_rho: wp.array[float],
+        contact_rolling_rho: wp.array[wp.mat22],
         contact_damping_bidirectional: bool,
+        # Input/output
         contact_lambda: wp.array[wp.vec3],
+        contact_lambda_angular: wp.array[wp.vec3],
     ):
-        """Update body-body contact duals."""
+        """Update body-body contact duals. Row geometry comes from :func:`build_body_body_contact_step_levers`."""
         idx = wp.tid()
         if idx >= rigid_contact_count[0]:
             return
@@ -6588,43 +7475,37 @@ def create_update_duals_body_body_contacts():
         if body_id_0 < 0 and body_id_1 < 0:
             return
 
-        cp0_local = rigid_contact_point0[idx]
-        cp1_local = rigid_contact_point1[idx]
-        offset0_local = rigid_contact_offset0[idx]
-        offset1_local = rigid_contact_offset1[idx]
-
-        X_0_prev, com_disp_0, rot_0, _jac_0 = _body_step_motion(body_id_0, body_q, body_q_prev, body_com)
-        X_1_prev, com_disp_1, rot_1, _jac_1 = _body_step_motion(body_id_1, body_q, body_q_prev, body_com)
-        lever_s_0, lever_c_0 = _contact_step_levers(body_id_0, X_0_prev, body_com, cp0_local, offset0_local)
-        lever_s_1, lever_c_1 = _contact_step_levers(body_id_1, X_1_prev, body_com, cp1_local, offset1_local)
-        a0_displacement = _lever_displacement(com_disp_0, rot_0, lever_c_0)
-        a1_displacement = _lever_displacement(com_disp_1, rot_1, lever_c_1)
-
         n = rigid_contact_normal[idx]
-        previous_penetration = _step_start_penetration(
-            body_id_0,
-            X_0_prev,
-            cp0_local,
-            body_id_1,
-            X_1_prev,
-            cp1_local,
+        slot = _recovery_slot(recovery, contact_generation, shape_id_0, shape_id_1, body_id_0, body_id_1, body_q, n)
+        if slot < -1:
+            contact_lambda[idx] = wp.vec3()
+            contact_lambda_angular[idx] = wp.vec3()
+            return
+
+        translation_0, rot_0, _jac_0 = _body_step_motion(body_id_0, body_q, body_q_prev, body_com)
+        translation_1, rot_1, _jac_1 = _body_step_motion(body_id_1, body_q, body_q_prev, body_com)
+        a0_displacement = _first_order_lever_displacement(translation_0, rot_0, contact_lever_c0[idx])
+        a1_displacement = _first_order_lever_displacement(translation_1, rot_1, contact_lever_c1[idx])
+
+        # The step-start penetration plus the bodies' first-order approach since then, as in the body solve.
+        start_penetration = contact_start_penetration[idx]
+        C_n_raw = start_penetration + wp.dot(
             n,
-            rigid_contact_margin0[idx],
-            rigid_contact_margin1[idx],
-        )
-        C_n_raw = previous_penetration + wp.dot(
-            n,
-            _lever_displacement(com_disp_0, rot_0, lever_s_0) - _lever_displacement(com_disp_1, rot_1, lever_s_1),
+            _first_order_lever_displacement(translation_0, rot_0, contact_lever_s0[idx])
+            - _first_order_lever_displacement(translation_1, rot_1, contact_lever_s1[idx]),
         )
 
         rho_n = contact_normal_rho[idx]
-        material_k = contact_material_ke[idx]
+        material_k = _normal_material(contact_material_ke[idx], slot)
         lam_vec = contact_lambda[idx]
-        mu = contact_material_mu[idx]
+        # Friction record: (sliding, torsional, rolling).
+        friction_mu = contact_material_mu[idx]
+        mu = friction_mu[0]
+        mu_torsional = friction_mu[1]
+        mu_rolling = friction_mu[2]
 
         C0_vec = contact_C0[idx]
-        C0_n = wp.dot(n, C0_vec)
-        normal_shift = stab_alpha * C0_n
+        normal_shift = wp.dot(n, C0_vec)
         C_stab_n = C_n_raw - normal_shift
 
         # Bypass C0 stabilization on separation so normal support releases fully.
@@ -6638,17 +7519,21 @@ def create_update_duals_body_body_contacts():
         tangential_disp = rel_disp - n * wp.dot(n, rel_disp)
         tangent_residual = tangential_disp
 
-        if contact_material_kd[idx] > 0.0 and not contact_damping_bidirectional:
-            previous_penetration -= normal_shift
+        # The elastic normal load bounds sliding and angular friction. With compression-increment
+        # damping the stored normal multiplier also carries the damping force.
+        lam_new = wp.vec3(0.0)
+        normal_load = float(0.0)
+        if contact_material_kd[idx] > 0.0 and not contact_damping_bidirectional and wp.isfinite(material_k):
+            previous_penetration = start_penetration - normal_shift
             old_n = wp.dot(lam_vec, n)
-            new_n, elastic_n, _metric = _compliant_contact_normal_response(
+            new_n, normal_load, _metric = _compliant_contact_normal_response(
                 C_stab_n, previous_penetration, material_k, contact_material_kd[idx], rho_n, old_n, dt
             )
-            trial_t = lam_vec - old_n * n + contact_tangent_rho[idx] * tangent_residual
-            new_t = _project_coulomb_tangent(trial_t, wp.length(trial_t), mu * elastic_n)
-            contact_lambda[idx] = n * new_n + new_t
+            lam_new = n * new_n + _project_friction_update_force_only(
+                lam_vec - old_n * n, tangent_residual, n, contact_tangent_rho[idx], mu * normal_load
+            )
         else:
-            contact_lambda[idx] = _compliant_contact_dual_step(
+            lam_new = _compliant_contact_dual_step(
                 lam_vec,
                 n,
                 C_stab_n,
@@ -6658,6 +7543,49 @@ def create_update_duals_body_body_contacts():
                 rho_n,
                 contact_tangent_rho[idx],
             )
+            normal_load = wp.max(wp.dot(lam_new, n), 0.0)
+
+        # Read everything before the first store; a load after a may-alias store waits for it.
+        # Contact-frame setup zeroed the angular multiplier of a row without angular friction.
+        if mu_torsional > 0.0 or mu_rolling > 0.0:
+            torsional_rho = contact_torsional_rho[idx]
+            rolling_rho = contact_rolling_rho[idx]
+            if wp.static(refresh_angular_conditioning) and refresh_contact_angular_conditioning == 1:
+                pair_angular_compliance = wp.mat33(0.0)
+                if body_id_0 >= 0:
+                    pair_angular_compliance += body_contact_free_angular_compliance[body_id_0]
+                if body_id_1 >= 0:
+                    pair_angular_compliance += body_contact_free_angular_compliance[body_id_1]
+                refreshed_torsional_rho, refreshed_rolling_rho = _contact_angular_conditioning_scales_from_mobility(
+                    pair_angular_compliance, n, 1.0
+                )
+                # Keep the inertia seed from contact-frame setup if the local factorization is invalid;
+                # frame setup already zeroed the rho of a channel without friction.
+                if mu_torsional > 0.0 and wp.isfinite(refreshed_torsional_rho) and refreshed_torsional_rho > 0.0:
+                    torsional_rho = refreshed_torsional_rho
+                if mu_rolling > 0.0 and wp.isfinite(refreshed_rolling_rho[0, 0]) and refreshed_rolling_rho[0, 0] > 0.0:
+                    rolling_rho = refreshed_rolling_rho
+
+            # Use the body solve's angular law with the updated normal multiplier,
+            # omitting the unused 3x3 solve metric.
+            normal_load_ang = normal_load
+            lam_angular_new = wp.vec3(0.0)
+            if normal_load_ang > 0.0:
+                ang_disp = -_relative_angular_displacement(body_id_0, body_id_1, body_q, body_q_prev)
+                ang_disp_n = wp.dot(ang_disp, n)
+                tor_lim = mu_torsional * normal_load_ang
+                tor_trial = wp.dot(contact_lambda_angular[idx], n) + torsional_rho * ang_disp_n
+                # Remove the spin before the rolling projection scales its float32 residual by rho.
+                rol_disp = ang_disp - n * ang_disp_n
+                rol_torque = _project_friction_update_force_only(
+                    contact_lambda_angular[idx], rol_disp, n, rolling_rho, mu_rolling * normal_load_ang
+                )
+                lam_angular_new = n * wp.clamp(tor_trial, -tor_lim, tor_lim) + rol_torque
+            if wp.static(refresh_angular_conditioning) and refresh_contact_angular_conditioning == 1:
+                contact_torsional_rho[idx] = torsional_rho
+                contact_rolling_rho[idx] = rolling_rho
+            contact_lambda_angular[idx] = lam_angular_new
+        contact_lambda[idx] = lam_new
 
     # ``module="unique"`` kernels do not inherit this file's module options.
     wp.set_module_options({"enable_backward": False}, module=update_duals_body_body_contacts.module)
@@ -6881,7 +7809,6 @@ values are ``2**(e - 23)`` apart. Because ``_FLOAT32_EPS = 2**-23``, the
 product ``_FLOAT32_EPS * abs(S) = m * 2**(e - 23)`` is between one and two
 such spacings.
 """
-_FLOAT32_MIN_NORMAL = wp.constant(1.1754944e-38)
 DAT_ULP_FACTOR = wp.constant(4.0)
 """Keep the DAT separation band roughly four to eight float32 spacings wide when needed."""
 

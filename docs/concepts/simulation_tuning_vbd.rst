@@ -203,10 +203,8 @@ can inherit ``model.vbd`` settings.
        solver after changes.
 
 Deprecated aliases remain for one release cycle: ``particle_self_contact_radius``
-(legacy radius and margin pair), ``particle_collision_detection_interval``
-(now the self-contact slot of the collision schedule) and
-``particle_conservative_bound_relaxation`` (now
-``dat_conservative_bound_relaxation``). New code should not use them. Passing a
+(legacy radius and margin pair) and ``particle_collision_detection_interval``
+(now the self-contact slot of the collision schedule). New code should not use them. Passing a
 margin without a gap also triggers the legacy meaning of the margin and a
 deprecation warning, so always pass both.
 
@@ -683,9 +681,25 @@ body-body damping direction (``rigid_contact_damping_bidirectional``), and the e
 :ref:`vbd-energy-terms`. Unexpected slip can also come from missing contacts or
 an incomplete solve.
 
+**Torsional and rolling friction.** Body-body contacts resist spin about the
+contact normal and rolling in the contact plane.
+:attr:`~newton.ModelBuilder.ShapeConfig.mu_torsional` and
+:attr:`~newton.ModelBuilder.ShapeConfig.mu_rolling` are lengths [m]: each
+torque limit is the coefficient times the normal force. Both defaults are
+nonzero. Pair coefficients use the geometric mean, so zero on either shape
+disables that channel. For small parts and thin cables, reduce the
+coefficients or set them to zero if angular resistance is too strong.
+
 **Body coloring.** VBD updates bodies in the same color group in parallel.
 Automatic coloring uses joint and tendon connections, but does not include
 contacts. Contacting bodies may share a color, which can slow convergence.
+Compliant-ALM contacts between two dynamic bodies of the same color use a
+doubled solve metric to bound their simultaneous corrections. This can improve
+stability in dense contact networks, but those pairs may need more iterations.
+Bodies in different color groups are updated sequentially, so their contact
+solve metrics are not doubled.
+Damped grasps with same-color contacts can still fail at higher iteration
+counts.
 For small scenes with predictable contacts, consider splitting
 existing groups in ``builder.body_color_groups`` to separate frequently
 contacting bodies. Make these edits after ``builder.color()`` and before
@@ -739,6 +753,9 @@ behave as follows:
        tangential multipliers for valid matches, as with ``"latest"``;
        friction acts on the replayed anchors' current-step slip.
        This matching mode is experimental.
+
+Both matching modes also restore torsional and rolling multipliers, projected
+to the current contact frame and torque limits.
 
 For a baseline, set ``rigid_contact_history=False`` explicitly. Use
 ``contact_matching="disabled"`` unless rigid detection uses ``ITERATIONS``,

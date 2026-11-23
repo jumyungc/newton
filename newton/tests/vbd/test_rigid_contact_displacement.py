@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 The Newton Developers
 # SPDX-License-Identifier: Apache-2.0
 
-"""Rigid contact point motion: small slips survive world translation, and rolling creates no energy."""
+"""Rigid contact point motion: small increments survive world translation, and rolling creates no energy."""
 
 import unittest
 
@@ -9,16 +9,15 @@ import numpy as np
 import warp as wp
 
 import newton
-from newton._src.solvers.vbd.rigid_contact_activation import create_accumulate_inactive_contact_metric
+from newton._src.geometry.sdf_planar_recovery import MeshRecoveryData
 from newton._src.solvers.vbd.rigid_vbd_kernels import (
+    _NUM_CONTACT_THREADS_PER_BODY,
     _body_rotation_increment,
-    compute_body_body_contact_forces,
-    compute_rigid_contact_forces,
-    create_accumulate_body_body_contacts_per_body,
-    step_body_body_contact_C0_lambda,
+    _body_step_motion,
+    accumulate_body_body_contacts_per_body,
+    build_body_body_contact_step_levers,
     update_duals_body_body_contacts,
 )
-from newton._src.solvers.vbd.vbd_coupling_kernels import _harvest_vbd_proxy_wrenches_kernel
 from newton.tests.unittest_utils import add_function_test, get_test_devices
 
 
@@ -33,7 +32,7 @@ def _contact_rotation_increments(q: wp.array[wp.quat], q_prev: wp.array[wp.quat]
 
 
 def test_small_rotation_contact_force_is_translation_invariant(test, device):
-    """Preserve small rotational slip and exact zero increments at nonidentity orientations."""
+    """Preserve small normal motion, rotational slip and exact zero increments at nonidentity orientations."""
     radius = 2.0**-10
     angle = 2.0**-18
     penetration = 2.0**-10
@@ -43,7 +42,8 @@ def test_small_rotation_contact_force_is_translation_invariant(test, device):
     dt = 1.0 / 600.0
     with wp.ScopedDevice(device):
         builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
-        cfg = builder.ShapeConfig(ke=material_ke, kd=0.0, mu=1.0, density=0.0)
+        # Sliding friction only: the small spin about the normal would otherwise load the torsional channel.
+        cfg = builder.ShapeConfig(ke=material_ke, kd=0.0, mu=1.0, mu_torsional=0.0, mu_rolling=0.0, density=0.0)
         body = builder.add_body(mass=1.0, inertia=wp.mat33(np.eye(3)), lock_inertia=True)
         shape0 = builder.add_shape_sphere(body, radius=0.01, cfg=cfg)
         shape1 = builder.add_ground_plane(cfg=cfg)
@@ -64,8 +64,8 @@ def test_small_rotation_contact_force_is_translation_invariant(test, device):
         solver.body_body_contact_normal_rho.fill_(1.0e6)
         solver.body_body_contact_material_ke.fill_(material_ke)
         solver.body_body_contact_material_kd.zero_()
-        solver.body_body_contact_material_mu.fill_(1.0)
-        solver.body_body_contact_tangent_rho.fill_(rho_t)
+        solver.body_body_contact_material_mu.fill_(wp.vec3(1.0, 0.0, 0.0))
+        solver.body_body_contact_tangent_rho.fill_(wp.mat22(rho_t, rho_t, 1.0, 0.0))
         solver.body_body_contact_C0.zero_()
         solver.body_body_contact_lambda.assign([(0.0, 0.0, -normal_force)])
         wrench = wp.zeros(1, dtype=wp.spatial_vector)
@@ -101,6 +101,152 @@ def test_small_rotation_contact_force_is_translation_invariant(test, device):
         if len(reported) == 2:
             np.testing.assert_allclose(reported[1], reported[0], rtol=2.0e-5, atol=1.0e-10)
 
+        # A tiny normal approach must also survive the world-point rounding that
+        # the solve avoids. Use a bottom-edge witness and rotate about y instead.
+        stiffness = 1.0e6
+        q_normal = np.array([0.0, np.sin(angle / 2.0), 0.0, np.cos(angle / 2.0)], dtype=np.float32)
+        compression = radius * 2.0 * float(q_normal[1])
+        test.assertGreater(compression, 1.0e-9)
+        test.assertLess(compression, np.spacing(np.float32(1.0)))
+        solver.body_body_contact_material_ke.fill_(stiffness)
+        solver.body_body_contact_material_mu.zero_()
+        solver.body_body_contact_lambda_angular.zero_()
+        contacts.rigid_contact_point0.assign([(radius, 0.0, -radius)])
+        color_group = wp.array([body], dtype=wp.int32)
+        counts, indices = wp.array([1], dtype=wp.int32), wp.array([0], dtype=wp.int32)
+        records = wp.array([(body, -1, 0)], dtype=wp.vec3i)
+        gathered = [wp.zeros(1, dtype=wp.vec3) for _ in range(2)]
+        gathered += [wp.zeros(1, dtype=wp.mat33) for _ in range(3)]
+        levers = [getattr(solver, "body_body_contact_lever_" + name) for name in ("s0", "c0", "s1", "c1")]
+        levers.append(solver.body_body_contact_start_penetration)
+        material = [
+            solver.body_body_contact_normal_rho,
+            solver.body_body_contact_material_ke,
+            solver.body_body_contact_material_kd,
+            solver.body_body_contact_material_mu,
+            solver.body_body_contact_tangent_rho,
+            solver.body_body_contact_torsional_rho,
+            solver.body_body_contact_rolling_rho,
+        ]
+        gather_inputs = [
+            dt,
+            color_group,
+            solver.body_q_prev,
+            state.body_q,
+            model.body_com,
+            False,
+            *material,
+            solver.body_body_contact_lambda,
+            solver.body_body_contact_lambda_angular,
+            solver.body_body_contact_C0,
+            MeshRecoveryData(),
+            contacts.contact_generation,
+            contacts.rigid_contact_count,
+            contacts.rigid_contact_shape0,
+            contacts.rigid_contact_shape1,
+            contacts.rigid_contact_surface_velocity,
+            contacts.rigid_contact_normal,
+            *levers,
+            1,
+            counts,
+            indices,
+            records,
+        ]
+        dual_inputs = [
+            contacts.rigid_contact_count,
+            contacts.rigid_contact_shape0,
+            contacts.rigid_contact_shape1,
+            contacts.rigid_contact_surface_velocity,
+            contacts.rigid_contact_normal,
+            *levers,
+            model.shape_body,
+            state.body_q,
+            solver.body_q_prev,
+            model.body_com,
+            solver.body_contact_free_angular_compliance,
+            0,
+            dt,
+            material[3],
+            solver.body_body_contact_C0,
+            MeshRecoveryData(),
+            contacts.contact_generation,
+            material[1],
+            material[2],
+            material[4],
+            material[0],
+            material[5],
+            material[6],
+            False,
+            solver.body_body_contact_lambda,
+            solver.body_body_contact_lambda_angular,
+        ]
+        for translation in (0.0, 1.0):
+            for warm in (0.0, stiffness * compression):
+                with test.subTest(normal_translation=translation, normal_warm_start=warm):
+                    position = wp.vec3(translation, translation, translation + radius)
+                    state.body_q.assign([wp.transform(position, wp.quat(*q_normal))])
+                    solver.body_q_prev.assign([wp.transform(position, wp.quat_identity())])
+                    contacts.rigid_contact_point1.assign([(translation + radius, translation, translation)])
+                    solver.body_body_contact_lambda.assign([(0.0, 0.0, -warm)])
+                    solver._build_body_body_contact_step_levers(contacts)
+                    lambda_normal = warm
+                    for after_dual in (False, True):
+                        expected_normal = 0.5 * (stiffness * compression + lambda_normal)
+                        expected_force = np.array([0.0, 0.0, expected_normal])
+                        expected_torque = np.array([0.0, -radius * expected_normal * float(q_normal[3]), 0.0])
+                        qy, qw = float(q_normal[1]), float(q_normal[3])
+                        lever_x = radius * (qw * qw - qy * qy - 2.0 * qw * qy)
+                        expected_reported_torque = np.array([0.0, -lever_x * expected_normal, 0.0])
+                        for output in gathered:
+                            output.zero_()
+                        wp.launch(
+                            accumulate_body_body_contacts_per_body,
+                            _NUM_CONTACT_THREADS_PER_BODY,
+                            inputs=gather_inputs,
+                            outputs=gathered,
+                        )
+                        values = solver.collect_rigid_contact_forces(state.body_q, solver.body_q_prev, contacts, dt)
+                        solver._export_body_body_contact_forces(state, contacts, dt, wrench)
+                        np.testing.assert_allclose(
+                            gathered[0].numpy()[0],
+                            expected_force,
+                            rtol=2.0e-6,
+                            atol=1.0e-9,
+                        )
+                        np.testing.assert_allclose(
+                            gathered[1].numpy()[0],
+                            expected_torque,
+                            rtol=2.0e-6,
+                            atol=1.0e-12,
+                        )
+                        np.testing.assert_allclose(
+                            -values[4].numpy()[0],
+                            expected_force,
+                            rtol=2.0e-6,
+                            atol=1.0e-9,
+                        )
+                        np.testing.assert_allclose(
+                            wrench.numpy()[0, :3],
+                            expected_force,
+                            rtol=2.0e-6,
+                            atol=1.0e-9,
+                        )
+                        np.testing.assert_allclose(
+                            wrench.numpy()[0, 3:],
+                            expected_reported_torque,
+                            rtol=2.0e-6,
+                            atol=1.0e-12,
+                        )
+                        if not after_dual:
+                            wp.launch(update_duals_body_body_contacts, 1, inputs=dual_inputs)
+                            np.testing.assert_allclose(
+                                solver.body_body_contact_lambda.numpy()[0],
+                                -expected_force,
+                                rtol=2.0e-6,
+                                atol=1.0e-9,
+                            )
+                            lambda_normal = expected_normal
+
         # An identity baseline hides cancellation in q * inverse(q_prev), especially under CUDA FMA.
         # Exercise exact zero and a tiny increment at a generic baseline, including q versus -q.
         baseline = np.array([1.0, 2.0, 3.0, 4.0])
@@ -130,6 +276,135 @@ def test_small_rotation_contact_force_is_translation_invariant(test, device):
         increments = rotations.numpy()
         np.testing.assert_array_equal(increments[:2], np.zeros((2, 3)))
         np.testing.assert_allclose(increments[2:], np.tile(expected_increment, (2, 1)), rtol=5.0e-7, atol=1.0e-14)
+
+
+def _expected_contact_step_rows(model, contacts, body_q_prev):
+    """Recompute each active row's step-start levers and penetration in float64."""
+    count = int(contacts.rigid_contact_count.numpy()[0])
+    shape_body = model.shape_body.numpy()
+    com = model.body_com.numpy().astype(np.float64)
+    names = ("shape0", "shape1", "point0", "point1", "offset0", "offset1", "normal", "margin0", "margin1")
+    shape0, shape1, point0, point1, offset0, offset1, normal, margin0, margin1 = (
+        getattr(contacts, "rigid_contact_" + name).numpy()[:count].astype(np.float64) for name in names
+    )
+
+    def rotate(q, v):
+        return v + 2.0 * np.cross(q[:3], np.cross(q[:3], v) + q[3] * v)
+
+    rows = np.zeros((count, 13))
+    for i in range(count):
+        ends = []
+        for shape, point, offset in ((shape0[i], point0[i], offset0[i]), (shape1[i], point1[i], offset1[i])):
+            body = shape_body[int(shape)] if shape >= 0 else -1
+            if body < 0:
+                # A world endpoint is a body at the identity with its COM at the origin.
+                ends.append((point, point, point + offset))
+                continue
+            position, q = body_q_prev[body, :3].astype(np.float64), body_q_prev[body, 3:].astype(np.float64)
+            center = position + rotate(q, com[body])
+            world = position + rotate(q, point)
+            ends.append((world, world - center, position + rotate(q, point + offset) - center))
+        (world0, s0, c0), (world1, s1, c1) = ends
+        penetration = margin0[i] + margin1[i] - normal[i] @ (world1 - world0)
+        rows[i] = np.concatenate((s0, c0, s1, c1, [penetration]))
+    return rows
+
+
+def _stored_contact_step_rows(solver, count):
+    """Return the solver's stored step-start levers and penetration for the first ``count`` rows."""
+    levers = [getattr(solver, "body_body_contact_lever_" + name).numpy()[:count] for name in ("s0", "c0", "s1", "c1")]
+    return np.concatenate([*levers, solver.body_body_contact_start_penetration.numpy()[:count, None]], axis=1)
+
+
+def test_contact_step_levers_follow_rows_and_history(test, device):
+    """Stored row geometry follows the rows and pose history of the iterations; reporting does not read it."""
+    Slot = newton.solvers.SolverBase.CollisionSlot
+    Frequency = newton.solvers.SolverBase.CollisionFrequencyType
+    builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+    cfg = builder.ShapeConfig(ke=1.0e4, kd=10.0, mu=0.5, density=1000.0)
+    # A second sphere on each body moves its COM off the contacting sphere's center.
+    lower = builder.add_body(xform=wp.transform((0.0, 0.0, 0.0), wp.quat_identity()))
+    builder.add_shape_sphere(lower, radius=0.2, cfg=cfg)
+    builder.add_shape_sphere(lower, xform=wp.transform((0.0, 0.3, -0.3), wp.quat_identity()), radius=0.1, cfg=cfg)
+    upper = builder.add_body(xform=wp.transform((0.0, 0.0, 2.0), wp.quat_identity()))
+    builder.add_shape_sphere(upper, radius=0.1, cfg=cfg)
+    builder.add_shape_sphere(upper, xform=wp.transform((0.0, -0.2, 0.2), wp.quat_identity()), radius=0.05, cfg=cfg)
+    builder.color()
+    dt = 1.0 / 60.0
+
+    with wp.ScopedDevice(device):
+        model = builder.finalize()
+
+        def touching_state(speed):
+            """Move the upper body into contact after the solver was built, tilted and moving."""
+            state = model.state()
+            q = state.body_q.numpy()
+            q[upper] = [0.05, 0.0, 0.29, *wp.quat_from_axis_angle(wp.vec3(1.0, 0.0, 0.0), 0.4)]
+            state.body_q.assign(q)
+            qd = state.body_qd.numpy()
+            qd[upper] = [speed, 0.0, 0.0, 0.0, 3.0, 0.0]
+            state.body_qd.assign(qd)
+            return state
+
+        def check(solver, contacts, history):
+            count = int(contacts.rigid_contact_count.numpy()[0])
+            test.assertGreater(count, 0)
+            stored = _stored_contact_step_rows(solver, count)
+            np.testing.assert_allclose(
+                stored, _expected_contact_step_rows(model, contacts, history), rtol=1.0e-5, atol=2.0e-6
+            )
+            test.assertGreater(np.abs(stored[:, :12]).max(), 0.05)
+
+        # First step: the pose history is rebaselined to the moved pose, not the pose at construction.
+        solver = newton.solvers.SolverVBD(model, iterations=4)
+        small = newton.CollisionPipeline(model, rigid_contact_max=4)
+        contacts = small.contacts()
+        state, out = touching_state(0.3), model.state()
+        history = state.body_q.numpy().copy()
+        small.collide(state, contacts)
+        solver.step(state, out, None, contacts, dt)
+        check(solver, contacts, history)
+
+        # Reporting takes its own poses and history: overwriting the stored rows must not change it.
+        history_array = wp.array(history, dtype=wp.transform)
+        force = solver.collect_rigid_contact_forces(out.body_q, history_array, contacts, dt)[4].numpy().copy()
+        test.assertGreater(np.abs(force).max(), 1.0)
+        for name in ("lever_s0", "lever_c0", "lever_s1", "lever_c1"):
+            getattr(solver, "body_body_contact_" + name).fill_(wp.vec3(1.0e3, 1.0e3, 1.0e3))
+        solver.body_body_contact_start_penetration.fill_(1.0e3)
+        np.testing.assert_array_equal(
+            solver.collect_rigid_contact_forces(out.body_q, history_array, contacts, dt)[4].numpy(), force
+        )
+
+        # A larger contact buffer on the next step: storage grows with the other row state and is rebuilt.
+        large = newton.CollisionPipeline(model, rigid_contact_max=16)
+        large_contacts = large.contacts()
+        test.assertGreater(large_contacts.rigid_contact_max, contacts.rigid_contact_max)
+        history = out.body_q.numpy().copy()
+        large.collide(out, large_contacts)
+        solver.step(out, state, None, large_contacts, dt)
+        test.assertEqual(solver.body_body_contact_start_penetration.shape[0], large_contacts.rigid_contact_max)
+        check(solver, large_contacts, history)
+
+        # Detection inside the iterations replaces the rows: the stored geometry belongs to the last refresh.
+        owned = newton.solvers.SolverVBD(
+            model,
+            iterations=4,
+            collision_pipeline=newton.CollisionPipeline(model, contact_matching="latest"),
+            collision_frequency={Slot.RIGID: 1},
+            collision_frequency_type={Slot.RIGID: Frequency.ITERATIONS},
+        )
+        state, out = touching_state(2.0), model.state()
+        history = state.body_q.numpy().copy()
+        large.collide(state, large_contacts)
+        before_refresh = _expected_contact_step_rows(model, large_contacts, history)
+        owned.step(state, out, None, None, dt)
+        check(owned, owned.contacts, history)
+        after_refresh = _expected_contact_step_rows(model, owned.contacts, history)
+        # The comparison above is only meaningful if the refresh changed the rows.
+        test.assertTrue(
+            after_refresh.shape != before_refresh.shape or np.abs(after_refresh - before_refresh).max() > 1.0e-3
+        )
 
 
 def test_rolling_cylinder_keeps_its_speed(test, device):
@@ -171,326 +446,80 @@ def test_rolling_cylinder_keeps_its_speed(test, device):
         test.assertAlmostEqual(float(state.body_qd.numpy()[0, 0]), speed, delta=0.03 * speed)
 
 
-def test_small_normal_rotation_is_translation_invariant(test, device):
-    """Preserve tiny normal motion in the solve, history, reports and activation guard."""
-    radius, dt, stiffness, penalty = 2.0**-10, 0.01, 1.0e6, 1.0e6
-    cases = [
-        (angle, height, seeded, body_a)
-        for angle in (0.0, 2.0**-18)
-        for height in (0.0, 1.0)
-        for seeded in (False, True)
-        for body_a in (False, True)
-    ]
-    count = len(cases)
-    quaternions = np.array([[0.0, np.sin(a / 2.0), 0.0, np.cos(a / 2.0)] for a, _, _, _ in cases], dtype=np.float32)
-    # Independent first-order map of the encoded quaternion: the point (r,0,0)
-    # moves down by r*2*q_y. This is below the float32 ULP at world height 1 m.
-    compression = radius * 2.0 * quaternions[:, 1].astype(np.float64)
-    sign = np.array([-1.0 if body_a else 1.0 for _, _, _, body_a in cases])
-    seeded = np.array([warm for _, _, warm, _ in cases])
+@wp.kernel
+def _body_step_translations(
+    q: wp.array[wp.transform],
+    q_prev: wp.array[wp.transform],
+    com: wp.array[wp.vec3],
+    translation: wp.array[wp.vec3],
+):
+    """Evaluate the production center-of-mass step translation."""
+    i = wp.tid()
+    step, _rotation, _jacobian_t = _body_step_motion(i, q, q_prev, com)
+    translation[i] = step
+
+
+def test_step_start_contact_geometry_is_translation_invariant(test, device):
+    """Keep a row's step translation, levers and start gap at any distance from the world origin."""
+    distances = (0.0, 1.0, 100.0)
+    count = len(distances)
+    # 1. Each body turns by 1e-4 rad about its own origin, which stays in place, so its center of mass, 30 mm
+    # from that origin, moves 3 um. At 100 m this is less than half the float32 spacing (7.6 um): a difference
+    # of two world-space center-of-mass positions rounds the step to zero.
+    offset, angle = 0.03, 1.0e-4
+    turned = np.array([0.0, 0.0, np.sin(angle / 2.0), np.cos(angle / 2.0)], dtype=np.float32)
+    # First-order motion of (0, offset, 0) under the encoded rotation about z, in float64.
+    expected_step = np.array(
+        [-2.0 * float(turned[2]) * float(turned[3]) * offset, -2.0 * float(turned[2]) ** 2 * offset, 0.0]
+    )
+    # 2. Two bodies 0.25 m apart along x, each with an offset center of mass, touch across a 0.1 mm gap. Their
+    # levers and their gap depend on the relative pose only; world points at 100 m round both by micrometers.
+    com = np.array([0.01, 0.02, 0.03], dtype=np.float32)
+    point0 = np.array([0.1249, 0.001, 0.0], dtype=np.float32)
+    point1 = np.array([-0.125, 0.001, 0.0], dtype=np.float32)
+    expected_gap = 0.25 + float(point1[0]) - float(point0[0])
+    expected_levers = (point0.astype(np.float64) - com, point1.astype(np.float64) - com)
     with wp.ScopedDevice(device):
-        q = wp.array(
-            [wp.transform((0.0, 0.0, h), wp.quat(*rot)) for (_, h, _, _), rot in zip(cases, quaternions, strict=True)],
+        q = wp.array([wp.transform((d, 0.0, 0.0), wp.quat(*turned)) for d in distances], dtype=wp.transform)
+        q_prev = wp.array([wp.transform((d, 0.0, 0.0), wp.quat_identity()) for d in distances], dtype=wp.transform)
+        translation = wp.zeros(count, dtype=wp.vec3)
+        wp.launch(
+            _body_step_translations,
+            count,
+            inputs=[q, q_prev, wp.array([(0.0, offset, 0.0)] * count, dtype=wp.vec3)],
+            outputs=[translation],
+        )
+        np.testing.assert_allclose(translation.numpy(), np.tile(expected_step, (count, 1)), rtol=0.0, atol=5.0e-8)
+
+        pair_q = wp.array(
+            [wp.transform((d + shift, 0.0, 0.0), wp.quat_identity()) for d in distances for shift in (0.0, 0.25)],
             dtype=wp.transform,
         )
-        previous = wp.array(
-            [wp.transform((0.0, 0.0, h), wp.quat_identity()) for _, h, _, _ in cases], dtype=wp.transform
+        levers = [wp.zeros(count, dtype=wp.vec3) for _ in range(4)] + [wp.zeros(count, dtype=float)]
+        zeros = wp.zeros(count, dtype=wp.vec3)
+        wp.launch(
+            build_body_body_contact_step_levers,
+            count,
+            inputs=[
+                wp.array([count], dtype=int),
+                wp.array(np.arange(count) * 2, dtype=int),
+                wp.array(np.arange(count) * 2 + 1, dtype=int),
+                wp.array([point0] * count, dtype=wp.vec3),
+                wp.array([point1] * count, dtype=wp.vec3),
+                zeros,
+                zeros,
+                wp.array([(1.0, 0.0, 0.0)] * count, dtype=wp.vec3),
+                wp.zeros(count, dtype=float),
+                wp.zeros(count, dtype=float),
+                wp.array(np.arange(2 * count), dtype=int),
+                pair_q,
+                wp.array([com] * (2 * count), dtype=wp.vec3),
+            ],
+            outputs=levers,
         )
-        vectors = wp.zeros(count, dtype=wp.vec3)
-        zeros = wp.zeros(count)
-        body_ids = wp.array(np.arange(count), dtype=int)
-        colors = wp.zeros(count, dtype=int)
-        inverse_mass = wp.ones(count)
-        rho = wp.full(count, penalty)
-        ke = wp.full(count, stiffness)
-        kd = wp.zeros(count)
-        lam = wp.zeros(count, dtype=wp.vec3)
-        normals = wp.array(np.column_stack((np.zeros((count, 2)), sign)), dtype=wp.vec3)
-        shape_body = wp.array(
-            [b for i, (_, _, _, a) in enumerate(cases) for b in ((i, -1) if a else (-1, i))], dtype=int
-        )
-        geometry = [
-            wp.array([count], dtype=int),
-            wp.array(np.arange(count) * 2, dtype=int),
-            wp.array(np.arange(count) * 2 + 1, dtype=int),
-            wp.array([(radius, 0.0, 0.0 if a else h) for _, h, _, a in cases], dtype=wp.vec3),
-            wp.array([(radius, 0.0, h if a else 0.0) for _, h, _, a in cases], dtype=wp.vec3),
-            vectors,
-            vectors,
-            vectors,
-            normals,
-            zeros,
-            zeros,
-        ]
-        material = [rho, ke, kd, zeros, zeros, lam, vectors, 0.0]
-        adjacency = [1, wp.ones(count, dtype=int), body_ids]
-        for damping, bidirectional in ((0.0, False), (1.0e4, False), (1.0e4, True)):
-            kd.fill_(damping)
-            dashpot = damping / dt
-            row_stiffness = stiffness if bidirectional else stiffness + dashpot
-            initial_lambda = seeded * row_stiffness * compression
-            lam.assign(np.column_stack((np.zeros((count, 2)), sign * initial_lambda)))
-            expected_dual = row_stiffness / (row_stiffness + penalty) * (penalty * compression + initial_lambda)
-            expected_force = expected_dual + (dashpot * compression if bidirectional else 0.0)
-            report_inputs = [dt, *geometry, shape_body, q, previous, vectors, *material, 0.01, bidirectional]
-            reported = [wp.empty(count, dtype=t) for t in (int, int, wp.vec3, wp.vec3, wp.vec3)]
-            wrench = wp.empty(count, dtype=wp.spatial_vector)
-            wp.launch(compute_rigid_contact_forces, count, inputs=report_inputs, outputs=reported)
-            wp.launch(compute_body_body_contact_forces, count, inputs=report_inputs, outputs=[wrench])
-            with test.subTest(damping=damping, bidirectional=bidirectional):
-                np.testing.assert_allclose(reported[-1].numpy()[:, 2] * sign, expected_force, rtol=2.0e-6, atol=1.0e-10)
-                np.testing.assert_allclose(-wrench.numpy()[:, 2] * sign, expected_force, rtol=2.0e-6, atol=1.0e-10)
-            for width in (4, 32):
-                gathered = [wp.zeros(count, dtype=t) for t in (wp.vec3, wp.vec3, wp.mat33, wp.mat33, wp.mat33)]
-                wp.launch(
-                    create_accumulate_body_body_contacts_per_body(width),
-                    count * width,
-                    inputs=[
-                        dt,
-                        body_ids,
-                        previous,
-                        q,
-                        vectors,
-                        inverse_mass,
-                        colors,
-                        0.01,
-                        bidirectional,
-                        *material,
-                        *geometry,
-                        shape_body,
-                        *adjacency,
-                    ],
-                    outputs=gathered,
-                )
-                with test.subTest(damping=damping, bidirectional=bidirectional, width=width):
-                    np.testing.assert_allclose(gathered[0].numpy()[:, 2], expected_force, rtol=2.0e-6, atol=1.0e-10)
-            wp.launch(
-                update_duals_body_body_contacts,
-                count,
-                inputs=[
-                    *geometry,
-                    shape_body,
-                    q,
-                    previous,
-                    vectors,
-                    dt,
-                    zeros,
-                    vectors,
-                    0.0,
-                    ke,
-                    kd,
-                    zeros,
-                    rho,
-                    bidirectional,
-                    lam,
-                ],
-            )
-            np.testing.assert_allclose(lam.numpy()[:, 2] * sign, expected_dual, rtol=2.0e-6, atol=1.0e-10)
-
-            # The zero-increment controls must not activate; the tiny trial must
-            # activate at either height without adding a physical force.
-            lam.zero_()
-            metric = penalty * row_stiffness / (penalty + row_stiffness)
-            if bidirectional:
-                metric += dashpot
-            for width in (4, 32):
-                guarded = [wp.zeros(count, dtype=wp.mat33) for _ in range(3)]
-                activated = wp.zeros(count, dtype=int)
-                guard_inputs = [
-                    dt,
-                    body_ids,
-                    previous,
-                    previous,
-                    q,
-                    vectors,
-                    inverse_mass,
-                    colors,
-                    rho,
-                    ke,
-                    kd,
-                    lam,
-                    vectors,
-                    0.0,
-                    bidirectional,
-                    *geometry[:5],
-                    normals,
-                    zeros,
-                    zeros,
-                    shape_body,
-                    *adjacency,
-                ]
-                wp.launch(
-                    create_accumulate_inactive_contact_metric(width),
-                    count * width,
-                    inputs=guard_inputs,
-                    outputs=[*guarded, activated],
-                )
-                np.testing.assert_array_equal(activated.numpy(), compression > 0.0)
-                np.testing.assert_allclose(
-                    guarded[0].numpy()[:, 2, 2], (compression > 0.0) * metric, rtol=2.0e-6, atol=1.0e-6
-                )
-
-                # With the same tiny rotation already in the current iterate,
-                # its ordinary contact block must not receive another guard metric.
-                guard_inputs[3] = q
-                for output in (*guarded, activated):
-                    output.zero_()
-                wp.launch(
-                    create_accumulate_inactive_contact_metric(width),
-                    count * width,
-                    inputs=guard_inputs,
-                    outputs=[*guarded, activated],
-                )
-                with test.subTest(damping=damping, bidirectional=bidirectional, width=width, current_active=True):
-                    for output in (*guarded, activated):
-                        np.testing.assert_array_equal(output.numpy(), 0)
-
-
-def test_large_world_translation_invariance_and_c0_precision(test, device):
-    """Verify 1000 m translation invariance for millimeter levers, offset COMs, C0, and proxy torques."""
-    with wp.ScopedDevice(device):
-        # 1. C0 normal precision on tilted normal with large tangential offset at 1000 m
-        n_np = np.array([1.0, 2.0, 3.0], dtype=np.float64)
-        n_np /= np.linalg.norm(n_np)
-        t_np = np.array([2.0, -1.0, 0.0], dtype=np.float64)
-        t_np /= np.linalg.norm(t_np)
-        expected_c0 = 1.0e-6
-        p0_local = np.zeros(3, dtype=np.float32)
-        p1_local = (-expected_c0 * n_np + 0.5 * t_np).astype(np.float32)
-        n_f32 = n_np.astype(np.float32)
-        n_f64 = n_f32.astype(np.float64)
-        expected_exact = -float(np.dot(n_f64, p1_local.astype(np.float64))) * float(np.dot(n_f64, n_f64))
-        # The two large products of dot(n, p1) are about 0.12 and cancel. Each may round by half a
-        # float32 spacing there (3.7e-9), depending on evaluation order and fused multiply-adds.
-        c0_tolerance = 1.0e-8
-
-        c0_by_shift = []
-        for world_shift in (0.0, 1000.0):
-            X_world = wp.transform((world_shift, -world_shift, 0.5 * world_shift), wp.quat_identity())
-            c0_out = wp.zeros(1, dtype=wp.vec3, device=device)
-            wp.launch(
-                step_body_body_contact_C0_lambda,
-                dim=1,
-                inputs=[
-                    wp.array([1], dtype=int),
-                    wp.array([0], dtype=int),
-                    wp.array([1], dtype=int),
-                    wp.array([p0_local], dtype=wp.vec3),
-                    wp.array([p1_local], dtype=wp.vec3),
-                    wp.zeros(1, dtype=wp.vec3),
-                    wp.zeros(1, dtype=wp.vec3),
-                    wp.array([n_np.astype(np.float32)], dtype=wp.vec3),
-                    wp.zeros(1, dtype=float),
-                    wp.zeros(1, dtype=float),
-                    wp.array([0, 1], dtype=wp.int32),
-                    wp.zeros(2, dtype=wp.int32),
-                    wp.array([1.0, 1.0], dtype=float),
-                    wp.zeros(2, dtype=wp.mat33),
-                    wp.zeros(2, dtype=wp.vec3),
-                    wp.zeros(2, dtype=float),
-                    int(newton.BodyFlags.PROXY),
-                    wp.array([X_world, X_world], dtype=wp.transform),
-                    1.0,
-                    100.0,
-                    wp.array([1.0e6], dtype=float),
-                    1.0,
-                ],
-                outputs=[
-                    wp.zeros(1, dtype=float),
-                    c0_out,
-                    wp.zeros(1, dtype=wp.vec3),
-                    wp.zeros(1, dtype=float),
-                ],
-            )
-            c0_scalar = float(np.dot(c0_out.numpy()[0].astype(np.float64), n_f64))
-            c0_by_shift.append(c0_scalar)
-            test.assertAlmostEqual(c0_scalar, expected_exact, delta=c0_tolerance)
-        test.assertEqual(c0_by_shift[1], c0_by_shift[0])
-
-        # 2. Offset-COM slip & 1 mm lever force/torque + proxy wrench invariance between 0 m and 1000 m
-        wrenches_by_shift = []
-        proxy_by_shift = []
-        q_rot = wp.quat_from_axis_angle(wp.vec3(0.0, 0.0, 1.0), 1.0e-3)
-        for world_shift in (0.0, 1000.0):
-            base = np.array([world_shift, -0.75 * world_shift, 0.25 * world_shift], dtype=np.float32)
-            X_prev = wp.transform(tuple(base), wp.quat_identity())
-            X_cur = wp.transform(tuple(base), q_rot)
-            body_q_prev = wp.array([X_prev, X_prev], dtype=wp.transform)
-            body_q_cur = wp.array([X_cur, X_prev], dtype=wp.transform)
-            body_com = wp.array([[0.05, -0.03, 0.02], [0.0, 0.0, 0.0]], dtype=wp.vec3)
-            pt0 = wp.array([[0.051, -0.03, 0.02]], dtype=wp.vec3)
-            pt1 = wp.array([[0.051, -0.03, 0.0199]], dtype=wp.vec3)
-            off0 = wp.array([[0.0, 0.0, -0.002]], dtype=wp.vec3)
-            off1 = wp.array([[0.0, 0.0, 0.002]], dtype=wp.vec3)
-            normal_arr = wp.array([[0.0, 0.0, 1.0]], dtype=wp.vec3)
-            zeros_f = wp.zeros(1, dtype=float)
-            wrench = wp.zeros(1, dtype=wp.spatial_vector)
-            wp.launch(
-                compute_body_body_contact_forces,
-                dim=1,
-                inputs=[
-                    0.01,
-                    wp.array([1], dtype=int),
-                    wp.array([0], dtype=int),
-                    wp.array([1], dtype=int),
-                    pt0,
-                    pt1,
-                    None,
-                    off0,
-                    off1,
-                    normal_arr,
-                    zeros_f,
-                    zeros_f,
-                    wp.array([0, 1], dtype=wp.int32),
-                    body_q_cur,
-                    body_q_prev,
-                    body_com,
-                    wp.array([1.0e5], dtype=float),
-                    wp.array([1.0e5], dtype=float),
-                    zeros_f,
-                    wp.array([0.8], dtype=float),
-                    wp.array([1.0e5], dtype=float),
-                    wp.array([[0.0, 0.0, 50.0]], dtype=wp.vec3),
-                    wp.zeros(1, dtype=wp.vec3),
-                    0.0,
-                    1.0e-6,
-                    False,
-                ],
-                outputs=[wrench],
-            )
-            w_np = wrench.numpy()[0].copy()
-            wrenches_by_shift.append(w_np)
-
-            proxy_out = wp.zeros(1, dtype=wp.spatial_vector)
-            wp.launch(
-                _harvest_vbd_proxy_wrenches_kernel,
-                dim=1,
-                inputs=[
-                    wp.array([1], dtype=int),
-                    wp.array([0], dtype=wp.int32),
-                    wp.array([1], dtype=wp.int32),
-                    pt0,
-                    pt1,
-                    wp.array([-w_np[:3]], dtype=wp.vec3),
-                    normal_arr,
-                    off0,
-                    off1,
-                    wp.array([0.0, 1.0], dtype=float),
-                    wp.array([int(newton.BodyFlags.PROXY), 0], dtype=wp.int32),
-                    wp.array([0, -1], dtype=int),
-                    int(newton.BodyFlags.PROXY),
-                    body_com,
-                    body_q_cur,
-                    proxy_out,
-                ],
-            )
-            proxy_by_shift.append(proxy_out.numpy()[0].copy())
-
-        # The row is active: the equalities below would also hold for three zero wrenches.
-        test.assertGreater(float(np.linalg.norm(wrenches_by_shift[0][:3])), 1.0)
-        np.testing.assert_allclose(wrenches_by_shift[1], wrenches_by_shift[0], rtol=2.0e-6, atol=1.0e-7)
-        np.testing.assert_allclose(proxy_by_shift[1], proxy_by_shift[0], rtol=2.0e-6, atol=1.0e-7)
-        np.testing.assert_allclose(proxy_by_shift[0], wrenches_by_shift[0], rtol=2.0e-6, atol=1.0e-7)
+        for lever, expected in zip((levers[0], levers[2]), expected_levers, strict=True):
+            np.testing.assert_allclose(lever.numpy(), np.tile(expected, (count, 1)), rtol=0.0, atol=5.0e-8)
+        np.testing.assert_allclose(levers[4].numpy(), -expected_gap, rtol=0.0, atol=5.0e-8)
 
 
 class TestRigidContactDisplacement(unittest.TestCase):
@@ -507,8 +536,16 @@ add_function_test(
 
 add_function_test(
     TestRigidContactDisplacement,
-    "test_small_normal_rotation_is_translation_invariant",
-    test_small_normal_rotation_is_translation_invariant,
+    "test_contact_step_levers_follow_rows_and_history",
+    test_contact_step_levers_follow_rows_and_history,
+    devices=get_test_devices(),
+)
+
+
+add_function_test(
+    TestRigidContactDisplacement,
+    "test_step_start_contact_geometry_is_translation_invariant",
+    test_step_start_contact_geometry_is_translation_invariant,
     devices=get_test_devices(),
 )
 
@@ -517,14 +554,6 @@ add_function_test(
     TestRigidContactDisplacement,
     "test_rolling_cylinder_keeps_its_speed",
     test_rolling_cylinder_keeps_its_speed,
-    devices=get_test_devices(),
-)
-
-
-add_function_test(
-    TestRigidContactDisplacement,
-    "test_large_world_translation_invariance_and_c0_precision",
-    test_large_world_translation_invariance_and_c0_precision,
     devices=get_test_devices(),
 )
 

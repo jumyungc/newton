@@ -9,7 +9,9 @@ import numpy as np
 import warp as wp
 
 import newton
+from newton._src.geometry.sdf_planar_recovery import MeshRecoveryData
 from newton._src.solvers.vbd.rigid_contact_activation import create_accumulate_inactive_contact_metric
+from newton._src.solvers.vbd.rigid_vbd_kernels import build_body_body_contact_step_levers
 from newton.tests.unittest_utils import add_function_test, get_test_devices
 
 
@@ -26,34 +28,58 @@ def test_metric_oracle(test, device):
         for gap, dz, lam, kd, bidirectional, expected in cases:
             identity = wp.array([wp.transform_identity()], dtype=wp.transform)
             trial = wp.array([wp.transform((0.0, 0.0, dz), wp.quat_identity())], dtype=wp.transform)
+            com = wp.zeros(1, dtype=wp.vec3)
+            count = wp.array([1], dtype=int)
+            normal = wp.array([[0.0, 0.0, 1.0]], dtype=wp.vec3)
+            # One row from the world (endpoint 0) to body 0 (endpoint 1); the solve stores its step-start geometry.
+            levers = [wp.zeros(1, dtype=wp.vec3) for _ in range(4)] + [wp.zeros(1)]
+            wp.launch(
+                build_body_body_contact_step_levers,
+                dim=1,
+                inputs=[
+                    count,
+                    wp.zeros(1, dtype=int),
+                    wp.ones(1, dtype=int),
+                    wp.array([[0.1, 0.0, 0.0]], dtype=wp.vec3),
+                    wp.array([[0.1, 0.0, gap]], dtype=wp.vec3),
+                    wp.zeros(1, dtype=wp.vec3),
+                    wp.zeros(1, dtype=wp.vec3),
+                    normal,
+                    wp.zeros(1),
+                    wp.zeros(1),
+                    wp.array([-1, 0], dtype=int),
+                    identity,
+                    com,
+                ],
+                outputs=levers,
+            )
             inputs = [
                 0.001,
                 wp.array([0], dtype=int),
                 identity,
                 identity,
                 trial,
-                wp.zeros(1, dtype=wp.vec3),
-                wp.ones(1),
-                wp.zeros(1, dtype=int),
+                com,
                 wp.full(1, 1000.0),
                 wp.full(1, 100.0),
                 wp.full(1, kd),
                 wp.array([[0.0, 0.0, lam]], dtype=wp.vec3),
                 wp.zeros(1, dtype=wp.vec3),
-                0.0,
+                MeshRecoveryData(),
+                wp.zeros(1, dtype=int),
                 bidirectional,
-                wp.array([1], dtype=int),
+                count,
                 wp.zeros(1, dtype=int),
                 wp.ones(1, dtype=int),
-                wp.array([[0.1, 0.0, 0.0]], dtype=wp.vec3),
-                wp.array([[0.1, 0.0, gap]], dtype=wp.vec3),
-                wp.array([[0.0, 0.0, 1.0]], dtype=wp.vec3),
-                wp.zeros(1),
-                wp.zeros(1),
-                wp.array([-1, 0], dtype=int),
+                normal,
+                levers[0],
+                levers[2],
+                levers[4],
                 1,
                 wp.ones(1, dtype=int),
                 wp.zeros(1, dtype=int),
+                # Per-body list record: (endpoint 0 body, endpoint 1 body, same-color flag).
+                wp.array([(-1, 0, 0)], dtype=wp.vec3i),
             ]
             skew = np.array([[0.0, -gap, 0.0], [gap, 0.0, -0.1], [0.0, 0.1, 0.0]])
             metric = np.diag([0.0, 0.0, expected])
@@ -156,7 +182,9 @@ def test_crossing_trial_is_shortened(test, device):
     """
     clearance, dt = 1.0e-3, 1.0 / 600.0
     builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
-    cfg = newton.ModelBuilder.ShapeConfig(ke=1.0e7, kd=0.0, mu=0.0, density=0.0, gap=0.01)
+    cfg = newton.ModelBuilder.ShapeConfig(
+        ke=1.0e7, kd=0.0, mu=0.0, mu_torsional=0.0, mu_rolling=0.0, density=0.0, gap=0.01
+    )
     start = wp.transform((0.0, 0.0, 0.1 + clearance), wp.quat_identity())
     body = builder.add_link(xform=start, mass=1.0, inertia=wp.mat33(np.eye(3) * 0.0066666667), lock_inertia=True)
     builder.add_shape_box(body=body, hx=0.1, hy=0.1, hz=0.1, cfg=cfg)
@@ -218,41 +246,66 @@ def test_pair_rotations_and_offset_com(test, device):
             [wp.transform((0.0, 0.0, 0.0), quat), wp.transform((0.0, 0.0, 0.001), quat)],
             dtype=wp.transform,
         )
+        body_com = wp.array([com, com], dtype=wp.vec3)
+        count = wp.ones(1, dtype=int)
+        normal = wp.array([[0.0, 0.0, 1.0]], dtype=wp.vec3)
+        points = wp.array([local], dtype=wp.vec3)
+        levers = [wp.zeros(1, dtype=wp.vec3) for _ in range(4)] + [wp.zeros(1)]
+        wp.launch(
+            build_body_body_contact_step_levers,
+            dim=1,
+            inputs=[
+                count,
+                wp.zeros(1, dtype=int),
+                wp.ones(1, dtype=int),
+                points,
+                points,
+                wp.zeros(1, dtype=wp.vec3),
+                wp.zeros(1, dtype=wp.vec3),
+                normal,
+                wp.zeros(1),
+                wp.zeros(1),
+                wp.array([0, 1], dtype=int),
+                previous,
+                body_com,
+            ],
+            outputs=levers,
+        )
         for same_color, dynamic_partner in ((True, True), (False, True), (True, False)):
             trial = wp.array(
                 [wp.transform((0.0, 0.0, 0.002), quat), wp.transform((0.0, 0.0, 0.001), quat)],
                 dtype=wp.transform,
             )
+            # The solver lists a row only under dynamic bodies and flags it when both share a color.
+            flag = 1 if same_color and dynamic_partner else 0
             inputs = [
                 0.001,
                 wp.array([0, 1], dtype=int),
                 previous,
                 current,
                 trial,
-                wp.array([com, com], dtype=wp.vec3),
-                wp.array([1.0, 1.0 if dynamic_partner else 0.0], dtype=float),
-                wp.array([0, 0 if same_color else 1], dtype=int),
+                body_com,
                 wp.full(1, 1000.0),
                 wp.full(1, 100.0),
                 wp.zeros(1),
                 wp.zeros(1, dtype=wp.vec3),
                 wp.zeros(1, dtype=wp.vec3),
-                0.0,
+                MeshRecoveryData(),
+                wp.zeros(1, dtype=int),
                 False,  # contact_damping_bidirectional
-                wp.ones(1, dtype=int),
+                count,
                 wp.zeros(1, dtype=int),
                 wp.ones(1, dtype=int),
-                wp.array([local], dtype=wp.vec3),
-                wp.array([local], dtype=wp.vec3),
-                wp.array([[0.0, 0.0, 1.0]], dtype=wp.vec3),
-                wp.zeros(1),
-                wp.zeros(1),
-                wp.array([0, 1], dtype=int),
+                normal,
+                levers[0],
+                levers[2],
+                levers[4],
                 1,
-                wp.ones(2, dtype=int),
+                wp.array([1, 1 if dynamic_partner else 0], dtype=int),
                 wp.zeros(2, dtype=int),
+                wp.array([(0, 1, flag)] * 2, dtype=wp.vec3i),
             ]
-            factor = 2.0 if same_color and dynamic_partner else 1.0
+            factor = 2.0 if flag == 1 else 1.0
             K = np.diag([0.0, 0.0, factor * 1000.0 * 100.0 / 1100.0])
             expected = (K, jt @ skew(arm) @ K, jt @ skew(arm).T @ K @ skew(arm) @ jt.T)
             for width in (4, 32):

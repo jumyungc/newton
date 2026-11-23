@@ -100,7 +100,9 @@ every contact at the end of the step (multiplier and normal)
 and restores it onto the matched contacts at the next step's contact refresh:
 the normal multiplier along the new normal and the tangential multiplier
 projected onto the friction disk, in both ``"latest"`` and ``"sticky"`` modes.
-Under compliant ALM, friction responds to the anchors' relative displacement
+Both matching modes also restore torsional and rolling multipliers, projected
+to the current contact frame and torque limits.
+Friction responds to the anchors' relative displacement
 within the current step, including any prescribed surface velocity. It does
 not restore accumulated tangential displacement from an earlier step: doing
 so can make friction accelerate reversed slip. The saved multiplier is a
@@ -614,9 +616,10 @@ Each energy term depends on a few blocks and on model parameters:
      - ``compute_projected_isotropic_friction``
    * - Body-body contact, with friction and damping
      - two shapes, on two rigid bodies or on a rigid body and a static shape
-     - shape :attr:`~newton.ModelBuilder.ShapeConfig.ke`, :attr:`~newton.ModelBuilder.ShapeConfig.kd`, :attr:`~newton.ModelBuilder.ShapeConfig.mu` averaged over the pair; positive per-contact
-       ``rigid_contact_stiffness`` and ``rigid_contact_damping`` of :class:`~newton.Contacts` replace
-       the first two, and a positive ``rigid_contact_friction`` scales the third; shape radius and
+     - shape :attr:`~newton.ModelBuilder.ShapeConfig.ke`, :attr:`~newton.ModelBuilder.ShapeConfig.kd`, :attr:`~newton.ModelBuilder.ShapeConfig.mu`,
+       :attr:`~newton.ModelBuilder.ShapeConfig.mu_torsional` and :attr:`~newton.ModelBuilder.ShapeConfig.mu_rolling`, combined over the pair; positive
+       per-contact ``rigid_contact_stiffness`` and ``rigid_contact_damping`` of :class:`~newton.Contacts`
+       replace the first two, and a positive ``rigid_contact_friction`` scales ``mu``; shape radius and
        :attr:`~newton.ModelBuilder.ShapeConfig.margin`
      - ``accumulate_body_body_contacts_per_body``, ``update_duals_body_body_contacts``
    * - Particle-body attachments
@@ -677,11 +680,11 @@ like :attr:`tri_kd <newton.Model.tri_materials>`. In both Neo-Hookean terms the 
 Lamé parameters; the kernels convert them to the Neo-Hookean parameters, which
 is why :math:`\lambda_{\text{NH}}` carries the extra :math:`\mu`.
 
-**Contact** is three different terms, one per contact kind. Each kind has its
-own distance, its own stiffness and its own law; self-contact and rigid-soft
-contact share the friction smoothing length
-:math:`\epsilon_u = \mathtt{friction\_epsilon}\, h`, whereas body-body contact
-projects tangential trial forces directly onto the Coulomb cone without it.
+**Contact** is three different terms, one per contact kind: each kind has its
+own distance, its own stiffness and its own law. For self-contact and
+rigid-soft contact, the friction smoothing length is
+:math:`\epsilon_u = \mathtt{friction\_epsilon}\, h`; compliant-ALM body-body
+friction is a Coulomb projection and does not use it.
 
 *Self-contact* acts between a vertex and a triangle, or between two edges, of
 one particle system (``accumulate_self_contact_force_and_hessian``). The
@@ -812,7 +815,10 @@ at another pose (a kinematic body moved before detection, or the
 about :math:`r\,(\omega h)^2/2` for a point at distance :math:`r` from the
 axis of a body turning at :math:`\omega`. The row adds
 :math:`k_{\text{eff}}\,\mathbf{n}\mathbf{n}^{\mathsf T}`
-to the body Hessians (``_rigid_contact_row_response``). After every
+to the body Hessians (``accumulate_body_body_contacts_per_body``). For a
+contact between two dynamic bodies of the same color, the body solve doubles
+every Hessian block of the contact (normal, damping and friction) and leaves
+its forces unchanged, which bounds the two simultaneous corrections. After every
 iteration the multiplier is advanced by the relaxed ascent
 :math:`\lambda_n \leftarrow \max\big(s\,(\lambda_n + \rho_n C),\ 0\big)`
 (``update_duals_body_body_contacts``). At
@@ -820,33 +826,48 @@ the fixed point :math:`\lambda_n = k\,C` and :math:`f_n = k\,C`: a converged
 resting contact carries its load like a penalty of the material stiffness
 :math:`k`, with the penetration :math:`f_n/k`, while each single iteration
 uses the smaller :math:`k_{\text{eff}}`, which keeps the 6x6 systems well
-conditioned. Friction is a Coulomb bound, not a smooth law: the tangential
+conditioned.
+
+For a verified thin-wall mesh recovery contact, VBD temporarily treats positive
+normal stiffness as infinite. The hard constraint carries the load while
+limiting outward correction per step. Its normal force comes from the hard
+constraint solve, so the finite-stiffness relation :math:`f_n = k\,C` does
+not apply during recovery. The pair-averaged material stiffness applies again
+when collision detection returns the ordinary SDF manifold.
+
+Friction is a Coulomb bound, not a smooth law: the tangential
 force :math:`\rho_t\,\mathbf{u}_t + \boldsymbol{\lambda}_t`, with
 :math:`\mathbf{u}_t` the current-step relative displacement of the surface
 anchors, including prescribed surface velocity, and :math:`\rho_t` the tangent
-metric, is projected onto the disk
-:math:`\lVert\mathbf{f}_t\rVert \le \mu f_n`,
+metric, a 2D response matrix in the contact plane, is projected onto the disk
+:math:`\lVert\mathbf{f}_t\rVert \le \mu f_n` in the inverse response metric,
 and :math:`\boldsymbol{\lambda}_t` is advanced and projected onto the disk of
-radius :math:`\mu\lambda_n` in the same dual step; outside the disk, the body
-solve uses the continuous isotropic secant metric
-:math:`(\mu f_n / \lVert\rho_t\,\mathbf{u}_t + \boldsymbol{\lambda}_t\rVert)\,\rho_t\,(\mathbf{I} - \mathbf{n}\mathbf{n}^{\mathsf T})`.
-Accumulated tangential
+radius :math:`\mu\lambda_n` in the same dual step. Accumulated tangential
 separation from previous steps is not added to this residual. Sticky matching
 still replays material anchors, while retained multipliers warm-start their
-contact forces; it does not impose a positional tangential spring.
+contact forces; it does not impose a positional tangential spring. Torsional and rolling
+friction are two further Coulomb bounds on the relative rotation of the two
+bodies: the torque about the normal is clamped to
+:math:`\mu_{\text{tor}} f_n` and the torque in the contact plane is projected
+onto the disk of radius :math:`\mu_{\text{roll}} f_n`, with the pair's
+:attr:`~newton.ModelBuilder.ShapeConfig.mu_torsional` and
+:attr:`~newton.ModelBuilder.ShapeConfig.mu_rolling` [m], each the geometric
+mean of the two shapes' values, so a zero on either shape removes that
+resistance for the pair.
 
 ``rigid_contact_tangent_scale`` is an experimental, solver-side conditioning
-option. Its default of ``1`` retains the automatic tangent weight. A finite
-value greater than one multiplies that weight for all compliant body-body
-contact rows. The existing same-colour solve metric remains in effect. The same row
-weight is used by both body gathers, the ordinary dual update and contact-force
+option. Its default of ``1`` retains the automatic tangent metric. A finite
+value greater than one multiplies both eigenvalues of :math:`\rho_t` for all
+compliant body-body contact rows; torsional and rolling metrics are unchanged.
+The existing same-color solve metric remains in effect. The same row metric is
+used by both body gathers, the ordinary dual update and contact-force
 reporting; there is no separate owner force or multiplier update. Normal
 material stiffness, damping and the elastic Coulomb bound are unchanged.
 
 This option can improve collective friction convergence on a narrow contact
 patch, but larger weights can slow other modes and are not monotonically
-better. In tangential-displacement units, the Coulomb projection disk has
-radius :math:`\mu f_n / \rho_t`, which shrinks as the scale grows. The distance
+better. Along each principal tangent axis, the Coulomb projection disk has
+displacement radius :math:`\mu f_n / \rho_{t,i}`, which shrinks as the scale grows. The distance
 to its boundary also depends on the current displacement and retained
 tangential multiplier. For the resting cup of the ``robot_panda_hydro`` scenes
 at a 600 Hz substep, a scale of 1000 leaves a radius of a few nanometers,
@@ -893,15 +914,6 @@ does not support coupled solvers that restart a step; that combination is
 rejected. It stores one spatial vector per body. Like the iteration count, it
 is numerical solver configuration and introduces no USD attribute.
 
-When both contact bodies are dynamic and share a colour, their pose updates
-are simultaneous. The compliant path doubles only the normal and tangential
-positive-semidefinite contact solve blocks to majorize the omitted cross-body
-blocks. It does not scale the contact forces, multipliers or material parameters.
-Separate-colour contacts and contacts against a static or kinematic body keep
-their original blocks. This stabilizes a stiff alternating
-mode, but can change finite-iteration convergence; it is not a nonlinear
-convergence guarantee or a replacement for contact-aware colouring.
-
 With positive :math:`k_d` and the default
 ``rigid_contact_damping_bidirectional=False``, the compliant ALM path instead
 eliminates internal compression and compression-increment damping together. At a dual fixed point
@@ -911,8 +923,8 @@ the material force is
 penetration prevents a gap before first touch from producing a damping impulse
 at :math:`C=0`. Unloading is undamped. The finite-iteration normal response and
 metric are given by ``_compliant_contact_normal_response``, rather than the
-undamped formulas above. The primal and dual friction disks use only the elastic
-part of that normal response, not the total damped normal force.
+undamped formulas above. The sliding, torsional and rolling friction bounds use
+only the elastic part of that normal response, not the total damped normal force.
 
 At a finite iteration budget, the eliminated compression can differ from the
 geometric penetration. A cold row can therefore have no damping even while
@@ -944,10 +956,10 @@ It is not a universal remedy for high-stiffness float32 force accuracy,
 under-resolved contact geometry, missing robot features or insufficient solver
 budgets.
 
-With ``rigid_contact_damping_bidirectional=True``, the solver uses
-:math:`-k_d\,(\mathbf{n}\cdot\mathbf{v}_{\text{rel}})\,\mathbf{n}` while the
-row carries load, in both directions including while separating.
-The compliant ALM multiplier and friction disk then use the undamped elastic
+With ``rigid_contact_damping_bidirectional=True``, the velocity damper
+:math:`-k_d\,(\mathbf{n}\cdot\mathbf{v}_{\text{rel}})\,\mathbf{n}` acts in
+both directions, including while separating, as long as the elastic row carries
+load (:math:`f_n > 0`). The multiplier and friction bounds then use the undamped elastic
 response above; damping is added separately to the force and solve metric.
 The signed damping force can exceed the elastic force during unloading, so this
 option does not clamp the total normal force to be repulsive.

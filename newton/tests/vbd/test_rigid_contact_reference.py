@@ -8,12 +8,11 @@ import unittest
 import numpy as np
 import warp as wp
 
+from newton._src.geometry.sdf_planar_recovery import MeshRecoveryData
+from newton._src.sim.contacts import contact_surface_separation
 from newton._src.solvers.vbd.rigid_vbd_kernels import (
-    _body_step_motion,
     _compliant_contact_normal_response,
-    _contact_step_levers,
-    _lever_displacement,
-    _step_start_penetration,
+    build_body_body_contact_step_levers,
     compute_rigid_contact_forces,
     update_duals_body_body_contacts,
 )
@@ -24,7 +23,6 @@ from newton.tests.unittest_utils import add_function_test, get_test_devices
 def _reference(
     q: wp.array[wp.transform],
     prev: wp.array[wp.transform],
-    com: wp.array[wp.vec3],
     normal: wp.array[wp.vec3],
     c0: wp.array[wp.vec3],
     lam: wp.array[wp.vec3],
@@ -33,16 +31,15 @@ def _reference(
 ):
     i = wp.tid()
     a, b = 2 * i, 2 * i + 1
-    xa, cda, wa, _ja = _body_step_motion(a, q, prev, com)
-    xb, cdb, wb, _jb = _body_step_motion(b, q, prev, com)
-    lsa, _lca = _contact_step_levers(a, xa, com, wp.vec3(0.0), wp.vec3(0.0))
-    lsb, _lcb = _contact_step_levers(b, xb, com, wp.vec3(0.0), wp.vec3(0.0))
-    da = _lever_displacement(cda, wa, lsa)
-    db = _lever_displacement(cdb, wb, lsb)
+    # The bodies only translate and each contact point sits at its body origin.
+    pa = wp.transform_get_translation(prev[a])
+    pb = wp.transform_get_translation(prev[b])
+    da = wp.transform_get_translation(q[a]) - pa
+    db = wp.transform_get_translation(q[b]) - pb
     n = normal[i]
     shift = alpha * wp.dot(n, c0[i])
     # Evaluate the fixed geometry directly, not current + a cancelling displacement.
-    start_raw = _step_start_penetration(a, xa, wp.vec3(0.0), b, xb, wp.vec3(0.0), n, 0.1, 0.0)
+    start_raw = -contact_surface_separation(pa, pb, n, 0.1, 0.0)
     current = start_raw + wp.dot(n, da - db) - shift
     start = start_raw - shift
     force, _elastic, _metric = _compliant_contact_normal_response(
@@ -76,6 +73,7 @@ def test_fixed_damping_reference(test, device):
         shift = wp.array(c0, dtype=wp.vec3)
         initial = wp.array(np.array(normals) * 10.0, dtype=wp.vec3)
         lam = wp.empty_like(initial)
+        lam_angular = wp.zeros(count, dtype=wp.vec3)
         zeros = wp.zeros(count, dtype=float)
         points = wp.zeros(count, dtype=wp.vec3)
         shape0 = wp.array(np.arange(count, dtype=np.int32) * 2, dtype=int)
@@ -86,8 +84,11 @@ def test_fixed_damping_reference(test, device):
         rho = wp.full(count, 1.0e5, dtype=float)
         ke = wp.full(count, 5.0e6, dtype=float)
         kd = wp.full(count, 5.0e3, dtype=float)
+        # Frictionless rows: the friction record and the packed tangent and rolling metrics stay zero.
+        mu = wp.zeros(count, dtype=wp.vec3)
+        rho_t = wp.zeros(count, dtype=wp.mat22)
         expected = wp.empty(count, dtype=wp.vec3)
-        output = [wp.empty(count, dtype=t) for t in (int, int, wp.vec3, wp.vec3, wp.vec3)]
+        output = [wp.empty(count, dtype=t) for t in (int, int, wp.vec3, wp.vec3, wp.vec3, wp.vec3)]
         geometry = [
             nc,
             shape0,
@@ -105,22 +106,74 @@ def test_fixed_damping_reference(test, device):
             prev,
             com,
         ]
+        # The dual update reads the row geometry the solve stores once per step.
+        levers = [wp.zeros(count, dtype=wp.vec3) for _ in range(4)] + [wp.zeros(count, dtype=float)]
+        wp.launch(
+            build_body_body_contact_step_levers,
+            count,
+            inputs=[nc, shape0, shape1, points, points, points, points, n, margin, zeros, shape_body, prev, com],
+            outputs=levers,
+        )
         # The reference, the exporter and the dual update are separate kernels, and the compiler may fuse
         # the multiply-adds of the 0.1 m gap differently in each. Two float32 spacings of that gap
         # (1.5e-8 m) times the row stiffness (1e5 N/m) bound the difference; a wrong damping reference
         # is off by newtons.
         atol = 1.5e-3
+        recovery = MeshRecoveryData()
+        generation = wp.zeros(1, dtype=int)
         for alpha in (0.0, 0.35):
+            scaled_shift = wp.array(np.asarray(c0, dtype=np.float32) * np.float32(alpha), dtype=wp.vec3)
             wp.copy(lam, initial)
-            wp.launch(_reference, count, inputs=[q, prev, com, n, shift, initial, alpha, expected])
+            wp.launch(_reference, count, inputs=[q, prev, n, shift, initial, alpha, expected])
             wp.launch(
                 compute_rigid_contact_forces,
                 count,
-                inputs=[1.0 / 1920.0, *geometry, rho, ke, kd, zeros, rho, lam, shift, alpha, 0.01, False],
+                inputs=[
+                    1.0 / 1920.0,
+                    *geometry,
+                    rho,
+                    ke,
+                    kd,
+                    mu,
+                    rho_t,
+                    lam,
+                    lam_angular,
+                    scaled_shift,
+                    recovery,
+                    generation,
+                    False,
+                ],
                 outputs=output,
             )
-            np.testing.assert_allclose(output[-1].numpy(), expected.numpy(), rtol=4.0e-7, atol=atol)
-            inputs = [*geometry, 1.0 / 1920.0, zeros, shift, alpha, ke, kd, rho, rho, False, lam]
+            np.testing.assert_allclose(output[4].numpy(), expected.numpy(), rtol=4.0e-7, atol=atol)
+            inputs = [
+                nc,
+                shape0,
+                shape1,
+                None,
+                n,
+                *levers,
+                shape_body,
+                q,
+                prev,
+                com,
+                wp.zeros(2 * count, dtype=wp.mat33),
+                0,
+                1.0 / 1920.0,
+                mu,
+                scaled_shift,
+                recovery,
+                generation,
+                ke,
+                kd,
+                rho_t,
+                rho,
+                zeros,
+                rho_t,
+                False,
+                lam,
+                lam_angular,
+            ]
             update = update_duals_body_body_contacts
             wp.launch(update, count, inputs=inputs)
             np.testing.assert_allclose(lam.numpy(), expected.numpy(), rtol=4.0e-7, atol=atol)

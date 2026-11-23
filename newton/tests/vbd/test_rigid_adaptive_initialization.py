@@ -258,7 +258,7 @@ def test_start_keeps_only_acceleration_along_the_applied_direction(test, device)
             wp.array(velocity, dtype=wp.spatial_vector, device=device),
             wp.array(previous_velocity, dtype=wp.spatial_vector, device=device),
         ],
-        outputs=[wp.zeros(count, dtype=wp.transform, device=device), body_inertia_q],
+        outputs=[wp.zeros(count, dtype=wp.transform, device=device), body_inertia_q, None, None],
         device=device,
     )
     start, target = body_q.numpy(), body_inertia_q.numpy()
