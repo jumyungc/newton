@@ -1,0 +1,1 @@
+Fix first-touch damping for VBD rigid contacts by excluding motion before contact. Set `rigid_contact_damping_bidirectional=True` where the previous first-touch damping was relied on to stop a bounce.

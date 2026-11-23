@@ -597,8 +597,10 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 registered, otherwise uses ``False``.
             rigid_contact_damping_bidirectional: Whether body-body contact damping, whose coefficient is the
                 mean of the two shapes' ``kd``, also acts while the bodies separate. The default ``False``
-                keeps the closing-only damping of rigid contacts (while the row carries load). ``True`` also
-                damps the rebound, so rigid contacts return less of the approach speed.
+                damps closing motion while the row carries load, excluding travel before first touch, and
+                solves that damper together with the contact spring. ``True`` also damps the rebound, so
+                contacts return less of the approach speed, and assembles the damper separately, which
+                needs more iterations for accurate contact forces and friction when the damping is stiff.
             rigid_body_contact_buffer_size: Max body-body contacts per rigid body for per-body contact lists.
             rigid_body_particle_contact_buffer_size: Capacity of the per-body soft-contact adjacency
                 list, including currently ineligible mesh candidates. If a body's list overflows, force
@@ -4712,6 +4714,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                     contacts.contact_generation,
                     self.rigid_contact_alpha,
                     self.body_body_contact_material_ke,
+                    self.body_body_contact_material_kd,
+                    self.rigid_contact_damping_bidirectional,
                     self.body_body_contact_tangent_rho,
                     self.body_body_contact_normal_rho,
                     self.body_body_contact_torsional_rho,  # input/output

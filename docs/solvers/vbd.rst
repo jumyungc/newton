@@ -754,7 +754,8 @@ their bodies and :math:`t_0, t_1` the effective thicknesses (shape radius plus
 The material is the pair average of the shape values:
 :math:`k = \tfrac{1}{2}(\mathtt{ke}_0 + \mathtt{ke}_1)`,
 :math:`k_d = \tfrac{1}{2}(\mathtt{kd}_0 + \mathtt{kd}_1)` and
-:math:`\mu = \sqrt{\mathtt{mu}_0\,\mathtt{mu}_1}`. The normal force is
+:math:`\mu = \sqrt{\mathtt{mu}_0\,\mathtt{mu}_1}`. Without coupled damping,
+the elastic normal force is
 
 .. math::
 
@@ -770,8 +771,8 @@ torques, and the row adds :math:`k_{\text{eff}}\,\mathbf{n}\mathbf{n}^{\mathsf T
 to the body Hessians (``accumulate_body_body_contacts_per_body``). For a
 contact between two dynamic bodies of the same color, the body solve doubles
 every Hessian block of the contact (normal, damping and friction) and leaves
-its forces unchanged, which bounds the two simultaneous corrections. After every
-iteration the multiplier is advanced by the relaxed ascent
+its forces unchanged, which bounds the two simultaneous corrections. For the uncoupled
+row, each iteration advances the multiplier by the relaxed ascent
 :math:`\lambda_n \leftarrow \max\big(s\,(\lambda_n + \rho_n C),\ 0\big)`
 (``update_duals_body_body_contacts``). At
 the fixed point :math:`\lambda_n = k\,C` and :math:`f_n = k\,C`: a converged
@@ -802,10 +803,24 @@ onto the disk of radius :math:`\mu_{\text{roll}} f_n`, with the pair's
 :attr:`~newton.ModelBuilder.ShapeConfig.mu_torsional` and
 :attr:`~newton.ModelBuilder.ShapeConfig.mu_rolling` [m], each the geometric
 mean of the two shapes' values, so a zero on either shape removes that
-resistance for the pair. Damping is
-:math:`-k_d\,(\mathbf{n}\cdot\mathbf{v}_{\text{rel}})\,\mathbf{n}` while the row
-carries load, only while the bodies approach by default and in both directions
-of the normal relative velocity with ``rigid_contact_damping_bidirectional=True``.
+resistance for the pair.
+
+By default, normal damping resists only compression gained after contact:
+with :math:`\Delta C` the step's increase of penetration along :math:`\mathbf{n}`
+and :math:`C_{\text{raw}}` the penetration before residual stabilization,
+the closing increment is :math:`\Delta C_+ = \max\!\big(\min(\Delta C,\, C_{\text{raw}},\, C),\ 0\big)`
+and the damping reaction at the fixed point is :math:`f_d = (k_d / h)\,\Delta C_+`,
+excluding travel across an initial gap. While the row carries load, the
+unilateral spring and the closing damper are solved together in the normal
+ALM row. On the active closing branch, this places
+:math:`k+k_d/h` inside the ALM elimination instead of adding :math:`k_d/h`
+to the spring's effective solve stiffness. The stored normal multiplier and
+the friction limits still use the elastic reaction, excluding damping.
+Setting
+``rigid_contact_damping_bidirectional=True`` assembles the damper separately
+for every contact; while the normal row carries load, it adds the force
+:math:`-k_d\,(\mathbf{n}\cdot\mathbf{v}_{\text{rel}})\,\mathbf{n}` during
+separation, and its closing part uses :math:`\Delta C_+` in the same way.
 The multipliers start from zero in
 every step unless ``rigid_contact_history=True`` warm-starts them from the
 matched contacts of the previous step.
@@ -898,8 +913,9 @@ Examples
 :ref:`Empirical parameter combinations <vbd-empirical-table>` on the tuning
 page lists one shipped example per scenario, from cloth drape to a gripper on
 a soft pad, and says what each one demonstrates; copy the values from the
-example file. For cables, see the
-:ref:`cable example table <vbd-cable-examples>`.
+example file. For cables and rigid contacts, see the
+:ref:`cable example table <vbd-cable-examples>` and the
+:ref:`rigid-contact example table <vbd-rigid-contact-examples>`.
 
 Runnable examples using :class:`~newton.solvers.SolverVBD` on GitHub:
 

@@ -676,6 +676,15 @@ dominate normal stiffness while a shape with ``mu=0`` makes its pairs
 frictionless. Unexpected slip can also come from missing contacts or an
 incomplete solve.
 
+**Contact damping.** Body-body ``kd`` resists the compression rate of a
+contact. By default it acts only while the contact compresses, and only on
+compression gained after touch, so it softens a landing but leaves the
+rebound undamped. Set ``rigid_contact_damping_bidirectional=True`` to damp
+the rebound as well, for example to bring dropped bodies to rest. That mode
+assembles the damper separately from the contact spring; if a very stiff
+``kd`` relative to ``m / dt`` then slows normal load buildup and reduces
+Coulomb friction, raise ``iterations`` or reduce ``dt``.
+
 **Torsional and rolling friction.** Body-body contacts resist spin about the
 contact normal and rolling in the contact plane.
 :attr:`~newton.ModelBuilder.ShapeConfig.mu_torsional` and
@@ -689,12 +698,20 @@ coefficients or set them to zero if angular resistance is too strong.
 Automatic coloring uses joint and tendon connections, but does not include
 contacts. Contacting bodies may share a color, which can slow convergence.
 Compliant-ALM contacts between two dynamic bodies of the same color use a
-doubled solve metric to bound their simultaneous corrections. This can improve
-stability in dense contact networks, but those pairs may need more iterations.
+doubled solve metric to bound their simultaneous corrections. Closing-only
+contact damping is solved together with the contact spring, which can
+improve convergence of stiffly damped contacts and of their friction.
+Same-color pairs, and any contact with
+``rigid_contact_damping_bidirectional=True``, may still need more iterations.
+A light object held by fingers at the end of a chain of joints creeps in a
+long hold when its contacts start cold every step, with or without contact
+damping: within each step the chain is still settling when the iterations
+end, and the friction rows follow it with a lag. More iterations reduce the
+creep; a damped object that shares the fingers' color can be lost to it.
+Contact history with sticky matching holds such a grasp
+(:ref:`vbd-rigid-contact-history`).
 Bodies in different color groups are updated sequentially, so their contact
 solve metrics are not doubled.
-Damped grasps with same-color contacts can still fail at higher iteration
-counts.
 For small scenes with predictable contacts, consider splitting
 existing groups in ``builder.body_color_groups`` to separate frequently
 contacting bodies. Make these edits after ``builder.color()`` and before
@@ -1474,6 +1491,35 @@ These examples demonstrate cable setup and behavior:
 Run, for example, ``python -m newton.examples cable_initial_rest_pose``.
 Example settings are specific to each scene; check convergence before reusing
 them.
+
+.. _vbd-rigid-contact-examples:
+
+Rigid contacts
+``````````````
+
+These validation examples check body-body friction, contact damping, and
+articulated parallel-jaw grasping:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 30 50
+
+   * - Scenario
+     - Example
+     - What it demonstrates
+   * - Coulomb friction channels
+     - :github:`rigid_contact_friction <newton/examples/vbd/example_rigid_contact_friction.py>`
+     - Sliding, torsional, and rolling Coulomb deceleration against closed-form
+       references, plus static holding under oblique load and on a ramp.
+   * - Normal contact damping
+     - :github:`rigid_contact_damping <newton/examples/vbd/example_rigid_contact_damping.py>`
+     - Soft first-touch landing across sub-step phases, straight settling of
+       single- and mixed-color stacks, and Coulomb slip invariance between
+       dynamic bodies under stiff ``kd``.
+   * - Parallel-jaw rigid pickup
+     - :github:`vbd_franka_pickup <newton/examples/vbd/example_vbd_franka_pickup.py>`
+     - A Franka arm grasps, lifts, and holds a 20 g damped cylinder or capsule
+       whose automatic color group matches the mimic-coupled fingers.
 
 .. _vbd-rules-of-thumb:
 

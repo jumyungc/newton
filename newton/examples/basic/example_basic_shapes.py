@@ -111,6 +111,8 @@ class Example:
             self.solver = newton.solvers.SolverVBD(
                 self.model,
                 iterations=5,
+                # The dropped shapes should come to rest: damp the rebound as well as the approach.
+                rigid_contact_damping_bidirectional=True,
             )
         elif self.solver_type == "kamino":
             solver_config = newton.solvers.SolverKamino.Config.from_model(

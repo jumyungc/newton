@@ -1788,6 +1788,20 @@ add_contact_example_test(
     test_suffix="kamino",
     expect_output_regexes=[(_PYRAMID_BUILD_OUTPUT_RE, "stdout")],
 )
+add_contact_example_test(
+    name="vbd.example_rigid_contact_damping",
+    devices=test_devices,
+    use_viewer=True,
+)
+for collider in ("cylinder", "capsule"):
+    add_contact_example_test(
+        name="vbd.example_vbd_franka_pickup",
+        devices=cuda_test_devices,
+        test_options={"requires": ("git", "trimesh", "collada"), "collider": collider},
+        use_viewer=True,
+        test_suffix=collider,
+        allow_output_regexes=[(NEWTON_ASSET_DOWNLOAD_OUTPUT_RE, "stdout")],
+    )
 
 
 class TestMultiphysicsExamples(NewtonTestCase):

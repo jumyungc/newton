@@ -1,0 +1,1 @@
+Improve convergence of stiff normal contact damping in `SolverVBD`, including the friction of damped contacts, by solving the closing damper together with the contact spring; `rigid_contact_damping_bidirectional=True` keeps the separately assembled damper.

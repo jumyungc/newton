@@ -1,0 +1,1 @@
+Add the `rigid_contact_damping` and `vbd_franka_pickup` validation examples covering damped first-touch landing, single- and mixed-color stacking, Coulomb slip invariance, and parallel-jaw rigid pickup.

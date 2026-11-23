@@ -47,6 +47,7 @@ from newton._src.solvers.vbd.rigid_vbd_kernels import (
     _compute_body_particle_contact_force,
     _contact_angular_conditioning_scales,
     _contact_angular_conditioning_scales_from_mobility,
+    _contact_damped_normal_response,
     _contact_tangent_conditioning_scale,
     _eval_body_particle_contact,
     _eval_soft_ef_contact,
@@ -497,6 +498,7 @@ def _eval_compliant_sliding_contact_metric_kernel(
         wp.vec3(0.0),
         wp.vec3(0.0, 0.0, 1.0),
         0.01,
+        0.01,
         100.0,
         1000.0,
         wp.mat22(100.0, 100.0, 1.0, 0.0),
@@ -901,6 +903,7 @@ def _eval_separating_contact_damping_kernel(
         wp.vec3(0.0),
         normal,
         0.06,
+        0.06,
         100.0,
         100.0,
         wp.mat22(100.0, 100.0, 1.0, 0.0),
@@ -935,6 +938,7 @@ def _eval_separating_contact_damping_kernel(
         wp.vec3(0.0),
         normal,
         0.06,
+        0.06,
         100.0,
         100.0,
         wp.mat22(100.0, 100.0, 1.0, 0.0),
@@ -947,6 +951,20 @@ def _eval_separating_contact_damping_kernel(
     )
     damping_forces[mode, 2] = force_b_damped - force_b_undamped
     damping_hessians[mode, 2] = h_ll_b_damped - h_ll_b_undamped
+
+
+@wp.kernel
+def _eval_damped_normal_row_scale_kernel(sweeps: int, out_large_rho: wp.array[wp.vec3], out_stiff: wp.array[wp.vec2]):
+    # Large rho: rho * increment would overflow float32 if formed directly.
+    f_big, e_big, m_big = _contact_damped_normal_response(1.0e8, 1.0e8, 1.0e8, 1.0e5, 1.0e3, 1.0e32, 10.0, 0.01)
+    out_large_rho[0] = wp.vec3(f_big, e_big, m_big)
+
+    # Stiff-to-rho ratio ((ke + kd/dt) / rho > 2^24) with an overshot warm multiplier during unloading.
+    lam = float(1.0e5)
+    force = float(0.0)
+    for _step in range(sweeps):
+        force, lam, _metric = _contact_damped_normal_response(0.0, 0.0, -1.0e-4, 2.0e8, 1.0e4, 10.0, lam, 0.01)
+    out_stiff[0] = wp.vec2(force, lam)
 
 
 @wp.kernel
@@ -1211,6 +1229,7 @@ def _eval_rigid_contact_rigid_motion_kernel(
         wp.vec3(0.0),
         contact_normal[sample],
         0.06,
+        0.06,
         100.0,
         100.0,
         wp.mat22(100.0, 100.0, 1.0, 0.0),
@@ -1244,6 +1263,7 @@ def _eval_rigid_contact_rigid_motion_kernel(
         wp.vec3(0.0),
         wp.vec3(0.0),
         contact_normal[sample],
+        0.06,
         0.06,
         100.0,
         100.0,
@@ -2366,6 +2386,8 @@ def _rigid_contact_dual_update_computes_lambda(test, device):
                 wp.zeros(1, dtype=int, device=device),
                 0.0,
                 contact_ke,
+                wp.zeros(2, dtype=float, device=device),
+                False,
                 wp.array([wp.mat22(10.0, 10.0, 1.0, 0.0)] * 2, dtype=wp.mat22, device=device),
                 contact_rho,
                 contact_rho,
@@ -3367,7 +3389,7 @@ def _particle_contact_scatter_solver_step_dispatch(test, device):
 
 
 def _body_body_contact_damping_ignores_rho(test, device):
-    """Keep absolute body-body damping independent of the ALM metric."""
+    """Keep separately assembled (two-sided) body-body damping independent of the ALM metric."""
     with wp.ScopedDevice(device):
         contact_count = wp.array([4], dtype=int, device=device)
         shape0 = wp.zeros(4, dtype=int, device=device)
@@ -3436,7 +3458,7 @@ def _body_body_contact_damping_ignores_rho(test, device):
                 MeshRecoveryData(),
                 wp.zeros(1, dtype=int, device=device),
                 0.95,
-                False,
+                True,
             ],
             outputs=[body0, body1, point0_world, point1_world, force_on_body1, pure_torque_on_body1],
             device=device,
@@ -3920,6 +3942,235 @@ def _contact_damping_bidirectional_damps_separation(test, device):
         )
         test.assertFalse(solver.soft_contact_damping_bidirectional)
         test.assertTrue(solver.rigid_contact_damping_bidirectional)
+
+
+def _contact_damping_matches_closed_form(test, device):
+    """Verify that normal contact damping reaches the implicit step's closed form.
+
+    One step without gravity or friction: a sphere approaches its partner at ``speed`` from a start
+    compression ``p`` (negative for a gap). The damper acts on compression gained after touch, so with
+    ``A = m / dt^2`` (reduced mass for a pair) and ``D = kd / dt`` the end compression ``C`` solves
+    ``A (p + speed dt - C) = ke C + D (C - max(p, 0))``.
+
+    First touch on the ground: a damper that counts the approach across the gap leaves the step without
+    a solution; ten iterations then give no contact response (-1.0 m/s) and eleven an over-damped one
+    (-0.41 m/s). The two-sided option shares this closing branch, so it runs the same case.
+    Pair of two dynamic bodies: their damper is solved in the contact's normal row. Both spheres are in one
+    color and move in the same sweep, where a separately assembled damper of stiffness ``D`` leaves this
+    heavy/light pair about 36 mm/s from the solution after ten iterations. The same pair meeting across a
+    gap: the row excludes the gap as the separate damper does; a row that counts it stays 278 mm/s from the
+    solution.
+    """
+    radius, speed, dt = 0.1, 1.0, 1.0 / 60.0
+    # Partner mass [kg] (None: the ground plane), start compression [m], kd [N*s/m], two-sided damping,
+    # iterations, tolerance [m/s].
+    cases = (
+        (None, -0.012, 100.0, (False, True), (10, 11), 1.0e-4),
+        (100.0, 0.001, 1.0e4, (False,), (10,), 2.0e-3),
+        (100.0, -0.012, 1.0e4, (False,), (10,), 2.0e-3),
+    )
+    for partner_mass, start, kd, two_sided, iteration_counts, tolerance in cases:
+        builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+        cfg = builder.ShapeConfig(density=0.0, mu=0.0, kd=kd, mu_torsional=0.0, mu_rolling=0.0)
+        if partner_mass is None:
+            builder.add_ground_plane(cfg=cfg)
+            masses, heights, reduced_mass = (1.0,), (radius - start,), 1.0
+        else:
+            masses, heights = (partner_mass, 1.0), (0.0, 2.0 * radius - start)
+            reduced_mass = partner_mass / (partner_mass + 1.0)
+        for mass, height in zip(masses, heights, strict=True):
+            body = builder.add_body(
+                xform=wp.transform((0.0, 0.0, height), wp.quat_identity()),
+                mass=mass,
+                inertia=wp.mat33(np.eye(3) * 0.004 * mass),
+                lock_inertia=True,
+            )
+            builder.add_shape_sphere(body, radius=radius, cfg=cfg)
+        builder.color()
+        model = builder.finalize(device=device)
+        pipeline = newton.CollisionPipeline(model, broad_phase="nxn")
+        support, dashpot = reduced_mass / dt**2, kd / dt
+        compression = (support * (start + speed * dt) + dashpot * max(start, 0.0)) / (support + cfg.ke + dashpot)
+        for bidirectional, iterations in ((b, i) for b in two_sided for i in iteration_counts):
+            with test.subTest(
+                partner_mass=partner_mass, start=start, bidirectional=bidirectional, iterations=iterations
+            ):
+                solver = newton.solvers.SolverVBD(
+                    model, iterations=iterations, rigid_contact_damping_bidirectional=bidirectional
+                )
+                contacts = pipeline.contacts()
+                state_0, state_1 = model.state(), model.state()
+                body_qd = state_0.body_qd.numpy()
+                body_qd[-1, 2] = -speed
+                state_0.body_qd.assign(body_qd)
+                pipeline.collide(state_0, contacts)
+                solver.step(state_0, state_1, None, contacts, dt)
+                body_qd = state_1.body_qd.numpy()
+                closing_velocity = body_qd[-1, 2] - (0.0 if partner_mass is None else body_qd[0, 2])
+                test.assertAlmostEqual(float(closing_velocity), (start - compression) / dt, delta=tolerance)
+
+
+def _contact_damping_keeps_mixed_color_stack_at_rest(test, device):
+    """Verify that a stiffly damped stack rests when its bodies are split over color groups.
+
+    Three spheres, the lower two in one color group and the top one in another. With the damper of
+    the upper contact assembled separately next to the coupled row of the lower contact, the middle
+    sphere carries both formulations: the stack peaks at 1.2 m/s and still moves at 0.7 m/s after one
+    second. Every closing-only damper is solved in the row, whatever the colors.
+    """
+    radius, dt = 0.1, 1.0 / 60.0
+    builder = newton.ModelBuilder()
+    cfg = builder.ShapeConfig(density=0.0, ke=1.0e5, kd=1.0e4, mu=0.0, mu_torsional=0.0, mu_rolling=0.0)
+    builder.add_ground_plane(cfg=cfg)
+    for level in range(3):
+        body = builder.add_body(
+            xform=wp.transform((0.0, 0.0, (2.0 * level + 1.0) * radius), wp.quat_identity()),
+            mass=1.0,
+            inertia=wp.mat33(np.eye(3) * 0.004),
+            lock_inertia=True,
+        )
+        builder.add_shape_sphere(body, radius=radius, cfg=cfg)
+    builder.color()
+    builder.body_color_groups = [np.array([0, 1], dtype=np.int32), np.array([2], dtype=np.int32)]
+    model = builder.finalize(device=device)
+    pipeline = newton.CollisionPipeline(model, broad_phase="nxn")
+    solver = newton.solvers.SolverVBD(model, iterations=10)
+    contacts = pipeline.contacts()
+    state_0, state_1 = model.state(), model.state()
+    peak_speed = 0.0
+    for _ in range(60):
+        pipeline.collide(state_0, contacts)
+        solver.step(state_0, state_1, None, contacts, dt)
+        state_0, state_1 = state_1, state_0
+        peak_speed = max(peak_speed, float(np.abs(state_0.body_qd.numpy()[:, 2]).max()))
+    test.assertLess(peak_speed, 0.2)
+    test.assertLess(float(np.abs(state_0.body_qd.numpy()[:, 2]).max()), 1.0e-3)
+
+
+def _contact_damping_leaves_ground_friction(test, device):
+    """A light box braking on static ground decelerates at ``mu * g`` once its damped contact has settled."""
+    mu, gravity, dt = 0.5, 9.81, 1.0 / 60.0
+    builder = newton.ModelBuilder()
+    # A 100 g box (0.2 x 0.2 x 0.1 m) with the default contact stiffness and damping of a shape.
+    cfg = builder.ShapeConfig(density=25.0, ke=2.5e3, kd=100.0, mu=mu, mu_torsional=0.0, mu_rolling=0.0)
+    builder.add_ground_plane(cfg=cfg)
+    body = builder.add_body(xform=wp.transform((0.0, 0.0, 0.05), wp.quat_identity()))
+    builder.add_shape_box(body, hx=0.1, hy=0.1, hz=0.05, cfg=cfg)
+    builder.color()
+    model = builder.finalize(device=device)
+    state_0, state_1 = model.state(), model.state()
+    qd = state_0.body_qd.numpy()
+    qd[0, 0] = 2.0
+    state_0.body_qd.assign(qd)
+    solver = newton.solvers.SolverVBD(model, iterations=10)
+    pipeline = newton.CollisionPipeline(model)
+    contacts = pipeline.contacts()
+    speeds = []
+    for _ in range(23):
+        pipeline.collide(state_0, contacts)
+        solver.step(state_0, state_1, None, contacts, dt)
+        state_0, state_1 = state_1, state_0
+        speeds.append(float(state_0.body_qd.numpy()[0, 0]))
+    # The damper acts along the normal only: it must not lower the Coulomb load of the sliding box.
+    deceleration = (speeds[14] - speeds[22]) / (8.0 * dt)
+    test.assertAlmostEqual(deceleration, mu * gravity, delta=0.02 * mu * gravity)
+
+
+def _contact_damping_row_keeps_float32_scale(test, device):
+    """Verify that the damped normal-row helper avoids float32 overflow at large rho and relaxes stiff warm seeds."""
+    out_large_rho = wp.zeros(1, dtype=wp.vec3, device=device)
+    out_stiff = wp.zeros(1, dtype=wp.vec2, device=device)
+    wp.launch(
+        _eval_damped_normal_row_scale_kernel, dim=1, inputs=[10000], outputs=[out_large_rho, out_stiff], device=device
+    )
+    large_rho = out_large_rho.numpy()[0]
+    stiff = out_stiff.numpy()[0]
+    test.assertTrue(np.isfinite(large_rho).all())
+    np.testing.assert_allclose(large_rho, np.array([2.0e13, 1.0e13, 2.0e5]), rtol=1.0e-5)
+    test.assertTrue(np.isfinite(stiff).all())
+    test.assertLess(float(stiff[1]), 1.0e5)
+
+
+def _contact_damping_preserves_coulomb_sliding(test, device):
+    """Verify that stiff normal damping between dynamic bodies does not alter Coulomb mu*g slip."""
+    dt, gravity, mu = 1.0 / 120.0, 9.81, 0.1
+    settle_steps, push_steps = 20, 96
+    carrier_half, box_half = (0.9, 0.2, 0.05), (0.1, 0.1, 0.05)
+    carrier_mass, rider_mass = 2.0, 1.0
+    push_force = carrier_mass * 1.5 + mu * rider_mass * gravity
+
+    builder = newton.ModelBuilder(gravity=(0.0, 0.0, -gravity))
+    carriers, riders = [], []
+    for lane_idx, kd in enumerate((0.0, 1000.0)):
+        y = 0.8 * lane_idx
+        builder.add_shape_box(
+            -1,
+            xform=wp.transform((0.6, y, -0.05), wp.quat_identity()),
+            hx=1.8,
+            hy=0.25,
+            hz=0.05,
+            cfg=builder.ShapeConfig(density=0.0, ke=1.0e5, kd=kd, mu=0.0, mu_torsional=0.0, mu_rolling=0.0),
+        )
+        carrier = builder.add_body(xform=wp.transform((0.0, y, carrier_half[2]), wp.quat_identity()))
+        builder.add_shape_box(
+            carrier,
+            hx=carrier_half[0],
+            hy=carrier_half[1],
+            hz=carrier_half[2],
+            cfg=builder.ShapeConfig(
+                density=carrier_mass / (8.0 * carrier_half[0] * carrier_half[1] * carrier_half[2]),
+                ke=1.0e5,
+                kd=kd,
+                mu=mu,
+                mu_torsional=0.0,
+                mu_rolling=0.0,
+            ),
+        )
+        rider = builder.add_body(xform=wp.transform((0.3, y, 2.0 * carrier_half[2] + box_half[2]), wp.quat_identity()))
+        builder.add_shape_box(
+            rider,
+            hx=box_half[0],
+            hy=box_half[1],
+            hz=box_half[2],
+            cfg=builder.ShapeConfig(
+                density=rider_mass / (8.0 * box_half[0] * box_half[1] * box_half[2]),
+                ke=1.0e5,
+                kd=kd,
+                mu=mu,
+                mu_torsional=0.0,
+                mu_rolling=0.0,
+            ),
+        )
+        carriers.append(carrier)
+        riders.append(rider)
+
+    builder.color()
+    model = builder.finalize(device=device)
+    pipeline = newton.CollisionPipeline(model)
+    contacts = pipeline.contacts()
+    solver = newton.solvers.SolverVBD(model, iterations=10)
+    state_0, state_1 = model.state(), model.state()
+
+    wrench = np.zeros((model.body_count, 6), dtype=np.float32)
+    wrench[carriers, 0] = push_force
+    wrench_wp = wp.array(wrench, dtype=wp.spatial_vector, device=device)
+
+    for step in range(settle_steps + push_steps):
+        state_0.clear_forces()
+        if step == settle_steps:
+            start_x = state_0.body_q.numpy()[riders, 0].astype(np.float64)
+        if step >= settle_steps:
+            wp.copy(state_0.body_f, wrench_wp)
+        pipeline.collide(state_0, contacts)
+        solver.step(state_0, state_1, None, contacts, dt)
+        state_0, state_1 = state_1, state_0
+
+    travel = state_0.body_q.numpy()[riders, 0].astype(np.float64) - start_x
+    reference = 0.5 * mu * gravity * dt * dt * push_steps * (push_steps + 1)
+    rel_error = np.abs(travel - reference) / reference
+    spread = abs(float(travel[1] - travel[0])) / reference
+    test.assertLess(float(rel_error.max()), 0.05)
+    test.assertLess(spread, 0.005)
 
 
 def _d6_fully_free_structural_slots_are_inactive(test, device):
@@ -7715,6 +7966,36 @@ add_function_test(
     TestSolverVBD,
     "test_contact_damping_bidirectional_damps_separation",
     _contact_damping_bidirectional_damps_separation,
+    devices=devices,
+)
+add_function_test(
+    TestSolverVBD,
+    "test_contact_damping_matches_closed_form",
+    _contact_damping_matches_closed_form,
+    devices=devices,
+)
+add_function_test(
+    TestSolverVBD,
+    "test_contact_damping_keeps_mixed_color_stack_at_rest",
+    _contact_damping_keeps_mixed_color_stack_at_rest,
+    devices=devices,
+)
+add_function_test(
+    TestSolverVBD,
+    "test_contact_damping_leaves_ground_friction",
+    _contact_damping_leaves_ground_friction,
+    devices=devices,
+)
+add_function_test(
+    TestSolverVBD,
+    "test_contact_damping_row_keeps_float32_scale",
+    _contact_damping_row_keeps_float32_scale,
+    devices=devices,
+)
+add_function_test(
+    TestSolverVBD,
+    "test_contact_damping_preserves_coulomb_sliding",
+    _contact_damping_preserves_coulomb_sliding,
     devices=devices,
 )
 add_function_test(
