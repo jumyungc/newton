@@ -428,7 +428,10 @@ def _record_reduction_overflow(
     extra_overflows: wp.array[wp.int32],
     overflow: wp.array[wp.int32],
 ):
-    """Latch reducer or generation losses on this stream; the pass start clears the flag."""
+    """Latch reducer, face-buffer or identity losses on this stream; the pass start clears the flag.
+
+    Overflows of the earlier hydroelastic stages (broadphase, iso refinement) are only printed.
+    """
     if insert_failures[0] > 0 or buffer_overflows[0] > 0:
         overflow[0] = 1
     if extra_overflows.shape[0] > 0 and extra_overflows[0] > 0:

@@ -162,6 +162,12 @@ def test_external_rigid_solver_is_rejected(test, device):
     model = builder.finalize(device=device)
     with test.assertRaisesRegex(ValueError, "rigid_adaptive_initialization"):
         newton.solvers.SolverVBD(model, integrate_with_external_rigid_solver=True, rigid_adaptive_initialization=True)
+    default_solver = newton.solvers.SolverVBD(model)
+    adaptive_solver = newton.solvers.SolverVBD(model, rigid_adaptive_initialization=True)
+    test.assertFalse(default_solver.rigid_adaptive_initialization)
+    test.assertTrue(adaptive_solver.rigid_adaptive_initialization)
+    with test.assertRaises(AttributeError):
+        default_solver.rigid_adaptive_initialization = True
 
 
 def test_resumed_iterations_preserve_galilean_invariance(test, device):
@@ -267,6 +273,65 @@ def test_start_keeps_only_acceleration_along_the_applied_direction(test, device)
     np.testing.assert_allclose(start[:, 3:], expected_rotations, rtol=0.0, atol=1.0e-6)
 
 
+def test_masked_reset_restores_free_fall_only_in_selected_world(test, device):
+    """Resetting one world restores its first-step free-fall start while preserving another world's held start."""
+    gravity, mass, dt = 10.0, 0.2, 0.01
+    builder = newton.ModelBuilder(gravity=(0.0, 0.0, -gravity))
+    for _ in range(2):
+        builder.begin_world()
+        b0 = builder.add_link(
+            xform=wp.transform(wp.vec3(0.0, 0.0, 1.0), wp.quat_identity()),
+            mass=mass,
+            inertia=wp.mat33(np.eye(3) * 1.0e-3),
+            lock_inertia=True,
+        )
+        b1 = builder.add_link(
+            xform=wp.transform(wp.vec3(0.1, 0.0, 1.0), wp.quat_identity()),
+            mass=mass,
+            inertia=wp.mat33(np.eye(3) * 1.0e-3),
+            lock_inertia=True,
+        )
+        j0 = builder.add_joint_free(b0)
+        j1 = builder.add_joint_fixed(
+            b0,
+            b1,
+            parent_xform=wp.transform(wp.vec3(0.05, 0.0, 0.0), wp.quat_identity()),
+            child_xform=wp.transform(wp.vec3(-0.05, 0.0, 0.0), wp.quat_identity()),
+        )
+        builder.add_articulation([j0, j1])
+        builder.end_world()
+    builder.color()
+    model = builder.finalize(device=device)
+    solver = newton.solvers.SolverVBD(model, iterations=1, rigid_adaptive_initialization=True)
+    state_0, state_1 = model.state(), model.state()
+
+    # Step 0 balances gravity with upward external force so both worlds record zero realized acceleration.
+    hold_force = np.zeros((model.body_count, 6), dtype=np.float32)
+    hold_force[:, 2] = mass * gravity
+    state_0.body_f.assign(hold_force)
+    solver.step(state_0, state_1, None, None, dt)
+    state_0, state_1 = state_1, state_0
+
+    # Release the upward force and reset only world 0: world 0 starts both links in free fall (-g * dt^2),
+    # whereas unreset world 1 starts at the held pose (z = 1) so 1 Gauss-Seidel sweep across the fixed joint lags.
+    state_0.clear_forces()
+    z_before = state_0.body_q.numpy()[:, 2].copy()
+    mask = wp.array([True, False, False], dtype=wp.bool, device=device)
+    if device.is_cuda:
+        with wp.ScopedCapture(device=device) as capture:
+            solver.reset(state_0, world_mask=mask, flags=0)
+            solver.step(state_0, state_1, None, None, dt)
+        wp.capture_launch(capture.graph)
+    else:
+        solver.reset(state_0, world_mask=mask, flags=0)
+        solver.step(state_0, state_1, None, None, dt)
+
+    dz = state_1.body_q.numpy()[:, 2] - z_before
+    free_fall = -gravity * dt * dt
+    np.testing.assert_allclose(dz[:2], free_fall, atol=1.0e-6)
+    test.assertGreater(float(dz[2]), 0.6 * free_fall)
+
+
 class TestRigidAdaptiveInitialization(unittest.TestCase):
     pass
 
@@ -280,6 +345,10 @@ for _name, _test in (
     (
         "test_start_keeps_only_acceleration_along_the_applied_direction",
         test_start_keeps_only_acceleration_along_the_applied_direction,
+    ),
+    (
+        "test_masked_reset_restores_free_fall_only_in_selected_world",
+        test_masked_reset_restores_free_fall_only_in_selected_world,
     ),
 ):
     add_function_test(TestRigidAdaptiveInitialization, _name, _test, devices=get_test_devices())

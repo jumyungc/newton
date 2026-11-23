@@ -15,8 +15,10 @@ from newton._src.solvers.vbd.rigid_vbd_kernels import (
     compute_body_body_contact_forces,
     compute_rigid_contact_forces,
     create_accumulate_body_body_contacts_per_body,
+    step_body_body_contact_C0_lambda,
     update_duals_body_body_contacts,
 )
+from newton._src.solvers.vbd.vbd_coupling_kernels import _harvest_vbd_proxy_wrenches_kernel
 from newton.tests.unittest_utils import add_function_test, get_test_devices
 
 
@@ -74,8 +76,10 @@ def test_small_rotation_contact_force_is_translation_invariant(test, device):
         q = np.array([0.0, 0.0, np.sin(angle / 2.0), np.cos(angle / 2.0)], dtype=np.float32)
         omega_z = 2.0 * float(q[2])
         expected_force = np.array([0.0, -rho_t * radius * omega_z, normal_force])
-        lever_torque = np.cross([radius, 0.0, 0.0], expected_force)
-        expected_torque = float(q[3]) * lever_torque + np.cross(q[:3].astype(np.float64), lever_torque)
+        # The reported torque is about the body's current center of mass, from its current lever.
+        qz, qw = float(q[2]), float(q[3])
+        lever = radius * np.array([qw * qw - qz * qz, 2.0 * qw * qz, 0.0])
+        expected_torque = np.cross(lever, expected_force)
         test.assertLess(abs(expected_force[1]), normal_force, "The row must remain inside its friction cone")
 
         reported = []
@@ -342,6 +346,153 @@ def test_small_normal_rotation_is_translation_invariant(test, device):
                         np.testing.assert_array_equal(output.numpy(), 0)
 
 
+def test_large_world_translation_invariance_and_c0_precision(test, device):
+    """Verify 1000 m translation invariance for millimeter levers, offset COMs, C0, and proxy torques."""
+    with wp.ScopedDevice(device):
+        # 1. C0 normal precision on tilted normal with large tangential offset at 1000 m
+        n_np = np.array([1.0, 2.0, 3.0], dtype=np.float64)
+        n_np /= np.linalg.norm(n_np)
+        t_np = np.array([2.0, -1.0, 0.0], dtype=np.float64)
+        t_np /= np.linalg.norm(t_np)
+        expected_c0 = 1.0e-6
+        p0_local = np.zeros(3, dtype=np.float32)
+        p1_local = (-expected_c0 * n_np + 0.5 * t_np).astype(np.float32)
+        n_f32 = n_np.astype(np.float32)
+        n_f64 = n_f32.astype(np.float64)
+        expected_exact = -float(np.dot(n_f64, p1_local.astype(np.float64))) * float(np.dot(n_f64, n_f64))
+        # The two large products of dot(n, p1) are about 0.12 and cancel. Each may round by half a
+        # float32 spacing there (3.7e-9), depending on evaluation order and fused multiply-adds.
+        c0_tolerance = 1.0e-8
+
+        c0_by_shift = []
+        for world_shift in (0.0, 1000.0):
+            X_world = wp.transform((world_shift, -world_shift, 0.5 * world_shift), wp.quat_identity())
+            c0_out = wp.zeros(1, dtype=wp.vec3, device=device)
+            wp.launch(
+                step_body_body_contact_C0_lambda,
+                dim=1,
+                inputs=[
+                    wp.array([1], dtype=int),
+                    wp.array([0], dtype=int),
+                    wp.array([1], dtype=int),
+                    wp.array([p0_local], dtype=wp.vec3),
+                    wp.array([p1_local], dtype=wp.vec3),
+                    wp.zeros(1, dtype=wp.vec3),
+                    wp.zeros(1, dtype=wp.vec3),
+                    wp.array([n_np.astype(np.float32)], dtype=wp.vec3),
+                    wp.zeros(1, dtype=float),
+                    wp.zeros(1, dtype=float),
+                    wp.array([0, 1], dtype=wp.int32),
+                    wp.zeros(2, dtype=wp.int32),
+                    wp.array([1.0, 1.0], dtype=float),
+                    wp.zeros(2, dtype=wp.mat33),
+                    wp.zeros(2, dtype=wp.vec3),
+                    wp.zeros(2, dtype=float),
+                    int(newton.BodyFlags.PROXY),
+                    wp.array([X_world, X_world], dtype=wp.transform),
+                    1.0,
+                    100.0,
+                    wp.array([1.0e6], dtype=float),
+                    1.0,
+                ],
+                outputs=[
+                    wp.zeros(1, dtype=float),
+                    c0_out,
+                    wp.zeros(1, dtype=wp.vec3),
+                    wp.zeros(1, dtype=float),
+                ],
+            )
+            c0_scalar = float(np.dot(c0_out.numpy()[0].astype(np.float64), n_f64))
+            c0_by_shift.append(c0_scalar)
+            test.assertAlmostEqual(c0_scalar, expected_exact, delta=c0_tolerance)
+        test.assertEqual(c0_by_shift[1], c0_by_shift[0])
+
+        # 2. Offset-COM slip & 1 mm lever force/torque + proxy wrench invariance between 0 m and 1000 m
+        wrenches_by_shift = []
+        proxy_by_shift = []
+        q_rot = wp.quat_from_axis_angle(wp.vec3(0.0, 0.0, 1.0), 1.0e-3)
+        for world_shift in (0.0, 1000.0):
+            base = np.array([world_shift, -0.75 * world_shift, 0.25 * world_shift], dtype=np.float32)
+            X_prev = wp.transform(tuple(base), wp.quat_identity())
+            X_cur = wp.transform(tuple(base), q_rot)
+            body_q_prev = wp.array([X_prev, X_prev], dtype=wp.transform)
+            body_q_cur = wp.array([X_cur, X_prev], dtype=wp.transform)
+            body_com = wp.array([[0.05, -0.03, 0.02], [0.0, 0.0, 0.0]], dtype=wp.vec3)
+            pt0 = wp.array([[0.051, -0.03, 0.02]], dtype=wp.vec3)
+            pt1 = wp.array([[0.051, -0.03, 0.0199]], dtype=wp.vec3)
+            off0 = wp.array([[0.0, 0.0, -0.002]], dtype=wp.vec3)
+            off1 = wp.array([[0.0, 0.0, 0.002]], dtype=wp.vec3)
+            normal_arr = wp.array([[0.0, 0.0, 1.0]], dtype=wp.vec3)
+            zeros_f = wp.zeros(1, dtype=float)
+            wrench = wp.zeros(1, dtype=wp.spatial_vector)
+            wp.launch(
+                compute_body_body_contact_forces,
+                dim=1,
+                inputs=[
+                    0.01,
+                    wp.array([1], dtype=int),
+                    wp.array([0], dtype=int),
+                    wp.array([1], dtype=int),
+                    pt0,
+                    pt1,
+                    None,
+                    off0,
+                    off1,
+                    normal_arr,
+                    zeros_f,
+                    zeros_f,
+                    wp.array([0, 1], dtype=wp.int32),
+                    body_q_cur,
+                    body_q_prev,
+                    body_com,
+                    wp.array([1.0e5], dtype=float),
+                    wp.array([1.0e5], dtype=float),
+                    zeros_f,
+                    wp.array([0.8], dtype=float),
+                    wp.array([1.0e5], dtype=float),
+                    wp.array([[0.0, 0.0, 50.0]], dtype=wp.vec3),
+                    wp.zeros(1, dtype=wp.vec3),
+                    0.0,
+                    1.0e-6,
+                    False,
+                ],
+                outputs=[wrench],
+            )
+            w_np = wrench.numpy()[0].copy()
+            wrenches_by_shift.append(w_np)
+
+            proxy_out = wp.zeros(1, dtype=wp.spatial_vector)
+            wp.launch(
+                _harvest_vbd_proxy_wrenches_kernel,
+                dim=1,
+                inputs=[
+                    wp.array([1], dtype=int),
+                    wp.array([0], dtype=wp.int32),
+                    wp.array([1], dtype=wp.int32),
+                    pt0,
+                    pt1,
+                    wp.array([-w_np[:3]], dtype=wp.vec3),
+                    normal_arr,
+                    off0,
+                    off1,
+                    wp.array([0.0, 1.0], dtype=float),
+                    wp.array([int(newton.BodyFlags.PROXY), 0], dtype=wp.int32),
+                    wp.array([0, -1], dtype=int),
+                    int(newton.BodyFlags.PROXY),
+                    body_com,
+                    body_q_cur,
+                    proxy_out,
+                ],
+            )
+            proxy_by_shift.append(proxy_out.numpy()[0].copy())
+
+        # The row is active: the equalities below would also hold for three zero wrenches.
+        test.assertGreater(float(np.linalg.norm(wrenches_by_shift[0][:3])), 1.0)
+        np.testing.assert_allclose(wrenches_by_shift[1], wrenches_by_shift[0], rtol=2.0e-6, atol=1.0e-7)
+        np.testing.assert_allclose(proxy_by_shift[1], proxy_by_shift[0], rtol=2.0e-6, atol=1.0e-7)
+        np.testing.assert_allclose(proxy_by_shift[0], wrenches_by_shift[0], rtol=2.0e-6, atol=1.0e-7)
+
+
 class TestRigidContactDisplacement(unittest.TestCase):
     pass
 
@@ -366,6 +517,14 @@ add_function_test(
     TestRigidContactDisplacement,
     "test_rolling_cylinder_keeps_its_speed",
     test_rolling_cylinder_keeps_its_speed,
+    devices=get_test_devices(),
+)
+
+
+add_function_test(
+    TestRigidContactDisplacement,
+    "test_large_world_translation_invariance_and_c0_precision",
+    test_large_world_translation_invariance_and_c0_precision,
     devices=get_test_devices(),
 )
 

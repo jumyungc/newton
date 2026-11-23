@@ -10,6 +10,7 @@ import warp as wp
 
 import newton
 from newton._src.solvers.vbd.rigid_vbd_kernels import (
+    _compliant_contact_normal_response,
     compute_rigid_contact_forces,
     evaluate_rigid_contact_from_collision,
     update_duals_body_body_contacts,
@@ -93,6 +94,63 @@ def test_solver_force_reporting(test, device):
                 wp.capture_launch(capture.graph)
                 np.testing.assert_array_equal(values[4].numpy()[0], force)
                 np.testing.assert_array_equal(wrench.numpy()[0], expected_wrench)
+
+
+def test_reported_torque_about_current_com(test, device):
+    """The reported torque on a body that turned during the step uses its current levers."""
+    builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+    cfg = builder.ShapeConfig(ke=1.0e4, kd=0.0, mu=0.5, density=0.0)
+    for x in (0.0, 0.19):
+        body = builder.add_body(
+            xform=wp.transform((x, 0.0, 0.0), wp.quat_identity()),
+            mass=1.0,
+            inertia=wp.mat33(np.eye(3) * 0.004),
+            lock_inertia=True,
+        )
+        builder.add_shape_sphere(body, radius=0.1, cfg=cfg)
+    builder.color()
+    with wp.ScopedDevice(device):
+        model = builder.finalize()
+        pipeline = newton.CollisionPipeline(model)
+        dt = 1.0 / 600.0
+        solver = newton.solvers.SolverVBD(model, iterations=1)
+        state, out = model.state(), model.state()
+        contacts = pipeline.contacts()
+        pipeline.collide(state, contacts)
+        solver.step(state, out, None, contacts, dt)
+        test.assertEqual(int(contacts.rigid_contact_count.numpy()[0]), 1)
+        b0 = int(model.shape_body.numpy()[int(contacts.rigid_contact_shape0.numpy()[0])])
+        test.assertGreaterEqual(b0, 0)
+        # Body 0 turned by 0.2 rad about z during the step; the row state is prescribed.
+        poses = model.body_q.numpy()
+        state.body_q.assign(poses)
+        previous = poses.copy()
+        previous[b0, 3:] = (0.0, 0.0, np.sin(-0.1), np.cos(-0.1))
+        solver.body_q_prev.assign(previous)
+        solver.body_body_contact_normal_rho.fill_(1.0e6)
+        solver.body_body_contact_material_ke.fill_(1.0e4)
+        solver.body_body_contact_material_kd.fill_(0.0)
+        solver.body_body_contact_material_mu.fill_(0.5)
+        solver.body_body_contact_tangent_rho.fill_(1.0e6)
+        solver.body_body_contact_C0.zero_()
+        n = contacts.rigid_contact_normal.numpy()[0].astype(np.float64)
+        lam = np.zeros((solver.body_body_contact_lambda.shape[0], 3), dtype=np.float32)
+        lam[0] = n * 100.0
+        solver.body_body_contact_lambda.assign(lam)
+        wrench = wp.zeros(contacts.rigid_contact_max, dtype=wp.spatial_vector)
+        solver._export_body_body_contact_forces(state, contacts, dt, wrench)
+        force = wrench.numpy()[0, :3].astype(np.float64)
+        normal_force = n * float(force @ n)
+        friction = force - normal_force
+        # The turn slides the anchor, so friction is present and off the lever.
+        test.assertGreater(float(np.linalg.norm(friction)), 1.0)
+        com = model.body_com.numpy()[b0].astype(np.float64)
+        point = contacts.rigid_contact_point0.numpy()[0].astype(np.float64)
+        anchor = point + contacts.rigid_contact_offset0.numpy()[0].astype(np.float64)
+        # Body 0's current orientation is the identity.
+        expected = np.cross(point - com, normal_force) + np.cross(anchor - com, friction)
+        test.assertGreater(float(np.linalg.norm(expected)), 0.05)
+        np.testing.assert_allclose(wrench.numpy()[0, 3:], expected, rtol=1.0e-5, atol=1.0e-6)
 
 
 @wp.kernel
@@ -224,6 +282,107 @@ def test_compliant_damping_modes(test, device):
                     check()
 
 
+@wp.kernel(enable_backward=False)
+def _eval_damped_normal_kernel(
+    penetration: wp.array[float],
+    previous: wp.array[float],
+    ke: wp.array[float],
+    kd: wp.array[float],
+    rho: wp.array[float],
+    lam: wp.array[float],
+    dt: float,
+    out_force: wp.array[float],
+):
+    i = wp.tid()
+    f, _ef, _m = _compliant_contact_normal_response(penetration[i], previous[i], ke[i], kd[i], rho[i], lam[i], dt)
+    out_force[i] = f
+
+
+def test_damped_normal_extreme_rho_and_stiff_ratio(test, device):
+    """Verify damped normal elimination neither overflows at huge rho nor freezes warm duals at stiff ratios."""
+    with wp.ScopedDevice(device):
+        # Row 0: large rho (1e36) must stay finite: ke * rho (1e41) exceeds float32, although
+        # rho * increment (1e33) does not.
+        # Row 1: (ke + kd/dt) / rho = 5e9 / 200 = 2.5e7 > 2^24 (so s == 1.0 in float32)
+        # with compression_increment = 0 and transition_force = 1.0, multiplier_excess = 1e6:
+        # _alm_relaxed_ascent relaxes overshoot by a * excess = 4e-8 * 1e6 = 0.04 N (0.5 * ULP(1e6) = 0.03125 N).
+        out = wp.zeros(2, dtype=float)
+        wp.launch(
+            _eval_damped_normal_kernel,
+            dim=2,
+            inputs=[
+                wp.array([0.002, 1.0e-6], dtype=float),
+                wp.array([0.001, 1.0e-6], dtype=float),
+                wp.array([1.0e5, 1.0e6], dtype=float),
+                wp.array([1.0e2, 4.999e5], dtype=float),
+                wp.array([1.0e36, 200.0], dtype=float),
+                wp.array([100.0, 1000001.0], dtype=float),
+                1.0e-4,
+            ],
+            outputs=[out],
+        )
+        vals = out.numpy()
+        test.assertTrue(np.all(np.isfinite(vals)))
+        # Row 0 limit as rho -> inf: ke * 0.002 + (kd / dt) * 0.001 = 200 + 1000 = 1200 N
+        test.assertAlmostEqual(float(vals[0]), 1200.0, delta=1.0e-2)
+        # Without _alm_relaxed_ascent, total_scale == 1.0 freezes vals[1] at 1000001.0; with it, vals[1] < 1000001.0
+        test.assertLess(float(vals[1]), 1000001.0)
+        test.assertAlmostEqual(float(vals[1]), 1000001.0 - 0.04, delta=0.04)
+
+
+def test_step_resolves_per_contact_materials(test, device):
+    """Read per-contact stiffness, damping and friction in the solver step, with and without contact history."""
+    shape_ke, shape_kd, shape_mu = 1.0e4, 20.0, 0.5
+    # Per-contact stiffness, damping and friction scale (zero is unset), and the material each row must get.
+    overrides = np.array([[0.0, 0.0, 0.0], [2.5e3, 0.0, 0.0], [4.0e4, 0.0, 2.0], [2.5e3, 7.0, 0.5]], dtype=np.float32)
+    expected = np.array(
+        [
+            [shape_ke, shape_kd, shape_mu],
+            [2.5e3, 0.25 * shape_kd, shape_mu],  # a softer row keeps the relaxation time kd / ke
+            [4.0e4, shape_kd, 2.0 * shape_mu],  # a stiffer row keeps the authored damping
+            [2.5e3, 7.0, 0.5 * shape_mu],  # an explicit damping replaces the scaled one
+        ]
+    )
+    count = len(overrides)
+    with wp.ScopedDevice(device):
+        builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+        cfg = builder.ShapeConfig(ke=shape_ke, kd=shape_kd, mu=shape_mu, density=0.0)
+        body = builder.add_body(
+            xform=wp.transform((0.0, 0.0, 1.0), wp.quat_identity()),
+            mass=1.0,
+            inertia=wp.mat33(np.eye(3)),
+            lock_inertia=True,
+        )
+        sphere = builder.add_shape_sphere(body, radius=0.01, cfg=cfg)
+        ground = builder.add_ground_plane(cfg=cfg)
+        builder.color()
+        model = builder.finalize()
+        # The two settings resolve the materials in different kernels.
+        for history in (False, True):
+            with test.subTest(history=history):
+                contacts = newton.Contacts(
+                    count, 0, device=device, per_contact_shape_properties=True, contact_matching=history
+                )
+                if history:
+                    # A pipeline with contact matching stamps this provenance on its buffers.
+                    contacts._contact_matching_mode = "latest"
+                contacts.rigid_contact_count.fill_(count)
+                contacts.rigid_contact_shape0.fill_(sphere)
+                contacts.rigid_contact_shape1.fill_(ground)
+                # Separated rows: the step resolves their materials without moving the body.
+                contacts.rigid_contact_normal.assign([(0.0, 0.0, -1.0)] * count)
+                contacts.rigid_contact_stiffness.assign(overrides[:, 0])
+                contacts.rigid_contact_damping.assign(overrides[:, 1])
+                contacts.rigid_contact_friction.assign(overrides[:, 2])
+                contacts.contact_generation.fill_(1)
+                solver = newton.solvers.SolverVBD(model, iterations=1, rigid_contact_history=history)
+                state, out = model.state(), model.state()
+                solver.step(state, out, None, contacts, 1.0 / 600.0)
+                for column, name in enumerate(("ke", "kd", "mu")):
+                    actual = getattr(solver, "body_body_contact_material_" + name).numpy()[:count]
+                    np.testing.assert_allclose(actual, expected[:, column], rtol=1.0e-6, err_msg=name)
+
+
 class TestRigidContactDamping(unittest.TestCase):
     pass
 
@@ -235,6 +394,30 @@ add_function_test(
 
 add_function_test(
     TestRigidContactDamping, "test_compliant_damping_modes", test_compliant_damping_modes, devices=get_test_devices()
+)
+
+
+add_function_test(
+    TestRigidContactDamping,
+    "test_damped_normal_extreme_rho_and_stiff_ratio",
+    test_damped_normal_extreme_rho_and_stiff_ratio,
+    devices=get_test_devices(),
+)
+
+
+add_function_test(
+    TestRigidContactDamping,
+    "test_step_resolves_per_contact_materials",
+    test_step_resolves_per_contact_materials,
+    devices=get_test_devices(),
+)
+
+
+add_function_test(
+    TestRigidContactDamping,
+    "test_reported_torque_about_current_com",
+    test_reported_torque_about_current_com,
+    devices=get_test_devices(),
 )
 
 

@@ -1,1 +1,1 @@
-Prevent alternating release of stiff compliant rigid contacts between same-colour dynamic bodies in `SolverVBD` by majorizing their simultaneous contact solve blocks without changing contact forces or materials.
+Prevent alternating release of stiff compliant rigid contacts between same-color dynamic bodies in `SolverVBD` by majorizing their simultaneous contact solve blocks without changing contact forces or materials.

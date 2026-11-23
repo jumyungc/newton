@@ -1,1 +1,1 @@
-Fix regular small marching-cubes triangles being discarded as degenerate and large triangles losing valid normals by normalizing their edges before computing area and orientation.
+Fix regular small marching-cubes triangles being discarded as degenerate and large triangles losing valid normals by normalizing their edges before computing area and orientation. Marching-cubes face builders compute triangle edges from voxel-local vertex offsets, so small faces far from the grid or world origin keep their area and orientation.

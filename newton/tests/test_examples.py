@@ -1782,7 +1782,8 @@ add_contact_example_test(
 add_contact_example_test(
     name="contacts.example_nut_bolt_hydro",
     devices=cuda_test_devices,
-    # Allow gravity-driven rotation to develop without the former initial preload.
+    # Kamino turns the nut more slowly: it passed the 45-degree check at frame 112, where MuJoCo and VBD
+    # passed at frame 39, so it runs 240 frames instead of 120.
     test_options={"requires": ("trimesh",), "num-frames": 240, "world-count": 1, "solver": "kamino"},
     use_viewer=True,
     test_suffix="kamino",

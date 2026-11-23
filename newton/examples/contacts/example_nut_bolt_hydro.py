@@ -46,8 +46,10 @@ MESH_SDF_CACHE_DIR = Path(tempfile.gettempdir()) / "newton_sdf_cache"
 SHAPE_CFG = newton.ModelBuilder.ShapeConfig(
     margin=0.0,
     mu=0.01,
-    # Hydroelastic supplies the per-contact stiffness for the nut/bolt pair, so
-    # ``ke``/``kd`` reach only the non-hydroelastic contacts. At the 1e10 ``kh``
+    # Hydroelastic supplies the per-contact stiffness for the nut/bolt pair. Under
+    # MuJoCo and Kamino ``ke``/``kd`` reach only the non-hydroelastic contacts, and
+    # XPBD uses neither; VBD also damps the hydroelastic rows with ``kd``, scaled by the
+    # per-contact stiffness over ``ke`` when that stiffness is lower. At the 1e10 ``kh``
     # default the thread contacts resolve over a ~95 ms solref time constant --
     # roughly 45 substeps -- and the nut sits visibly cocked under MuJoCo. XPBD
     # projects positions and is insensitive to this either way.
@@ -357,9 +359,9 @@ class Example:
                     scale=self.scene_scale,
                 )
 
-                # Start just clear of the thread. The former 0.041 m start
-                # overlapped the flanks by about 0.25 mm at unit scene scale,
-                # adding a large initial elastic preload to this gravity task.
+                # Start just clear of the thread. A start at 0.041 m overlaps
+                # the flanks by about 0.25 mm at unit scene scale, which adds a
+                # large initial elastic preload to this gravity task.
                 nut_xform = wp.transform(
                     wp.vec3(x_offset, y_offset, 0.0413 * self.scene_scale),
                     wp.quat_from_axis_angle(wp.vec3(0.0, 0.0, 1.0), np.pi / 8),
@@ -463,6 +465,7 @@ class Example:
 
         - Bolts should stay approximately in place (limited displacement)
         - Nuts should rotate (thread engagement) and move slightly downward
+        - Nuts should stay within 5 mm of their bolt's axis
         """
         body_q = self.state_0.body_q.numpy()
 
@@ -479,7 +482,9 @@ class Example:
 
         # The 45 degree threshold catches stalled thread engagement while
         # allowing observed solver/contact-count variation.
-        max_nut_radial_offset = 0.005  # 5 mm radial tolerance keeps the nut engaged on the bolt axis
+        # 5 mm catches a nut that left the bolt or passed through its thread; rotation and descent
+        # check the engagement.
+        max_nut_radial_offset = 0.005
         min_rotation_threshold = np.radians(45.0)
         min_descent = 0.005
         for i, nut_idx in enumerate(self.nut_body_indices):

@@ -335,14 +335,16 @@ class Contacts:
                 self.rigid_contact_damping = wp.zeros(rigid_contact_max, dtype=wp.float32)
                 """Per-contact damping [N·s/m], shape (rigid_contact_max,), dtype float."""
                 self.rigid_contact_friction = wp.zeros(rigid_contact_max, dtype=wp.float32)
-                """Per-contact friction coefficient [dimensionless], shape (rigid_contact_max,), dtype float."""
+                """Per-contact friction scale [dimensionless] on the shape-pair friction (zero leaves it
+                unchanged), shape (rigid_contact_max,), dtype float."""
             else:
                 self.rigid_contact_stiffness = None
                 """Per-contact stiffness [N/m], shape (rigid_contact_max,), dtype float."""
                 self.rigid_contact_damping = None
                 """Per-contact damping [N·s/m], shape (rigid_contact_max,), dtype float."""
                 self.rigid_contact_friction = None
-                """Per-contact friction coefficient [dimensionless], shape (rigid_contact_max,), dtype float."""
+                """Per-contact friction scale [dimensionless] on the shape-pair friction (zero leaves it
+                unchanged), shape (rigid_contact_max,), dtype float."""
 
             # Contact matching index — filled by the collision pipeline when
             # contact_matching is enabled.

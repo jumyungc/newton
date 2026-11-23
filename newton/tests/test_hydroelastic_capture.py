@@ -14,6 +14,7 @@ from newton.tests.unittest_utils import add_function_test, get_selected_cuda_tes
 
 
 def test_capture_at_host_warning_boundary(test, device):
+    """Capture and replay a collision pass on the launch that polls host warnings."""
     model, state, _ = _build_margin_gap_boxes(device)
     pipeline = newton.CollisionPipeline(model, broad_phase="explicit", rigid_contact_max=20000, deterministic=True)
     contacts = pipeline.contacts()

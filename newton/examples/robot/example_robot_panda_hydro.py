@@ -16,19 +16,22 @@ latest contact matching retains numerical force estimates across substeps;
 passing ``--no-deterministic`` disables contact matching and history, which
 lifts the scene-wide deterministic face limit. The cube task passes without
 them at larger world counts; the pen task needs them and is not reliable with
-``--no-deterministic``. Free objects are solved after the gripper; the
-experimental tangent-weight scale improves the narrow pen patch's friction
-convergence. Linear joint stiffness is increased to reduce hand sag while the
+``--no-deterministic``. Free objects are solved after the gripper. The pen
+scene raises the experimental tangent-weight scale to 10, which holds the pen
+in its narrow pad patches. The cube scene keeps the default weight: it does
+not need the scale, and at a scale of 1000 one of two cups fell over.
+Linear joint stiffness is increased to reduce hand sag while the
 default one-way contact damping is retained. The experimental adaptive initialization
-reduces the pen's rotation in the grip. Its opt-in contact activation guard adds
-one provisional body solve per colour and local iteration. MuJoCo keeps the
-original setup. Equal iteration counts are not equal work or accuracy.
+reduces the pen's rotation in the grip. The opt-in contact activation guard, enabled
+here, adds one provisional body solve per color and iteration. These options
+apply to VBD only. Equal iteration counts are not equal work or accuracy.
 
 Success criteria:
 - Each world shows a Franka arm, a support box, a cup, and the selected grasp object.
 - The arm lifts and transports the object while the cup remains upright.
 - The pen stays within 20 degrees of horizontal during the first lift and transport,
   until the grip starts loosening above the cup.
+- The cup stays at rest after the object is released and the arm returns.
 
 Runs:
 - `python -m newton.examples robot_panda_hydro --solver vbd --iterations 15 --scene cube --world-count 2`
@@ -381,6 +384,13 @@ class Example:
             wp.DeterministicMode.RUN_TO_RUN if self.deterministic_solver else wp.DeterministicMode.NOT_GUARANTEED
         )
         if self.solver_name == "vbd":
+            # At the default tangential row weight the pen turns in the grip of its narrow pad
+            # patches and fails its check. A scale of 10 holds it within 4 degrees and leaves
+            # the dropped pen at rest in the cup. Scales of 100 and 1000 hold the pen within
+            # about one degree but slow other friction modes: the dropped pen kept shifting in
+            # the cup, and in the cube scene a scale of 1000 pushed one of two cups over. The cube does
+            # not need the scale and keeps the default.
+            tangent_scale = 10.0 if self.scene == SceneType.PEN else 1.0
             self.solver = newton.solvers.SolverVBD(
                 self.model,
                 iterations=self.sim_iterations,
@@ -388,7 +398,7 @@ class Example:
                 rigid_adaptive_initialization=True,
                 rigid_contact_history=use_contact_history,
                 rigid_joint_linear_ke=1.0e6,
-                rigid_contact_tangent_scale=1000.0,
+                rigid_contact_tangent_scale=tangent_scale,
                 rigid_body_contact_buffer_size=4096,
                 deterministic=deterministic_mode,
             )
@@ -427,6 +437,7 @@ class Example:
 
         # Track maximum object height for testing (only in test mode)
         self.object_max_z = [self.object_pos[2]] * self.world_count if self.test_mode else None
+        self.cup_rest_start_q = None
 
         self.capture()
         self.capture_ik()
@@ -497,7 +508,7 @@ class Example:
         self.sim_time += self.frame_dt
 
     def test_post_step(self):
-        """Check pen orientation before release and track lift height."""
+        """Check the pen before release, track the lift height, and sample the cup for the rest check."""
         # Track maximum object height for testing (only in test mode)
         body_q = self.state_0.body_q.numpy()
         check_pen_grip = (
@@ -518,6 +529,10 @@ class Example:
                     f"Time={self.sim_time:.3f}, vertical axis component={pen_axis_z:.3f} "
                     f"(expected < {max_axis_z:.3f}, within 20 degrees of horizontal)"
                 )
+
+        if self.cup_body_local is not None and self.cup_rest_start_q is None and self.sim_time >= self.rest_check_start:
+            cup_rows = np.arange(self.world_count) * self.bodies_per_world + self.cup_body_local
+            self.cup_rest_start_q = body_q[cup_rows].astype(np.float64)
 
     def render(self):
         self.viewer.begin_frame(self.sim_time)
@@ -541,7 +556,7 @@ class Example:
             self.viewer.show_hydro_contact_surface = self.show_isosurface
 
     def test_final(self):
-        """Verify that the object is lifted and placed in the upright cup."""
+        """Verify that the object is lifted and placed in the upright cup, and that the cup is at rest."""
         # Verify that the object was picked up by checking the maximum height reached
         initial_z = self.object_pos[2]
         min_lift_height = 0.15  # Object should be lifted at least 15cm above initial position
@@ -581,6 +596,33 @@ class Example:
                 f"World {world_idx}: Object is not in the cup. "
                 f"Object pos={object_position.tolist()}, cup pos={cup_position.tolist()}, "
                 f"horizontal offset={horizontal_offset:.3f} (expected < {tolerance_xy})"
+            )
+
+        assert self.cup_rest_start_q is not None, (
+            f"Run past t={self.rest_check_start:.2f} s for the cup rest check (--num-frames)."
+        )
+
+        # Bound the cup's net travel and turn between the post-release sample and the final pose,
+        # not the excursion in between or the final velocity. The largest values seen in either
+        # scene were 0.011 mm and 0.013 degrees, about a tenth of each bound. With a tangent
+        # scale of 1000 in the cube scene one of two cups fell over and the other slid by 2 mm and
+        # turned by 0.2 degrees.
+        max_cup_travel = 1.0e-4
+        max_cup_turn = np.deg2rad(0.1)
+        for world_idx in range(self.world_count):
+            cup_pose = body_q[world_idx * self.bodies_per_world + self.cup_body_local].astype(np.float64)
+            start_pose = self.cup_rest_start_q[world_idx]
+            travel = float(np.linalg.norm(cup_pose[:3] - start_pose[:3]))
+            # Vector part of the relative quaternion: its length is sin(turn / 2), accurate for small turns.
+            relative = (
+                start_pose[6] * cup_pose[3:6] - cup_pose[6] * start_pose[3:6] - np.cross(cup_pose[3:6], start_pose[3:6])
+            )
+            turn = 2.0 * float(np.arcsin(min(1.0, float(np.linalg.norm(relative)))))
+            assert travel < max_cup_travel and turn < max_cup_turn, (
+                f"World {world_idx}: Cup is not at rest after the release. "
+                f"Since t={self.rest_check_start:.2f} s it moved {travel * 1.0e3:.4f} mm "
+                f"(expected < {max_cup_travel * 1.0e3:.1f}) and turned {np.rad2deg(turn):.4f} degrees "
+                f"(expected < {np.rad2deg(max_cup_turn):.1f})"
             )
 
     def setup_ik(self):
@@ -655,6 +697,11 @@ class Example:
                 ]
             )
             self.waypoints.extend(wps)
+
+        # One pass of the script ends here, after the gripper has opened and the arm has returned
+        # to its rest position; the script then repeats. The cup's final pose is compared with
+        # its pose 0.25 s into the second pass.
+        self.rest_check_start = sum(waypoint[1] for waypoint in self.waypoints) + 0.25
 
     @staticmethod
     def create_parser():

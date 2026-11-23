@@ -140,8 +140,60 @@ def test_departure_and_capture(test, device):
                 np.testing.assert_allclose(
                     observables.solver_residual_history.numpy(), history, rtol=1.0e-5, atol=1.0e-12
                 )
+        # Also without a residual request, a body whose trial crossed no inactive row keeps its trial pose.
+        reset()
+        pipeline.collide(state, contacts)
+        solver.step(state, out, control, contacts, dt)
+        np.testing.assert_allclose(out.body_q.numpy(), eager, rtol=0.0, atol=2.0e-7)
     np.testing.assert_allclose(poses[0], poses[1], rtol=0.0, atol=2.0e-7)
     np.testing.assert_allclose(residual_histories[0], residual_histories[1], rtol=1.0e-5, atol=1.0e-12)
+
+
+def test_crossing_trial_is_shortened(test, device):
+    """Shorten a driven step whose trial crosses inactive contact rows, with and without a residual request.
+
+    The residual describes the iterate the sweep starts from, so the guard must not change it.
+    """
+    clearance, dt = 1.0e-3, 1.0 / 600.0
+    builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+    cfg = newton.ModelBuilder.ShapeConfig(ke=1.0e7, kd=0.0, mu=0.0, density=0.0, gap=0.01)
+    start = wp.transform((0.0, 0.0, 0.1 + clearance), wp.quat_identity())
+    body = builder.add_link(xform=start, mass=1.0, inertia=wp.mat33(np.eye(3) * 0.0066666667), lock_inertia=True)
+    builder.add_shape_box(body=body, hx=0.1, hy=0.1, hz=0.1, cfg=cfg)
+    builder.add_ground_plane(cfg=cfg)
+    # The drive pulls the box 5 cm down, through the ground 1 mm below it.
+    joint = builder.add_joint_prismatic(
+        -1, body, axis=(0.0, 0.0, 1.0), parent_xform=start, target_q=-0.05, target_ke=1.0e5, target_kd=0.0
+    )
+    builder.add_articulation([joint])
+    builder.color()
+    model = builder.finalize(device=device)
+    pipeline = newton.CollisionPipeline(model)
+    contacts = pipeline.contacts()
+    travel = {}
+    residuals = {}
+    for guard in (False, True):
+        for residual in (False, True):
+            solver = newton.solvers.SolverVBD(model, iterations=1, rigid_contact_activation_guard=guard)
+            observables = solver.observables({solver.ObservableKind.SOLVER_RESIDUAL_HISTORY}) if residual else None
+            state, out = model.state(), model.state()
+            pipeline.collide(state, contacts)
+            test.assertGreater(int(contacts.rigid_contact_count.numpy()[0]), 0)
+            solver.step(state, out, model.control(), contacts, dt, observables=observables)
+            travel[guard, residual] = float(model.body_q.numpy()[body, 2] - out.body_q.numpy()[body, 2])
+            if residual:
+                residuals[guard] = observables.solver_residual_history.numpy().copy()
+    # The unguarded sweep takes the whole drive step and ends deep in the ground.
+    test.assertGreater(travel[False, False], 5.0 * clearance)
+    # The guard adds the crossed rows' normal metric and solves again from the same iterate.
+    test.assertLess(travel[True, False], 0.6 * travel[False, False])
+    test.assertGreater(travel[True, False], 0.0)
+    for guard in (False, True):
+        test.assertAlmostEqual(travel[guard, True], travel[guard, False], delta=2.0e-7)
+    # One iteration from the same start: the guard's added metric carries no force and must not
+    # lower the recorded residual of that start.
+    test.assertGreater(float(residuals[False].max()), 0.0)
+    np.testing.assert_allclose(residuals[True], residuals[False], rtol=1.0e-5, atol=0.0)
 
 
 def test_pair_rotations_and_offset_com(test, device):
@@ -227,18 +279,23 @@ class TestRigidContactActivation(unittest.TestCase):
         builder.add_body(mass=1.0, inertia=wp.mat33(np.eye(3)))
         builder.color()
         model = builder.finalize(device="cpu")
-        with self.assertRaisesRegex(ValueError, "requires compliant ALM and internal"):
+        with self.assertRaisesRegex(ValueError, "requires internal rigid integration"):
             newton.solvers.SolverVBD(
                 model, rigid_contact_activation_guard=True, integrate_with_external_rigid_solver=True
             )
-        with self.assertRaisesRegex(ValueError, "legacy AVBD.*removed"):
-            newton.solvers.SolverVBD(model, rigid_contact_activation_guard=True, rigid_compliant_alm=False)
+        default_solver = newton.solvers.SolverVBD(model)
+        guarded_solver = newton.solvers.SolverVBD(model, rigid_contact_activation_guard=True)
+        self.assertFalse(default_solver.rigid_contact_activation_guard)
+        self.assertTrue(guarded_solver.rigid_contact_activation_guard)
+        with self.assertRaises(AttributeError):
+            default_solver.rigid_contact_activation_guard = True
 
 
 for test_name, test_function in (
     ("test_metric_oracle", test_metric_oracle),
     ("test_pair_rotations_and_offset_com", test_pair_rotations_and_offset_com),
     ("test_departure_and_capture", test_departure_and_capture),
+    ("test_crossing_trial_is_shortened", test_crossing_trial_is_shortened),
 ):
     add_function_test(TestRigidContactActivation, test_name, test_function, devices=get_test_devices())
 

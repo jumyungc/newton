@@ -249,12 +249,13 @@ penalty spring and damping forces. Configure the global gains with
 ``joint_mimic_ke`` and ``joint_mimic_kd`` on the solver. As with other explicit
 springs, stronger gains may require a smaller simulation time step.
 :class:`newton.solvers.SolverXPBD` and :class:`newton.solvers.SolverVBD` enforce
-relationships between revolute, prismatic, and D6 joints with coupled
-maximal-coordinate corrections. Both approaches act on the follower and the
-reference joint, so forces applied to the follower also affect the reference.
-VBD performs one mimic correction after each rigid-body iteration. Increase
-the solver's ``iterations`` setting when mimic relationships need tighter
-convergence.
+relationships between revolute, prismatic, and D6 joints in maximal
+coordinates. Both approaches act on the follower and the reference joint, so
+forces applied to the follower also affect the reference. XPBD applies one
+coupled correction per iteration. VBD adds one finite-stiffness row per
+mimicked coordinate to its rigid body solve, with stiffness
+``rigid_joint_linear_ke`` or ``rigid_joint_angular_ke``. Increase the solver's
+``iterations`` setting when mimic relationships need tighter convergence.
 :class:`newton.solvers.SolverFeatherstone` applies the same relationships in
 generalized coordinates. It removes follower degrees of freedom from the
 dynamics solve and transfers their forces and inertia to the reference joint.

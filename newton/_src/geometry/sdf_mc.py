@@ -121,25 +121,43 @@ def int_to_vec3f(x: wp.int32, y: wp.int32, z: wp.int32):
 
 @wp.func
 def get_triangle_fraction(vert_depths: wp.vec3f, num_inside: wp.int32) -> wp.float32:
-    """Compute the fraction of a triangle's area inside its linear zero contour."""
+    """Compute the fraction of a triangle's area that lies inside the object.
+
+    Uses linear interpolation along edges to estimate where the zero-crossing
+    occurs, then computes the area ratio. Returns 1.0 if all vertices inside,
+    0.0 if all outside, or a proportional fraction for partial intersections.
+    """
     if num_inside == 3:
         return 1.0
+
     if num_inside == 0:
         return 0.0
 
+    # Rotate the distinct vertex into d0 without dynamic vector indexing. The
+    # latter forces this three-float value into thread-local memory on CUDA.
     d0 = vert_depths[0]
     d1 = vert_depths[1]
     d2 = vert_depths[2]
     if num_inside == 1:
+        # Find the one vertex that IS inside (negative depth)
         if vert_depths[1] < 0.0:
-            d0, d1, d2 = vert_depths[1], vert_depths[2], vert_depths[0]
+            d0 = vert_depths[1]
+            d1 = vert_depths[2]
+            d2 = vert_depths[0]
         elif vert_depths[2] < 0.0:
-            d0, d1, d2 = vert_depths[2], vert_depths[0], vert_depths[1]
-    else:
+            d0 = vert_depths[2]
+            d1 = vert_depths[0]
+            d2 = vert_depths[1]
+    else:  # num_inside == 2
+        # Find the one vertex that is NOT inside (non-negative depth)
         if vert_depths[1] >= 0.0:
-            d0, d1, d2 = vert_depths[1], vert_depths[2], vert_depths[0]
+            d0 = vert_depths[1]
+            d1 = vert_depths[2]
+            d2 = vert_depths[0]
         elif vert_depths[2] >= 0.0:
-            d0, d1, d2 = vert_depths[2], vert_depths[0], vert_depths[1]
+            d0 = vert_depths[2]
+            d1 = vert_depths[0]
+            d2 = vert_depths[1]
 
     scale = wp.max(wp.abs(d0), wp.max(wp.abs(d1), wp.abs(d2)))
     d0, d1, d2 = d0 / scale, d1 / scale, d2 / scale
@@ -199,6 +217,7 @@ def mc_calc_face(
         - vertices: 3x3 matrix with vertex positions as rows
     """
     face_verts = wp.mat33f()
+    face_offsets = wp.mat33f()
     vert_depths = wp.vec3f()
     num_inside = wp.int32(0)
     for vi in range(3):
@@ -220,6 +239,7 @@ def mc_calc_face(
             # at the same corner, producing degenerate (zero-area) triangles.
             t = wp.clamp((isovalue - val_0) / val_diff, MC_EDGE_CLAMP_MIN, MC_EDGE_CLAMP_MAX)
             p = p_0 + t * (p_1 - p_0)
+        face_offsets[vi] = wp.volume_index_to_world_dir(sdf_a, p)
         vol_idx = p + int_to_vec3f(x_id, y_id, z_id)
         p_scaled = wp.volume_index_to_world(sdf_a, vol_idx)
         face_verts[vi] = p_scaled
@@ -230,7 +250,9 @@ def mc_calc_face(
         if depth < 0.0:
             num_inside += 1
 
-    n, edge_scale = _scaled_triangle_cross(face_verts[0], face_verts[1], face_verts[2])
+    # Form triangle edges from voxel-local offsets so large voxel indices or volume
+    # translations cannot round small faces in float32 before normalization.
+    n, edge_scale = _scaled_triangle_cross(face_offsets[0], face_offsets[1], face_offsets[2])
     n_sq = wp.dot(n, n)
     if n_sq < MC_DEGENERATE_N_SQ_EPS:
         # Degenerate triangle — return zero area with a valid (non-NaN) normal.

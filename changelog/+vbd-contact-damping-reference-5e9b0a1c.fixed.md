@@ -1,1 +1,0 @@
-Keep compliant VBD contact damping referenced to the directly evaluated step-start gap, avoiding iterate-dependent float32 cancellation in force and multiplier updates without changing the material law or solve budget.

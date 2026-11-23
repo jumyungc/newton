@@ -13,6 +13,7 @@ from newton.tests.unittest_utils import add_function_test, get_test_devices
 
 
 def test_mimic_reference_notify_recapture(test, device):
+    """Match a new solver after a mimic is rerouted, disabled and restored through notification."""
     with wp.ScopedDevice(device):
         builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
         joints = []

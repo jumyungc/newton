@@ -1581,6 +1581,7 @@ def _generate_dense_mc_kernel(
         if fi >= num_faces:
             return
         face_verts = wp.mat33f()
+        face_offsets = wp.mat33f()
         for vi in range(3):
             ev = wp.vec2i(flat_edge_verts_table[tri_start + 3 * fi + vi])
             val_0 = wp.float32(corner_vals[ev[0]])
@@ -1593,13 +1594,16 @@ def _generate_dense_mc_kernel(
             else:
                 t = wp.clamp((0.0 - val_0) / val_diff, MC_EDGE_CLAMP_MIN, MC_EDGE_CLAMP_MAX)
                 p = p_0 + t * (p_1 - p_0)
+            face_offsets[vi] = wp.cw_mul(p, voxel_size)
             local = base + p
             face_verts[vi] = wp.vec3(
                 origin[0] + local[0] * voxel_size[0],
                 origin[1] + local[1] * voxel_size[1],
                 origin[2] + local[2] * voxel_size[2],
             )
-        n, _edge_scale = _scaled_triangle_cross(face_verts[0], face_verts[1], face_verts[2])
+        # Form triangle edges from voxel-local offsets so grid origins or voxel indices
+        # far from zero cannot round small faces in float32 before normalization.
+        n, _edge_scale = _scaled_triangle_cross(face_offsets[0], face_offsets[1], face_offsets[2])
         n_sq = wp.dot(n, n)
         if n_sq < MC_DEGENERATE_N_SQ_EPS:
             normal = wp.vec3(0.0, 0.0, 1.0)

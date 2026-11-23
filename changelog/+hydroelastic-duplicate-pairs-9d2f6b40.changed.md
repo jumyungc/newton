@@ -1,0 +1,1 @@
+Reject duplicate or reversed unordered hydroelastic shape pairs in deterministic model-based collision pipelines with `ValueError`, which keeps their contact identities unique; remove the duplicate entries from the pair list.

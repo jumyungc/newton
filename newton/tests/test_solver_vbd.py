@@ -9468,6 +9468,56 @@ def test_rigid_contact_first_order_torque_is_exact_gradient(test, device):
         )
         np.testing.assert_allclose(force.numpy(), np.tile([0.0, 0.0, k_eff * depth], (n, 1)), rtol=1.0e-5)
 
+        # The body solve's gather composes the row inline: it must chain the same torque through the
+        # rotation update at these in-step angles, at both lane widths.
+        for width in (
+            rigid_vbd_kernels._NUM_CONTACT_THREADS_PER_BODY,
+            rigid_vbd_kernels._WIDE_CONTACT_THREADS_PER_BODY,
+        ):
+            gathered = [wp.zeros(n, dtype=wp.vec3), wp.zeros(n, dtype=wp.vec3)]
+            gathered += [wp.zeros(n, dtype=wp.mat33) for _ in range(3)]
+            wp.launch(
+                rigid_vbd_kernels.create_accumulate_body_body_contacts_per_body(width),
+                dim=n * width,
+                inputs=[
+                    0.002,
+                    wp.array(np.arange(n), dtype=int),
+                    wp.array(body_q_prev, dtype=wp.transform),
+                    wp.array(body_q, dtype=wp.transform),
+                    wp.zeros(n, dtype=wp.vec3),
+                    wp.ones(n),
+                    wp.zeros(n, dtype=int),
+                    1.0e-4,
+                    False,  # contact_damping_bidirectional
+                    wp.full(n, 1.0e4),
+                    wp.full(n, 1.0e3),
+                    wp.zeros(n),
+                    wp.zeros(n),
+                    wp.full(n, 1.0e4),
+                    wp.zeros(n, dtype=wp.vec3),
+                    wp.zeros(n, dtype=wp.vec3),
+                    0.0,
+                    wp.array([n], dtype=int),
+                    wp.zeros(n, dtype=int),
+                    wp.array(np.arange(1, n + 1), dtype=int),
+                    wp.zeros(n, dtype=wp.vec3),
+                    wp.array(np.tile(point, (n, 1)), dtype=wp.vec3),
+                    wp.zeros(n, dtype=wp.vec3),
+                    wp.zeros(n, dtype=wp.vec3),
+                    wp.zeros(n, dtype=wp.vec3),
+                    wp.array(np.tile([0.0, 0.0, 1.0], (n, 1)), dtype=wp.vec3),
+                    wp.zeros(n),
+                    wp.zeros(n),
+                    wp.array(np.arange(-1, n), dtype=int),
+                    1,
+                    wp.ones(n, dtype=int),
+                    wp.array(np.arange(n), dtype=int),
+                ],
+                outputs=gathered,
+            )
+            np.testing.assert_allclose(gathered[0].numpy(), np.tile([0.0, 0.0, k_eff * depth], (n, 1)), rtol=1.0e-5)
+            np.testing.assert_allclose(gathered[1].numpy()[:, 1], np.asarray(expected), rtol=1.0e-5)
+
 
 add_function_test(
     TestSolverVBD,
@@ -9485,7 +9535,8 @@ def test_rigid_contact_warm_multiplier_has_tangential_friction(test, device):
     cone = 0.5 * normal_force
     normal_metric = np.diag([0.0, 0.0, rho * material_k / (rho + material_k)])
     # The warm tangent (2 N) is outside the cone at zero incremental slip.
-    tangent_metric = np.diag([2.0 * cone / (epsilon * dt), cone / 2.0 * tangent_rho, 0.0])
+    secant_rho = cone / 2.0 * tangent_rho
+    tangent_metric = np.diag([secant_rho, secant_rho, 0.0])
     centers = np.array([[0.1, -0.2, 0.1], [-0.2, 0.1, -0.05]], dtype=np.float32)
     points = np.array([[0.3, 0.2, 0.0], [0.3, 0.2, -depth]], dtype=np.float32)
     offsets = np.array([[0.02, -0.01, 0.005], [-0.01, 0.03, 0.004]], dtype=np.float32)

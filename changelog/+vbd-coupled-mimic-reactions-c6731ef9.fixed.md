@@ -1,1 +1,0 @@
-Couple joint-owned mimic reactions into `SolverVBD` body sweeps instead of projecting poses afterwards, using finite linear/angular joint stiffness; reset mimic multipliers by world and refresh notified model bindings.

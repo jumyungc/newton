@@ -321,6 +321,7 @@ def mc_calc_face_texture(
     :attr:`HydroelasticSDF.Config.mc_edge_clamp_min`.
     """
     face_verts = wp.mat33f()
+    face_offsets = wp.mat33f()
     vert_adjusted_sdf = wp.vec3f()
     vert_pair_separation = wp.vec3f()
     num_inside = wp.int32(0)
@@ -351,6 +352,7 @@ def mc_calc_face_texture(
         vol_idx = p + int_to_vec3f(x_id, y_id, z_id)
         local_pos = sdf_a.sdf_box_lower + wp.cw_mul(vol_idx, sdf_a.voxel_size)
         face_verts[vi] = local_pos
+        face_offsets[vi] = wp.cw_mul(p, sdf_a.voxel_size)
         adjusted_sdf_from = corner_sdfs_from[0]
         adjusted_sdf_to = corner_sdfs_to[0]
         other_adjusted_sdf_from = corner_sdfs_from[1]
@@ -363,7 +365,9 @@ def mc_calc_face_texture(
         if pair_separation < 0.0:
             num_inside += 1
 
-    n, edge_scale = _scaled_triangle_cross(face_verts[0], face_verts[1], face_verts[2])
+    # Orientation and area come from the offsets inside the voxel. The grid index added to the
+    # vertices rounds a triangle smaller than its float32 spacing to a few lattice points.
+    n, edge_scale = _scaled_triangle_cross(face_offsets[0], face_offsets[1], face_offsets[2])
     n_sq = wp.dot(n, n)
     if n_sq < MC_DEGENERATE_N_SQ_EPS:
         # Degenerate triangle — return zero area with a valid (non-NaN) normal.
@@ -426,7 +430,7 @@ class HydroelasticSDF:
         information from the simulation :class:`~newton.Model`.
 
         Deterministic face identities support 419,430 iso voxels per shape pair.
-        Each unordered shape pair must occur only once in the input stream.
+        In deterministic mode each unordered shape pair must occur only once in the input stream.
         Model-based construction validates this requirement; direct callers of
         :meth:`launch` must provide unique pairs themselves.
 
@@ -453,11 +457,12 @@ class HydroelasticSDF:
         buffers from their default estimated capacities before applying stage
         multipliers. Lower values reduce memory usage and may cause overflows in
         dense scenes. Overflows are bounds-safe and emit warnings; increase this
-        value when warnings appear. Deterministic identities support at most
-        419,430 iso voxels per shape pair, and the face buffer supports at most
-        1,048,575 faces across all pairs. Buffer multipliers cannot raise these
-        limits. Reduce SDF resolution for a per-pair overflow or use fewer
-        worlds for a face-buffer overflow.
+        value when warnings appear. In deterministic mode (also enabled by contact
+        matching), face identities support at most 419,430 iso voxels per shape
+        pair and the face buffer at most 1,048,575 faces across all pairs; buffer
+        settings cannot raise these limits. Reduce SDF resolution for a per-pair
+        overflow, use fewer worlds for a face-buffer overflow, or disable
+        determinism and contact matching.
         """
         buffer_mult_broad: int = 1
         """Multiplier for the preallocated broadphase buffer that stores overlapping
@@ -621,8 +626,8 @@ class HydroelasticSDF:
 
         self.config = config
         self.deterministic = deterministic
-        if device is None:
-            device = wp.get_device()
+        # Normalize None and device aliases such as "cuda:0": launch() reads Device attributes.
+        device = wp.get_device(device)
         self.device = device
 
         self.shape_material_kh = shape_material_kh
@@ -2316,6 +2321,11 @@ def get_generate_contacts_kernel(
 
                 if keep_count > 0:
                     base = wp.atomic_add(reducer_data.contact_count, 0, keep_count)
+                    dropped = wp.min(keep_count, base - reducer_data.capacity + keep_count)
+                    if dropped > 0:
+                        # The count keeps its overshoot, which the overflow message reports. Count the
+                        # dropped faces too, so the pipeline latches the loss on the contact stream.
+                        wp.atomic_add(reducer_data.buffer_overflows, 0, dropped)
                     if base < reducer_data.capacity:
                         out_idx = base
 
@@ -2456,8 +2466,9 @@ def verify_collision_step(
             max_face_contact_count,
         )
         has_overflow = True
-    if face_contact_overflows[0] > 0:
-        # Failed reservations roll back contact_count, so the count alone cannot reveal this loss.
+    elif face_contact_overflows[0] > 0:
+        # Failed single reservations roll back contact_count, so the count alone cannot reveal this
+        # loss. Batched reservations keep their overshoot in the count and are reported above.
         if deterministic and max_face_contact_count == (1 << int(CONTACT_ID_BITS)) - 1:
             wp.printf(
                 "  [hydroelastic] face contact overflow: %d faces dropped at the deterministic limit of %d. "

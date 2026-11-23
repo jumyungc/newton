@@ -45,7 +45,7 @@ from ..tendon_state import TendonStateMixin
 from ..xpbd import kernels as xpbd_kernels
 from ..xpbd.kernels import apply_joint_forces
 from . import particle_vbd_kernels, rigid_vbd_kernels, vbd_coupling_kernels
-from .joint_mimic_kernels import JointMimicData, accumulate_joint_mimics, update_joint_mimic_duals
+from .joint_mimic_kernels import JointMimicData, accumulate_joint_mimics, step_joint_mimics, update_joint_mimic_duals
 from .particle_vbd_kernels import (
     NUM_THREADS_PER_COLLISION_PRIMITIVE,
     TILE_SIZE_TRI_MESH_ELASTICITY_SOLVE,
@@ -256,7 +256,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         Each rigid contact reads positive stiffness and damping overrides from
         :attr:`newton.Contacts.rigid_contact_stiffness`,
         :attr:`newton.Contacts.rigid_contact_damping` when those arrays are
-        allocated (as used by hydroelastic contact patches); non-positive entries
+        allocated (hydroelastic contact patches write the stiffness and, with contact
+        reduction, the friction scale, not the damping); non-positive entries
         fall back to the shape-pair arithmetic averages of ``model.shape_material_ke``
         and ``model.shape_material_kd``. A positive
         :attr:`newton.Contacts.rigid_contact_friction` instead scales the geometric
@@ -512,8 +513,9 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             iterations: Number of VBD iterations per step. If ``None``, use the registered
                 ``newton:maxSolverIterations`` scene value, or ``10`` if absent or ``-1``.
                 Explicit values override the scene.
-            friction_epsilon: Threshold to smooth small relative velocities in friction computation (used for both particle
-                and rigid body contacts).
+            friction_epsilon: Small sliding-speed threshold [m/s]. Regularizes
+                particle and rigid-soft friction.
+                Does not affect compliant-ALM rigid-rigid contacts.
             soft_contact_damping_bidirectional: Whether the damping of soft contacts (soft self-contact, driven
                 by ``Model.soft_contact_kd``, and rigid-soft contacts, driven by the mean of
                 ``Model.soft_contact_kd`` and the shape's ``Model.shape_material_kd``) also acts while a
@@ -591,11 +593,12 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 .. deprecated:: 1.9
 
             rigid_contact_activation_guard: Constructor-only stabilization of inactive rigid contact rows
-                crossed by the actual body Newton trial. Requires compliant ALM and internal
-                rigid integration. Per colour and local iteration with a rigid contact buffer,
-                adds one provisional body solve, one normal-metric gather and one pose copy.
-                Forces, materials and the number of dual updates are unchanged. Extra scratch
-                is one transform per body. Defaults to ``False``; this is not a convergence guarantee.
+                crossed by the actual body Newton trial. Requires internal rigid integration. With a
+                rigid contact buffer it adds one provisional body solve and one normal-metric gather
+                per color and iteration, plus one pose copy at the start of each iteration. With
+                ``rigid_soft_enable_dat``, it also copies poses after each color. Forces, materials
+                and the number of dual updates are unchanged. Extra scratch is one transform and one integer
+                flag per body. Defaults to ``False``; this is not a convergence guarantee.
 
                 .. experimental::
                     ``rigid_contact_activation_guard`` may change or be removed without prior notice.
@@ -633,17 +636,6 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 retention is set separately by ``rigid_avbd_gamma``.
             rigid_avbd_gamma: Per-step retention factor for persisted lambda in joints,
                 particle-body attachments, and validated contacts. Lower values discard history faster.
-            rigid_contact_tangent_scale: Numerical scale for the automatic compliant-ALM
-                tangential contact weight [dimensionless]. Must be finite and at least one. Both endpoints and the
-                dual update use the same scaled weight; material stiffness, friction coefficient and
-                Coulomb fixed points are unchanged. The existing simultaneous-body solve metric
-                remains in effect for dynamic bodies in the same color.
-                Larger values are not monotonically better and can slow convergence of other modes.
-                This runtime-only conditioning option requires internal rigid integration and ALM
-                when greater than one; it is not an authored material property or a USD attribute.
-
-                .. experimental::
-                    ``rigid_contact_tangent_scale`` may change or be removed without prior notice.
             rigid_contact_history: Whether to persist body-body numeric contact state
                 across steps using ``Contacts.rigid_contact_match_index``. Compliant ALM
                 restores the normal and projected tangential multipliers for
@@ -665,11 +657,29 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 or run one uncaptured solver step before capture.
                 ``None`` (default) reads ``model.vbd.rigid_contact_history`` when
                 registered, otherwise uses ``False``.
+            rigid_contact_tangent_scale: Numerical scale for the automatic compliant-ALM
+                tangential contact weight [dimensionless]. Must be finite and at least one. Both endpoints and the
+                dual update use the same scaled weight; material stiffness, friction coefficient and
+                Coulomb fixed points are unchanged. The existing simultaneous-body solve metric
+                remains in effect for dynamic bodies in the same color.
+                Larger values are not monotonically better and can slow convergence of other modes.
+                In tangential-displacement units, the Coulomb projection disk has radius
+                ``mu * f_n / rho_t``, which shrinks in inverse proportion to the scale. The distance to its
+                boundary also depends on the current displacement and retained tangential multiplier.
+                When the radius approaches float32 pose resolution, a representable correction can
+                overshoot the disk and cause friction chatter or drift. A row already at rest inside
+                the disk can still stick. Use the smallest scale the task needs.
+                This solver-side conditioning option requires internal rigid integration when greater
+                than one; it is not an authored material property or a USD attribute.
+
+                .. experimental::
+                    ``rigid_contact_tangent_scale`` may change or be removed without prior notice.
             rigid_contact_damping_bidirectional: Whether body-body contact damping also acts while the
                 bodies separate. Its coefficient is the mean of the two shapes' ``kd``, subject to per-contact
-                material overrides. The default ``False`` uses compression-increment damping by default. ``True`` uses signed normal-velocity
-                damping in both directions while the elastic row carries load, separate from the elastic ALM
-                multiplier and friction bound. The total normal force can become attractive during unloading.
+                material overrides. The default ``False`` damps only the compression gained since the step
+                start; unloading is undamped. ``True`` uses signed normal-velocity damping in both directions
+                while the elastic row carries load, separate from the elastic ALM multiplier and friction
+                bound. The total normal force can become attractive during unloading.
             rigid_body_contact_buffer_size: Max body-body contacts per rigid body for per-body contact lists.
             rigid_body_particle_contact_buffer_size: Capacity of the per-body soft-contact adjacency
                 list, including currently ineligible mesh candidates. If a body's list overflows, force
@@ -849,16 +859,16 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         self.rigid_compliant_alm = True
 
         if rigid_contact_activation_guard and integrate_with_external_rigid_solver:
-            raise ValueError("rigid_contact_activation_guard requires compliant ALM and internal rigid integration.")
+            raise ValueError("rigid_contact_activation_guard requires internal rigid integration.")
         if rigid_adaptive_initialization and integrate_with_external_rigid_solver:
             raise ValueError("rigid_adaptive_initialization requires internal rigid integration.")
-        self.rigid_adaptive_initialization = bool(rigid_adaptive_initialization)
+        self._rigid_adaptive_initialization = bool(rigid_adaptive_initialization)
 
         if not np.isfinite(rigid_contact_tangent_scale) or rigid_contact_tangent_scale < 1.0:
             raise ValueError("rigid_contact_tangent_scale must be finite and at least one.")
         if rigid_contact_tangent_scale > 1.0 and integrate_with_external_rigid_solver:
-            raise ValueError("rigid_contact_tangent_scale > 1 requires compliant ALM and internal rigid integration.")
-        self.rigid_contact_tangent_scale = float(rigid_contact_tangent_scale)
+            raise ValueError("rigid_contact_tangent_scale > 1 requires internal rigid integration.")
+        self._rigid_contact_tangent_scale = float(rigid_contact_tangent_scale)
 
         # Self-contact geometry: margin/gap scheme (margin = interaction distance,
         # detection query radius = margin + gap). The legacy radius/margin pair is
@@ -995,7 +1005,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             raise ValueError(
                 "SolverVBD(rigid_contact_history=True) with an owned pipeline requires contact "
                 "matching for the warm-start restore; construct the pipeline with "
-                "contact_matching='latest' (or 'sticky' for persistent friction anchors). "
+                "contact_matching='latest' or 'sticky'. "
                 "Alternatively, set rigid_contact_history=False."
                 + (
                     " The value came from the scene (model.vbd.rigid_contact_history, "
@@ -1100,7 +1110,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
 
         # Common parameters
         self.iterations = iterations
-        self.rigid_contact_activation_guard = bool(rigid_contact_activation_guard)
+        self._rigid_contact_activation_guard = bool(rigid_contact_activation_guard)
         self._rigid_contact_trial_q = None
         self._rigid_contact_activated = None
         self.friction_epsilon = friction_epsilon
@@ -1183,6 +1193,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             self._joint_mimics.body_colors = self._body_colors
             self._joint_mimics.linear_ke = self.rigid_joint_linear_ke
             self._joint_mimics.angular_ke = self.rigid_joint_angular_ke
+            self._joint_mimics.support = wp.zeros((model.joint_count, 6), dtype=float, device=self.device)
             self._joint_mimics.lambda_ = wp.zeros((model.joint_count, 6), dtype=float, device=self.device)
             self._refresh_joint_mimic_color_groups()
 
@@ -1413,11 +1424,11 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             # Previous step's length and start-of-step velocity, for adaptive initialization.
             self._rigid_step_dt_prev = wp.zeros(1, dtype=float, device=self.device)
             self._body_qd_prev = wp.zeros(
-                model.body_count if self.rigid_adaptive_initialization else 0,
+                model.body_count if self._rigid_adaptive_initialization else 0,
                 dtype=wp.spatial_vector,
                 device=self.device,
             )
-            if self.rigid_contact_activation_guard:
+            if self._rigid_contact_activation_guard:
                 self._rigid_contact_trial_q = wp.empty_like(model.body_q, device=self.device)
                 self._rigid_contact_activated = wp.zeros(model.body_count, dtype=wp.int32, device=self.device)
 
@@ -1622,7 +1633,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         :attr:`~newton.ModelFlags.JOINT_PROPERTIES`, which rebinds their arrays
         and clears their multipliers. Replacing model arrays requires recapturing
         step graphs after notification; existing graphs retain their old pointers.
-        Mimic topology is fixed at solver construction.
+        A solver built on a model without a supported mimic relationship ignores
+        relationships added later; construct a new solver for them.
         """
         self._apply_module_options()
         if flags & ModelFlags.TENDON_PROPERTIES:
@@ -1662,6 +1674,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             if flags & ModelFlags.JOINT_PROPERTIES:
                 for name in ("joint_enabled", "joint_X_p", "joint_X_c", "joint_mimic_joint", "joint_mimic_coeffs"):
                     setattr(self._joint_mimics, name, getattr(self.model, name))
+                self._joint_mimics.support.zero_()
                 self._joint_mimics.lambda_.zero_()
                 self._refresh_joint_mimic_color_groups()
             if flags & ModelFlags.JOINT_DOF_PROPERTIES:
@@ -1696,6 +1709,21 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             wp.array(f_list, dtype=int, device=self.device) if f_list else None for f_list in by_color
         )
 
+    @property
+    def rigid_adaptive_initialization(self) -> bool:
+        """Whether rigid iterations adapt their initial center-of-mass positions (experimental, read-only)."""
+        return self._rigid_adaptive_initialization
+
+    @property
+    def rigid_contact_activation_guard(self) -> bool:
+        """Whether rigid iterations guard inactive contact crossings (experimental, read-only)."""
+        return self._rigid_contact_activation_guard
+
+    @property
+    def rigid_contact_tangent_scale(self) -> float:
+        """Numerical scale factor for automatic compliant-ALM tangent rho (experimental, read-only)."""
+        return self._rigid_contact_tangent_scale
+
     @override
     def coupling_supports_inertial_property_refresh(self) -> bool:
         return True
@@ -1707,7 +1735,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
     @override
     def coupling_notify_iteration_restarts(self, enabled: bool) -> None:
         """Reject adaptive initialization when a coupler repeats the same step interval."""
-        if enabled and self.rigid_adaptive_initialization:
+        if enabled and self._rigid_adaptive_initialization:
             raise ValueError("rigid_adaptive_initialization does not support coupling iteration restarts.")
 
     def coupling_notify_input_state_update(
@@ -1831,7 +1859,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         body_q_prev = self._coupling_body_q_prev_snapshot
 
         if contacts.rigid_contact_max > 0:
-            body0, body1, point0, point1, force_on_body1, rigid_contact_count = self.collect_rigid_contact_forces(
+            body0, body1, _point0, _point1, force_on_body1, rigid_contact_count = self.collect_rigid_contact_forces(
                 state_out.body_q,
                 body_q_prev,
                 contacts,
@@ -1844,9 +1872,12 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                     rigid_contact_count,
                     body0,
                     body1,
-                    point0,
-                    point1,
+                    contacts.rigid_contact_point0,
+                    contacts.rigid_contact_point1,
                     force_on_body1,
+                    contacts.rigid_contact_normal,
+                    contacts.rigid_contact_offset0,
+                    contacts.rigid_contact_offset1,
                     self.model.body_inv_mass,
                     self.model.body_flags,
                     body_local_to_proxy_global,
@@ -3900,7 +3931,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 lambda_retention,
                 1.0 / (dt * dt),
                 self.body_body_contact_material_ke,
-                self.rigid_contact_tangent_scale,
+                self._rigid_contact_tangent_scale,
             ],
             outputs=[
                 self.body_body_contact_normal_rho,
@@ -3973,6 +4004,21 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                     self.rigid_avbd_gamma,
                 )
 
+            if self._joint_mimics is not None:
+                wp.launch(
+                    kernel=step_joint_mimics,
+                    dim=model.joint_count,
+                    inputs=[
+                        self._joint_mimics,
+                        state_in.body_q,
+                        self.body_inv_mass_effective,
+                        self.body_inv_inertia_effective,
+                        1.0 / (dt * dt) if dt > 0.0 else 0.0,
+                        self.rigid_avbd_gamma,
+                    ],
+                    device=self.device,
+                )
+
             # Accumulate joint_f into body wrenches (scratch buffer avoids mutating user state).
             body_f_for_integration = state_in.body_f
             if model.joint_count > 0 and control is not None and control.joint_f is not None:
@@ -4008,7 +4054,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 kernel=forward_step_rigid_bodies,
                 inputs=[
                     dt,
-                    int(self.rigid_adaptive_initialization and self.iterations > 0),
+                    int(self._rigid_adaptive_initialization and self.iterations > 0),
                     self._rigid_step_dt_prev,
                     model.gravity,
                     model.body_world,
@@ -4570,13 +4616,13 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
 
         body_color_groups = model.body_color_groups
         guard_active = (
-            self.rigid_contact_activation_guard
+            self._rigid_contact_activation_guard
             and contacts is not None
             and contacts.rigid_contact_max > 0
             and model.shape_count > 0
         )
         if guard_active:
-            # Every pose update below also writes the trial buffer, so one copy per iteration suffices.
+            # Body solves update the trial buffer; DAT truncation refreshes it below.
             wp.copy(self._rigid_contact_trial_q, state_in.body_q)
 
         # Gauss-Seidel-style per-color updates
@@ -4808,11 +4854,13 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             if guard_active:
                 # Keep the iterate unchanged until the guard has examined the full trial,
                 # including joint, mimic, attachment, tendon and active-contact forces.
+                # The residual belongs to this iterate, so the provisional solve records it:
+                # the guard's metric has no force and must not lower it.
                 wp.launch(
                     self._solve_rigid_body_kernel,
                     dim=color_group.size,
                     inputs=body_solve_inputs,
-                    outputs=[self._rigid_contact_trial_q, None, None, None],
+                    outputs=[self._rigid_contact_trial_q, None, None, world_residual],
                     block_dim=solve_block_dim,
                     device=self.device,
                 )
@@ -4866,7 +4914,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                         state_in.body_q,
                         self._rigid_contact_trial_q,
                         self._rigid_contact_activated,
-                        world_residual,
+                        None,
                     ],
                     block_dim=solve_block_dim,
                     device=self.device,

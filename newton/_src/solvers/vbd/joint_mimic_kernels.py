@@ -35,6 +35,7 @@ class JointMimicData:
     body_colors: wp.array[int]
     linear_ke: float
     angular_ke: float
+    support: wp.array2d[float]
     lambda_: wp.array2d[float]
 
 
@@ -54,10 +55,12 @@ def _supported(joint_type: int):
 @wp.func
 def _active(data: JointMimicData, follower: int):
     reference = data.joint_mimic_joint[follower]
-    if reference < 0 or not data.joint_enabled[follower]:
+    if reference < 0 or reference >= data.joint_type.shape[0] or not data.joint_enabled[follower]:
         return False
     return (
         data.joint_enabled[reference]
+        and data.joint_child[follower] >= 0
+        and data.joint_child[reference] >= 0
         and _supported(data.joint_type[follower])
         and _supported(data.joint_type[reference])
     )
@@ -68,24 +71,34 @@ def _coordinate(data: JointMimicData, joint: int, component: int, body_q: wp.arr
     """Evaluate a supported coordinate and its derivatives about each body's COM."""
     parent = data.joint_parent[joint]
     child = data.joint_child[joint]
-    X_wp = data.joint_X_p[joint]
+    pose_c = body_q[child]
+    q_body_c = wp.transform_get_rotation(pose_c)
+    q_c = q_body_c * wp.transform_get_rotation(data.joint_X_c[joint])
+    q_p = wp.transform_get_rotation(data.joint_X_p[joint])
     if parent >= 0:
-        X_wp = body_q[parent] * X_wp
-    X_wc = body_q[child] * data.joint_X_c[joint]
-    q_p = wp.transform_get_rotation(X_wp)
-    q_c = wp.transform_get_rotation(X_wc)
+        q_p = wp.transform_get_rotation(body_q[parent]) * q_p
     linear_count = data.joint_dof_dim[joint, 0]
     start = data.joint_qd_start[joint]
     if component < linear_count:
         axis = wp.quat_rotate(q_p, data.joint_axis[start + component])
-        anchor_c = wp.transform_get_translation(X_wc)
-        separation = anchor_c - wp.transform_get_translation(X_wp)
-        coordinate = wp.dot(separation, axis)
-        # The prismatic coordinate's axis rotates with its parent frame.
+        p_c = wp.transform_get_translation(pose_c)
+        x_c = wp.transform_get_translation(data.joint_X_c[joint])
+        rel_c = wp.quat_rotate(q_body_c, x_c)
+        r_c = wp.quat_rotate(q_body_c, x_c - data.body_com[child])
+        # Subtract world origins before adding rotated body-local offsets so
+        # large world translations do not lose anchor precision; the prismatic
+        # axis rotates with its parent frame, giving lever anchor_c - com_p.
         r_p = wp.vec3(0.0)
+        separation = (p_c - wp.transform_get_translation(data.joint_X_p[joint])) + rel_c
         if parent >= 0:
-            r_p = anchor_c - wp.transform_point(body_q[parent], data.body_com[parent])
-        r_c = anchor_c - wp.transform_point(body_q[child], data.body_com[child])
+            pose_p = body_q[parent]
+            q_body_p = wp.transform_get_rotation(pose_p)
+            base_diff = p_c - wp.transform_get_translation(pose_p)
+            separation = base_diff + (
+                rel_c - wp.quat_rotate(q_body_p, wp.transform_get_translation(data.joint_X_p[joint]))
+            )
+            r_p = base_diff + (rel_c - wp.quat_rotate(q_body_p, data.body_com[parent]))
+        coordinate = wp.dot(separation, axis)
         return coordinate, wp.spatial_vector(-axis, -wp.cross(r_p, axis)), wp.spatial_vector(axis, wp.cross(r_c, axis))
 
     start += linear_count
@@ -148,6 +161,45 @@ def _row(data: JointMimicData, follower: int, component: int, body_q: wp.array[w
 
 
 @wp.kernel
+def step_joint_mimics(
+    data: JointMimicData,
+    body_q: wp.array[wp.transform],
+    body_inv_mass: wp.array[float],
+    body_inv_inertia: wp.array[wp.mat33],
+    inv_dt_sq: float,
+    lambda_retention: float,
+):
+    """Refresh each mimic row's inverse-Delassus support and decay retained multipliers."""
+    follower = wp.tid()
+    count = int(0)
+    if _active(data, follower):
+        count = data.joint_dof_dim[follower, 0] + data.joint_dof_dim[follower, 1]
+    for component in range(6):
+        if component < count:
+            row = _row(data, follower, component, body_q)
+            w = float(0.0)
+            for i in range(4):
+                body = row.bodies[i]
+                if body >= 0:
+                    inv_m = body_inv_mass[body]
+                    if inv_m > 0.0:
+                        gradient = row.gradients[i]
+                        linear = wp.spatial_top(gradient)
+                        angular_local = wp.quat_rotate_inv(
+                            wp.transform_get_rotation(body_q[body]),
+                            wp.spatial_bottom(gradient),
+                        )
+                        w += inv_m * wp.dot(linear, linear) + wp.dot(
+                            angular_local, body_inv_inertia[body] * angular_local
+                        )
+            data.support[follower, component] = inv_dt_sq / w if w > 0.0 else 0.0
+            data.lambda_[follower, component] = lambda_retention * data.lambda_[follower, component]
+        else:
+            data.support[follower, component] = 0.0
+            data.lambda_[follower, component] = 0.0
+
+
+@wp.kernel
 def accumulate_joint_mimics(
     followers: wp.array[int],
     data: JointMimicData,
@@ -167,7 +219,7 @@ def accumulate_joint_mimics(
     count = data.joint_dof_dim[follower, 0] + data.joint_dof_dim[follower, 1]
     for component in range(count):
         row = _row(data, follower, component, body_q)
-        rho = _bilateral_auto_rho(0.0, row.stiffness)
+        rho = _bilateral_auto_rho(data.support[follower, component], row.stiffness)
         s, stiffness, _a = _compliant_alm_coefficients(row.stiffness, rho)
         force = stiffness * row.error + s * data.lambda_[follower, component]
         concurrent = int(0)
@@ -200,7 +252,7 @@ def update_joint_mimic_duals(data: JointMimicData, body_q: wp.array[wp.transform
     for component in range(count):
         if _active(data, follower):
             row = _row(data, follower, component, body_q)
-            rho = _bilateral_auto_rho(0.0, row.stiffness)
+            rho = _bilateral_auto_rho(data.support[follower, component], row.stiffness)
             data.lambda_[follower, component] = _alm_relaxed_ascent(
                 data.lambda_[follower, component], row.error, row.stiffness, rho
             )

@@ -157,18 +157,73 @@ def test_tangent_scale_validation(test, device):
                 model, rigid_contact_tangent_scale=300.0, integrate_with_external_rigid_solver=True
             )
         # The neutral default remains valid when an external solver owns the bodies.
-        newton.solvers.SolverVBD(model, rigid_contact_tangent_scale=1.0, integrate_with_external_rigid_solver=True)
-        with test.assertRaisesRegex(ValueError, "legacy AVBD.*removed"):
-            newton.solvers.SolverVBD(model, rigid_contact_tangent_scale=1.0, rigid_compliant_alm=False)
+        ext = newton.solvers.SolverVBD(
+            model, rigid_contact_tangent_scale=1.0, integrate_with_external_rigid_solver=True
+        )
+        test.assertEqual(ext.rigid_contact_tangent_scale, 1.0)
+        scaled = newton.solvers.SolverVBD(model, rigid_contact_tangent_scale=300.0)
+        test.assertEqual(scaled.rigid_contact_tangent_scale, 300.0)
+        with test.assertRaises(AttributeError):
+            scaled.rigid_contact_tangent_scale = -1.0
 
 
 class TestRigidContactTangentScale(unittest.TestCase):
     pass
 
 
+def test_tangent_scale_secant_metric_converges(test, device):
+    """Converge sub-Coulomb braking to sticking equilibrium without cone-boundary chatter."""
+    with wp.ScopedDevice(device):
+        builder = newton.ModelBuilder(gravity=(0.0, 0.0, -9.81))
+        builder.begin_world()
+        cfg = builder.ShapeConfig(ke=1.0e5, kd=100.0, mu=1.0, density=0.0)
+        body = builder.add_body(
+            xform=wp.transform(wp.vec3(0.0, 0.0, 0.03 - 9.81e-6), wp.quat_identity()),
+            mass=0.1,
+            inertia=wp.mat33(np.eye(3) * 6.0e-5),
+            lock_inertia=True,
+        )
+        builder.add_shape_box(body, hx=0.03, hy=0.03, hz=0.03, cfg=cfg)
+        builder.end_world()
+        builder.add_ground_plane(cfg=cfg)
+        builder.color()
+        model = builder.finalize(device=device)
+
+        pipeline = newton.CollisionPipeline(model, contact_matching="latest")
+        contacts = pipeline.contacts()
+        dt = 1.0 / 600.0
+        solver = newton.solvers.SolverVBD(
+            model,
+            iterations=15,
+            rigid_contact_tangent_scale=1000.0,
+            rigid_contact_history=True,
+            rigid_adaptive_initialization=True,
+            rigid_contact_activation_guard=True,
+        )
+        obs = solver.observables({solver.ObservableKind.SOLVER_RESIDUAL_HISTORY})
+        state_in, state_out = model.state(), model.state()
+        braking_history = None
+        for step in range(25):
+            if step == 15:
+                qd = state_in.body_qd.numpy()
+                qd[0, 0] = 0.005
+                state_in.body_qd.assign(qd)
+            pipeline.collide(state_in, contacts)
+            solver.step(state_in, state_out, None, contacts, dt, observables=obs)
+            state_in, state_out = state_out, state_in
+            if step == 15:
+                braking_history = obs.solver_residual_history.numpy()[:, 0].copy()
+
+        settled_history = obs.solver_residual_history.numpy()[:, 0]
+        test.assertLess(float(braking_history[-1]), 1.0e-9)
+        test.assertLess(float(braking_history[-1]), 1.0e-3 * float(braking_history[0]))
+        test.assertLess(float(settled_history[-1]), 1.0e-9)
+
+
 for name, function in (
     ("test_tangent_scale_eligibility", test_tangent_scale_eligibility),
     ("test_tangent_scale_preserves_loaded_coulomb_state", test_tangent_scale_preserves_loaded_coulomb_state),
+    ("test_tangent_scale_secant_metric_converges", test_tangent_scale_secant_metric_converges),
 ):
     add_function_test(TestRigidContactTangentScale, name, function, devices=get_test_devices())
 add_function_test(

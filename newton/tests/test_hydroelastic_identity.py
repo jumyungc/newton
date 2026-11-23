@@ -48,9 +48,27 @@ def test_hydroelastic_pair_local_capacity(test, device):
         shape_material_kh=wp.ones(6, dtype=float, device=device),
         n_shapes=6,
         config=HydroelasticSDF.Config(reduce_contacts=False),
-        device=device,
+        device=str(device),
         deterministic=True,
     )
+    # Device aliases and ambient ScopedDevice defaults are normalized on both hydro and its reducer.
+    test.assertIs(hydro.device, device)
+    test.assertIs(hydro.contact_reduction.device, device)
+    test.assertIs(hydro.contact_reduction.reducer.device, device)
+    with wp.ScopedDevice(device):
+        scoped_hydro = HydroelasticSDF(
+            num_shape_pairs=1,
+            total_num_tiles=1,
+            total_num_active_tiles=1,
+            shape_material_kh=wp.ones(1, dtype=float, device=device),
+            n_shapes=1,
+            config=HydroelasticSDF.Config(buffer_fraction=0.01),
+        )
+    test.assertIs(scoped_hydro.device, device)
+    test.assertIs(scoped_hydro.contact_reduction.device, device)
+    test.assertIs(scoped_hydro.contact_reduction.reducer.device, device)
+    with wp.ScopedDevice("cpu"):
+        scoped_hydro.contact_reduction.clear()
     limit = _MAX_DETERMINISTIC_ISO_VOXELS_PER_PAIR
     test.assertGreater(hydro.max_num_iso_voxels, limit)
     test.assertEqual(hydro.max_num_face_contacts, (1 << 20) - 1)

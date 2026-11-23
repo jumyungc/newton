@@ -104,7 +104,9 @@ Under compliant ALM, friction responds to the anchors' relative displacement
 within the current step, including any prescribed surface velocity. It does
 not restore accumulated tangential displacement from an earlier step: doing
 so can make friction accelerate reversed slip. The saved multiplier is a
-numerical force estimate that preserves loaded static equilibrium. Contact
+numerical force estimate that preserves loaded static equilibrium. Without
+``rigid_contact_history`` neither matching mode carries friction between steps:
+friction then acts on each step's slip alone. Contact
 alpha stabilizes the normal residual only. Unmatched contacts start cold, and so does
 every contact when two detection passes run between two steps. Between iterations, a ``RIGID`` slot on the ``ITERATIONS`` schedule
 re-detects inside the iteration loop and replaces the contact set in the
@@ -305,11 +307,14 @@ self-contact on or off, margin and gap, the candidate buffer sizes, the
 topological and rest-shape filters, and the tile solve. ``rigid_*``: the
 ALM stabilization and retention factors, body-body
 contact history and two-sided damping (``rigid_contact_damping_bidirectional``),
+the experimental ``rigid_contact_tangent_scale``,
+``rigid_contact_activation_guard`` and ``rigid_adaptive_initialization``,
 the per-body contact list capacities, the rigid-soft barrier law and DAT, and
 the structural joint stiffness and damping. Defaults and exact
 semantics are in :class:`~newton.solvers.SolverVBD`; recommended values for
 particle systems, and effects and symptoms for rigid bodies and cables, are
-in the :ref:`Tuning VBD` parameter table.
+in the :ref:`Tuning VBD` parameter table. The three experimental options are
+described with the rigid contact rows below.
 
 .. _vbd-how-it-works:
 
@@ -410,9 +415,9 @@ The real call tree, with the control flow written out:
              detect again, refresh the DAT reference
          _solve_rigid_body_iteration
              for colour in body colours:
-                 accumulate attachments, body-particle contacts, body-body contacts
+                 accumulate mimics, attachments, body-particle contacts, body-body contacts
                  solve_rigid_body            (6x6 LDL^T per body)
-             update dual variables of the joint and contact rows
+             update dual variables of the joint, mimic and contact rows
          _solve_particle_iteration
              for colour in particle colours:
                  accumulate attachment, body-particle contact, spring and self-contact terms
@@ -559,8 +564,10 @@ body sweep, with error :math:`q_f-o-mq_r`. Their finite stiffness uses
 ``rigid_joint_linear_ke`` or ``rigid_joint_angular_ke`` according to the
 follower coordinate. Reactions act on both joints' bodies; gradients for a shared
 body are combined before constructing its solve block. Same-colour blocks
-majorize frozen-gradient cross terms. Multipliers advance after the sweep and
-are cleared in reset-selected worlds. This replaces post-sweep pose projection.
+majorize frozen-gradient cross terms. Each step refreshes the row's
+inverse-Delassus support and scales retained multipliers by
+``rigid_avbd_gamma``; multipliers advance after the sweep and are cleared in
+reset-selected worlds. This replaces post-sweep pose projection.
 A small mimic coordinate error does not certify force balance at a finite
 iteration budget. Three-angular-axis D6 mimic rows use Euler coordinates and
 are undefined at gimbal lock (:math:`\pm 90^\circ` middle angle). These rows do
@@ -607,11 +614,11 @@ Each energy term depends on a few blocks and on model parameters:
      - ``compute_projected_isotropic_friction``
    * - Body-body contact, with friction and damping
      - two shapes, on two rigid bodies or on a rigid body and a static shape
-     - shape :attr:`~newton.ModelBuilder.ShapeConfig.ke`, :attr:`~newton.ModelBuilder.ShapeConfig.kd`, :attr:`~newton.ModelBuilder.ShapeConfig.mu` averaged over the pair, or positive per-contact
-       ``rigid_contact_stiffness``, ``rigid_contact_damping``, ``rigid_contact_friction`` of
-       :class:`~newton.Contacts`; shape radius and
+     - shape :attr:`~newton.ModelBuilder.ShapeConfig.ke`, :attr:`~newton.ModelBuilder.ShapeConfig.kd`, :attr:`~newton.ModelBuilder.ShapeConfig.mu` averaged over the pair; positive per-contact
+       ``rigid_contact_stiffness`` and ``rigid_contact_damping`` of :class:`~newton.Contacts` replace
+       the first two, and a positive ``rigid_contact_friction`` scales the third; shape radius and
        :attr:`~newton.ModelBuilder.ShapeConfig.margin`
-     - ``evaluate_rigid_contact_from_collision``, ``update_duals_body_body_contacts``
+     - ``accumulate_body_body_contacts_per_body``, ``update_duals_body_body_contacts``
    * - Particle-body attachments
      - a particle and a point fixed on a body
      - attachment stiffness (finite: compliant; infinite: hard limit, damping
@@ -624,10 +631,12 @@ Each energy term depends on a few blocks and on model parameters:
      - two particles
      - spring stiffness and damping
      - ``accumulate_spring_force_and_hessian``
-   * - Joints, drives and limits
-     - one or two bodies
-     - joint stiffness and damping
-     - compliant augmented-Lagrangian rows, ``update_duals_joint``
+   * - Joints, drives, limits and mimics
+     - one to four bodies
+     - joint stiffness and damping; mimic reference and affine coefficients
+     - compliant augmented-Lagrangian rows, ``update_duals_joint``,
+       ``step_joint_mimics``, ``accumulate_joint_mimics``,
+       ``update_joint_mimic_duals``
 
 **Elasticity** is three terms. The membrane term resists stretch and shear of a
 triangle. With :math:`\mathbf{F}` the in-plane deformation gradient,
@@ -668,10 +677,11 @@ like :attr:`tri_kd <newton.Model.tri_materials>`. In both Neo-Hookean terms the 
 Lamé parameters; the kernels convert them to the Neo-Hookean parameters, which
 is why :math:`\lambda_{\text{NH}}` carries the extra :math:`\mu`.
 
-**Contact** is three different terms, one per contact kind. They share the
-friction smoothing length :math:`\epsilon_u = \mathtt{friction\_epsilon}\, h`
-and nothing else: each kind has its own distance, its own stiffness and its
-own law.
+**Contact** is three different terms, one per contact kind. Each kind has its
+own distance, its own stiffness and its own law; self-contact and rigid-soft
+contact share the friction smoothing length
+:math:`\epsilon_u = \mathtt{friction\_epsilon}\, h`, whereas body-body contact
+projects tangential trial forces directly onto the Coulomb cone without it.
 
 *Self-contact* acts between a vertex and a triangle, or between two edges, of
 one particle system (``accumulate_self_contact_force_and_hessian``). The
@@ -770,10 +780,11 @@ The material is the pair average of the shape values:
 :math:`k = \tfrac{1}{2}(\mathtt{ke}_0 + \mathtt{ke}_1)`,
 :math:`k_d = \tfrac{1}{2}(\mathtt{kd}_0 + \mathtt{kd}_1)` and
 :math:`\mu = \sqrt{\mathtt{mu}_0\,\mathtt{mu}_1}`. Positive per-contact values
-in :attr:`~newton.Contacts.rigid_contact_stiffness`,
-:attr:`~newton.Contacts.rigid_contact_damping` and
-:attr:`~newton.Contacts.rigid_contact_friction`, written for example by
-hydroelastic contact, replace :math:`k` and :math:`k_d` and scale :math:`\mu`.
+in :attr:`~newton.Contacts.rigid_contact_stiffness` and
+:attr:`~newton.Contacts.rigid_contact_damping` replace :math:`k` and
+:math:`k_d`, and a positive :attr:`~newton.Contacts.rigid_contact_friction`
+scales :math:`\mu`. Hydroelastic contact writes the stiffness and, with contact
+reduction (the default), the friction scale; it leaves the damping unset.
 Without a per-contact damping, a per-contact stiffness below :math:`k` scales
 :math:`k_d` by the same ratio, so the many soft rows of one patch keep the
 relaxation time :math:`k_d/k`. First consider the undamped case
@@ -793,9 +804,15 @@ COM translation plus the rotation vector crossed with the step-start lever, and
 the force acts along :math:`\mathbf{n}` at the step-start levers, chained
 through the rotation-update Jacobian. This makes the torque the exact gradient
 of the normal row energy for that point motion; the positive-semidefinite solve
-blocks are not general exact Hessians. The row adds
+blocks are not general exact Hessians. The points start from the step-start
+pose, which reproduces the detected gap when detection ran at that pose: a
+collision pass before the step, or the ``PRE_INIT`` schedule. A contact detected
+at another pose (a kinematic body moved before detection, or the
+``PRE_POST_INIT`` and ``ITERATIONS`` schedules) is rebuilt with an error of
+about :math:`r\,(\omega h)^2/2` for a point at distance :math:`r` from the
+axis of a body turning at :math:`\omega`. The row adds
 :math:`k_{\text{eff}}\,\mathbf{n}\mathbf{n}^{\mathsf T}`
-to the body Hessians (``evaluate_rigid_contact_from_collision``). After every
+to the body Hessians (``_rigid_contact_row_response``). After every
 iteration the multiplier is advanced by the relaxed ascent
 :math:`\lambda_n \leftarrow \max\big(s\,(\lambda_n + \rho_n C),\ 0\big)`
 (``update_duals_body_body_contacts``). At
@@ -810,12 +827,15 @@ anchors, including prescribed surface velocity, and :math:`\rho_t` the tangent
 metric, is projected onto the disk
 :math:`\lVert\mathbf{f}_t\rVert \le \mu f_n`,
 and :math:`\boldsymbol{\lambda}_t` is advanced and projected onto the disk of
-radius :math:`\mu\lambda_n` in the same dual step. Accumulated tangential
+radius :math:`\mu\lambda_n` in the same dual step; outside the disk, the body
+solve uses the continuous isotropic secant metric
+:math:`(\mu f_n / \lVert\rho_t\,\mathbf{u}_t + \boldsymbol{\lambda}_t\rVert)\,\rho_t\,(\mathbf{I} - \mathbf{n}\mathbf{n}^{\mathsf T})`.
+Accumulated tangential
 separation from previous steps is not added to this residual. Sticky matching
 still replays material anchors, while retained multipliers warm-start their
 contact forces; it does not impose a positional tangential spring.
 
-``rigid_contact_tangent_scale`` is an experimental, runtime-only conditioning
+``rigid_contact_tangent_scale`` is an experimental, solver-side conditioning
 option. Its default of ``1`` retains the automatic tangent weight. A finite
 value greater than one multiplies that weight for all compliant body-body
 contact rows. The existing same-colour solve metric remains in effect. The same row
@@ -825,7 +845,19 @@ material stiffness, damping and the elastic Coulomb bound are unchanged.
 
 This option can improve collective friction convergence on a narrow contact
 patch, but larger weights can slow other modes and are not monotonically
-better. It requires compliant ALM and internal rigid integration when enabled.
+better. In tangential-displacement units, the Coulomb projection disk has
+radius :math:`\mu f_n / \rho_t`, which shrinks as the scale grows. The distance
+to its boundary also depends on the current displacement and retained
+tangential multiplier. For the resting cup of the ``robot_panda_hydro`` scenes
+at a 600 Hz substep, a scale of 1000 leaves a radius of a few nanometers,
+below the float32 spacing of the cup's position (15 to 60 nm). In the pen
+scene a scale of 10 holds the pen and leaves the dropped pen at rest in the
+cup; at 100 and 1000 the pen is held tighter but keeps shifting in the cup. In
+the cube scene a scale of 1000 pushed one of two cups over, so that scene ships with
+the default. Use the smallest scale the task needs, and only in scenes that
+need it.
+A value above one requires internal rigid integration; it raises
+``ValueError`` with ``integrate_with_external_rigid_solver=True``.
 Contact matching/history and an appropriate body solve order remain separate
 choices. Like the iteration count, this is numerical solver configuration,
 not an authored material property; it introduces no USD attribute.
@@ -858,7 +890,8 @@ applied acceleration it removes from the starting pose must then be rebuilt by
 the iterations. It does not adapt the angular starting motion or address drift
 driven solely by applied torque. It requires internal rigid integration and
 does not support coupled solvers that restart a step; that combination is
-rejected. It stores one spatial vector per body.
+rejected. It stores one spatial vector per body. Like the iteration count, it
+is numerical solver configuration and introduces no USD attribute.
 
 When both contact bodies are dynamic and share a colour, their pose updates
 are simultaneous. The compliant path doubles only the normal and tangential
@@ -897,15 +930,16 @@ trial, then recomputes the body update from the original iterate. It adds no
 contact force and changes no constitutive fixed-point equation. It can improve
 finite-budget contact chatter, but is not a convergence guarantee or a
 replacement for iteration, timestep and contact-resolution checks. It requires
-compliant ALM and internal rigid integration. The additional work per colour
-per local iteration is one provisional body solve, one inactive-contact gather
-and a body-pose copy. Disabled by default, it allocates no trial-pose buffer and
-launches none of these additional operations.
+internal rigid integration. The additional work is one provisional body solve
+and one inactive-contact gather per colour per iteration, plus one body-pose
+copy at the start of each iteration. When ``rigid_soft_enable_dat`` is set,
+there is also one copy after each colour to reflect truncation.
+Disabled by default, it allocates no trial-pose buffer and launches none of
+these additional operations.
 
-This option is an experimental, runtime-only solver choice; it does not add
-USD-authored material properties. It is constructor-only: construct a new
-solver and recapture CUDA
-graphs to change it. Do not toggle its attribute on an existing solver.
+This option is experimental and adds no USD-authored material property. It is
+constructor-only: construct a new solver and recapture CUDA graphs to change
+it.
 It is not a universal remedy for high-stiffness float32 force accuracy,
 under-resolved contact geometry, missing robot features or insufficient solver
 budgets.

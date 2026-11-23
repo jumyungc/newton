@@ -1,1 +1,1 @@
-Add an opt-in actual-trial rigid contact activation guard for compliant VBD. It adds a provisional body solve and inactive normal-metric gather per colour and iteration; the default scheduling and physical law are unchanged.
+Add an experimental, opt-in actual-trial rigid contact activation guard to `SolverVBD` (`rigid_contact_activation_guard`). It adds a provisional body solve and an inactive normal-metric gather per color and iteration; bodies whose trial crosses no inactive row keep the trial pose. The default scheduling and physical law are unchanged.

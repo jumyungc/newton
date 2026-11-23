@@ -1,1 +1,1 @@
-Preserve small rigid-contact friction displacements in VBD by evaluating anchor increments directly, avoiding cancellation when subtracting absolute world positions.
+Reduce world-coordinate cancellation in small rigid-contact normal motion and friction slip in `SolverVBD` by evaluating body-motion increments, contact levers and the step-start gap from relative poses in the body solve, the multiplier update, contact force reporting and coupled proxy torques. Motion already lost in stored float32 poses cannot be recovered.

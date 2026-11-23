@@ -19,7 +19,12 @@ from .particle_vbd_kernels import (
     evaluate_edge_edge_contact_2_vertices,
     evaluate_vertex_triangle_collision_force_hessian_4_vertices,
 )
-from .rigid_vbd_kernels import _NUM_CONTACT_THREADS_PER_BODY, _eval_body_particle_contact, _eval_soft_ef_contact
+from .rigid_vbd_kernels import (
+    _NUM_CONTACT_THREADS_PER_BODY,
+    _contact_step_levers,
+    _eval_body_particle_contact,
+    _eval_soft_ef_contact,
+)
 
 wp.set_module_options({"enable_backward": False})
 
@@ -68,9 +73,12 @@ def _harvest_vbd_proxy_wrenches_kernel(
     rigid_contact_count: wp.array[int],
     contact_body0: wp.array[wp.int32],
     contact_body1: wp.array[wp.int32],
-    contact_point0_world: wp.array[wp.vec3],
-    contact_point1_world: wp.array[wp.vec3],
+    contact_point0: wp.array[wp.vec3],
+    contact_point1: wp.array[wp.vec3],
     contact_force_on_body1: wp.array[wp.vec3],
+    contact_normal: wp.array[wp.vec3],
+    contact_offset0: wp.array[wp.vec3],
+    contact_offset1: wp.array[wp.vec3],
     dst_body_inv_mass: wp.array[float],
     dst_body_flags: wp.array[wp.int32],
     body_local_to_proxy_global: wp.array[int],
@@ -79,7 +87,12 @@ def _harvest_vbd_proxy_wrenches_kernel(
     body_q: wp.array[wp.transform],
     out_proxy_body_f: wp.array[wp.spatial_vector],
 ):
-    """Accumulate dynamic body-vs-proxy contact wrenches on proxy bodies."""
+    """Accumulate dynamic body-vs-proxy contact wrenches on proxy bodies.
+
+    Applies normal forces at the support lever and tangential forces at the surface lever of the
+    proxy's current pose: the physical torque about its current center of mass, as reported in
+    ``contact_f``. The levers are rotated body-local offsets, so no world position is subtracted.
+    """
     contact_id = wp.tid()
     if contact_id >= rigid_contact_count[0]:
         return
@@ -115,19 +128,25 @@ def _harvest_vbd_proxy_wrenches_kernel(
     if is_proxy1 == 1:
         proxy_local_id = body1
         proxy_global_id = proxy_global1
-        contact_point = contact_point1_world[contact_id]
+        contact_point = contact_point1[contact_id]
+        contact_offset = contact_offset1[contact_id]
         force_on_proxy = force_on_b1
     else:
         proxy_local_id = body0
         proxy_global_id = proxy_global0
-        contact_point = contact_point0_world[contact_id]
+        contact_point = contact_point0[contact_id]
+        contact_offset = contact_offset0[contact_id]
         force_on_proxy = -force_on_b1
 
     if proxy_global_id < 0 or proxy_global_id >= out_proxy_body_f.shape[0]:
         return
 
-    com_world = wp.transform_point(body_q[proxy_local_id], body_com[proxy_local_id])
-    torque = wp.cross(contact_point - com_world, force_on_proxy)
+    lever_s, lever_c = _contact_step_levers(
+        proxy_local_id, body_q[proxy_local_id], body_com, contact_point, contact_offset
+    )
+    n = contact_normal[contact_id]
+    normal_force = n * wp.dot(n, force_on_proxy)
+    torque = wp.cross(lever_s, normal_force) + wp.cross(lever_c, force_on_proxy - normal_force)
     wp.atomic_add(out_proxy_body_f, proxy_global_id, wp.spatial_vector(force_on_proxy, torque))
 
 

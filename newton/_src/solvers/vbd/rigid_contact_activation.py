@@ -13,12 +13,13 @@ import warp as wp
 
 from .rigid_vbd_kernels import (
     _SMALL_LENGTH_EPS,
-    _body_step_kinematics,
+    _body_step_motion,
     _compliant_contact_normal_response,
     _contact_lever_blocks,
-    _first_order_contact_penetration,
-    _first_order_displacement,
+    _contact_step_levers,
+    _lever_displacement,
     _material_force_terms,
+    _step_start_penetration,
 )
 
 
@@ -70,8 +71,8 @@ def create_accumulate_inactive_contact_metric(threads_per_body: int):
         if body_inv_mass[body] == 0.0 or lane >= count:
             return
 
-        X_prev, com_prev, com_now, rotation, jacobian_t = _body_step_kinematics(body, body_q, body_q_prev, body_com)
-        _X_trial, _com_trial_prev, com_trial, rotation_trial, _J_trial = _body_step_kinematics(
+        X_prev, com_disp, rotation, jacobian_t = _body_step_motion(body, body_q, body_q_prev, body_com)
+        _X_trial, com_disp_trial, rotation_trial, _J_trial = _body_step_motion(
             body, body_q_trial, body_q_prev, body_com
         )
         h_ll = wp.mat33(0.0)
@@ -94,23 +95,30 @@ def create_accumulate_inactive_contact_metric(threads_per_body: int):
                 continue
             self_is_a = b0 == body
             other = b1 if self_is_a else b0
-            X_other_prev, com_other_prev, com_other, rotation_other, _J_other = _body_step_kinematics(
+            X_other_prev, com_disp_other, rotation_other, _J_other = _body_step_motion(
                 other, body_q, body_q_prev, body_com
             )
-            x_prev = wp.transform_point(X_prev, point0[row] if self_is_a else point1[row])
-            y_prev = wp.transform_point(X_other_prev, point1[row] if self_is_a else point0[row])
-            dx = _first_order_displacement(x_prev, com_prev, com_now, rotation)
-            dy = _first_order_displacement(y_prev, com_other_prev, com_other, rotation_other)
+            pt_a = point0[row]
+            pt_b = point1[row]
+            lever_self, _ = _contact_step_levers(body, X_prev, body_com, pt_a if self_is_a else pt_b, wp.vec3(0.0))
+            lever_other, _ = _contact_step_levers(
+                other, X_other_prev, body_com, pt_b if self_is_a else pt_a, wp.vec3(0.0)
+            )
+            dx = _lever_displacement(com_disp, rotation, lever_self)
+            dy = _lever_displacement(com_disp_other, rotation_other, lever_other)
             n = normal[row]
-            C, Cp, _increment = _first_order_contact_penetration(
-                x_prev if self_is_a else y_prev,
-                y_prev if self_is_a else x_prev,
-                dx if self_is_a else dy,
-                dy if self_is_a else dx,
+            Cp = _step_start_penetration(
+                b0,
+                X_prev if self_is_a else X_other_prev,
+                pt_a,
+                b1,
+                X_other_prev if self_is_a else X_prev,
+                pt_b,
                 n,
                 margin0[row],
                 margin1[row],
             )
+            C = Cp + wp.dot(n, (dx - dy) if self_is_a else (dy - dx))
             lam = wp.dot(contact_lambda[row], n)
             shift = alpha * wp.dot(contact_C0[row], n)
             k, lam_eff = _material_force_terms(contact_rho[row], contact_ke[row], lam)
@@ -120,20 +128,12 @@ def create_accumulate_inactive_contact_metric(threads_per_body: int):
             if k <= 0.0:
                 continue
 
-            _X_other_trial, _cp_other, ct_other, rt_other, _Jt_other = _body_step_kinematics(
+            _X_other_trial, ct_disp_other, rt_other, _Jt_other = _body_step_motion(
                 other, body_q_trial, body_q_prev, body_com
             )
-            dxt = _first_order_displacement(x_prev, com_prev, com_trial, rotation_trial)
-            dyt = _first_order_displacement(y_prev, com_other_prev, ct_other, rt_other)
-            Ct, _previous, _trial_increment = _first_order_contact_penetration(
-                x_prev if self_is_a else y_prev,
-                y_prev if self_is_a else x_prev,
-                dxt if self_is_a else dyt,
-                dyt if self_is_a else dxt,
-                n,
-                margin0[row],
-                margin1[row],
-            )
+            dxt = _lever_displacement(com_disp_trial, rotation_trial, lever_self)
+            dyt = _lever_displacement(ct_disp_other, rt_other, lever_other)
+            Ct = Cp + wp.dot(n, (dxt - dyt) if self_is_a else (dyt - dxt))
             if (Ct <= _SMALL_LENGTH_EPS and lam <= 0.0) or k * (Ct - shift) + lam_eff <= 0.0:
                 continue
             force = k * (Ct - shift) + lam_eff
@@ -153,7 +153,7 @@ def create_accumulate_inactive_contact_metric(threads_per_body: int):
                     metric *= 2.0
             K = metric * wp.outer(n, n)
             _torque, H_al, H_aa = _contact_lever_blocks(
-                wp.vec3(0.0), wp.vec3(0.0), K, wp.mat33(0.0), x_prev - com_prev, wp.vec3(0.0), jacobian_t
+                wp.vec3(0.0), wp.vec3(0.0), K, wp.mat33(0.0), lever_self, wp.vec3(0.0), jacobian_t
             )
             h_ll += K
             h_al += H_al

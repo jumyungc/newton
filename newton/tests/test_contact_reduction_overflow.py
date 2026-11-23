@@ -178,7 +178,7 @@ def test_unreduced_hydroelastic_clear_resets_buffer_overflows(test, device):
     test.assertEqual(int(hydro.reducer.contact_count.numpy()[0]), 0)
 
 
-def test_pipeline_flags_dropped_hydroelastic_faces(test, device, reduce_contacts):
+def test_pipeline_flags_dropped_hydroelastic_faces(test, device, reduce_contacts, pre_prune_contacts=False):
     """Latch real hydroelastic face losses and reset them during captured replay."""
     builder = newton.ModelBuilder()
     cfg = newton.ModelBuilder.ShapeConfig(
@@ -201,7 +201,7 @@ def test_pipeline_flags_dropped_hydroelastic_faces(test, device, reduce_contacts
         rigid_contact_max=4096,
         sdf_hydroelastic_config=HydroelasticSDF.Config(
             reduce_contacts=reduce_contacts,
-            pre_prune_contacts=False,
+            pre_prune_contacts=pre_prune_contacts,
             buffer_mult_contact=0,
             contact_reduction_hashtable_size_factor=4.0,
         ),
@@ -223,9 +223,16 @@ def test_pipeline_flags_dropped_hydroelastic_faces(test, device, reduce_contacts
         for count, capacity in zip(hydro.iso_buffer_counts, stage_capacities, strict=True):
             test.assertLessEqual(int(count.numpy()[0]), capacity)
         test.assertEqual(int(reducer.ht_insert_failures.numpy()[0]), 0)
-        test.assertEqual(int(reducer.contact_count.numpy()[0]), reducer.capacity)
+        face_count = int(reducer.contact_count.numpy()[0])
         dropped_faces = int(reducer.buffer_overflows.numpy()[0])
         test.assertGreater(dropped_faces, 0)
+        if pre_prune_contacts:
+            # Batched reservations are disjoint and keep their overshoot in the count, so the
+            # overshoot is the number of lost faces, each counted once.
+            test.assertEqual(face_count - reducer.capacity, dropped_faces)
+        else:
+            # A failed single reservation rolls the count back.
+            test.assertEqual(face_count, reducer.capacity)
         test.assertGreater(int(contacts.rigid_contact_count.numpy()[0]), 0)
         test.assertLessEqual(int(contacts.rigid_contact_count.numpy()[0]), contacts.rigid_contact_max)
         # This is the rejecting assertion on the original implementation.
@@ -505,6 +512,14 @@ for _reduce_contacts in (True, False):
         devices=get_cuda_test_devices(),
         reduce_contacts=_reduce_contacts,
     )
+add_function_test(
+    TestContactReductionOverflow,
+    "test_pipeline_flags_dropped_hydroelastic_faces_pre_pruned",
+    test_pipeline_flags_dropped_hydroelastic_faces,
+    devices=get_cuda_test_devices(),
+    reduce_contacts=True,
+    pre_prune_contacts=True,
+)
 
 
 if __name__ == "__main__":
