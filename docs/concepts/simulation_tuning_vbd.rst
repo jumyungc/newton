@@ -1354,8 +1354,10 @@ before the next step:
   ``model.joint_target_ke`` or ``model.joint_target_kd``.
 - :attr:`ModelFlags.JOINT_REFERENCE_POSE_PROPERTIES` for rod rest
   rotations in ``model.joint_rest_q``.
+- :attr:`ModelFlags.CONSTRAINT_PROPERTIES` after editing
+  ``model.joint_mimic_coeffs`` (also covered by :attr:`ModelFlags.JOINT_PROPERTIES`).
 - :attr:`ModelFlags.JOINT_PROPERTIES` after toggling ``model.joint_enabled`` or
-  editing a joint-owned mimic's reference joint, coefficients, or joint frames.
+  editing a joint-owned mimic's reference joint or joint frames.
 - :attr:`ModelFlags.BODY_PROPERTIES` after changing kinematic flags.
 - :attr:`ModelFlags.BODY_INERTIAL_PROPERTIES` after changing body mass or inertia.
 

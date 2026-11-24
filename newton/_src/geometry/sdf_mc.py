@@ -160,11 +160,13 @@ def get_triangle_fraction(vert_depths: wp.vec3f, num_inside: wp.int32) -> wp.flo
             d2 = vert_depths[1]
 
     scale = wp.max(wp.abs(d0), wp.max(wp.abs(d1), wp.abs(d2)))
+    if scale == 0.0:
+        return 0.0
     d0, d1, d2 = d0 / scale, d1 / scale, d2 / scale
     if num_inside == 1:
         if d0 == 0.0:
             return 0.0
-        return (d0 / (d0 - d1)) * (d0 / (d0 - d2))
+        return wp.clamp((d0 / (d0 - d1)) * (d0 / (d0 - d2)), 0.0, 1.0)
 
     # Split the retained quadrilateral into positive-area triangles to avoid
     # cancellation when the excluded triangle is almost full.
@@ -174,7 +176,7 @@ def get_triangle_fraction(vert_depths: wp.vec3f, num_inside: wp.int32) -> wp.flo
         t1 = -d1 / (d0 - d1)
     if d2 != 0.0:
         t2 = -d2 / (d0 - d2)
-    return t1 + t2 * (1.0 - t1)
+    return wp.clamp(t1 + t2 * (1.0 - t1), 0.0, 1.0)
 
 
 @wp.func

@@ -1646,9 +1646,12 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         host-side edits outside capture; captured updates must preserve finite,
         nonnegative material coefficients.
 
-        Joint-owned mimic references, coefficients and frames use
-        :attr:`~newton.ModelFlags.JOINT_PROPERTIES`, which rebinds their arrays
-        and clears their multipliers. Replacing model arrays requires recapturing
+        Joint-owned mimic coefficients use
+        :attr:`~newton.ModelFlags.CONSTRAINT_PROPERTIES`, which rebinds
+        ``joint_mimic_coeffs`` and clears mimic multipliers on the device;
+        mimic reference joints, joint frames, and ``joint_enabled`` use
+        :attr:`~newton.ModelFlags.JOINT_PROPERTIES`, which also rebuilds the
+        per-color mimic schedule on the host. Replacing model arrays requires recapturing
         step graphs after notification; existing graphs retain their old pointers.
         A solver built on a model without a supported mimic relationship ignores
         relationships added later; construct a new solver for them.
@@ -1696,6 +1699,10 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 self._joint_mimics.support.zero_()
                 self._joint_mimics.lambda_.zero_()
                 self._refresh_joint_mimic_color_groups()
+            elif flags & ModelFlags.CONSTRAINT_PROPERTIES:
+                self._joint_mimics.joint_mimic_coeffs = self.model.joint_mimic_coeffs
+                self._joint_mimics.support.zero_()
+                self._joint_mimics.lambda_.zero_()
             if flags & ModelFlags.JOINT_DOF_PROPERTIES:
                 self._joint_mimics.joint_axis = self.model.joint_axis
             if flags & ModelFlags.BODY_INERTIAL_PROPERTIES:
@@ -1742,6 +1749,25 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
     def rigid_contact_tangent_scale(self) -> float:
         """Numerical scale factor for automatic compliant-ALM tangent rho (experimental, read-only)."""
         return self._rigid_contact_tangent_scale
+
+    @override
+    def _non_graphable_model_flags(self) -> int:
+        flags = 0
+        if self.model.tendon_count > 0:
+            # The tendon refresh validates on the host and rebuilds the tendon reset state.
+            flags |= ModelFlags.TENDON_PROPERTIES
+        if self._integrates_rigid_bodies and self.model.joint_count > 0:
+            dof_force = ModelFlags.JOINT_DOF_PROPERTIES | ModelFlags.JOINT_DOF_FORCE_PROPERTIES
+            if self.rigid_compliant_alm:
+                # Compliant ALM validates the joint drive and limit coefficients on the host.
+                flags |= dof_force
+            if self.model._has_rod_joints:  # pyright: ignore[reportPrivateUsage]
+                # Rod material axes and rest bend/twist invariants are checked and computed on the host.
+                flags |= dof_force | ModelFlags.JOINT_PROPERTIES | ModelFlags.JOINT_REFERENCE_POSE_PROPERTIES
+        if self._joint_mimics is not None:
+            # Mimic follower color groups are rebuilt from joint references on the host.
+            flags |= ModelFlags.JOINT_PROPERTIES
+        return int(flags)
 
     @override
     def coupling_supports_inertial_property_refresh(self) -> bool:
@@ -2545,7 +2571,9 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
 
         Dahl rod friction is enabled per joint only where both
         ``model.vbd.dahl_eps_max`` and ``model.vbd.dahl_tau`` are authored
-        positive; the attributes default to zero.
+        positive; the attributes default to zero. The solver skips Dahl friction
+        entirely when no joint enables it at construction, so reconstruct the
+        solver after making them positive.
 
         Args:
             builder: Model builder to register attributes on.
