@@ -47,10 +47,10 @@ from newton._src.sim import JointType
 
 from .rigid_vbd_kernels import (
     _SMALL_LENGTH_EPS,
-    _load_solve_weight,
     _material_force_terms,
     contact_surface_separation,
-    evaluate_rigid_contact_from_collision,
+    evaluate_rigid_contact_angular_friction,
+    evaluate_rigid_contact_normal_sliding,
 )
 
 wp.set_module_options({"enable_backward": False})
@@ -260,6 +260,16 @@ def _finalize_body_diagonal_d(
 
 
 @wp.func
+def _angular_contact_block_d(k_ang: wp.mat33):
+    """Embed a ``3 x 3`` rotational contact metric into the angular corner of a ``6 x 6`` spatial matrix."""
+    out = wp.spatial_matrixd(0.0)
+    for r in range(3):
+        for c in range(3):
+            out[r + 3, c + 3] = wp.float64(k_ang[r, c])
+    return out
+
+
+@wp.func
 def _body_inertial_rhs_d(
     body: int,
     dt: float,
@@ -367,19 +377,18 @@ def assemble_chain_segments(
     body_inv_mass: wp.array[float],
     body_inertia: wp.array[wp.mat33],
     body_com: wp.array[wp.vec3],
-    friction_epsilon: float,
     contact_damping_bidirectional: bool,
-    contact_penalty_k: wp.array[float],
     contact_normal_rho: wp.array[float],
     contact_material_ke: wp.array[float],
     contact_material_kd: wp.array[float],
-    contact_material_mu: wp.array[float],
-    contact_tangent_rho: wp.array[float],
+    contact_material_mu: wp.array[wp.vec3],
+    contact_tangent_rho: wp.array[wp.mat22],
+    contact_torsional_rho: wp.array[float],
+    contact_rolling_rho: wp.array[wp.mat22],
     contact_lambda: wp.array[wp.vec3],
+    contact_lambda_angular: wp.array[wp.vec3],
     contact_C0: wp.array[wp.vec3],
     stab_alpha: float,
-    legacy_hard_contacts: int,
-    contact_compliant_alm: int,
     rigid_contact_count: wp.array[int],
     rigid_contact_shape0: wp.array[int],
     rigid_contact_shape1: wp.array[int],
@@ -473,22 +482,15 @@ def assemble_chain_segments(
             normal_error = -contact_surface_separation(
                 point0, point1, normal, rigid_contact_margin0[contact], rigid_contact_margin1[contact]
             )
-            multiplier = wp.vec3(0.0)
-            multiplier_normal = 0.0
-            stabilized_error = normal_error
-            tangent_C0 = wp.vec3(0.0)
-            normal_weight = _load_solve_weight(contact_penalty_k, contact_normal_rho, contact, contact_compliant_alm)
+            normal_weight = contact_normal_rho[contact]
             material_k = contact_material_ke[contact]
-            if legacy_hard_contacts == 1 or contact_compliant_alm == 1:
-                multiplier = contact_lambda[contact]
-                multiplier_normal = wp.dot(multiplier, normal)
-                C0 = contact_C0[contact]
-                C0_normal = wp.dot(normal, C0)
-                stabilized_error = normal_error - stab_alpha * C0_normal
-                tangent_C0 = (1.0 - stab_alpha) * (C0 - normal * C0_normal)
-            normal_primal_k, multiplier_normal_eff = _material_force_terms(
-                normal_weight, material_k, multiplier_normal, contact_compliant_alm
-            )
+            multiplier = contact_lambda[contact]
+            multiplier_normal = wp.dot(multiplier, normal)
+            C0 = contact_C0[contact]
+            C0_normal = wp.dot(normal, C0)
+            stabilized_error = normal_error - C0_normal
+            tangent_C0 = (1.0 - stab_alpha) * (C0 - normal * C0_normal)
+            normal_primal_k, multiplier_normal_eff = _material_force_terms(normal_weight, material_k, multiplier_normal)
             inactive = multiplier_normal <= 0.0 and (
                 normal_error <= _SMALL_LENGTH_EPS or normal_primal_k * stabilized_error + multiplier_normal_eff <= 0.0
             )
@@ -524,6 +526,7 @@ def assemble_chain_segments(
             surface_velocity = wp.vec3(0.0)
             if rigid_contact_surface_velocity:
                 surface_velocity = rigid_contact_surface_velocity[contact]
+            friction_mu = contact_material_mu[contact]
             (
                 force0,
                 torque0,
@@ -535,7 +538,7 @@ def assemble_chain_segments(
                 _h_ll1,
                 _h_al1,
                 _h_aa1,
-            ) = evaluate_rigid_contact_from_collision(
+            ) = evaluate_rigid_contact_normal_sliding(
                 body0,
                 body1,
                 body_q,
@@ -553,15 +556,35 @@ def assemble_chain_segments(
                 contact_tangent_rho[contact],
                 contact_material_kd[contact],
                 multiplier,
-                contact_material_mu[contact],
-                friction_epsilon,
-                legacy_hard_contacts,
-                contact_compliant_alm,
+                friction_mu[0],
                 dt,
                 tangent_C0,
                 contact_damping_bidirectional,
                 1,
             )
+            mu_torsional = friction_mu[1]
+            mu_rolling = friction_mu[2]
+            normal_load = wp.max(normal_primal_k * stabilized_error + multiplier_normal_eff, 0.0)
+            has_angular_friction = normal_load > 0.0 and (mu_torsional > 0.0 or mu_rolling > 0.0)
+            ang_block = wp.spatial_matrixd(0.0)
+            if has_angular_friction:
+                pure_torque_b, k_angular = evaluate_rigid_contact_angular_friction(
+                    body0,
+                    body1,
+                    body_q,
+                    body_q_prev,
+                    normal,
+                    normal_load,
+                    mu_torsional,
+                    mu_rolling,
+                    contact_torsional_rho[contact],
+                    contact_rolling_rho[contact],
+                    contact_lambda_angular[contact],
+                )
+                torque0 -= pure_torque_b
+                torque1 += pure_torque_b
+                ang_block = _angular_contact_block_d(k_angular)
+
             r_s_0, r_c_0 = _contact_levers_d(body0, body_q, body_com, point0_local, point0_offset)
             r_s_1, r_c_1 = _contact_levers_d(body1, body_q, body_com, point1_local, point1_offset)
 
@@ -582,13 +605,15 @@ def assemble_chain_segments(
 
             force_acc = force_acc + my_f
             torque_acc = torque_acc + my_t
-            mine_block = _contact_pair_block_d(stiffness, normal, r_s_me, r_c_me, r_s_me, r_c_me)
+            mine_block = _contact_pair_block_d(stiffness, normal, r_s_me, r_c_me, r_s_me, r_c_me) + ang_block
 
             if hub >= 0:
                 # Coupled segment-hub contact: +1x on segment, +1x on hub, -1x off-diagonal border.
                 contact_block = contact_block + mine_block
-                hub_block = _contact_pair_block_d(stiffness, normal, r_s_other, r_c_other, r_s_other, r_c_other)
-                cross_block = _contact_pair_block_d(stiffness, normal, r_s_me, r_c_me, r_s_other, r_c_other)
+                hub_block = (
+                    _contact_pair_block_d(stiffness, normal, r_s_other, r_c_other, r_s_other, r_c_other) + ang_block
+                )
+                cross_block = _contact_pair_block_d(stiffness, normal, r_s_me, r_c_me, r_s_other, r_c_other) + ang_block
                 segment_hub_diagonal[s, hub] = segment_hub_diagonal[s, hub] + hub_block
                 segment_border[s, hub] = segment_border[s, hub] - cross_block
                 segment_hub_wrench[s, hub] = segment_hub_wrench[s, hub] + wp.spatial_vectord(
@@ -879,19 +904,18 @@ def solve_chain_hubs(
     body_inv_mass: wp.array[float],
     body_inertia: wp.array[wp.mat33],
     body_com: wp.array[wp.vec3],
-    friction_epsilon: float,
     contact_damping_bidirectional: bool,
-    contact_penalty_k: wp.array[float],
     contact_normal_rho: wp.array[float],
     contact_material_ke: wp.array[float],
     contact_material_kd: wp.array[float],
-    contact_material_mu: wp.array[float],
-    contact_tangent_rho: wp.array[float],
+    contact_material_mu: wp.array[wp.vec3],
+    contact_tangent_rho: wp.array[wp.mat22],
+    contact_torsional_rho: wp.array[float],
+    contact_rolling_rho: wp.array[wp.mat22],
     contact_lambda: wp.array[wp.vec3],
+    contact_lambda_angular: wp.array[wp.vec3],
     contact_C0: wp.array[wp.vec3],
     stab_alpha: float,
-    legacy_hard_contacts: int,
-    contact_compliant_alm: int,
     rigid_contact_count: wp.array[int],
     rigid_contact_shape0: wp.array[int],
     rigid_contact_shape1: wp.array[int],
@@ -956,23 +980,16 @@ def solve_chain_hubs(
                 normal_error = -contact_surface_separation(
                     point0, point1, normal, rigid_contact_margin0[contact], rigid_contact_margin1[contact]
                 )
-                multiplier = wp.vec3(0.0)
-                multiplier_normal = 0.0
-                stabilized_error = normal_error
-                tangent_C0 = wp.vec3(0.0)
-                normal_weight = _load_solve_weight(
-                    contact_penalty_k, contact_normal_rho, contact, contact_compliant_alm
-                )
+                normal_weight = contact_normal_rho[contact]
                 material_k = contact_material_ke[contact]
-                if legacy_hard_contacts == 1 or contact_compliant_alm == 1:
-                    multiplier = contact_lambda[contact]
-                    multiplier_normal = wp.dot(multiplier, normal)
-                    C0 = contact_C0[contact]
-                    C0_normal = wp.dot(normal, C0)
-                    stabilized_error = normal_error - stab_alpha * C0_normal
-                    tangent_C0 = (1.0 - stab_alpha) * (C0 - normal * C0_normal)
+                multiplier = contact_lambda[contact]
+                multiplier_normal = wp.dot(multiplier, normal)
+                C0 = contact_C0[contact]
+                C0_normal = wp.dot(normal, C0)
+                stabilized_error = normal_error - C0_normal
+                tangent_C0 = (1.0 - stab_alpha) * (C0 - normal * C0_normal)
                 normal_primal_k, multiplier_normal_eff = _material_force_terms(
-                    normal_weight, material_k, multiplier_normal, contact_compliant_alm
+                    normal_weight, material_k, multiplier_normal
                 )
                 if multiplier_normal <= 0.0 and (
                     normal_error <= _SMALL_LENGTH_EPS
@@ -982,6 +999,7 @@ def solve_chain_hubs(
                 surface_velocity = wp.vec3(0.0)
                 if rigid_contact_surface_velocity:
                     surface_velocity = rigid_contact_surface_velocity[contact]
+                friction_mu = contact_material_mu[contact]
                 (
                     force0,
                     torque0,
@@ -993,7 +1011,7 @@ def solve_chain_hubs(
                     _h_ll1,
                     _h_al1,
                     _h_aa1,
-                ) = evaluate_rigid_contact_from_collision(
+                ) = evaluate_rigid_contact_normal_sliding(
                     body0,
                     body1,
                     body_q,
@@ -1011,15 +1029,33 @@ def solve_chain_hubs(
                     contact_tangent_rho[contact],
                     contact_material_kd[contact],
                     multiplier,
-                    contact_material_mu[contact],
-                    friction_epsilon,
-                    legacy_hard_contacts,
-                    contact_compliant_alm,
+                    friction_mu[0],
                     dt,
                     tangent_C0,
                     contact_damping_bidirectional,
                     1,
                 )
+                mu_torsional = friction_mu[1]
+                mu_rolling = friction_mu[2]
+                normal_load = wp.max(normal_primal_k * stabilized_error + multiplier_normal_eff, 0.0)
+                ang_block = wp.spatial_matrixd(0.0)
+                if normal_load > 0.0 and (mu_torsional > 0.0 or mu_rolling > 0.0):
+                    pure_torque_b, k_angular = evaluate_rigid_contact_angular_friction(
+                        body0,
+                        body1,
+                        body_q,
+                        body_q_prev,
+                        normal,
+                        normal_load,
+                        mu_torsional,
+                        mu_rolling,
+                        contact_torsional_rho[contact],
+                        contact_rolling_rho[contact],
+                        contact_lambda_angular[contact],
+                    )
+                    torque0 -= pure_torque_b
+                    torque1 += pure_torque_b
+                    ang_block = _angular_contact_block_d(k_angular)
                 if body == body0:
                     ext_force = ext_force + wp.vec3d(force0)
                     ext_torque = ext_torque + wp.vec3d(torque0)
@@ -1028,7 +1064,7 @@ def solve_chain_hubs(
                     ext_force = ext_force + wp.vec3d(force1)
                     ext_torque = ext_torque + wp.vec3d(torque1)
                     r_s_me, r_c_me = _contact_levers_d(body1, body_q, body_com, point1_local, point1_offset)
-                mine_block = _contact_pair_block_d(stiffness, normal, r_s_me, r_c_me, r_s_me, r_c_me)
+                mine_block = _contact_pair_block_d(stiffness, normal, r_s_me, r_c_me, r_s_me, r_c_me) + ang_block
                 scale = wp.float64(2.0) if (other_body >= 0 and body_inv_mass[other_body] > 0.0) else wp.float64(1.0)
                 ext_contact_block = ext_contact_block + scale * mine_block
 
@@ -1478,22 +1514,21 @@ class ChainCondensation:
         body_contact_buffer_size,
         body_contact_counts,
         body_contact_indices,
-        friction_epsilon,
         contact_damping_bidirectional,
-        contact_penalty_k,
         contact_normal_rho,
         contact_material_ke,
         contact_material_kd,
         contact_material_mu,
         contact_tangent_rho,
+        contact_torsional_rho,
+        contact_rolling_rho,
         contact_lambda,
+        contact_lambda_angular,
         contact_C0,
         contact_stab_alpha,
-        legacy_hard_contacts,
-        contact_compliant_alm,
     ):
         """Solve all chain-condensation islands in ``float64`` without global atomics."""
-        has_contacts = int(contacts is not None and contacts.rigid_contact_max > 0 and contact_penalty_k is not None)
+        has_contacts = int(contacts is not None and contacts.rigid_contact_max > 0 and contact_normal_rho is not None)
         device = self.device
         keep_debug = int(bool(self.keep_assembly))
         if keep_debug and self._hub_base_debug is None:
@@ -1544,19 +1579,18 @@ class ChainCondensation:
                 body_inv_mass,
                 body_inertia,
                 body_com,
-                float(friction_epsilon),
                 bool(contact_damping_bidirectional),
-                contact_penalty_k if has_contacts else None,
                 contact_normal_rho if has_contacts else None,
                 contact_material_ke if has_contacts else None,
                 contact_material_kd if has_contacts else None,
                 contact_material_mu if has_contacts else None,
                 contact_tangent_rho if has_contacts else None,
+                contact_torsional_rho if has_contacts else None,
+                contact_rolling_rho if has_contacts else None,
                 contact_lambda if has_contacts else None,
+                contact_lambda_angular if has_contacts else None,
                 contact_C0 if has_contacts else None,
                 float(contact_stab_alpha),
-                int(legacy_hard_contacts),
-                int(contact_compliant_alm),
                 contacts.rigid_contact_count if has_contacts else None,
                 contacts.rigid_contact_shape0 if has_contacts else None,
                 contacts.rigid_contact_shape1 if has_contacts else None,
@@ -1677,19 +1711,18 @@ class ChainCondensation:
                 body_inv_mass,
                 body_inertia,
                 body_com,
-                float(friction_epsilon),
                 bool(contact_damping_bidirectional),
-                contact_penalty_k if has_contacts else None,
                 contact_normal_rho if has_contacts else None,
                 contact_material_ke if has_contacts else None,
                 contact_material_kd if has_contacts else None,
                 contact_material_mu if has_contacts else None,
                 contact_tangent_rho if has_contacts else None,
+                contact_torsional_rho if has_contacts else None,
+                contact_rolling_rho if has_contacts else None,
                 contact_lambda if has_contacts else None,
+                contact_lambda_angular if has_contacts else None,
                 contact_C0 if has_contacts else None,
                 float(contact_stab_alpha),
-                int(legacy_hard_contacts),
-                int(contact_compliant_alm),
                 contacts.rigid_contact_count if has_contacts else None,
                 contacts.rigid_contact_shape0 if has_contacts else None,
                 contacts.rigid_contact_shape1 if has_contacts else None,

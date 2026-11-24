@@ -250,8 +250,6 @@ def test_global_d6_preserves_authored_equilibrium(test, device):
             for global_count in (0, 1):
                 with test.subTest(axes=axis_count, solver=solver_type.__name__, global_count=global_count):
                     options = {"iterations": 2, "rigid_joint_global_iterations": global_count}
-                    if solver_type is newton.solvers.SolverVBD:
-                        options["rigid_compliant_alm"] = True
                     solver = solver_type(model, **options)
                     state_in, state_out = model.state(), model.state()
                     newton.eval_fk(model, coordinates, model.joint_qd, state_in)
@@ -271,8 +269,6 @@ def test_global_rejects_unrepresented_tendons(test, device):
         model, _ = build_single_span_tendon()
         for solver_type in (newton.solvers.SolverVBD, newton.solvers.SolverXPBD):
             options = {"iterations": 2}
-            if solver_type is newton.solvers.SolverVBD:
-                options["rigid_compliant_alm"] = True
             # The same physical model remains supported through upstream's local path.
             solver_type(model, rigid_joint_global_iterations=0, **options)
             with test.assertRaisesRegex(ValueError, "models containing tendons"):

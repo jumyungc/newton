@@ -64,7 +64,6 @@ from .rigid_vbd_kernels import (
     _evaluate_drive_axis,
     _evaluate_limit_axis,
     _global_limit_support,
-    _load_solve_weight,
     _material_force_terms,
     _pose_com_diff,
     _reset_world_selected,
@@ -74,7 +73,8 @@ from .rigid_vbd_kernels import (
     compute_joint_kappa_and_jacobian,
     compute_kappa_dot,
     contact_surface_separation,
-    evaluate_rigid_contact_from_collision,
+    evaluate_rigid_contact_angular_friction,
+    evaluate_rigid_contact_normal_sliding,
     pose_from_displacement,
     rotation_vector_compose,
 )
@@ -668,19 +668,18 @@ def _make_accumulate_structural_contacts(translation_only: bool, forces_only: bo
         body_q: wp.array[wp.transform],
         body_com: wp.array[wp.vec3],
         body_inv_mass: wp.array[float],
-        friction_epsilon: float,
         contact_damping_bidirectional: bool,
-        contact_penalty_k: wp.array[float],
         contact_normal_rho: wp.array[float],
         contact_material_ke: wp.array[float],
         contact_material_kd: wp.array[float],
-        contact_material_mu: wp.array[float],
-        contact_tangent_rho: wp.array[float],
+        contact_material_mu: wp.array[wp.vec3],
+        contact_tangent_rho: wp.array[wp.mat22],
+        contact_torsional_rho: wp.array[float],
+        contact_rolling_rho: wp.array[wp.mat22],
         contact_lambda: wp.array[wp.vec3],
+        contact_lambda_angular: wp.array[wp.vec3],
         contact_C0: wp.array[wp.vec3],
         stab_alpha: float,
-        legacy_hard_contacts: int,
-        contact_compliant_alm: int,
         rigid_contact_count: wp.array[int],
         rigid_contact_shape0: wp.array[int],
         rigid_contact_shape1: wp.array[int],
@@ -821,30 +820,19 @@ def _make_accumulate_structural_contacts(translation_only: bool, forces_only: bo
                 if not (separation > 0.0 and wp.dot(contact_lambda[contact], normal) <= 0.0):
                     wp.atomic_min(island_contact_state, island, -1)
 
-            multiplier = wp.vec3(0.0)
-            multiplier_normal = 0.0
-            stabilized_error = normal_error
-            tangent_C0 = wp.vec3(0.0)
-            normal_weight = _load_solve_weight(
-                contact_penalty_k,
-                contact_normal_rho,
-                contact,
-                contact_compliant_alm,
-            )
+            multiplier = contact_lambda[contact]
+            multiplier_normal = wp.dot(multiplier, normal)
+            C0 = contact_C0[contact]
+            C0_normal = wp.dot(normal, C0)
+            stabilized_error = normal_error - C0_normal
+            tangent_C0 = (1.0 - stab_alpha) * (C0 - normal * C0_normal)
+            normal_weight = contact_normal_rho[contact]
             material_k = contact_material_ke[contact]
-            if legacy_hard_contacts == 1 or contact_compliant_alm == 1:
-                multiplier = contact_lambda[contact]
-                multiplier_normal = wp.dot(multiplier, normal)
-                C0 = contact_C0[contact]
-                C0_normal = wp.dot(normal, C0)
-                stabilized_error = normal_error - stab_alpha * C0_normal
-                tangent_C0 = (1.0 - stab_alpha) * (C0 - normal * C0_normal)
 
             normal_primal_k, multiplier_normal_eff = _material_force_terms(
                 normal_weight,
                 material_k,
                 multiplier_normal,
-                contact_compliant_alm,
             )
             inactive = multiplier_normal <= 0.0 and (
                 normal_error <= _SMALL_LENGTH_EPS or normal_primal_k * stabilized_error + multiplier_normal_eff <= 0.0
@@ -863,6 +851,7 @@ def _make_accumulate_structural_contacts(translation_only: bool, forces_only: bo
                 if shifted:
                     surface_velocity -= (side / dt) * carried
 
+            friction_mu = contact_material_mu[contact]
             (
                 force0,
                 torque0,
@@ -874,7 +863,7 @@ def _make_accumulate_structural_contacts(translation_only: bool, forces_only: bo
                 h_ll1,
                 h_al1,
                 h_aa1,
-            ) = evaluate_rigid_contact_from_collision(
+            ) = evaluate_rigid_contact_normal_sliding(
                 body0,
                 body1,
                 body_q,
@@ -892,15 +881,35 @@ def _make_accumulate_structural_contacts(translation_only: bool, forces_only: bo
                 contact_tangent_rho[contact],
                 contact_material_kd[contact],
                 multiplier,
-                contact_material_mu[contact],
-                friction_epsilon,
-                legacy_hard_contacts,
-                contact_compliant_alm,
+                friction_mu[0],
                 dt,
                 tangent_C0,
                 contact_damping_bidirectional,
                 0 if wp.static(forces_only) else 1,
             )
+            if not wp.static(translation_only):
+                mu_torsional = friction_mu[1]
+                mu_rolling = friction_mu[2]
+                normal_load = wp.max(normal_primal_k * stabilized_error + multiplier_normal_eff, 0.0)
+                if normal_load > 0.0 and (mu_torsional > 0.0 or mu_rolling > 0.0):
+                    pure_torque_b, k_angular = evaluate_rigid_contact_angular_friction(
+                        body0,
+                        body1,
+                        body_q,
+                        body_q_prev,
+                        normal,
+                        normal_load,
+                        mu_torsional,
+                        mu_rolling,
+                        contact_torsional_rho[contact],
+                        contact_rolling_rho[contact],
+                        contact_lambda_angular[contact],
+                    )
+                    torque0 -= pure_torque_b
+                    torque1 += pure_torque_b
+                    if not wp.static(forces_only):
+                        h_aa0 += k_angular
+                        h_aa1 += k_angular
 
             if body == body0:
                 force_acc += force0
@@ -929,9 +938,7 @@ def _make_accumulate_structural_contacts(translation_only: bool, forces_only: bo
                     if body == body0:
                         applied = force0
                     friction_acc += applied - wp.dot(normal, applied) * normal
-                    capacity = contact_material_mu[contact] * wp.max(
-                        normal_primal_k * stabilized_error + multiplier_normal_eff, 0.0
-                    )
+                    capacity = friction_mu[0] * wp.max(normal_primal_k * stabilized_error + multiplier_normal_eff, 0.0)
                     capacity_acc += capacity
                     support_acc += (side * capacity) * normal
             i += _NUM_CONTACT_THREADS_PER_BODY
@@ -1072,14 +1079,10 @@ def flag_active_contact_islands(
     shape_body: wp.array[wp.int32],
     body_q: wp.array[wp.transform],
     body_inv_mass: wp.array[float],
-    contact_penalty_k: wp.array[float],
     contact_normal_rho: wp.array[float],
     contact_material_ke: wp.array[float],
     contact_lambda: wp.array[wp.vec3],
     contact_C0: wp.array[wp.vec3],
-    stab_alpha: float,
-    legacy_hard_contacts: int,
-    contact_compliant_alm: int,
     body_slot_by_id: wp.array[wp.int32],
     graph_body_island: wp.array[wp.int32],
     body_contact_buffer_pre_alloc: int,
@@ -1130,24 +1133,15 @@ def flag_active_contact_islands(
         rigid_contact_margin0[contact],
         rigid_contact_margin1[contact],
     )
-    multiplier_normal = 0.0
-    stabilized_error = normal_error
-    normal_weight = _load_solve_weight(
-        contact_penalty_k,
-        contact_normal_rho,
-        contact,
-        contact_compliant_alm,
-    )
+    normal_weight = contact_normal_rho[contact]
     material_k = contact_material_ke[contact]
-    if legacy_hard_contacts == 1 or contact_compliant_alm == 1:
-        multiplier_normal = wp.dot(contact_lambda[contact], normal)
-        C0_normal = wp.dot(normal, contact_C0[contact])
-        stabilized_error = normal_error - stab_alpha * C0_normal
+    multiplier_normal = wp.dot(contact_lambda[contact], normal)
+    C0_normal = wp.dot(normal, contact_C0[contact])
+    stabilized_error = normal_error - C0_normal
     normal_primal_k, multiplier_normal_eff = _material_force_terms(
         normal_weight,
         material_k,
         multiplier_normal,
-        contact_compliant_alm,
     )
     inactive = multiplier_normal <= 0.0 and (
         normal_error <= _SMALL_LENGTH_EPS or normal_primal_k * stabilized_error + multiplier_normal_eff <= 0.0
@@ -2374,7 +2368,6 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
                     upper,
                     has_drive,
                     has_limit,
-                    1,
                 )
                 inv_dt = 1.0 / dt
                 rate = (coordinate - coordinate_previous) * inv_dt
@@ -2489,7 +2482,6 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
                         upper,
                         has_drive,
                         has_limit,
-                        1,
                     )
                     inv_dt = 1.0 / dt
                     rate = wp.dot(kappa_rate, axis_local)
@@ -5228,19 +5220,18 @@ def accumulate_free_rigid_system(
     contact_torques: wp.array[wp.vec3],
     dynamic_hessian: wp.array[wp.spatial_matrix],
     has_contacts: int,
-    friction_epsilon: float,
     contact_damping_bidirectional: bool,
-    contact_penalty_k: wp.array[float],
     contact_normal_rho: wp.array[float],
     contact_material_ke: wp.array[float],
     contact_material_kd: wp.array[float],
-    contact_material_mu: wp.array[float],
-    contact_tangent_rho: wp.array[float],
+    contact_material_mu: wp.array[wp.vec3],
+    contact_tangent_rho: wp.array[wp.mat22],
+    contact_torsional_rho: wp.array[float],
+    contact_rolling_rho: wp.array[wp.mat22],
     contact_lambda: wp.array[wp.vec3],
+    contact_lambda_angular: wp.array[wp.vec3],
     contact_C0: wp.array[wp.vec3],
     stab_alpha: float,
-    legacy_hard_contacts: int,
-    contact_compliant_alm: int,
     contact_count: wp.array[int],
     contact_shape0: wp.array[int],
     contact_shape1: wp.array[int],
@@ -5335,26 +5326,22 @@ def accumulate_free_rigid_system(
             p0 = wp.transform_point(body_q[b0], p0_loc) if b0 >= 0 else p0_loc
             p1 = wp.transform_point(body_q[b1], p1_loc) if b1 >= 0 else p1_loc
             n_err = -contact_surface_separation(p0, p1, nrm, contact_margin0[c], contact_margin1[c])
-            mult = wp.vec3(0.0)
-            mult_n = 0.0
-            stab_err = n_err
-            tan_c0 = wp.vec3(0.0)
-            n_weight = _load_solve_weight(contact_penalty_k, contact_normal_rho, c, contact_compliant_alm)
+            n_weight = contact_normal_rho[c]
             mat_k = contact_material_ke[c]
-            if legacy_hard_contacts == 1 or contact_compliant_alm == 1:
-                mult = contact_lambda[c]
-                mult_n = wp.dot(mult, nrm)
-                c0_val = contact_C0[c]
-                c0_n = wp.dot(nrm, c0_val)
-                stab_err = n_err - stab_alpha * c0_n
-                tan_c0 = (1.0 - stab_alpha) * (c0_val - nrm * c0_n)
-            n_pk, mult_n_eff = _material_force_terms(n_weight, mat_k, mult_n, contact_compliant_alm)
+            mult = contact_lambda[c]
+            mult_n = wp.dot(mult, nrm)
+            c0_val = contact_C0[c]
+            c0_n = wp.dot(nrm, c0_val)
+            stab_err = n_err - c0_n
+            tan_c0 = (1.0 - stab_alpha) * (c0_val - nrm * c0_n)
+            n_pk, mult_n_eff = _material_force_terms(n_weight, mat_k, mult_n)
             if mult_n <= 0.0 and (n_err <= _SMALL_LENGTH_EPS or n_pk * stab_err + mult_n_eff <= 0.0):
                 continue
             surf_vel = wp.vec3(0.0)
             if contact_surface_velocity:
                 surf_vel = contact_surface_velocity[c]
-            f0, t0, hll0, hal0, haa0, f1, t1, hll1, hal1, haa1 = evaluate_rigid_contact_from_collision(
+            friction_mu = contact_material_mu[c]
+            f0, t0, hll0, hal0, haa0, f1, t1, hll1, hal1, haa1 = evaluate_rigid_contact_normal_sliding(
                 b0,
                 b1,
                 body_q,
@@ -5372,14 +5359,32 @@ def accumulate_free_rigid_system(
                 contact_tangent_rho[c],
                 contact_material_kd[c],
                 mult,
-                contact_material_mu[c],
-                friction_epsilon,
-                legacy_hard_contacts,
-                contact_compliant_alm,
+                friction_mu[0],
                 dt,
                 tan_c0,
                 contact_damping_bidirectional,
             )
+            mu_torsional = friction_mu[1]
+            mu_rolling = friction_mu[2]
+            normal_load = wp.max(n_pk * stab_err + mult_n_eff, 0.0)
+            if normal_load > 0.0 and (mu_torsional > 0.0 or mu_rolling > 0.0):
+                pure_torque_b, k_angular = evaluate_rigid_contact_angular_friction(
+                    b0,
+                    b1,
+                    body_q,
+                    body_q_prev,
+                    nrm,
+                    normal_load,
+                    mu_torsional,
+                    mu_rolling,
+                    contact_torsional_rho[c],
+                    contact_rolling_rho[c],
+                    contact_lambda_angular[c],
+                )
+                t0 -= pure_torque_b
+                t1 += pure_torque_b
+                haa0 += k_angular
+                haa1 += k_angular
             if body == b0:
                 ext_f += f0
                 ext_tau += t0
@@ -12980,19 +12985,18 @@ class StructuralGraphKKT:
         resolve_only=False,
         resolve_sqp_torque=True,
         contact_stream=None,
-        friction_epsilon=0.0,
         contact_damping_bidirectional=False,
-        contact_penalty_k=None,
         contact_normal_rho=None,
         contact_material_ke=None,
         contact_material_kd=None,
         contact_material_mu=None,
         contact_tangent_rho=None,
+        contact_torsional_rho=None,
+        contact_rolling_rho=None,
         contact_lambda=None,
+        contact_lambda_angular=None,
         contact_C0=None,
         contact_stab_alpha=0.0,
-        legacy_hard_contacts=0,
-        contact_compliant_alm=1,
         sync_alm_duals=False,
     ):
         def solve_chain_route():
@@ -13020,19 +13024,18 @@ class StructuralGraphKKT:
                 body_contact_buffer_size=body_contact_buffer_size,
                 body_contact_counts=body_contact_counts,
                 body_contact_indices=body_contact_indices,
-                friction_epsilon=friction_epsilon,
                 contact_damping_bidirectional=contact_damping_bidirectional,
-                contact_penalty_k=contact_penalty_k,
                 contact_normal_rho=contact_normal_rho,
                 contact_material_ke=contact_material_ke,
                 contact_material_kd=contact_material_kd,
                 contact_material_mu=contact_material_mu,
                 contact_tangent_rho=contact_tangent_rho,
+                contact_torsional_rho=contact_torsional_rho,
+                contact_rolling_rho=contact_rolling_rho,
                 contact_lambda=contact_lambda,
+                contact_lambda_angular=contact_lambda_angular,
                 contact_C0=contact_C0,
                 contact_stab_alpha=contact_stab_alpha,
-                legacy_hard_contacts=legacy_hard_contacts,
-                contact_compliant_alm=contact_compliant_alm,
             )
 
         def linearizations_closure(bucket):
@@ -13583,19 +13586,18 @@ class StructuralGraphKKT:
                         contact_torques,
                         dynamic_contact_hessian,
                         1,
-                        float(friction_epsilon),
                         bool(contact_damping_bidirectional),
-                        contact_penalty_k,
                         contact_normal_rho,
                         contact_material_ke,
                         contact_material_kd,
                         contact_material_mu,
                         contact_tangent_rho,
+                        contact_torsional_rho,
+                        contact_rolling_rho,
                         contact_lambda,
+                        contact_lambda_angular,
                         contact_C0,
                         float(contact_stab_alpha),
-                        int(legacy_hard_contacts),
-                        int(contact_compliant_alm),
                         contacts.rigid_contact_count,
                         contacts.rigid_contact_shape0,
                         contacts.rigid_contact_shape1,
@@ -13696,7 +13698,7 @@ class StructuralGraphKKT:
                         wp.capture_if(self.line_search_pending, translate, refresh=iteration > 0)
                     else:
                         translate(refresh=iteration > 0)
-            if self.has_free_rigid_modes and contacts.rigid_contact_max > 0 and contact_penalty_k is not None:
+            if self.has_free_rigid_modes and contacts.rigid_contact_max > 0 and contact_normal_rho is not None:
                 reconcile_free_rigid_modes()
             return
 
@@ -13968,7 +13970,7 @@ class StructuralGraphKKT:
                     outputs=[self.rigid_mode_center],
                     device=self.device,
                 )
-                has_c = int(contacts is not None and contacts.rigid_contact_max > 0 and contact_penalty_k is not None)
+                has_c = int(contacts is not None and contacts.rigid_contact_max > 0 and contact_normal_rho is not None)
                 wp.launch(
                     accumulate_free_rigid_system,
                     self.graph_body_count,
@@ -13997,19 +13999,18 @@ class StructuralGraphKKT:
                         contact_torques,
                         dynamic_contact_hessian,
                         has_c,
-                        float(friction_epsilon),
                         bool(contact_damping_bidirectional),
-                        contact_penalty_k if has_c else None,
                         contact_normal_rho if has_c else None,
                         contact_material_ke if has_c else None,
                         contact_material_kd if has_c else None,
                         contact_material_mu if has_c else None,
                         contact_tangent_rho if has_c else None,
+                        contact_torsional_rho if has_c else None,
+                        contact_rolling_rho if has_c else None,
                         contact_lambda if has_c else None,
+                        contact_lambda_angular if has_c else None,
                         contact_C0 if has_c else None,
                         float(contact_stab_alpha),
-                        int(legacy_hard_contacts),
-                        int(contact_compliant_alm),
                         contacts.rigid_contact_count if has_c else None,
                         contacts.rigid_contact_shape0 if has_c else None,
                         contacts.rigid_contact_shape1 if has_c else None,

@@ -138,6 +138,42 @@ class TestBodyVariants(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "one variant per body"):
             _select(model, [0])
 
+    def test_variant_attribute_update_flags(self):
+        """Variants' declarations of a shape attribute merge their update flags in any order."""
+        shape_properties = newton.ModelFlags.SHAPE_PROPERTIES
+
+        def flagged(update_flags):
+            variant = _variant("cube")
+            tag = variant.custom_attributes["test:tag"]
+            variant.custom_attributes["test:tag"] = replace(tag, update_flags=update_flags)
+            return variant
+
+        for order in ((None, shape_properties), (shape_properties, None)):
+            with self.subTest(order=order):
+                builder = newton.ModelBuilder()
+                variants = [flagged(update_flags) for update_flags in order]
+                builder.add_body_variants(builder.add_body(), variants)
+                model = builder.finalize(device="cpu")
+                self.assertEqual(model.get_attribute_update_flags("test:tag"), shape_properties)
+                # The variant without flags keeps its own declaration.
+                self.assertIsNone(variants[order.index(None)].custom_attributes["test:tag"].update_flags)
+
+        # An undeclared first variant does not hide a conflict between later ones.
+        builder = newton.ModelBuilder()
+        variants = [flagged(None), flagged(shape_properties), flagged(newton.ModelFlags.BODY_PROPERTIES)]
+        with self.assertRaisesRegex(ValueError, "declared differently"):
+            builder.add_body_variants(builder.add_body(), variants)
+
+        # The builder's own declaration without flags adopts a variant's flags.
+        builder = newton.ModelBuilder()
+        builder.add_custom_attribute(
+            newton.ModelBuilder.CustomAttribute(
+                name="tag", namespace="test", frequency=newton.Model.AttributeFrequency.SHAPE, dtype=wp.int32
+            )
+        )
+        builder.add_body_variants(builder.add_body(), [flagged(shape_properties)])
+        self.assertEqual(builder.custom_attributes["test:tag"].update_flags, shape_properties)
+
     def test_variant_ids_follow_bodies(self):
         """Variant ids are positions in each body's list, whatever else the scene declares."""
         scene = newton.ModelBuilder()
@@ -435,8 +471,6 @@ def test_mujoco_rest_height_follows_selection(test, device):
     np.testing.assert_allclose(heights, [0.25, 0.1], atol=0.02)
 
     with test.assertRaises(NotImplementedError):
-        solver.render_mujoco_viewer()
-    with test.assertRaises(NotImplementedError):
         newton.solvers.SolverMuJoCo(model, use_mujoco_contacts=True)
 
 
@@ -448,7 +482,7 @@ def test_selection_replays_from_cuda_graph(test, device):
     model = scene.finalize(device=device)
     mujoco = newton.solvers.SolverMuJoCo(model, use_mujoco_contacts=False)
     vbd = newton.solvers.SolverVBD(
-        model, rigid_compliant_alm=True, rigid_soft_enable_dat=True, collision_pipeline=newton.CollisionPipeline(model)
+        model, rigid_soft_enable_dat=True, collision_pipeline=newton.CollisionPipeline(model)
     )
     cube_radius = vbd._rigid_dat_body_bounding_radius.numpy()[0]
 

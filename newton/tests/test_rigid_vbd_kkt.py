@@ -19,7 +19,7 @@ from newton._src.solvers.vbd import rigid_vbd_kkt, rigid_vbd_kkt_chains
 from newton._src.solvers.vbd.rigid_vbd_kernels import (
     compute_kappa_and_jacobian,
     evaluate_angular_constraint_force_hessian,
-    evaluate_rigid_contact_from_collision,
+    evaluate_rigid_contact_normal_sliding,
     ldlt6_solve,
     update_body_velocity,
 )
@@ -138,7 +138,6 @@ def _evaluate_local_angular_damping(
         wp.vec3(0.0),
         0.0,
         2.0,
-        1,
         dt,
     )
     result[0] = torque
@@ -191,7 +190,6 @@ def _build_chain(
         bend_stiffness=1.0e4,
         bend_damping=1.0e3,
         wrap_in_articulation=True,
-        body_frame_origin="com",
     )
     if capsule_mass:
         _use_capsule_rod_mass(builder, bodies, builder.default_shape_cfg.density)
@@ -227,7 +225,6 @@ def _build_chains(device, segment_counts, *, stiffness=1.0e7):
             bend_stiffness=1.0e4,
             bend_damping=1.0e3,
             wrap_in_articulation=True,
-            body_frame_origin="com",
         )
         _pin_body(builder, int(bodies[0]))
     builder.color(balance_colors=False)
@@ -259,7 +256,6 @@ def _build_y_tree(device, *, segments_per_branch=6, stiffness=1.0e9, interior_pi
         bend_stiffness=1.0e4,
         bend_damping=1.0e3,
         wrap_in_articulation=True,
-        body_frame_origin="com",
     )
     _pin_body(builder, int(bodies[segments_per_branch - 1]))
     for index in interior_pins:
@@ -294,7 +290,6 @@ def _build_y_trees(device, branch_segments, *, stiffness=1.0e7):
             bend_stiffness=1.0e4,
             bend_damping=1.0e3,
             wrap_in_articulation=True,
-            body_frame_origin="com",
         )
         _pin_body(builder, int(bodies[segments[0] - 1]))
     builder.color(balance_colors=False)
@@ -326,7 +321,6 @@ def _build_spurred_tree(device, *, arm_segments=8, stiffness=1.0e9):
         bend_stiffness=1.0e4,
         bend_damping=1.0e3,
         wrap_in_articulation=True,
-        body_frame_origin="com",
     )
     _pin_body(builder, int(bodies[arm_segments - 1]))
     builder.color(balance_colors=False)
@@ -375,7 +369,6 @@ def _build_loop_with_branch(
             bend_stiffness=bend_stiffness,
             bend_damping=1.0e3,
             wrap_in_articulation=True,
-            body_frame_origin="com",
         )
     if capsule_mass:
         _use_capsule_rod_mass(builder, bodies, shape.density)
@@ -685,7 +678,6 @@ def _simulate_prismatic_material_chain(device, *, kind, stiffness, global_iterat
     solver = newton.solvers.SolverVBD(
         model,
         iterations=iterations,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=global_iterations,
     )
     dt = 1.0 / 600.0
@@ -807,7 +799,6 @@ def _build_grounded_chain(
         bend_stiffness=1.0e4,
         bend_damping=1.0e3,
         wrap_in_articulation=True,
-        body_frame_origin="com",
     )
     if capsule_mass:
         _use_capsule_rod_mass(builder, bodies, shape.density)
@@ -820,7 +811,6 @@ def _build_grounded_chain(
     solver = newton.solvers.SolverVBD(
         model,
         iterations=iterations,
-        rigid_compliant_alm=True,
         rigid_contact_history=contact_history,
         rigid_joint_global_iterations=global_iterations,
         rigid_body_contact_buffer_size=contact_buffer_size,
@@ -969,7 +959,6 @@ def _path_float64_oracle_metrics(device, stiffness, *, segments=16, model=None, 
     solver = newton.solvers.SolverVBD(
         model,
         iterations=1,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
     )
     # The solver plans routes and factor precisions at its first step outside capture and may then replace
@@ -1108,7 +1097,6 @@ def _tree_float64_oracle_metrics(
     solver = newton.solvers.SolverVBD(
         model,
         iterations=1,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
     )
     backend = solver._structural_graph_kkt
@@ -1478,7 +1466,6 @@ def _simulate_grounded_loop_load(device, global_iterations):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=2,
-        rigid_compliant_alm=True,
         rigid_contact_history=False,
         rigid_joint_global_iterations=global_iterations,
         rigid_body_contact_buffer_size=256,
@@ -1516,7 +1503,6 @@ def _structural_kkt_selects_supported_complete_graphs(test, device):
     elastic_solver = newton.solvers.SolverVBD(
         elastic,
         iterations=1,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
     )
     test.assertIsNotNone(elastic_solver._structural_graph_kkt)
@@ -1526,7 +1512,6 @@ def _structural_kkt_selects_supported_complete_graphs(test, device):
     dahl_solver = newton.solvers.SolverVBD(
         dahl,
         iterations=1,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
     )
     test.assertIsNotNone(dahl_solver._structural_graph_kkt)
@@ -1535,7 +1520,6 @@ def _structural_kkt_selects_supported_complete_graphs(test, device):
     limited_solver = newton.solvers.SolverVBD(
         limited,
         iterations=1,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
     )
     test.assertIsNotNone(limited_solver._structural_graph_kkt)
@@ -1983,9 +1967,7 @@ def _structural_kkt_limit_requests_follow_dynamic_endpoint(test, device):
                     flags = model.body_flags.numpy().copy()
                     flags[child] |= int(newton.BodyFlags.KINEMATIC)
                     model.body_flags.assign(flags)
-                solver = newton.solvers.SolverVBD(
-                    model, iterations=1, rigid_compliant_alm=True, rigid_joint_global_iterations=1
-                )
+                solver = newton.solvers.SolverVBD(model, iterations=1, rigid_joint_global_iterations=1)
                 backend = solver._structural_graph_kkt
                 test.assertIsNotNone(backend)
                 test.assertEqual(backend.island_count, 2)
@@ -2017,9 +1999,7 @@ def _structural_kkt_rebuild_accounts_for_global_storage(test, device):
     mixed, _ = _build_mixed_fixed_topologies(device)
     for model in (chain, mixed):
         with test.subTest(body_count=model.body_count):
-            solver = newton.solvers.SolverVBD(
-                model, iterations=1, rigid_compliant_alm=True, rigid_joint_global_iterations=1
-            )
+            solver = newton.solvers.SolverVBD(model, iterations=1, rigid_joint_global_iterations=1)
             backend, allocated = _build_structural_backend_with_intercepted_bytes(model, solver=solver)
             test.assertIsNotNone(backend)
             test.assertEqual(allocated, backend._estimated_bytes)
@@ -2072,9 +2052,7 @@ def _structural_kkt_limit_capture_fallback_preserves_state(test, device):
     dt = 1.0 / 60.0
 
     def simulate(loaded, mode):
-        solver = newton.solvers.SolverVBD(
-            model, iterations=2, rigid_compliant_alm=True, rigid_joint_global_iterations=1
-        )
+        solver = newton.solvers.SolverVBD(model, iterations=2, rigid_joint_global_iterations=1)
         backend = solver._structural_graph_kkt
         test.assertEqual(backend.island_count, 2)
         test.assertTrue(backend.has_limit_rows)
@@ -2146,7 +2124,7 @@ def _structural_kkt_limit_capture_fallback_preserves_state(test, device):
 def _structural_kkt_inactive_limit_adds_curvature_without_force(test, device):
     """An open limit adds no curvature when unloaded, and retains curvature without ghost force when dual-loaded."""
     model, _, _, _ = _build_joint_pair(device, newton.JointType.REVOLUTE, finite_limit=True)
-    solver = newton.solvers.SolverVBD(model, iterations=1, rigid_compliant_alm=True, rigid_joint_global_iterations=1)
+    solver = newton.solvers.SolverVBD(model, iterations=1, rigid_joint_global_iterations=1)
     _simulate(model, solver, 1, 1.0 / 600.0)
     solver.joint_drive_limit_support.fill_(100.0)
     solver.joint_drive_lambda.zero_()
@@ -2203,7 +2181,6 @@ def _structural_kkt_inactive_trees_do_not_apply_free_body_corrections(test, devi
         solver = newton.solvers.SolverVBD(
             model,
             iterations=2,
-            rigid_compliant_alm=True,
             rigid_joint_global_iterations=1,
             rigid_joint_linear_ke=0.0,
             rigid_joint_angular_ke=0.0,
@@ -2258,7 +2235,6 @@ def _structural_kkt_reuses_compact_scratch(test, device):
         stretch_stiffness=1.0e9,
         bend_stiffness=1.0e4,
         wrap_in_articulation=True,
-        body_frame_origin="com",
     )
     _pin_body(builder, int(bodies[0]))
     builder.color(balance_colors=False)
@@ -2266,7 +2242,6 @@ def _structural_kkt_reuses_compact_scratch(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=1,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
     )
     backend = solver._structural_graph_kkt
@@ -2301,7 +2276,6 @@ def _structural_kkt_refreshes_notified_joint_enable_topology(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=1,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
     )
     test.assertIsNone(solver._structural_graph_kkt)
@@ -2335,7 +2309,6 @@ def _structural_kkt_uses_effective_kinematic_mass(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=1,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
     )
     backend = solver._structural_graph_kkt
@@ -2357,7 +2330,6 @@ def _cable_kkt_preserves_dahl_state_under_capture(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=4,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
     )
     backend = solver._structural_graph_kkt
@@ -2392,7 +2364,7 @@ def _cable_kkt_reduces_long_path_error(test, device):
     """Reduce closure error on a long cable path with one global pass."""
     dt = 1.0 / 600.0
     local_model, _, local_joints = _build_chain(device, segments=32)
-    local_solver = newton.solvers.SolverVBD(local_model, iterations=1, rigid_compliant_alm=True)
+    local_solver = newton.solvers.SolverVBD(local_model, iterations=1)
     local_state = _simulate(local_model, local_solver, 40, dt)
     local_gap = _max_joint_gap(local_model, local_state.body_q.numpy(), local_joints)
 
@@ -2400,7 +2372,6 @@ def _cable_kkt_reduces_long_path_error(test, device):
     kkt_solver = newton.solvers.SolverVBD(
         kkt_model,
         iterations=1,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
     )
     kkt_state = _simulate(kkt_model, kkt_solver, 40, dt)
@@ -2422,7 +2393,6 @@ def _cable_kkt_near_hard_capture_is_finite(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=2,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=2,
     )
     state_0 = model.state()
@@ -2456,7 +2426,6 @@ def _cable_kkt_near_hard_closed_cycle_is_finite_under_capture(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=1,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
     )
     closed_tree = solver._structural_graph_kkt.closed_tree_buckets[0]
@@ -2493,7 +2462,6 @@ def _cable_kkt_closed_cycle_bounds_multiplier_history(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=1,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
     )
     test.assertEqual(
@@ -2569,7 +2537,6 @@ def _structural_kkt_retains_interior_supported_branches(test, device):
             solver = newton.solvers.SolverVBD(
                 model,
                 iterations=2,
-                rigid_compliant_alm=True,
                 rigid_joint_global_iterations=1,
             )
             backend = solver._structural_graph_kkt
@@ -2627,7 +2594,7 @@ def _cable_kkt_tree_handles_stiff_y_junction(test, device):
     """Resolve a stiff branched cable tree with the global solve."""
     dt = 1.0 / 600.0
     local_model, _, local_joints = _build_y_tree(device)
-    local_solver = newton.solvers.SolverVBD(local_model, iterations=2, rigid_compliant_alm=True)
+    local_solver = newton.solvers.SolverVBD(local_model, iterations=2)
     local_state = _simulate(local_model, local_solver, 20, dt)
     local_gap = _max_joint_gap(local_model, local_state.body_q.numpy(), local_joints)
 
@@ -2635,7 +2602,6 @@ def _cable_kkt_tree_handles_stiff_y_junction(test, device):
     kkt_solver = newton.solvers.SolverVBD(
         kkt_model,
         iterations=2,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=2,
     )
     backend = kkt_solver._structural_graph_kkt
@@ -2661,7 +2627,7 @@ def _cable_kkt_closes_stiff_loop_with_one_global_pass(test, device):
     """Reduce closure error on a stiff cyclic cable graph."""
     dt = 1.0 / 600.0
     local_model, _, local_joints = _build_loop_with_branch(device, add_chord=True)
-    local_solver = newton.solvers.SolverVBD(local_model, iterations=2, rigid_compliant_alm=True)
+    local_solver = newton.solvers.SolverVBD(local_model, iterations=2)
     local_state = _simulate(local_model, local_solver, 20, dt)
     local_gap = _max_joint_gap(local_model, local_state.body_q.numpy(), local_joints)
 
@@ -2669,7 +2635,6 @@ def _cable_kkt_closes_stiff_loop_with_one_global_pass(test, device):
     kkt_solver = newton.solvers.SolverVBD(
         kkt_model,
         iterations=2,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
     )
     backend = kkt_solver._structural_graph_kkt
@@ -3062,7 +3027,6 @@ def _cable_kkt_closed_cycle_preserves_local_contact(test, device):
         solver = newton.solvers.SolverVBD(
             model,
             iterations=2,
-            rigid_compliant_alm=True,
             rigid_contact_history=False,
             rigid_joint_global_iterations=g,
             rigid_body_contact_buffer_size=256,
@@ -3149,7 +3113,6 @@ def _structural_kkt_reduces_fixed_chain_error(test, device):
     local_model, _, local_joints = _build_fixed_chain(device)
     solver_options = {
         "iterations": 1,
-        "rigid_compliant_alm": True,
         "rigid_joint_linear_ke": 1.0e9,
         "rigid_joint_angular_ke": 1.0e9,
     }
@@ -3189,7 +3152,6 @@ def _structural_kkt_batches_replicated_topologies(test, device):
         solver = newton.solvers.SolverVBD(
             model,
             iterations=1,
-            rigid_compliant_alm=True,
             rigid_joint_global_iterations=1,
         )
         backend = solver._structural_graph_kkt
@@ -3464,7 +3426,6 @@ def _structural_kkt_mixed_rod_tree_uses_stable_leaf_route(test, device):
         stretch_stiffness=1.0e9,
         bend_stiffness=1.0e4,
         wrap_in_articulation=True,
-        body_frame_origin="com",
     )
     builder.add_joint_ball(
         parent=slider,
@@ -3476,7 +3437,6 @@ def _structural_kkt_mixed_rod_tree_uses_stable_leaf_route(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=2,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
         deterministic=wp.DeterministicMode.RUN_TO_RUN,
     )
@@ -3495,7 +3455,6 @@ def _structural_kkt_mixed_rod_tree_uses_stable_leaf_route(test, device):
     homogeneous_solver = newton.solvers.SolverVBD(
         homogeneous_model,
         iterations=2,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
     )
     test.assertTrue(homogeneous_solver._structural_graph_kkt.tree_buckets[0].use_tree_contraction)
@@ -3506,7 +3465,6 @@ def _structural_kkt_partial_fallback_preserves_healthy_island(test, device):
     reference_model, reference_healthy_bodies = _build_mixed_fixed_topologies(device)
     solver_options = {
         "iterations": 1,
-        "rigid_compliant_alm": True,
         "rigid_joint_global_iterations": 1,
         "deterministic": wp.DeterministicMode.RUN_TO_RUN,
     }
@@ -3912,7 +3870,6 @@ def _structural_kkt_path_solve_has_small_residual(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=1,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
     )
     backend = solver._structural_graph_kkt
@@ -3970,7 +3927,6 @@ def _structural_kkt_persistent_cr_matches_level_schedule(test, device):
         solver = newton.solvers.SolverVBD(
             model,
             iterations=2,
-            rigid_compliant_alm=True,
             rigid_joint_global_iterations=1,
             deterministic=wp.DeterministicMode.RUN_TO_RUN,
         )
@@ -4001,7 +3957,6 @@ def _structural_kkt_persistent_cr_matches_level_schedule(test, device):
     larger_solver = newton.solvers.SolverVBD(
         larger_model,
         iterations=1,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
     )
     larger_bucket = larger_solver._structural_graph_kkt.path_buckets[0]
@@ -4014,7 +3969,6 @@ def _structural_kkt_persistent_cr_matches_level_schedule(test, device):
     cpu_solver = newton.solvers.SolverVBD(
         cpu_model,
         iterations=1,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
     )
     test.assertEqual(len(cpu_solver._structural_graph_kkt.path_buckets[0].cr_schedule.persistent), 0)
@@ -4111,7 +4065,6 @@ def _structural_kkt_ragged_path_bucket_matches_standalone_paths(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=1,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
     )
     test.assertEqual(len(solver._structural_graph_kkt.path_buckets), 1)
@@ -4173,7 +4126,6 @@ def _structural_kkt_ragged_tree_bucket_matches_separate_buckets(test, device):
         solver = newton.solvers.SolverVBD(
             model,
             iterations=4,
-            rigid_compliant_alm=True,
             rigid_joint_global_iterations=1,
             deterministic=wp.DeterministicMode.RUN_TO_RUN,
         )
@@ -4234,7 +4186,6 @@ def _structural_kkt_cr_tail_preserves_captured_trajectory(test, device):
             solver = newton.solvers.SolverVBD(
                 model,
                 iterations=4,
-                rigid_compliant_alm=True,
                 rigid_joint_global_iterations=global_iterations,
                 deterministic=wp.DeterministicMode.RUN_TO_RUN,
             )
@@ -4269,7 +4220,6 @@ def _structural_kkt_fused_closure_matches_level_schedule(test, device):
             solver = newton.solvers.SolverVBD(
                 model,
                 iterations=2,
-                rigid_compliant_alm=True,
                 rigid_joint_global_iterations=1,
             )
             bucket = solver._structural_graph_kkt.closed_tree_buckets[0]
@@ -4339,7 +4289,6 @@ def _structural_kkt_paired_coarse_lanes_match_serial_schedule(test, device):
         solver = newton.solvers.SolverVBD(
             model,
             iterations=2,
-            rigid_compliant_alm=True,
             rigid_joint_global_iterations=1,
             deterministic=wp.DeterministicMode.RUN_TO_RUN,
         )
@@ -4388,7 +4337,6 @@ def _structural_kkt_paired_coarse_lanes_match_serial_schedule(test, device):
     narrow_solver = newton.solvers.SolverVBD(
         narrow,
         iterations=1,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
     )
     narrow_bucket = narrow_solver._structural_graph_kkt.closed_tree_buckets[0]
@@ -4400,7 +4348,6 @@ def _structural_kkt_paired_coarse_lanes_match_serial_schedule(test, device):
     cpu_solver = newton.solvers.SolverVBD(
         cpu_model,
         iterations=1,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
     )
     test.assertFalse(cpu_solver._structural_graph_kkt.closed_tree_buckets[0].use_lane_split_coarse)
@@ -4522,7 +4469,6 @@ def _structural_kkt_fused_tree_levels_match_level_schedule(test, device):
         solver = newton.solvers.SolverVBD(
             model,
             iterations=2,
-            rigid_compliant_alm=True,
             rigid_joint_global_iterations=1,
             deterministic=wp.DeterministicMode.RUN_TO_RUN,
         )
@@ -4673,7 +4619,6 @@ def _structural_kkt_angular_damping_matches_local_force(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=1,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
     )
     dt = 0.02
@@ -4727,7 +4672,6 @@ def _structural_kkt_joint_linearizations_match_finite_difference(test, device):
         solver = newton.solvers.SolverVBD(
             model,
             iterations=1,
-            rigid_compliant_alm=True,
             rigid_joint_linear_ke=1.0e6,
             rigid_joint_angular_ke=1.0e6,
             rigid_joint_global_iterations=1,
@@ -4776,7 +4720,6 @@ def _structural_kkt_fused_stress_clears_disabled_rows(test, device):
         solver = newton.solvers.SolverVBD(
             model,
             iterations=2,
-            rigid_compliant_alm=True,
             rigid_joint_global_iterations=1,
             deterministic=wp.DeterministicMode.RUN_TO_RUN,
         )
@@ -4826,9 +4769,7 @@ def _structural_kkt_fused_stress_clears_disabled_rows(test, device):
 
     # A world-anchor or a general joint still requires the separate pass.
     for other in (_build_fixed_chain(device, link_count=4)[0], _build_loop_with_branch(device, ring_segments=8)[0]):
-        solver = newton.solvers.SolverVBD(
-            other, iterations=2, rigid_compliant_alm=True, rigid_joint_global_iterations=1
-        )
+        solver = newton.solvers.SolverVBD(other, iterations=2, rigid_joint_global_iterations=1)
         test.assertFalse(solver._structural_graph_kkt._fuse_rod_stress)
 
 
@@ -4884,7 +4825,7 @@ def _structural_kkt_uses_explicit_iteration_budget(test, device):
     """Distribute the requested global passes over the local iteration budget."""
     model, _, _ = _build_chain(device, segments=4)
 
-    disabled = newton.solvers.SolverVBD(model, iterations=5, rigid_compliant_alm=True)
+    disabled = newton.solvers.SolverVBD(model, iterations=5)
     test.assertIsNone(disabled._structural_graph_kkt)
     test.assertEqual(disabled._body_contact_scratch.shape, (11, model.body_count, 3))
     explicit_zero = newton.solvers.SolverVBD(model, iterations=5, rigid_joint_global_iterations=0)
@@ -4904,7 +4845,6 @@ def _structural_kkt_uses_explicit_iteration_budget(test, device):
         newton.solvers.SolverVBD(
             model,
             iterations=5,
-            rigid_compliant_alm=True,
             rigid_joint_global_iterations=6,
         )
 
@@ -4912,7 +4852,6 @@ def _structural_kkt_uses_explicit_iteration_budget(test, device):
         newton.solvers.SolverVBD(
             model,
             iterations=1,
-            rigid_compliant_alm=True,
             rigid_joint_global_iterations=1,
             integrate_with_external_rigid_solver=True,
         )
@@ -4922,14 +4861,12 @@ def _structural_kkt_uses_explicit_iteration_budget(test, device):
         newton.solvers.SolverVBD(
             mixed_model,
             iterations=1,
-            rigid_compliant_alm=True,
             rigid_joint_global_iterations=1,
         )
 
     solver = newton.solvers.SolverVBD(
         model,
         iterations=5,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=2,
     )
     test.assertIsNotNone(solver._structural_graph_kkt)
@@ -4959,7 +4896,6 @@ def _structural_kkt_uses_explicit_iteration_budget(test, device):
     all_global_solver = newton.solvers.SolverVBD(
         model,
         iterations=2,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=2,
     )
     all_global_events = []
@@ -4983,7 +4919,7 @@ def _structural_kkt_uses_explicit_iteration_budget(test, device):
 def _structural_kkt_prelocal_stage_bounds_coarse_chain_error(test, device):
     """Reconcile a coarse inertial prediction before a local sweep bends the chain."""
     model, bodies, joints = _build_chain(device, segments=8, stiffness=1.0e7)
-    solver = newton.solvers.SolverVBD(model, iterations=1, rigid_compliant_alm=True, rigid_joint_global_iterations=1)
+    solver = newton.solvers.SolverVBD(model, iterations=1, rigid_joint_global_iterations=1)
     state = _simulate(model, solver, 30, 1.0 / 60.0)
     pose = state.body_q.numpy()
     test.assertTrue(np.isfinite(pose).all())
@@ -5009,7 +4945,6 @@ def _structural_kkt_all_memory_fallback_uses_local_schedule(test, device):
         solver = newton.solvers.SolverVBD(
             model,
             iterations=2,
-            rigid_compliant_alm=True,
             rigid_joint_global_iterations=2,
         )
 
@@ -5096,7 +5031,7 @@ def _structural_kkt_contact_transitions_are_repeatable(test, device):
                         solver.joint_lambda_lin,
                         solver.joint_lambda_ang,
                         solver.body_body_contact_lambda,
-                        solver.joint_penalty_k,
+                        solver.joint_rho,
                     )
                 ]
             )
@@ -5125,7 +5060,6 @@ def _structural_kkt_contacts_preserve_independent_acceleration(test, device):
         solver = newton.solvers.SolverVBD(
             model,
             iterations=2,
-            rigid_compliant_alm=True,
             rigid_joint_global_iterations=g,
             rigid_joint_linear_ke=1.0e9,
             deterministic=wp.DeterministicMode.RUN_TO_RUN,
@@ -5255,7 +5189,6 @@ def _structural_kkt_inherits_solver_deterministic_mode(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=1,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
         deterministic=wp.DeterministicMode.RUN_TO_RUN,
     )
@@ -5270,7 +5203,6 @@ def _structural_kkt_inherits_solver_deterministic_mode(test, device):
     other = newton.solvers.SolverVBD(
         model,
         iterations=1,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
         deterministic=wp.DeterministicMode.NOT_GUARANTEED,
     )
@@ -5308,7 +5240,6 @@ def _structural_kkt_default_mode_matches_run_to_run(test, device):
                 solver = newton.solvers.SolverVBD(
                     model,
                     iterations=2,
-                    rigid_compliant_alm=True,
                     rigid_joint_global_iterations=1,
                     deterministic=deterministic,
                 )
@@ -5334,7 +5265,6 @@ def _structural_kkt_preflight_is_deterministic_and_capture_safe(test, device):
         solver = newton.solvers.SolverVBD(
             model,
             iterations=1,
-            rigid_compliant_alm=True,
             rigid_joint_global_iterations=1,
             deterministic=wp.DeterministicMode.RUN_TO_RUN,
         )
@@ -5392,7 +5322,6 @@ def _structural_kkt_captures_numeric_inertia_refresh(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=2,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
     )
     backend = solver._structural_graph_kkt
@@ -5436,7 +5365,6 @@ def _structural_kkt_free_root_is_constraint_free(test, device):
             solver = newton.solvers.SolverVBD(
                 model,
                 iterations=2,
-                rigid_compliant_alm=True,
                 rigid_joint_global_iterations=1,
                 rigid_joint_linear_ke=stiffness,
                 rigid_joint_angular_ke=stiffness,
@@ -5523,7 +5451,6 @@ def _structural_kkt_free_self_contact_conserves_momentum(test, device):
         stretch_stiffness=1.0e7,
         bend_stiffness=1.0e3,
         wrap_in_articulation=True,
-        body_frame_origin="com",
     )
     builder.color(balance_colors=False)
     model = builder.finalize(device=device)
@@ -5532,7 +5459,6 @@ def _structural_kkt_free_self_contact_conserves_momentum(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=2,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
         rigid_contact_history=True,
     )
@@ -5630,7 +5556,6 @@ def _structural_kkt_free_translation_preserves_momentum(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=5,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
     )
     a, b = model.state(), model.state()
@@ -5915,7 +5840,6 @@ def _structural_kkt_cooperative_paired_matches_serial(test, device):
         solver = newton.solvers.SolverVBD(
             model,
             iterations=2,
-            rigid_compliant_alm=True,
             rigid_joint_global_iterations=1,
             deterministic=wp.DeterministicMode.RUN_TO_RUN,
         )
@@ -5997,7 +5921,6 @@ def _structural_kkt_cooperative_paired_reuses_factors(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=1,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=1,
     )
     bucket = solver._structural_graph_kkt.closed_tree_buckets[0]
@@ -6155,7 +6078,6 @@ def _run_stiff_ball_tree(test, device, *, depth, stiffness, global_iterations, i
     solver = newton.solvers.SolverVBD(
         model,
         iterations=iterations,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=global_iterations,
         rigid_joint_linear_ke=stiffness,
         rigid_joint_linear_kd=0.0,
@@ -6216,7 +6138,8 @@ def _probe_frame_inv_contact_and_rhs_kernel(
     u = 3.0517578125e-5  # 2^-15 (0.5 ULP of 1024.0)
     n = wp.vec3(0.0, 0.0, 1.0)
     z3 = wp.vec3(0.0)
-    _f0, tau_l, _ll0, _al0, _aa0, _f1, _t1, _ll1, _al1, _aa1 = rigid_vbd_kkt.evaluate_rigid_contact_from_collision(
+    t_rho = wp.mat22(1.0e6, 0.0, 0.0, 1.0e6)
+    _f0, tau_l, _ll0, _al0, _aa0, _f1, _t1, _ll1, _al1, _aa1 = evaluate_rigid_contact_normal_sliding(
         0,
         -1,
         body_q,
@@ -6231,18 +6154,15 @@ def _probe_frame_inv_contact_and_rhs_kernel(
         1.0e-3,
         1.0e6,
         1.0e6,
-        1.0e6,
+        t_rho,
         0.0,
         z3,
         0.0,
-        1.0e-4,
-        0,
-        1,
         dt,
         z3,
         False,
     )
-    _f2, tau_r, _ll2, _al2, _aa2, _f3, _t3, _ll3, _al3, _aa3 = rigid_vbd_kkt.evaluate_rigid_contact_from_collision(
+    _f2, tau_r, _ll2, _al2, _aa2, _f3, _t3, _ll3, _al3, _aa3 = evaluate_rigid_contact_normal_sliding(
         0,
         -1,
         body_q,
@@ -6257,13 +6177,10 @@ def _probe_frame_inv_contact_and_rhs_kernel(
         1.0e-3,
         1.0e6,
         1.0e6,
-        1.0e6,
+        t_rho,
         0.0,
         z3,
         0.0,
-        1.0e-4,
-        0,
-        1,
         dt,
         z3,
         False,
@@ -6368,7 +6285,6 @@ def _structural_kkt_displacement_form_keeps_free_com(test, device):
         solver = newton.solvers.SolverVBD(
             model,
             iterations=1,
-            rigid_compliant_alm=True,
             rigid_joint_global_iterations=1,
         )
         state_in, state_out, control = model.state(), model.state(), model.control()
@@ -6594,7 +6510,6 @@ def _structural_correction_penalty_excludes_rod_rows(test, device):
         solver = newton.solvers.SolverVBD(
             model,
             iterations=1,
-            rigid_compliant_alm=True,
             rigid_joint_linear_ke=1.0e5,
             rigid_joint_angular_ke=1.0e5,
             rigid_joint_global_iterations=1,
@@ -6624,7 +6539,6 @@ def _structural_correction_penalty_excludes_rod_rows(test, device):
     s_ball = newton.solvers.SolverVBD(
         m_ball,
         iterations=1,
-        rigid_compliant_alm=True,
         rigid_joint_linear_ke=1.0e12,
         rigid_joint_global_iterations=1,
     )
@@ -6748,7 +6662,6 @@ def _structural_kkt_clean_saddle_stress_stateless_and_resolve_stable(test, devic
     solver = newton.solvers.SolverVBD(
         model,
         iterations=1,
-        rigid_compliant_alm=True,
         rigid_joint_linear_ke=stiffness,
         rigid_joint_global_iterations=1,
     )
@@ -6851,7 +6764,7 @@ def _structural_kkt_stored_stress_reset_respects_world_mask(test, device):
         builder.add_world(template, xform=wp.transform(wp.vec3(0.0, 0.5 * world, 0.0), wp.quat_identity()))
     builder.color(balance_colors=False)
     model = builder.finalize(device=device)
-    solver = newton.solvers.SolverVBD(model, iterations=1, rigid_compliant_alm=True, rigid_joint_global_iterations=1)
+    solver = newton.solvers.SolverVBD(model, iterations=1, rigid_joint_global_iterations=1)
     backend = solver._structural_graph_kkt
     buckets = [bucket for bucket in backend.tree_buckets if id(bucket) in backend.stored_stress_buckets]
     test.assertTrue(buckets)
@@ -6929,7 +6842,6 @@ def _structural_kkt_per_island_active_contact_sweep_gating(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=1,
-        rigid_compliant_alm=True,
         rigid_joint_linear_ke=1.0e6,
         rigid_joint_angular_ke=1.0e6,
         rigid_joint_global_iterations=1,
@@ -7651,7 +7563,7 @@ def _run_rigid_step_with_trace(model, solver, contacts):
             solver.body_hessian_aa.numpy(),
         ],
         "duals": [
-            solver.joint_penalty_k.numpy(),
+            solver.joint_rho.numpy(),
             solver.joint_lambda_lin.numpy(),
             solver.joint_lambda_ang.numpy(),
         ],
@@ -7714,7 +7626,6 @@ def test_paired_open_chain_global_solve(test, device):
     kwargs = {
         "iterations": 4,
         "rigid_joint_global_iterations": 1,
-        "rigid_compliant_alm": True,
         "deterministic": wp.DeterministicMode.NOT_GUARANTEED,
     }
     baseline = planned(model, **kwargs)
@@ -8155,7 +8066,6 @@ def _structural_kkt_multi_anchor_tree_survives_near_rigid_rows(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=2,
-        rigid_compliant_alm=True,
         rigid_joint_global_iterations=2,
         rigid_joint_linear_ke=1.0e12,
         rigid_joint_angular_ke=1.0e12,
@@ -8223,7 +8133,6 @@ def _structural_kkt_near_rigid_sled_slides_on_soft_ground(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=2,
-        rigid_compliant_alm=True,
         rigid_joint_linear_ke=1.0e12,
         rigid_joint_angular_ke=1.0e12,
         rigid_joint_global_iterations=1,
@@ -8304,7 +8213,6 @@ def _structural_kkt_ball_open_chain_uses_tree_contraction(test, device):
         solver = newton.solvers.SolverVBD(
             model,
             iterations=1,
-            rigid_compliant_alm=True,
             rigid_joint_linear_ke=ke,
             rigid_joint_angular_ke=ke,
             rigid_joint_global_iterations=1,
@@ -8375,7 +8283,6 @@ def _structural_kkt_near_rigid_anchored_tree_multistage_stable(test, device):
     solver = newton.solvers.SolverVBD(
         model,
         iterations=2,
-        rigid_compliant_alm=True,
         rigid_joint_linear_ke=1.0e12,
         rigid_joint_angular_ke=1.0e12,
         rigid_joint_global_iterations=2,
@@ -8421,7 +8328,6 @@ def _structural_kkt_sqp_saddle_chord_reduces_pendulum_step_error(test, device):
         solver = newton.solvers.SolverVBD(
             model,
             iterations=iters,
-            rigid_compliant_alm=True,
             rigid_joint_linear_ke=1.0e8,
             rigid_joint_angular_ke=1.0e8,
             rigid_joint_global_iterations=global_iters,
@@ -8801,7 +8707,6 @@ def _structural_kkt_arbitrary_length_paired_cr_and_budget_warning(test, device):
             model,
             iterations=1,
             rigid_joint_global_iterations=1,
-            rigid_compliant_alm=True,
         )
     test.assertIsNone(warned_solver._structural_graph_kkt)
 
@@ -8812,7 +8717,6 @@ def _structural_kkt_arbitrary_length_paired_cr_and_budget_warning(test, device):
         model,
         iterations=1,
         rigid_joint_global_iterations=1,
-        rigid_compliant_alm=True,
         deterministic=wp.DeterministicMode.NOT_GUARANTEED,
     )
     state_in, state_out, control = model.state(), model.state(), model.control()
@@ -9164,7 +9068,6 @@ def _heterogeneous_fused_trees_and_near_rigid_fp64_paired_cr(test, device):
         rigid_joint_global_iterations=1,
         rigid_joint_linear_ke=1.0e10,
         rigid_joint_angular_ke=1.0e10,
-        rigid_compliant_alm=True,
         deterministic=wp.DeterministicMode.NOT_GUARANTEED,
     )
     ls0, ls1, lctrl = long_model.state(), long_model.state(), long_model.control()
@@ -9187,7 +9090,7 @@ def _eval_unilateral_active_set_probe(
     out_knn: wp.array[float],
 ):
     n = wp.vec3(0.0, 1.0, 0.0)
-    f0, _t0, h_ll0, _hal0, _haa0, _f1, _t1, _hll1, _hal1, _haa1 = evaluate_rigid_contact_from_collision(
+    f0, _t0, h_ll0, _hal0, _haa0, _f1, _t1, _hll1, _hal1, _haa1 = evaluate_rigid_contact_normal_sliding(
         0,
         -1,
         body_q,
@@ -9202,13 +9105,10 @@ def _eval_unilateral_active_set_probe(
         penetration,
         1.0e6,
         1.0e6,
-        1.0e5,
+        wp.mat22(1.0e5, 0.0, 0.0, 1.0e5),
         0.0,
         n * lam_n,
         0.5,
-        1.0e-4,
-        0,
-        1,
         1.0e-3,
         wp.vec3(0.0),
         False,
@@ -9288,7 +9188,6 @@ def _rod_kirchhoff_proximal_and_unilateral_active_set_hessian(test, device):
         rigid_joint_global_iterations=2,
         rigid_joint_linear_ke=2.0e6,
         rigid_joint_angular_ke=1.0e5,
-        rigid_compliant_alm=True,
     )
     rod_solver._plan_structural_graph_kkt(1.0e-3)
     rod_ids = rod_solver._rod_kirchhoff_body_ids.numpy().tolist()
