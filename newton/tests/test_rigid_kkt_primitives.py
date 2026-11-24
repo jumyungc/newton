@@ -105,6 +105,9 @@ def test_directional_derivative_matches_dense_model(test, device):
             enabled,
             pose,
             pose,
+            array(np.zeros((2, 3)), wp.vec3),
+            array(np.zeros((2, 3)), wp.vec3),
+            0,
             array([1, 1], float),
             array([1, 1], float),
             array(np.tile(np.eye(3), (2, 1, 1)), wp.mat33),
@@ -235,7 +238,7 @@ def test_global_d6_preserves_authored_equilibrium(test, device):
             -1,
             body,
             angular_axes=[
-                config(axis=axis, target_pos=target, target_ke=1.0e4, target_kd=0.0)
+                config(axis=axis, target_q=target, target_ke=1.0e4, target_kd=0.0)
                 for axis, target in zip(axes[:axis_count], targets, strict=True)
             ],
         )

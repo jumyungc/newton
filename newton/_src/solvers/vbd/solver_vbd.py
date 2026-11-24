@@ -77,6 +77,8 @@ from .rigid_vbd_kernels import (
     accumulate_body_particle_contacts_per_body,
     apply_body_truncation_ts,
     apply_rigid_soft_truncation,
+    begin_rigid_bdf2_mixed_step,
+    begin_rigid_bdf2_step,
     build_body_body_contact_lists,
     build_body_particle_contact_lists,
     check_contact_overflow,
@@ -85,6 +87,9 @@ from .rigid_vbd_kernels import (
     compute_rigid_contact_forces,
     compute_rod_dahl_parameters,
     create_solve_rigid_body,
+    end_rigid_bdf2_mixed_step,
+    end_rigid_bdf2_step,
+    flag_bdf2_contact_islands,
     forward_step_rigid_bodies,
     init_body_body_contact_materials,
     init_body_body_contacts_alm,
@@ -93,7 +98,9 @@ from .rigid_vbd_kernels import (
     refresh_body_structural_k,
     refresh_joint_material_params,
     reset_particle_body_attachment_state,
+    reset_rigid_bdf2_worlds,
     reset_rigid_state,
+    scale_bdf2_mixed_joint_terms,
     select_variant_bounding_radius,
     snapshot_body_body_contact_history,
     step_body_body_contact_C0_lambda,
@@ -299,7 +306,9 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
           of relative rotation per solver step, including prediction and
           solver corrections.
         - :attr:`~newton.Control.joint_f` (feedforward forces) is supported,
-          including six-component world-frame wrenches for ROD joints.
+          including six-component world-frame wrenches for ROD joints. A joint force
+          shifts the inertial target of its two bodies; the iteration of the step starts
+          from the prediction without it.
         - Not supported: :attr:`~newton.Model.joint_armature`, :attr:`~newton.Model.joint_friction`,
           :attr:`~newton.Model.joint_effort_limit`, :attr:`~newton.Model.joint_velocity_limit`,
           :attr:`~newton.Model.joint_target_mode`, equality constraints, and the deprecated sparse mimic constraints.
@@ -477,6 +486,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         # Rigid body - constraint formulation and stabilization
         rigid_compliant_alm: bool = True,
         rigid_joint_global_iterations: int = 0,
+        rigid_joint_global_resolve: bool = False,
+        rigid_time_integration: str = "bdf1",
         rigid_avbd_alpha: float | None = None,  # Shared alpha override; None uses mode defaults
         rigid_avbd_joint_alpha: float | None = None,  # Joint alpha override
         rigid_avbd_contact_alpha: float | None = None,  # Body-body contact alpha override
@@ -614,20 +625,63 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 support only rigid-only models without tendons integrated directly by ``SolverVBD``.
                 An active global backend also enables numerical recovery for failed local
                 factorizations; the default local-only path keeps the baseline arithmetic.
-                Corrections are distributed over the local budget. Without a contact buffer,
+                The correction plans its elimination routes and factor precisions for the step size
+                at the first step taken outside graph capture; until then it uses the plan that is
+                safe at every step size, which is slower on long chains and on trees that are not
+                anchored by exactly one joint. Take the first step before capturing a graph.
+                Corrections are distributed over the local budget. With a contact buffer a single
+                requested correction is followed by a second one after the middle sweep when a
+                rigid contact is active on a structural island by then (always, inside a captured
+                graph without conditional nodes), because friction found by the sweeps reaches a
+                stiff structure only through a correction.
+                Without a contact buffer,
                 each selected correction precedes its local sweep, starting at the inertial
-                prediction; local sweeps retain joint-dual ownership. With contact, corrections
-                follow selected local sweeps and joint duals update after the paired correction,
-                except that a correction in the last iteration precedes its local sweep. A
-                directional search checks the current joint and contact forces. Eligible
-                unanchored rod islands also receive a six-dimensional collective rigid-motion
-                correction before acceptance; anchored or dynamically coupled islands do not.
+                prediction; local sweeps retain joint-dual ownership. When every iteration then
+                includes a correction, trees without rod joints skip their local sweeps, because
+                the correction is the exact step of their linearized problem; rod trees, bodies
+                outside the structural graph and islands whose joint limit is loaded or within
+                reach keep them. With contact, a correction
+                in the first or the last iteration also precedes its local sweep; corrections in
+                other iterations follow their local sweep, and joint duals then update after the
+                paired correction. A directional search checks the current joint and contact
+                forces. Eligible unanchored rod islands also receive a six-dimensional collective
+                rigid-motion correction before acceptance; anchored islands and islands in contact
+                with another dynamic body do not, while contact inside an island does not exclude it.
                 Unanchored islands reconcile common translation after the local sweeps. Collision
                 witnesses must be valid; the global solve cannot repair collision detection or
                 guarantee nonlinear convergence at a fixed iteration budget. Strongly nonlinear
                 graphs may need multiple global corrections; extra local sweeps alone can converge
-                slowly. Both schedules perform exactly ``iterations`` local sweeps; no extra
-                local sweep is added when every iteration includes a global correction.
+                slowly. With contact, both schedules perform exactly ``iterations`` local sweeps.
+            rigid_joint_global_resolve: Experimental. If ``True``, a step without a contact
+                buffer whose budget has a single structural correction follows it by a second
+                solve on its factorization with the residual of the corrected pose (a chord
+                Newton step), for trees without rod joints. It brings the step closer to
+                converged backward Euler at about 60 % of the cost of a correction and does not
+                change the integration error. With two or more corrections per step it has no
+                effect: the next correction takes its place. Requires
+                ``rigid_joint_global_iterations > 0``. Independently of this argument, a
+                single-precision tree without rod joints follows a single requested correction
+                with a second one when that correction rotates any of its bodies by ``theta``
+                with ``theta**2 / 2 >= 2**-24`` (or, inside a captured graph without conditional
+                nodes, when branched ``depth**2 * omega**2 * dt**2 >= 2**24``). A tree without
+                rod joints builds the stress term of every correction from the joint forces of
+                its last one, which for the first correction of a step is the last one of the
+                previous step. Persistent structural payload is bounded to one eighth of CUDA
+                device capacity (1 GiB on CPU), emitting a ``RuntimeWarning`` if islands fall
+                back to local sweeps.
+            rigid_time_integration: Experimental. ``"bdf1"`` (default) is backward Euler. ``"bdf2"``
+                is the second-order backward differentiation formula for rigid bodies: each step
+                is one backward-Euler solve of size ``2 dt / 3`` from a fictitious previous state
+                built from the last two states, so it costs one step and removes most of the
+                numerical damping of backward Euler. Scenes that rely on that damping to come
+                to rest settle more slowly. A body whose input state is not the state the last
+                step returned (first step, edited or reset state) restarts its history at second
+                order; a body edited on every step integrates at first order. When contacts or a
+                solver-owned collision pipeline are present, islands with a contact that touches or
+                can close within the step take backward Euler in that step so impacts settle without
+                extrapolating velocity jumps, while the other islands stay second order, also with
+                contact candidates inside the detection gap. Not supported with particles,
+                tendons or externally integrated rigid bodies.
             particle_global_iterations: Experimental number of additional tetrahedral primal
                 Newton--Krylov stages per step. ``0`` disables the backend; positive counts must
                 be smaller than ``iterations`` so a local sweep follows the final correction.
@@ -963,6 +1017,14 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             raise ValueError("rigid_joint_global_iterations does not support models containing tendons")
         if rigid_joint_global_iterations > 0 and model.device.is_capturing:
             raise RuntimeError("The global VBD joint topology must be constructed before CUDA graph capture.")
+        if rigid_joint_global_resolve and rigid_joint_global_iterations == 0:
+            raise ValueError("rigid_joint_global_resolve requires rigid_joint_global_iterations > 0")
+        if rigid_time_integration not in ("bdf1", "bdf2"):
+            raise ValueError(f"rigid_time_integration must be 'bdf1' or 'bdf2', got {rigid_time_integration!r}")
+        if rigid_time_integration == "bdf2" and integrate_with_external_rigid_solver:
+            raise ValueError("rigid_time_integration='bdf2' does not support externally integrated rigid bodies")
+        if rigid_time_integration == "bdf2" and (model.particle_count > 0 or model.tendon_count > 0):
+            raise ValueError("rigid_time_integration='bdf2' does not support models containing particles or tendons")
         if not isinstance(particle_global_iterations, int) or isinstance(particle_global_iterations, bool):
             raise TypeError("particle_global_iterations must be an integer")
         if particle_global_iterations < 0 or (
@@ -1198,6 +1260,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         self.rigid_soft_contact_use_log_barrier = bool(rigid_soft_contact_use_log_barrier)
         self._joint_mode_deprecation_warned = False
         self.rigid_joint_global_iterations = rigid_joint_global_iterations
+        self.rigid_joint_global_resolve = bool(rigid_joint_global_resolve)
+        self.rigid_time_integration = rigid_time_integration
         # Pair the first local/global correction, then leave local work to
         # reconcile contact. Contact-buffer allocation must not select a delay.
         self._rigid_joint_global_iteration_indices = frozenset(
@@ -1238,6 +1302,9 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         self._init_tendon_state(model)
 
         # Initialize rigid body system and rigid-particle (body-particle) interaction state
+        self._joint_max_structural_k_host: np.ndarray | None = None
+        self._joint_linear_k_host: np.ndarray | None = None
+        self._joint_angular_k_host: np.ndarray | None = None
         self._init_rigid_system(
             model,
             rigid_compliant_alm,
@@ -1260,11 +1327,18 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             rigid_joint_angular_kd,
         )
         self.body_dynamic_contact_hessian = None
+        self._rod_kirchhoff_body_ids = None
+        self._rod_kirchhoff_body_islands = None
+        self._rod_kirchhoff_proximal = None
         self._rigid_vbd_kkt = None
         self._structural_graph_kkt = None
         self._structural_graph_kkt_bucket_diagnostics = ()
         self._structural_graph_kkt_payload_budget_bytes = 0
         self._structural_graph_kkt_estimated_bytes = 0
+        # Step the structural plan was made for; None until the first step outside graph capture
+        # (_plan_structural_graph_kkt).
+        self._structural_plan_step: float | None = None
+        self._structural_budget_warned_key: tuple[int, int, int] | None = None
         self._rebuild_structural_graph_kkt()
 
         self.particle_global_iterations = particle_global_iterations
@@ -1281,6 +1355,21 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         self._attachment_particle_body_rho = wp.zeros(attachment_count, dtype=float, device=self.device)
 
         self._has_joint_mimics = self._integrates_rigid_bodies and has_supported_joint_mimics(model, "SolverVBD")
+        # The displacement form needs every pose update of a step to pass through its accumulation. Tendon routing
+        # reads pose differences outside it, so models with tendons keep the pose form.
+        self._use_body_displacement = int(
+            self._integrates_rigid_bodies
+            and not self._has_joint_mimics
+            and not self.rigid_soft_enable_dat
+            and model.tendon_count == 0
+        )
+        # BDF2 history per body: the last pose difference, the velocity before it, the state the last step
+        # returned (zero quaternions never equal a pose, so every body starts afresh), and whether the body
+        # started afresh in the current step.
+        self._bdf2_step_delta = None
+        self._bdf2_mixed_contacts_step = False
+        if self.rigid_time_integration == "bdf2" and self._integrates_rigid_bodies and model.body_count > 0:
+            self._init_rigid_bdf2_state()
         self._mimic_body_deltas = None
         if self._has_joint_mimics:
             for kernel in (xpbd_kernels.solve_joint_mimics, xpbd_kernels.apply_joint_mimic_deltas):
@@ -1536,6 +1625,12 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             self.body_q_prev = wp.clone(model.body_q, device=self.device)
             self._coupling_body_q_prev_snapshot = wp.clone(model.body_q, device=self.device)
             self.body_inertia_q = wp.zeros_like(model.body_q, device=self.device)  # inertial target poses
+            # Displacement of each dynamic body from its inertial target (COM and rotation vector),
+            # accumulated by every pose update of a step. The inertial terms and the end-of-step
+            # velocity read it, so float32 rounding of the stored poses does not reach the momentum.
+            # Joint mimics and rigid-soft truncation write poses behind it and keep the pose form.
+            self._body_disp = wp.zeros(model.body_count, dtype=wp.vec3, device=self.device)
+            self._body_disp_ang = wp.zeros(model.body_count, dtype=wp.vec3, device=self.device)
 
             # Adjacency and dimensions
             joint_constraint_dim = self._init_joint_constraint_layout()
@@ -1556,8 +1651,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             self.body_hessian_al = self._body_contact_scratch[5:8].reshape((body_count, 3, 3)).view(wp.mat33)
             self.body_hessian_aa = self._body_contact_scratch[8:11].reshape((body_count, 3, 3)).view(wp.mat33)
 
-            # Persistent scratch for joint_f accumulation
-            self._body_f_for_integration = wp.zeros(model.body_count, dtype=wp.spatial_vector, device=self.device)
+            # Persistent scratch for joint_f mapped to body wrenches
+            self._body_f_joint = wp.zeros(model.body_count, dtype=wp.spatial_vector, device=self.device)
 
             # Per-body contact lists (CSR-like: per-body counts + flat index array).
             # Tight: pre_alloc = 0 when the contact source is absent (no shapes / no particles).
@@ -1793,6 +1888,11 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             and self.model.joint_count > 0
         )
         topology_changed = global_topology_active and (refresh_structural_k or bool(flags & ModelFlags.BODY_PROPERTIES))
+        if self._bdf2_step_delta is not None and (
+            refresh_structural_k or bool(flags & (ModelFlags.BODY_PROPERTIES | ModelFlags.BODY_INERTIAL_PROPERTIES))
+        ):
+            if not self.device.is_capturing:
+                self._refresh_rigid_bdf2_islands()
         if topology_changed:
             if self.device.is_capturing:
                 raise RuntimeError("Structural joint or body topology cannot be rebuilt during CUDA graph capture")
@@ -1804,6 +1904,266 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             dynamic_mask = np.asarray(self.body_inv_mass_effective.numpy()) > 0.0
             if backend is None or not np.array_equal(dynamic_mask, backend.dynamic_body_mask_host):
                 self._rebuild_structural_graph_kkt()
+
+    def _init_rigid_bdf2_state(self) -> None:
+        """Allocate BDF2 history, dynamic island map, and solver-owned mixed-step buffers."""
+        model = self.model
+        self._bdf2_step_delta = wp.zeros_like(model.body_qd)
+        self._bdf2_previous_qd = wp.zeros_like(model.body_qd)
+        self._bdf2_last_q = wp.zeros_like(model.body_q)
+        self._bdf2_last_qd = wp.zeros_like(model.body_qd)
+        self._bdf2_restarted = wp.zeros(model.body_count, dtype=wp.int32, device=self.device)
+        self._bdf2_body_island = wp.empty(model.body_count, dtype=wp.int32, device=self.device)
+        self._bdf2_joint_island = (
+            wp.empty(model.joint_count, dtype=wp.int32, device=self.device) if model.joint_count > 0 else None
+        )
+        self._bdf2_island_has_contact = wp.zeros(max(1, model.body_count), dtype=wp.int32, device=self.device)
+        self._bdf2_body_mass = wp.empty_like(model.body_mass)
+        self._bdf2_body_inertia = wp.empty_like(model.body_inertia)
+        self._bdf2_saved_inv_mass_eff = wp.empty_like(self.body_inv_mass_effective)
+        self._bdf2_saved_inv_inertia_eff = wp.empty_like(self.body_inv_inertia_effective)
+        self._bdf2_penalty_kd = wp.empty_like(self.joint_penalty_kd) if self.joint_constraint_count > 0 else None
+        dof_count = model.joint_dof_count
+        self._bdf2_target_kd = wp.empty_like(model.joint_target_kd) if dof_count > 0 else None
+        self._bdf2_limit_kd = wp.empty_like(model.joint_limit_kd) if dof_count > 0 else None
+        self._bdf2_target_qd = wp.zeros(dof_count, dtype=float, device=self.device) if dof_count > 0 else None
+        self._refresh_rigid_bdf2_islands()
+
+    def _step_body_mass(self):
+        return self._bdf2_body_mass if self._bdf2_mixed_contacts_step else self.model.body_mass
+
+    def _step_body_inertia(self):
+        return self._bdf2_body_inertia if self._bdf2_mixed_contacts_step else self.model.body_inertia
+
+    def _step_joint_penalty_kd(self):
+        if self._bdf2_mixed_contacts_step and self._bdf2_penalty_kd is not None:
+            return self._bdf2_penalty_kd
+        return self.joint_penalty_kd
+
+    def _step_joint_target_kd(self):
+        if self._bdf2_mixed_contacts_step and self._bdf2_target_kd is not None:
+            return self._bdf2_target_kd
+        return self.model.joint_target_kd
+
+    def _step_joint_limit_kd(self):
+        if self._bdf2_mixed_contacts_step and self._bdf2_limit_kd is not None:
+            return self._bdf2_limit_kd
+        return self.model.joint_limit_kd
+
+    def _step_joint_target_qd(self, control: Control | None):
+        target_qd = control.joint_target_qd if control is not None else None
+        if (
+            self._bdf2_mixed_contacts_step
+            and target_qd is not None
+            and self._bdf2_target_qd is not None
+            and target_qd.shape[0] > 0
+        ):
+            return self._bdf2_target_qd
+        return target_qd
+
+    def _refresh_rigid_bdf2_islands(self) -> None:
+        """Assign connected dynamic rigid islands across joints and mimic pairs."""
+        model = self.model
+        inv_m = np.asarray(self.body_inv_mass_effective.numpy(), dtype=float)
+        body_count = model.body_count
+        parent_uf = list(range(body_count))
+
+        def find(x: int) -> int:
+            while parent_uf[x] != x:
+                parent_uf[x] = parent_uf[parent_uf[x]]
+                x = parent_uf[x]
+            return x
+
+        def union(a: int, b: int) -> None:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                if ra < rb:
+                    parent_uf[rb] = ra
+                else:
+                    parent_uf[ra] = rb
+
+        if model.joint_count > 0:
+            j_parent = np.asarray(model.joint_parent.numpy(), dtype=np.int32)
+            j_child = np.asarray(model.joint_child.numpy(), dtype=np.int32)
+            j_type = np.asarray(model.joint_type.numpy(), dtype=np.int32)
+            for j in range(model.joint_count):
+                if j_type[j] == int(JointType.FREE):
+                    continue
+                p, c = int(j_parent[j]), int(j_child[j])
+                if p >= 0 and c >= 0 and inv_m[p] > 0.0 and inv_m[c] > 0.0:
+                    union(p, c)
+            mimic_arr = getattr(model, "joint_mimic_joint", None)
+            if mimic_arr is not None and mimic_arr.shape[0] == model.joint_count:
+                mimic_h = np.asarray(mimic_arr.numpy(), dtype=np.int32)
+                for j in range(model.joint_count):
+                    ref = int(mimic_h[j])
+                    if 0 <= ref < model.joint_count:
+                        bj = (
+                            int(j_child[j])
+                            if int(j_child[j]) >= 0 and inv_m[int(j_child[j])] > 0.0
+                            else int(j_parent[j])
+                        )
+                        br = (
+                            int(j_child[ref])
+                            if int(j_child[ref]) >= 0 and inv_m[int(j_child[ref])] > 0.0
+                            else int(j_parent[ref])
+                        )
+                        if bj >= 0 and br >= 0 and inv_m[bj] > 0.0 and inv_m[br] > 0.0:
+                            union(bj, br)
+
+        root_to_island: dict[int, int] = {}
+        body_island = np.full(body_count, -1, dtype=np.int32)
+        for b in range(body_count):
+            if inv_m[b] > 0.0:
+                r = find(b)
+                isl = root_to_island.get(r)
+                if isl is None:
+                    isl = len(root_to_island)
+                    root_to_island[r] = isl
+                body_island[b] = isl
+        self._bdf2_island_count = len(root_to_island)
+        self._bdf2_body_island.assign(body_island)
+
+        if model.joint_count > 0 and self._bdf2_joint_island is not None:
+            joint_island = np.full(model.joint_count, -1, dtype=np.int32)
+            for j in range(model.joint_count):
+                c, p = int(j_child[j]), int(j_parent[j])
+                if c >= 0 and body_island[c] >= 0:
+                    joint_island[j] = body_island[c]
+                elif p >= 0 and body_island[p] >= 0:
+                    joint_island[j] = body_island[p]
+            self._bdf2_joint_island.assign(joint_island)
+
+    def _begin_rigid_bdf2_mixed(
+        self,
+        state_in: State,
+        control: Control,
+        contacts: Contacts | None,
+        dt: float,
+    ) -> None:
+        """Apply per-island BDF2 / BDF1 setup after contact counts are built."""
+        model = self.model
+        self._bdf2_island_has_contact.zero_()
+        if contacts is not None and contacts.rigid_contact_max > 0:
+            wp.launch(
+                kernel=flag_bdf2_contact_islands,
+                dim=contacts.rigid_contact_max,
+                inputs=[
+                    dt,
+                    model.gravity,
+                    model.body_world,
+                    contacts.rigid_contact_count,
+                    contacts.rigid_contact_shape0,
+                    contacts.rigid_contact_shape1,
+                    contacts.rigid_contact_point0,
+                    contacts.rigid_contact_point1,
+                    contacts.rigid_contact_normal,
+                    contacts.rigid_contact_margin0,
+                    contacts.rigid_contact_margin1,
+                    model.shape_body,
+                    state_in.body_q,
+                    state_in.body_qd,
+                    model.body_com,
+                    self._bdf2_body_island,
+                ],
+                outputs=[self._bdf2_island_has_contact],
+                device=self.device,
+            )
+        wp.launch(
+            kernel=begin_rigid_bdf2_mixed_step,
+            dim=model.body_count,
+            inputs=[
+                dt,
+                model.gravity,
+                model.body_world,
+                model.body_com,
+                model.body_mass,
+                model.body_inertia,
+                self._bdf2_body_island,
+                self._bdf2_island_has_contact,
+                self._bdf2_last_q,
+                self._bdf2_last_qd,
+            ],
+            outputs=[
+                state_in.body_q,
+                self.body_q_prev,
+                state_in.body_qd,
+                self.body_inv_mass_effective,
+                self.body_inv_inertia_effective,
+                self._bdf2_step_delta,
+                self._bdf2_previous_qd,
+                self._bdf2_restarted,
+                self._bdf2_body_mass,
+                self._bdf2_body_inertia,
+                self._bdf2_saved_inv_mass_eff,
+                self._bdf2_saved_inv_inertia_eff,
+            ],
+            block_dim=self._rigid_body_block_dim,
+            device=self.device,
+        )
+        if model.joint_count > 0 and (self.joint_constraint_count > 0 or model.joint_dof_count > 0):
+            target_qd = control.joint_target_qd if control is not None else None
+            has_tqd = int(target_qd is not None and self._bdf2_target_qd is not None and target_qd.shape[0] > 0)
+            dummy_float = self._bdf2_penalty_kd if self._bdf2_penalty_kd is not None else self._bdf2_target_kd
+            wp.launch(
+                kernel=scale_bdf2_mixed_joint_terms,
+                dim=model.joint_count,
+                inputs=[
+                    model.joint_qd_start,
+                    model.joint_dof_dim,
+                    self.joint_constraint_start,
+                    self.joint_constraint_dim,
+                    self._bdf2_joint_island,
+                    self._bdf2_island_has_contact,
+                    has_tqd,
+                    self.joint_penalty_kd,
+                    model.joint_target_kd,
+                    model.joint_limit_kd,
+                    target_qd if has_tqd else model.joint_target_kd,
+                ],
+                outputs=[
+                    self._bdf2_penalty_kd if self._bdf2_penalty_kd is not None else dummy_float,
+                    self._bdf2_target_kd if self._bdf2_target_kd is not None else dummy_float,
+                    self._bdf2_limit_kd if self._bdf2_limit_kd is not None else dummy_float,
+                    self._bdf2_target_qd if has_tqd else dummy_float,
+                ],
+                block_dim=self._rigid_joint_block_dim,
+                device=self.device,
+            )
+
+    def _end_rigid_bdf2_mixed(
+        self,
+        state_in: State,
+        state_out: State,
+        control: Control | None,
+        dt: float,
+    ) -> None:
+        """Restore solver-owned effective inverse inertia and finalize per-island BDF2 / BDF1 velocities."""
+        del control
+        model = self.model
+        wp.launch(
+            kernel=end_rigid_bdf2_mixed_step,
+            dim=model.body_count,
+            inputs=[
+                dt,
+                self._bdf2_saved_inv_mass_eff,
+                self._bdf2_saved_inv_inertia_eff,
+                self._bdf2_previous_qd,
+                state_out.body_q,
+            ],
+            outputs=[
+                self.body_inv_mass_effective,
+                self.body_inv_inertia_effective,
+                state_out.body_qd,
+                state_in.body_qd,
+                self._bdf2_step_delta,
+                self._bdf2_restarted,
+                self._bdf2_last_q,
+                self._bdf2_last_qd,
+            ],
+            block_dim=self._rigid_body_block_dim,
+            device=self.device,
+        )
 
     def _rebuild_particle_global_vbd(self, **options) -> None:
         """Construct the private backend; keyword overrides are for internal diagnostics.
@@ -1823,6 +2183,33 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         self._particle_global_vbd = backend
         self._particle_global_iteration_indices = backend.global_indices
 
+    def _plan_structural_graph_kkt(self, dt: float) -> None:
+        """Make the structural plan the one of the step that is about to be solved.
+
+        Elimination routes and factor precisions depend on the step through the rigidity ``omega^2 dt^2``.
+        No step is known at construction, so the first plan is the one that is safe at every step size. The
+        first step outside graph capture plans for its ``dt``; a later step replans only when it needs a more
+        robust plan. A captured graph cannot rebuild: a first step that is captured keeps the safe plan, and
+        a captured step that needs a more robust plan than the one made for an earlier step is an error.
+        """
+        backend = self._structural_graph_kkt
+        if backend is None:
+            return
+        change = backend.plan_change(dt)
+        if self.device.is_capturing:
+            if change > 0:
+                raise RuntimeError(
+                    f"SolverVBD planned its structural solve for a step of {backend.plan_step:g} s; a step of "
+                    f"{dt:g} s needs a more robust elimination route or factor precision, which cannot be "
+                    "rebuilt during graph capture. Take one step of this size before capturing."
+                )
+            return
+        first = self._structural_plan_step is None
+        if first or change > 0:
+            self._structural_plan_step = float(dt)
+            if change != 0:
+                self._rebuild_structural_graph_kkt()
+
     def _rebuild_structural_graph_kkt(self) -> None:
         """Build compact graph-capturable topology for the optional global correction."""
         self._rigid_vbd_kkt = None
@@ -1831,6 +2218,9 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         self._structural_graph_kkt_payload_budget_bytes = 0
         self._structural_graph_kkt_estimated_bytes = 0
         self.body_dynamic_contact_hessian = None
+        self._rod_kirchhoff_body_ids = None
+        self._rod_kirchhoff_body_islands = None
+        self._rod_kirchhoff_proximal = None
         if not (
             self.rigid_compliant_alm
             and self.rigid_joint_global_iterations > 0
@@ -1842,12 +2232,20 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             return
 
         rigid_vbd_kkt = _load_rigid_vbd_kkt()
+        from . import rigid_vbd_kkt_chains  # noqa: PLC0415
+
         self._set_module_options(self._rigid_module_options, module=rigid_vbd_kkt)
-        # Unique path kernels retain this solver's module-option ownership.
+        self._set_module_options(self._rigid_module_options, module=rigid_vbd_kkt_chains)
+        # Unique path/tree/rod kernels retain this solver's module-option ownership.
         for kernel in (
             rigid_vbd_kkt.assemble_joint_path_system_rows,
             rigid_vbd_kkt.reduce_cr_in_place_rows,
             rigid_vbd_kkt.solve_cr_tail_persistent_rows,
+            rigid_vbd_kkt.reduce_cr_in_place_rows_fp64,
+            rigid_vbd_kkt.solve_cr_tail_persistent_rows_fp64,
+            rigid_vbd_kkt.solve_tree_levels_fused,
+            rigid_vbd_kkt.resolve_tree_levels_fused,
+            rigid_vbd_kkt.add_contact_island_rod_kirchhoff_proximal,
         ):
             self._set_module_options(self._rigid_module_options, module=kernel.module)
         backend = rigid_vbd_kkt.StructuralGraphKKT(
@@ -1862,16 +2260,92 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             enable_stream_concurrency=(
                 self._rigid_module_options["deterministic"] == wp.DeterministicMode.NOT_GUARANTEED
             ),
+            joint_max_stiffness=self._joint_max_structural_k_host,
+            joint_linear_stiffness=self._joint_linear_k_host,
+            joint_angular_stiffness=self._joint_angular_k_host,
+            plan_step=self._structural_plan_step,
         )
         self._structural_graph_kkt_bucket_diagnostics = backend._bucket_diagnostics
         self._structural_graph_kkt_payload_budget_bytes = backend._payload_budget_bytes
         self._structural_graph_kkt_estimated_bytes = backend._estimated_bytes
+        budget_fallbacks = tuple(
+            diag for diag in backend._bucket_diagnostics if diag.fallback_reason == "payload_budget"
+        )
+        if budget_fallbacks:
+            excluded_islands = sum(diag.batch_count for diag in budget_fallbacks)
+            excluded_bodies = sum(diag.body_count_total for diag in budget_fallbacks)
+            warn_key = (excluded_islands, excluded_bodies, int(backend._payload_budget_bytes))
+            if self._structural_budget_warned_key != warn_key:
+                self._structural_budget_warned_key = warn_key
+                warnings.warn(
+                    f"SolverVBD structural KKT payload budget "
+                    f"({backend._payload_budget_bytes / (1 << 20):.1f} MiB) was exceeded; "
+                    f"{excluded_islands} island(s) ({excluded_bodies} bodies) fell back to local VBD sweeps.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+        else:
+            self._structural_budget_warned_key = None
         if not backend.active:
             return
 
         self._rigid_vbd_kkt = rigid_vbd_kkt
         self._structural_graph_kkt = backend
         self.body_dynamic_contact_hessian = backend.body_dynamic_contact_hessian
+        jt_host = self._to_numpy(self.model.joint_type, dtype=np.int32)
+        if np.any(jt_host == int(JointType.ROD)) and self._joint_linear_k_host is not None:
+            j_en = self._to_numpy(self.model.joint_enabled, dtype=np.int32)
+            j_p = self._to_numpy(self.model.joint_parent, dtype=np.int32)
+            j_c = self._to_numpy(self.model.joint_child, dtype=np.int32)
+            xp = self._to_numpy(self.model.joint_X_p, dtype=np.float64)
+            xc = self._to_numpy(self.model.joint_X_c, dtype=np.float64)
+            com = self._to_numpy(self.model.body_com, dtype=np.float64)
+            inv_m = self._to_numpy(self.body_inv_mass_effective, dtype=np.float64)
+            gb_ids = backend.graph_body_ids.numpy()
+            gb_isl = backend.graph_body_island.numpy()
+            body_to_isl = {int(b): int(isl) for b, isl in zip(gb_ids, gb_isl, strict=True)}
+            non_rod_bodies: set[int] = set()
+            for j_idx in range(len(jt_host)):
+                jt_val = int(jt_host[j_idx])
+                if int(j_en[j_idx]) == 0 or jt_val in (int(JointType.ROD), int(JointType.FREE)):
+                    continue
+                for b_id in (int(j_p[j_idx]), int(j_c[j_idx])):
+                    if b_id >= 0:
+                        non_rod_bodies.add(b_id)
+            prox_by_body: dict[int, float] = {}
+            for j_idx in range(len(jt_host)):
+                if int(jt_host[j_idx]) != int(JointType.ROD) or int(j_en[j_idx]) == 0:
+                    continue
+                p_b, c_b = int(j_p[j_idx]), int(j_c[j_idx])
+                if c_b < 0:
+                    continue
+                k_lin = float(self._joint_linear_k_host[j_idx])
+                if k_lin <= 0.0:
+                    continue
+                lp = float(np.linalg.norm(xp[j_idx, :3] - com[p_b])) if p_b >= 0 else 0.0
+                lc = float(np.linalg.norm(xc[j_idx, :3] - com[c_b]))
+                for b_id, r_arm in ((p_b, lp), (c_b, lc)):
+                    if (
+                        b_id >= 0
+                        and r_arm > 0.0
+                        and inv_m[b_id] > 0.0
+                        and b_id in body_to_isl
+                        and b_id not in non_rod_bodies
+                    ):
+                        # Single-body shear rotational diagonal r_b^2 * K_shear = (1/4) * L_b^2 * K_shear
+                        # using body b's own half-arm r_b so hub lever arms never pollute terminal segments or hubs.
+                        prox_by_body[b_id] = prox_by_body.get(b_id, 0.0) + r_arm * r_arm * k_lin
+            if prox_by_body:
+                ordered_rod_bodies = sorted(prox_by_body)
+                self._rod_kirchhoff_body_ids = wp.array(ordered_rod_bodies, dtype=wp.int32, device=self.device)
+                self._rod_kirchhoff_body_islands = wp.array(
+                    [body_to_isl[b] for b in ordered_rod_bodies], dtype=wp.int32, device=self.device
+                )
+                self._rod_kirchhoff_proximal = wp.array(
+                    [prox_by_body[b] for b in ordered_rod_bodies], dtype=float, device=self.device
+                )
+                if backend.chain_route is not None:
+                    backend.chain_route.set_segment_kirchhoff_proximal(prox_by_body)
 
     @override
     def coupling_supports_inertial_property_refresh(self) -> bool:
@@ -2632,6 +3106,45 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 else:
                     pass
 
+            jc_dim = self._to_numpy(self.joint_constraint_dim, dtype=np.int32)
+            joint_max_structural_k = np.zeros((len(jt),), dtype=np.float64)
+            joint_lin_k = np.zeros((len(jt),), dtype=np.float64)
+            joint_ang_k = np.zeros((len(jt),), dtype=np.float64)
+            for j_idx in range(len(jt)):
+                c0 = int(jc_start[j_idx])
+                cdim = int(jc_dim[j_idx])
+                if cdim > 0:
+                    joint_max_structural_k[j_idx] = float(np.max(joint_material_k_np[c0 : c0 + cdim]))
+                    j_kind = int(jt[j_idx])
+                    if j_kind == int(JointType.ROD):
+                        joint_lin_k[j_idx] = float(max(joint_material_k_np[c0], joint_material_k_np[c0 + 1]))
+                        joint_ang_k[j_idx] = float(max(joint_material_k_np[c0 + 2], joint_material_k_np[c0 + 3]))
+                    elif j_kind == int(JointType.BALL):
+                        joint_lin_k[j_idx] = float(joint_material_k_np[c0])
+                    elif j_kind == int(JointType.FIXED):
+                        joint_lin_k[j_idx] = float(joint_material_k_np[c0])
+                        joint_ang_k[j_idx] = float(joint_material_k_np[c0 + 1])
+                    elif j_kind == int(JointType.REVOLUTE):
+                        joint_lin_k[j_idx] = float(joint_material_k_np[c0])
+                        joint_ang_k[j_idx] = float(max(joint_material_k_np[c0 + 1], joint_material_k_np[c0 + 2]))
+                    elif j_kind == int(JointType.PRISMATIC):
+                        joint_lin_k[j_idx] = float(max(joint_material_k_np[c0], joint_material_k_np[c0 + 2]))
+                        joint_ang_k[j_idx] = float(joint_material_k_np[c0 + 1])
+                    elif j_kind == int(JointType.D6):
+                        lc_j = int(jdof_dim[j_idx, 0])
+                        ac_j = int(jdof_dim[j_idx, 1])
+                        lin_vals = [float(joint_material_k_np[c0])]
+                        if lc_j > 0:
+                            lin_vals.extend(float(x) for x in joint_material_k_np[c0 + 2 : c0 + 2 + lc_j])
+                        ang_vals = [float(joint_material_k_np[c0 + 1])]
+                        if ac_j > 0:
+                            ang_vals.extend(float(x) for x in joint_material_k_np[c0 + 2 + lc_j : c0 + 2 + lc_j + ac_j])
+                        joint_lin_k[j_idx] = max(lin_vals)
+                        joint_ang_k[j_idx] = max(ang_vals)
+            self._joint_max_structural_k_host = joint_max_structural_k
+            self._joint_linear_k_host = joint_lin_k
+            self._joint_angular_k_host = joint_ang_k
+
             k = wp.array(joint_k_init_np, dtype=float, device=self.device)
             k_min = wp.array(joint_k_init_np.copy(), dtype=float, device=self.device)
             material_k = wp.array(joint_material_k_np, dtype=float, device=self.device)
@@ -3156,6 +3669,10 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         rigid contact state (penalty_k, lambda, C0), and restores from history if enabled.
         When False, reuses previous rigid contact state. The flag is reset to True when consumed.
 
+        With ``rigid_time_integration="bdf2"`` a step without ``contacts`` is one backward-Euler
+        solve of size ``2 dt / 3`` from a fictitious previous state, which the solver writes into
+        ``state_in``; a step with ``contacts`` is a backward-Euler step.
+
         Args:
             state_in: Input state.
             state_out: Output state.
@@ -3173,12 +3690,59 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             RuntimeError: If required rigid contact-matching data is unavailable, or contact-history storage would
                 need to be allocated or grown during graph capture.
         """
+        if self._bdf2_step_delta is None:
+            self._step_backward_euler(state_in, state_out, control, contacts, dt, observables=observables)
+            return
+        if contacts is not None or self.collision_pipeline is not None:
+            self._bdf2_mixed_contacts_step = True
+            try:
+                self._step_backward_euler(state_in, state_out, control, contacts, dt, observables=observables)
+            finally:
+                self._bdf2_mixed_contacts_step = False
+            return
+        wp.launch(
+            kernel=begin_rigid_bdf2_step,
+            dim=self.model.body_count,
+            inputs=[dt, self.model.body_com, self.body_inv_mass_effective, self._bdf2_last_q, self._bdf2_last_qd],
+            outputs=[
+                state_in.body_q,
+                self.body_q_prev,
+                state_in.body_qd,
+                self._bdf2_step_delta,
+                self._bdf2_previous_qd,
+                self._bdf2_restarted,
+            ],
+            block_dim=self._rigid_body_block_dim,
+            device=self.device,
+        )
+        self._step_backward_euler(state_in, state_out, control, contacts, 2.0 * dt / 3.0, observables=observables)
+        wp.launch(
+            kernel=end_rigid_bdf2_step,
+            dim=self.model.body_count,
+            inputs=[dt, self._bdf2_restarted, self._bdf2_previous_qd, state_out.body_q],
+            outputs=[state_out.body_qd, self._bdf2_step_delta, self._bdf2_last_q, self._bdf2_last_qd],
+            block_dim=self._rigid_body_block_dim,
+            device=self.device,
+        )
+
+    def _step_backward_euler(
+        self,
+        state_in: State,
+        state_out: State,
+        control: Control,
+        contacts: Contacts | None,
+        dt: float,
+        *,
+        observables: SolverBase.Observables | None = None,
+    ) -> None:
+        """Advance one backward-Euler step of size ``dt``; :meth:`step` documents the arguments."""
         contacts = self._resolve_step_contacts(contacts)
         if self._particle_global_vbd is not None:
             self._particle_global_vbd.validate_step(contacts)
         self.validate_observables(observables, contacts)
         self._require_unreduced_contacts(contacts)
         self._apply_module_options()
+        self._plan_structural_graph_kkt(dt)
         update_rigid = self._update_rigid_history
         self._update_rigid_history = True
 
@@ -3239,29 +3803,95 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             and bool(self._rigid_joint_global_iteration_indices)
             and not (contacts is not None and self._has_joint_mimics)
         )
+        # Friction that the sweeps find reaches a stiff structure only through a solve. With a contact buffer a
+        # single requested correction is therefore followed by a second one, after the sweep of the middle
+        # iteration, when a rigid contact is active on a structural island by then. A captured graph without
+        # conditional nodes has no device predicate and takes the second correction always.
+        global_indices = self._rigid_joint_global_iteration_indices
+        contact_solve_iteration = -1
+        if (
+            use_global
+            and contacts is not None
+            and contacts.rigid_contact_max > 0
+            and len(global_indices) == 1
+            and self.iterations >= 2
+        ):
+            contact_solve_iteration = self.iterations // 2
+            global_indices = frozenset(global_indices | {contact_solve_iteration})
+        contact_solve_gated = contact_solve_iteration >= 0 and (
+            not self.device.is_capturing or wp.is_conditional_graph_supported()
+        )
+
+        def structural_solve(iteration: int) -> None:
+            if contact_solve_gated and iteration == contact_solve_iteration:
+                backend.contact_solve_islands.zero_()
+                self._flag_active_contact_islands(state_in, contacts, backend.contact_solve_islands)
+                wp.capture_if(
+                    backend.flag_contact_solve(),
+                    lambda: self._solve_structural_graph_kkt(state_in, control, contacts, dt),
+                )
+            else:
+                self._solve_structural_graph_kkt(state_in, control, contacts, dt)
+
         for iter_num in range(self.iterations):
             rigid_due = self.collision_pipeline is not None and self._rigid_collision_is_due(iter_num)
             soft_due = self.particle_enable_self_contact and self._self_contact_is_due(iter_num)
             self._mid_step_detection(
                 state_in, state_out, contacts, dt, rigid_due=rigid_due, soft_due=soft_due, preserve_history=True
             )
-            global_iteration = use_global and iter_num in self._rigid_joint_global_iteration_indices
-            if global_iteration and (contacts is None or iter_num == self.iterations - 1):
-                # Resolve contact-free structural coupling before local sweeps
-                # distort the inertial prediction. Contact keeps its established
-                # order, with a final local reconciliation at the configured budget.
-                self._solve_structural_graph_kkt(state_in, control, contacts, dt)
+            global_iteration = use_global and iter_num in global_indices
+            ran_stage_first = False
+            if global_iteration and (contacts is None or iter_num in (0, self.iterations - 1)):
+                # Resolve structural coupling before the first local sweep distorts
+                # the inertial prediction: a body-local step against stick friction
+                # rolls a hard-pulled segment instead of sliding it. Later contact
+                # iterations keep their established order.
+                structural_solve(iter_num)
+                # A non-rod float32 tree takes the stress term of a stage from the multipliers of
+                # its last solve; for this first stage that is the last solve of the previous
+                # step. A single requested stage is followed by a second one when its own correction
+                # turned a body of such a tree so far that the linearized rows are wrong in single
+                # precision (flag_nonlinear_correction): a property of the motion, read on the device.
+                # When rigid_joint_global_resolve is requested on a contact-free step, perform a
+                # second back-solve on the current factorization (Shamanskii chord step).
+                if backend is not None and len(global_indices) == 1:
+                    if backend.has_second_stage_bodies:
+                        needed = backend.flag_second_stage()
+                        if self.device.is_capturing and not wp.is_conditional_graph_supported():
+                            # No device predicate in this graph: decide from the structure and the step.
+                            if backend.second_stage_without_flag(dt):
+                                self._solve_structural_graph_kkt(state_in, control, contacts, dt)
+                        else:
+                            wp.capture_if(
+                                needed, lambda: self._solve_structural_graph_kkt(state_in, control, contacts, dt)
+                            )
+                    if self.rigid_joint_global_resolve and contacts is None and backend.has_resolvable_trees:
+                        self._solve_structural_graph_kkt(
+                            state_in,
+                            control,
+                            contacts,
+                            dt,
+                            resolve_only=True,
+                            resolve_sqp_torque=True,
+                        )
+                ran_stage_first = True
                 global_iteration = False
             # Material can redistribute between fixed guides even without any rigid bodies.
             if self.tendon_segment_lambda is not None and not self.integrate_with_external_rigid_solver:
                 self._update_tendon_routing(state_in, dt, False)
             self._solve_rigid_body_iteration(
-                state_in, state_out, control, contacts, dt, defer_joint_dual=global_iteration
+                state_in,
+                state_out,
+                control,
+                contacts,
+                dt,
+                defer_joint_dual=global_iteration,
+                skip_resolved_trees=ran_stage_first,
             )
             if global_iteration:
-                self._solve_structural_graph_kkt(state_in, control, contacts, dt)
+                structural_solve(iter_num)
                 self._update_rigid_body_contact_duals(state_in, contacts, dt)
-                self._update_rigid_joint_duals(state_in, control, dt)
+                self._update_rigid_joint_duals(state_in, control, contacts, dt)
             self._solve_particle_iteration(state_in, state_out, contacts, dt)
             if iter_num in self._particle_global_iteration_indices:
                 self._solve_particle_global_vbd(state_in, state_out, contacts, dt)
@@ -3317,7 +3947,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
 
         # Snapshot solved rigid contact state for next-frame warm-start.
         self._snapshot_rigid_contact_history(contacts)
-        self._finalize_rigid_bodies(state_in, state_out, dt)
+        self._finalize_rigid_bodies(state_in, state_out, dt, control=control)
         if update_tendon_diagnostics:
             self._update_tendon_segment_diagnostics(state_out, dt)
         self._finalize_particles(state_out, dt)
@@ -3333,8 +3963,9 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         """Reset rigid solver history and optional body and particle state for selected worlds.
 
         Body fields selected by *flags* are copied from the model defaults.
-        Joint penalty is restored to its minimum; joint C0 and AVBD dual history
-        is zeroed immediately. Pose and enabled-rod friction history (curvature,
+        Joint penalty is restored to its minimum; joint C0, AVBD dual history and
+        the joint forces kept for the stress term of the structural correction are
+        zeroed immediately. Pose and enabled-rod friction history (curvature,
         stress, and increment) are rebaselined together from the next :meth:`step`
         input pose, after any intervening state edits or forward kinematics.
         Mutable tendon material and routing state is restored to its initialized
@@ -3484,6 +4115,31 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
 
         if not self._integrates_rigid_bodies:
             return
+        if self._bdf2_step_delta is not None:
+            if world_mask is None:
+                self._bdf2_last_q.zero_()
+                self._bdf2_last_qd.zero_()
+                self._bdf2_step_delta.zero_()
+                self._bdf2_previous_qd.zero_()
+                self._bdf2_restarted.zero_()
+            else:
+                wp.launch(
+                    kernel=reset_rigid_bdf2_worlds,
+                    dim=model.body_count,
+                    inputs=[world_mask, model.body_world],
+                    outputs=[
+                        self._bdf2_last_q,
+                        self._bdf2_last_qd,
+                        self._bdf2_step_delta,
+                        self._bdf2_previous_qd,
+                        self._bdf2_restarted,
+                    ],
+                    block_dim=self._rigid_body_block_dim,
+                    device=self.device,
+                )
+        if self._structural_graph_kkt is not None:
+            # The next structural stage of the selected worlds starts without a stress term.
+            self._structural_graph_kkt.clear_stored_stress(world_mask, model.world_count, model.joint_world)
 
         # Entity-parallel launch over the widest lane: world slots (+1 global),
         # joints, and bodies (bodies only when copying model-default body state).
@@ -4353,7 +5009,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         no per-body contact lists are built, and no contact state is initialized or restored.
 
         If control provides joint_f, per-DOF joint forces are mapped to body spatial
-        wrenches and included in the forward integration (shifting the inertial target).
+        wrenches. They shift the inertial target; the pose the iteration starts from is
+        integrated without them (see :func:`forward_step_rigid_bodies`).
 
         The ``refresh`` input controls whether rigid contact lists and contact
         state are rebuilt. It may be promoted locally when contact state needs
@@ -4403,11 +5060,15 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                     self.rigid_avbd_gamma,
                 )
 
-            # Accumulate joint_f into body wrenches (scratch buffer avoids mutating user state).
-            body_f_for_integration = state_in.body_f
+            if self._bdf2_mixed_contacts_step:
+                self._begin_rigid_bdf2_mixed(state_in, control, contacts, dt)
+
+            # Map joint_f to body wrenches in a scratch buffer of its own: the forward step adds them to
+            # the inertial target and leaves them out of the pose the iteration starts from.
+            body_f_joint = None
             if model.joint_count > 0 and control is not None and control.joint_f is not None:
-                wp.copy(self._body_f_for_integration, state_in.body_f)
-                body_f_for_integration = self._body_f_for_integration
+                body_f_joint = self._body_f_joint
+                body_f_joint.zero_()
                 wp.launch(
                     kernel=apply_joint_forces,
                     dim=model.joint_count,
@@ -4427,7 +5088,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                         dt,
                     ],
                     outputs=[
-                        body_f_for_integration,
+                        body_f_joint,
                         None,  # joint_impulse: VBD does not populate body_parent_f
                     ],
                     device=self.device,
@@ -4441,9 +5102,10 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                     model.gravity,
                     model.body_world,
                     self._rigid_pose_rebaseline_mask,
-                    body_f_for_integration,
+                    state_in.body_f,
+                    body_f_joint,
                     model.body_com,
-                    model.body_inertia,
+                    self._step_body_inertia(),
                     self.body_inv_mass_effective,
                     self.body_inv_inertia_effective,
                     state_in.body_q,  # input/output
@@ -4452,6 +5114,9 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 outputs=[
                     self.body_q_prev,  # rebaselined for flagged worlds (first step / reset)
                     self.body_inertia_q,
+                    # set here: a body starts on its inertial target, or off it by its joint force
+                    self._body_disp if self._use_body_displacement else None,
+                    self._body_disp_ang if self._use_body_displacement else None,
                 ],
                 dim=model.body_count,
                 block_dim=self._rigid_body_block_dim,
@@ -4498,7 +5163,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                         self.joint_penalty_k_min,
                         self.joint_material_k,
                         model.joint_target_ke,
-                        model.joint_target_kd,
+                        self._step_joint_target_kd(),
                         model.joint_limit_lower,
                         model.joint_limit_upper,
                         model.joint_limit_ke,
@@ -4878,7 +5543,10 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 backend.graph_body_island,
                 int(backend.use_fused_contact_classification),
                 self.body_inertia_q,
-                self.model.body_mass,
+                self._body_disp,
+                self._body_disp_ang,
+                self._use_body_displacement,
+                self._step_body_mass(),
                 backend.island_translation_free,
                 backend.translation_system,
                 int(carry_translation),
@@ -4899,8 +5567,57 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             ],
             device=self.device,
         )
+        if not translation_only and not forces_only and self._rod_kirchhoff_body_ids is not None:
+            wp.launch(
+                kernel=rigid_vbd_kkt.add_contact_island_rod_kirchhoff_proximal,
+                dim=self._rod_kirchhoff_body_ids.shape[0],
+                inputs=[
+                    self._rod_kirchhoff_body_ids,
+                    self._rod_kirchhoff_body_islands,
+                    self._rod_kirchhoff_proximal,
+                    backend.island_contact_state,
+                ],
+                outputs=[self.body_hessian_aa],
+                device=self.device,
+            )
 
-    def _reset_structural_solve_state(self, *, clear_contacts: bool = True) -> None:
+    def _flag_active_contact_islands(self, state_in: State, contacts: Contacts, active_islands: wp.array) -> None:
+        """Mark in ``active_islands`` the structural islands with an active rigid contact at ``state_in``."""
+        model = self.model
+        backend = self._structural_graph_kkt
+        wp.launch(
+            kernel=self._rigid_vbd_kkt.flag_active_contact_islands,
+            dim=contacts.rigid_contact_max,
+            inputs=[
+                contacts.rigid_contact_count,
+                contacts.rigid_contact_shape0,
+                contacts.rigid_contact_shape1,
+                contacts.rigid_contact_point0,
+                contacts.rigid_contact_point1,
+                contacts.rigid_contact_normal,
+                contacts.rigid_contact_margin0,
+                contacts.rigid_contact_margin1,
+                model.shape_body,
+                state_in.body_q,
+                self.body_inv_mass_effective,
+                self.body_body_contact_penalty_k,
+                self.body_body_contact_normal_rho,
+                self.body_body_contact_material_ke,
+                self.body_body_contact_lambda,
+                self.body_body_contact_C0,
+                self.rigid_contact_alpha,
+                int(self.rigid_contact_hard),
+                int(self.rigid_compliant_alm),
+                backend.body_slot_by_id,
+                backend.graph_body_island,
+                self.body_body_contact_buffer_pre_alloc,
+                self.body_body_contact_counts,
+            ],
+            outputs=[active_islands],
+            device=self.device,
+        )
+
+    def _reset_structural_solve_state(self, *, clear_contacts: bool = True, clear_limit_islands: bool = True) -> None:
         """Reset scratch consumed by one global structural correction."""
         backend = self._structural_graph_kkt
         rigid_vbd_kkt = self._rigid_vbd_kkt
@@ -4910,7 +5627,12 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             wp.launch(
                 rigid_vbd_kkt.reset_structural_solve_state,
                 backend.graph_body_count,
-                inputs=[backend.island_count, int(clear_contacts), backend.graph_body_ids],
+                inputs=[
+                    backend.island_count,
+                    int(clear_contacts),
+                    int(clear_limit_islands),
+                    backend.graph_body_ids,
+                ],
                 outputs=[
                     self.body_forces,
                     self.body_torques,
@@ -4921,11 +5643,14 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                     backend.body_correction,
                     backend.island_contact_state,
                     backend.island_step_scale,
+                    backend.limit_search_islands,
                 ],
                 device=self.device,
             )
         else:
             backend.island_contact_state.fill_(1)
+            if clear_limit_islands:
+                backend.limit_search_islands.zero_()
             wp.launch(
                 rigid_vbd_kkt.clear_structural_contact_objective,
                 backend.graph_body_count,
@@ -4949,6 +5674,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         dt: float,
         *,
         translation_only: bool = False,
+        resolve_only: bool = False,
+        resolve_sqp_torque: bool = True,
     ) -> None:
         """Apply a structural correction or reconcile its free translation."""
         backend = self._structural_graph_kkt
@@ -4957,7 +5684,28 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             return
         model = self.model
 
-        self._reset_structural_solve_state(clear_contacts=contacts is not None and contacts.rigid_contact_max > 0)
+        if translation_only and contacts is not None and backend.use_fused_solve_reset:
+            wp.launch(
+                rigid_vbd_kkt.reset_translation_solve_state,
+                backend.island_count,
+                inputs=[],
+                outputs=[
+                    backend.island_contact_state,
+                    backend.island_step_scale,
+                    backend.translation_system,
+                    backend.translation_support,
+                ],
+                device=self.device,
+            )
+        else:
+            self._reset_structural_solve_state(
+                clear_contacts=not translation_only and contacts is not None and contacts.rigid_contact_max > 0,
+                clear_limit_islands=not translation_only and not resolve_only,
+            )
+            if translation_only:
+                backend.island_step_scale.fill_(1.0)
+                backend.translation_system.zero_()
+                backend.translation_support.zero_()
         if contacts is not None and contacts.rigid_contact_max > 0 and not backend.use_fused_contact_classification:
             wp.launch(
                 kernel=rigid_vbd_kkt.classify_global_contact_islands,
@@ -4984,10 +5732,12 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 device=self.device,
             )
         contact_stream = None
-        if translation_only:
-            backend.translation_system.zero_()
-            backend.translation_support.zero_()
-        elif backend.side_streams is not None and contacts is not None and contacts.rigid_contact_max > 0:
+        if (
+            not translation_only
+            and backend.side_streams is not None
+            and contacts is not None
+            and contacts.rigid_contact_max > 0
+        ):
             # Joint linearization does not read the contact objective; the
             # backend joins this stream before assembling its body surrogate.
             contact_stream = backend.side_streams[1]
@@ -5002,11 +5752,14 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             contacts=contacts,
             body_q=state_in.body_q,
             body_inertia_q=self.body_inertia_q,
+            body_disp=self._body_disp,
+            body_disp_ang=self._body_disp_ang,
+            use_displacement=self._use_body_displacement,
             body_q_prev=self.body_q_prev,
             body_q_rest=model.body_q,
-            body_mass=model.body_mass,
+            body_mass=self._step_body_mass(),
             body_inv_mass=self.body_inv_mass_effective,
-            body_inertia=model.body_inertia,
+            body_inertia=self._step_body_inertia(),
             body_com=model.body_com,
             contact_hessian_ll=self.body_hessian_ll,
             contact_hessian_al=self.body_hessian_al,
@@ -5029,15 +5782,15 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             joint_constraint_start=self.joint_constraint_start,
             joint_material_k=self.joint_material_k,
             joint_rho=self.joint_rho,
-            joint_penalty_kd=self.joint_penalty_kd,
+            joint_penalty_kd=self._step_joint_penalty_kd(),
             joint_target_ke=model.joint_target_ke,
-            joint_target_kd=model.joint_target_kd,
+            joint_target_kd=self._step_joint_target_kd(),
             joint_target_q=control.joint_target_q,
-            joint_target_qd=control.joint_target_qd,
+            joint_target_qd=self._step_joint_target_qd(control),
             joint_limit_lower=model.joint_limit_lower,
             joint_limit_upper=model.joint_limit_upper,
             joint_limit_ke=model.joint_limit_ke,
-            joint_limit_kd=model.joint_limit_kd,
+            joint_limit_kd=self._step_joint_limit_kd(),
             joint_drive_limit_support=self.joint_drive_limit_support,
             joint_drive_lambda=self.joint_drive_lambda,
             joint_limit_lambda=self.joint_limit_lambda,
@@ -5058,7 +5811,23 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 state_in, contacts, dt, translation_only=translation, forces_only=forces, carry_translation=translation
             ),
             translation_only=translation_only,
+            resolve_only=resolve_only,
+            resolve_sqp_torque=resolve_sqp_torque,
             contact_stream=contact_stream,
+            friction_epsilon=self.friction_epsilon,
+            contact_damping_bidirectional=self.rigid_contact_damping_bidirectional,
+            contact_penalty_k=self.body_body_contact_penalty_k,
+            contact_normal_rho=self.body_body_contact_normal_rho,
+            contact_material_ke=self.body_body_contact_material_ke,
+            contact_material_kd=self.body_body_contact_material_kd,
+            contact_material_mu=self.body_body_contact_material_mu,
+            contact_tangent_rho=self.body_body_contact_tangent_rho,
+            contact_lambda=self.body_body_contact_lambda,
+            contact_C0=self.body_body_contact_C0,
+            contact_stab_alpha=self.rigid_contact_alpha,
+            legacy_hard_contacts=self.rigid_contact_hard,
+            contact_compliant_alm=self.rigid_compliant_alm,
+            sync_alm_duals=bool(self.rigid_compliant_alm),
         )
 
     def _update_tendon_routing(self, state_in: State, dt: float, report_diagnostics: bool) -> None:
@@ -5222,6 +5991,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         dt: float,
         *,
         defer_joint_dual: bool = False,
+        skip_resolved_trees: bool = False,
     ):
         """Solve one rigid-body VBD iteration (per-iteration phase).
 
@@ -5272,10 +6042,35 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 )
             return
 
-        # Zero out forces and hessians
-        self._body_contact_scratch.zero_()
-
-        body_color_groups = model.body_color_groups
+        backend = self._structural_graph_kkt
+        has_rigid_contact_candidates = contacts is not None and model.shape_count > 0 and contacts.rigid_contact_max > 0
+        can_skip_resolved = (
+            skip_resolved_trees
+            and backend is not None
+            and backend.has_resolvable_trees
+            and not self._has_joint_mimics
+            and model.tendon_count == 0
+            and model.attachment_particle_body_count == 0
+            and not (contacts is not None and model.particle_count > 0)
+        )
+        skip_all_colors = (
+            can_skip_resolved
+            and backend.all_dynamic_rigid_resolved
+            and not backend.has_any_joint_limits
+            and not has_rigid_contact_candidates
+        )
+        use_per_body_skip = can_skip_resolved and not skip_all_colors
+        if use_per_body_skip and has_rigid_contact_candidates and self._rigid_vbd_kkt is not None:
+            self._flag_active_contact_islands(state_in, contacts, backend.limit_search_islands)
+        need_island_filter = use_per_body_skip and (backend.has_any_joint_limits or has_rigid_contact_candidates)
+        skip_slot_arr = backend.body_slot_by_id if use_per_body_skip else None
+        skip_flag_arr = backend.body_path_inverse if use_per_body_skip else None
+        skip_island_arr = backend.graph_body_island if need_island_filter else None
+        skip_limit_arr = backend.limit_search_islands if need_island_filter else None
+        body_color_groups = () if skip_all_colors else model.body_color_groups
+        if len(body_color_groups) > 0:
+            # Zero out forces and hessians
+            self._body_contact_scratch.zero_()
 
         # Gauss-Seidel-style per-color updates
         for color in range(len(body_color_groups)):
@@ -5424,9 +6219,9 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                     state_in.body_q,
                     self.body_q_prev,
                     model.body_q,
-                    model.body_mass,
+                    self._step_body_mass(),
                     self.body_inv_mass_effective,
-                    model.body_inertia,
+                    self._step_body_inertia(),
                     self.body_inertia_q,
                     model.body_com,
                     self.rigid_adjacency,
@@ -5445,17 +6240,17 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                     self.joint_penalty_k,
                     self.joint_rho,
                     self.joint_material_k,
-                    self.joint_penalty_kd,
+                    self._step_joint_penalty_kd(),
                     self.joint_sigma_start,
                     self.joint_C_fric,
                     model.joint_target_ke,
-                    model.joint_target_kd,
+                    self._step_joint_target_kd(),
                     control.joint_target_q,
-                    control.joint_target_qd,
+                    self._step_joint_target_qd(control),
                     model.joint_limit_lower,
                     model.joint_limit_upper,
                     model.joint_limit_ke,
-                    model.joint_limit_kd,
+                    self._step_joint_limit_kd(),
                     self.joint_drive_limit_support,
                     self.joint_drive_lambda,
                     self.joint_limit_lambda,
@@ -5475,6 +6270,11 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                     self.body_hessian_al,
                     self.body_hessian_aa,
                     self._structural_graph_kkt is not None,
+                    self._global_joint_stress_slot(contacts),
+                    skip_slot_arr,
+                    skip_flag_arr,
+                    skip_island_arr,
+                    skip_limit_arr,
                     self.tendon_adjacency,
                     model.tendon_guide_body,
                     model.tendon_guide_type,
@@ -5491,9 +6291,12 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                     self.tendon_segment_active,
                     self.tendon_segment_active_guide_l,
                     self.tendon_segment_active_guide_r,
+                    self._use_body_displacement,
                 ],
                 outputs=[
                     state_in.body_q,
+                    self._body_disp,
+                    self._body_disp_ang,
                 ],
                 dim=color_group.size,
                 block_dim=solve_block_dim,
@@ -5541,7 +6344,38 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             )
 
         if not defer_joint_dual:
-            self._update_rigid_joint_duals(state_in, control, dt)
+            skip_joint_dual_all = (
+                skip_all_colors
+                and self.rigid_compliant_alm
+                and backend is not None
+                and not backend.has_any_joint_drives_or_limits
+            )
+            if not skip_joint_dual_all:
+                self._update_rigid_joint_duals(state_in, control, contacts, dt)
+                if can_skip_resolved and self.rigid_compliant_alm and backend is not None:
+                    # Restore exact saddle multipliers on unflagged tree islands whose local
+                    # body sweep was skipped, avoiding float32 pose-rounding dual noise while
+                    # preserving drive/limit and contact-island dual updates.
+                    backend.sync_resolved_tree_alm_duals(
+                        joint_type=model.joint_type,
+                        joint_parent=model.joint_parent,
+                        joint_child=model.joint_child,
+                        joint_X_p=model.joint_X_p,
+                        joint_X_c=model.joint_X_c,
+                        joint_axis=model.joint_axis,
+                        joint_qd_start=model.joint_qd_start,
+                        joint_dof_dim=model.joint_dof_dim,
+                        joint_constraint_start=self.joint_constraint_start,
+                        joint_material_k=self.joint_material_k,
+                        joint_penalty_kd=self._step_joint_penalty_kd(),
+                        body_q=state_in.body_q,
+                        body_q_prev=self.body_q_prev,
+                        body_q_rest=model.body_q,
+                        dt=dt,
+                        joint_lambda_lin=self.joint_lambda_lin,
+                        joint_lambda_ang=self.joint_lambda_ang,
+                        only_unflagged_islands=need_island_filter,
+                    )
 
     def _update_rigid_body_contact_duals(self, state_in: State, contacts: Contacts | None, dt: float) -> None:
         """Update rigid body-body contact multipliers at the current pose."""
@@ -5582,7 +6416,18 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             device=self.device,
         )
 
-    def _update_rigid_joint_duals(self, state_in: State, control: Control, dt: float) -> None:
+    def _global_joint_stress_slot(self, contacts: Contacts | None):
+        if (
+            self._structural_graph_kkt is not None
+            and bool(self._rigid_joint_global_iteration_indices)
+            and not (contacts is not None and self._has_joint_mimics)
+        ):
+            return self._structural_graph_kkt.joint_stress_slot
+        return None
+
+    def _update_rigid_joint_duals(
+        self, state_in: State, control: Control, contacts: Contacts | None, dt: float
+    ) -> None:
         """Update structural, drive, and limit multipliers at the current pose."""
         model = self.model
         if self.joint_constraint_count == 0:
@@ -5617,17 +6462,18 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 self.rigid_linear_beta,
                 self.rigid_angular_beta,
                 model.joint_target_ke,
-                model.joint_target_kd,
+                self._step_joint_target_kd(),
                 control.joint_target_q,
-                control.joint_target_qd,
+                self._step_joint_target_qd(control),
                 model.joint_limit_lower,
                 model.joint_limit_upper,
                 model.joint_limit_ke,
-                model.joint_limit_kd,
+                self._step_joint_limit_kd(),
                 self.joint_rest_angle,
                 self.joint_angle_prev,
                 self.joint_drive_limit_support,
                 dt,
+                self._global_joint_stress_slot(contacts),
                 self.joint_penalty_k,  # input/output
                 self.joint_lambda_lin,  # input/output
                 self.joint_lambda_ang,  # input/output
@@ -5923,7 +6769,14 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             device=self.device,
         )
 
-    def _finalize_rigid_bodies(self, state_in: State, state_out: State, dt: float):
+    def _finalize_rigid_bodies(
+        self,
+        state_in: State,
+        state_out: State,
+        dt: float,
+        *,
+        control: Control | None = None,
+    ):
         """Finalize rigid body velocities and Dahl friction state after VBD iterations (post-iteration phase).
 
         Updates rigid body velocities using BDF1 and updates Dahl hysteresis state for rod bend/twist.
@@ -5941,12 +6794,18 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 dt,
                 state_in.body_q,
                 model.body_com,
+                self.body_inv_mass_effective,
+                self._body_disp,
+                self._body_disp_ang,
+                self._use_body_displacement,
             ],
             outputs=[self.body_q_prev, state_out.body_qd, state_in.body_qd, state_out.body_q],
             dim=model.body_count,
             block_dim=self._rigid_body_block_dim,
             device=self.device,
         )
+        if self._bdf2_mixed_contacts_step:
+            self._end_rigid_bdf2_mixed(state_in, state_out, control, dt)
 
         if self.enable_dahl_friction and model.joint_count > 0:
             wp.launch(

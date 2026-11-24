@@ -2205,6 +2205,7 @@ def _joint_angular_dual_projects_free_axis_lambda(test, device):
                 joint_rest_angle,
                 drive_limit_support,
                 1.0 / 60.0,
+                None,
             ],
             outputs=[
                 joint_penalty_k,
@@ -2303,6 +2304,7 @@ def _rod_soft_dual_slots_clear_preserved_lambda(test, device):
                 joint_rest_angle,
                 drive_limit_support,
                 1.0 / 60.0,
+                None,
             ],
             outputs=[
                 joint_penalty_k,
@@ -4100,6 +4102,13 @@ def _rigid_reset_state_and_history(test, device):
     world_mask = wp.array([True, False, False], dtype=wp.bool, device=device)
 
     solver = newton.solvers.SolverVBD(model, iterations=0, rigid_compliant_alm=True)
+    displacement_form = bool(getattr(solver, "_use_body_displacement", 0))
+
+    def edit_velocity(delta):
+        """Velocity a dynamic body reports after its pose was moved by ``delta`` between steps."""
+        # The pose form finite-differences the edit; the displacement form keeps it as a teleport.
+        return 0.0 if displacement_form else delta / dt
+
     # A history-disabled solver (the default) allocates no contact-reset state.
     test.assertIsNone(solver._contact_history_reset_mask)
     test.assertIsNone(solver._contact_history_reset_pending)
@@ -4185,13 +4194,14 @@ def _rigid_reset_state_and_history(test, device):
     # Phase 4: an all-false reset arms nothing, so the next step finite-differences
     # a known delta for every body (a leaked pose baseline would zero some world).
     solver.reset(state, world_mask=wp.array([False, False, False], dtype=wp.bool, device=device))
+    test.assertFalse(solver._rigid_pose_rebaseline_mask.numpy().any())
     all_false_delta = 2.0
     moved_q = base_q.copy()
     moved_q[:, 0] += all_false_delta
     state.body_q.assign(moved_q)
     state.body_qd.zero_()
     step_swap()
-    np.testing.assert_allclose(state.body_qd.numpy()[:, 0], all_false_delta / dt, atol=1.0e-1)
+    np.testing.assert_allclose(state.body_qd.numpy()[:, 0], edit_velocity(all_false_delta), atol=1.0e-1)
 
     # Phase 5: a full reset drains all joint history and restores model body State,
     # then defers pose so the next step reports zero velocity everywhere.
@@ -4224,13 +4234,14 @@ def _rigid_reset_state_and_history(test, device):
     state.body_q.assign(moved_final)
     state.body_qd.zero_()
     step_swap()
-    np.testing.assert_allclose(state.body_qd.numpy()[:, 0], one_shot_delta / dt, atol=1.0e-1)
+    np.testing.assert_allclose(state.body_qd.numpy()[:, 0], edit_velocity(one_shot_delta), atol=1.0e-1)
 
     # Phase 6: a masked flags=0 reset defers only world 0 and drains only its joint
     # history. The next step zeroes selected velocity while the unselected world and
     # the globals finite-difference the jump.
     solver.joint_lambda_lin.fill_(9.0)
     solver.reset(state, world_mask=world_mask, flags=0)
+    np.testing.assert_array_equal(solver._rigid_pose_rebaseline_mask.numpy(), world_mask.numpy())
     np.testing.assert_allclose(solver.joint_lambda_lin.numpy()[selected_joints], 0.0)
     np.testing.assert_allclose(solver.joint_lambda_lin.numpy()[~selected_joints], 9.0)
     masked_delta = 3.0
@@ -4241,7 +4252,7 @@ def _rigid_reset_state_and_history(test, device):
     step_swap()
     masked_qd = state.body_qd.numpy()
     np.testing.assert_allclose(masked_qd[selected_bodies, 0], 0.0, atol=1.0e-3)
-    np.testing.assert_allclose(masked_qd[~selected_bodies, 0], masked_delta / dt, atol=1.0e-1)
+    np.testing.assert_allclose(masked_qd[~selected_bodies, 0], edit_velocity(masked_delta), atol=1.0e-1)
 
     # Phase 7: the extended mask's final entry selects only global entities.
     global_mask = wp.array([False, False, True], dtype=wp.bool, device=device)
@@ -4252,6 +4263,7 @@ def _rigid_reset_state_and_history(test, device):
     state.body_qd.assign(custom_qd)
     solver.joint_lambda_lin.fill_(10.0)
     solver.reset(state, world_mask=global_mask, flags=newton.StateFlags.BODY_Q)
+    np.testing.assert_array_equal(solver._rigid_pose_rebaseline_mask.numpy(), global_mask.numpy())
 
     result_q = state.body_q.numpy()
     np.testing.assert_allclose(result_q[global_bodies], model_q[global_bodies])
@@ -4268,7 +4280,7 @@ def _rigid_reset_state_and_history(test, device):
     step_swap()
     global_qd = state.body_qd.numpy()
     np.testing.assert_allclose(global_qd[global_bodies], 0.0, atol=1.0e-3)
-    np.testing.assert_allclose(global_qd[~global_bodies, 0], global_delta / dt, atol=1.0e-1)
+    np.testing.assert_allclose(global_qd[~global_bodies, 0], edit_velocity(global_delta), atol=1.0e-1)
 
     # An extended all-true mask has the same immediate selection as None.
     state.body_q.assign(custom_q)
@@ -6735,6 +6747,177 @@ def _rigid_hinge_multiturn_limits(test, device):
             expected = math.copysign(4.0, torque)
             np.testing.assert_allclose(angles, expected, rtol=0.0, atol=2.0e-3, err_msg=f"{compliant_alm=}")
             test.assertLess(np.max(np.abs(state_in.body_qd.numpy()[:, 5])), 1.0e-2)
+
+
+def _rigid_bdf2_restarts_history_after_state_edit(test, device):
+    """A body whose state was edited between steps starts afresh instead of using stale BDF2 history."""
+    builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+    body = builder.add_body(mass=1.0)
+    builder.add_shape_sphere(body, radius=0.1)
+    builder.color()
+    model = builder.finalize(device=device)
+    solver = newton.solvers.SolverVBD(model, iterations=2, rigid_time_integration="bdf2")
+    state_in = model.state()
+    state_out = model.state()
+    control = model.control()
+    velocity = np.zeros((1, 6), dtype=np.float32)
+    velocity[0, 0] = 1.0
+    state_in.body_qd.assign(velocity)
+    dt = 0.01
+    for _ in range(5):
+        solver.step(state_in, state_out, control, None, dt)
+        state_in, state_out = state_out, state_in
+    # Without forces BDF2 moves the body by dt * v per step, from the first step on.
+    test.assertAlmostEqual(float(state_in.body_q.numpy()[0, 0]), 0.05, delta=1.0e-5)
+
+    pose = state_in.body_q.numpy()
+    pose[0, :3] = (2.0, 0.0, 0.0)
+    state_in.body_q.assign(pose)
+    state_in.body_qd.zero_()
+    solver.step(state_in, state_out, control, None, dt)
+    # Stale history would move the stopped body by dt * v / 9, about 1 mm.
+    np.testing.assert_allclose(state_out.body_q.numpy()[0, :3], (2.0, 0.0, 0.0), atol=1.0e-6)
+    np.testing.assert_allclose(state_out.body_qd.numpy(), 0.0, atol=1.0e-6)
+
+
+def _rigid_bdf2_validates_scope(test, device):
+    """Unknown names and particles are refused; an island in contact takes exact backward Euler; owned pipelines work."""
+    builder = newton.ModelBuilder()
+    builder.add_ground_plane()
+    body = builder.add_body(xform=wp.transform(wp.vec3(0.0, 0.0, 0.095), wp.quat_identity()), mass=1.0)
+    builder.add_shape_sphere(body, radius=0.1)
+    builder.color()
+    model = builder.finalize(device=device)
+    with test.assertRaisesRegex(ValueError, "rigid_time_integration"):
+        newton.solvers.SolverVBD(model, rigid_time_integration="rk4")
+    pipeline = newton.CollisionPipeline(model)
+    owned_solver = newton.solvers.SolverVBD(
+        model, iterations=2, rigid_time_integration="bdf2", collision_pipeline=pipeline
+    )
+    s_owned_in, s_owned_out, ctrl_owned = model.state(), model.state(), model.control()
+    owned_solver.step(s_owned_in, s_owned_out, ctrl_owned, None, 0.01)
+    test.assertTrue(np.isfinite(s_owned_out.body_q.numpy()).all())
+
+    # On an island with active contacts, BDF2 takes backward Euler bit for bit.
+    contacts = pipeline.contacts()
+    results = []
+    for integration in ("bdf1", "bdf2"):
+        solver = newton.solvers.SolverVBD(model, iterations=2, rigid_time_integration=integration)
+        state_in, state_out, control = model.state(), model.state(), model.control()
+        pipeline.collide(state_in, contacts)
+        solver.step(state_in, state_out, control, contacts, 0.01)
+        results.append((state_out.body_q.numpy().copy(), state_out.body_qd.numpy().copy()))
+    np.testing.assert_array_equal(results[0][0], results[1][0])
+    np.testing.assert_array_equal(results[0][1], results[1][1])
+
+    builder = newton.ModelBuilder()
+    body = builder.add_body(mass=1.0)
+    builder.add_shape_sphere(body, radius=0.1)
+    builder.add_particle(pos=(0.0, 0.0, 1.0), vel=(0.0, 0.0, 0.0), mass=1.0)
+    builder.color()
+    model = builder.finalize(device=device)
+    with test.assertRaisesRegex(ValueError, "particles or tendons"):
+        newton.solvers.SolverVBD(model, rigid_time_integration="bdf2")
+
+
+def _rigid_bdf2_per_island_contact_and_damping_second_order(test, device):
+    """Damped joints integrate at second order under BDF2 even beside a contacting island or owned pipeline."""
+
+    def run_damped_scene(
+        integration: str, dt: float, with_contact_island: bool, owned_pipe: bool = False, near_ground: bool = False
+    ):
+        builder = newton.ModelBuilder(gravity=(0.0, 0.0, -9.81))
+        cfg = builder.default_shape_cfg.copy()
+        cfg.ke, cfg.kd, cfg.mu, cfg.restitution = 1.0e6, 1.0e3, 0.8, 0.0
+        if with_contact_island:
+            builder.add_ground_plane(cfg=cfg)
+            box = builder.add_link(xform=wp.transform(wp.vec3(2.0, 0.0, 0.0502), wp.quat_identity()), mass=5.0)
+            builder.add_shape_box(box, hx=0.2, hy=0.2, hz=0.05, cfg=cfg)
+            j_free = builder.add_joint_free(box)
+            builder.add_articulation([j_free])
+        link = builder.add_link(
+            mass=1.0,
+            com=wp.vec3(0.0, 0.0, -0.25),
+            inertia=wp.mat33(0.02, 0.0, 0.0, 0.0, 0.02, 0.0, 0.0, 0.0, 0.002),
+            lock_inertia=True,
+        )
+        if near_ground:
+            # A collidable tip that passes 1 cm above the ground: inside the detection gap, never touching.
+            tip_cfg = cfg.copy()
+            tip_cfg.density = 0.0
+            builder.add_shape_sphere(
+                link, xform=wp.transform(wp.vec3(0.0, 0.0, -0.5), wp.quat_identity()), radius=0.05, cfg=tip_cfg
+            )
+        hinge = builder.add_joint_revolute(
+            parent=-1,
+            child=link,
+            axis=wp.vec3(0.0, 1.0, 0.0),
+            parent_xform=wp.transform(wp.vec3(0.0, 0.0, 0.56 if near_ground else 1.5), wp.quat_identity()),
+            armature=0.0,
+            target_ke=8.0,
+            target_kd=0.6,
+            limit_lower=-3.0,
+            limit_upper=3.0,
+        )
+        builder.add_articulation([hinge])
+        if with_contact_island:
+            builder.joint_q[:] = [2.0, 0.0, 0.0502, 0.0, 0.0, 0.0, 1.0, 0.5]
+        else:
+            builder.joint_q[:] = [0.5]
+        builder.color()
+        model = builder.finalize(device=device)
+        newton.eval_fk(model, model.joint_q, model.joint_qd, model)
+        pipe = newton.CollisionPipeline(model) if with_contact_island else None
+        solver = newton.solvers.SolverVBD(
+            model,
+            iterations=4,
+            rigid_joint_global_iterations=1,
+            rigid_joint_linear_ke=1.0e6,
+            rigid_joint_angular_ke=1.0e6,
+            rigid_joint_angular_kd=0.2,
+            rigid_time_integration=integration,
+            collision_pipeline=pipe if (with_contact_island and owned_pipe) else None,
+        )
+        state_in, state_out, control = model.state(), model.state(), model.control()
+        tqd = np.zeros(model.joint_dof_count, dtype=np.float32)
+        tqd[-1] = 0.25
+        control.joint_target_qd.assign(tqd)
+        contacts = pipe.contacts() if (pipe is not None and not owned_pipe) else None
+        steps = round(0.4 / dt)
+        link_idx = 1 if with_contact_island else 0
+        box_z = []
+        for _ in range(steps):
+            state_in.clear_forces()
+            if contacts is not None:
+                pipe.collide(state_in, contacts)
+            solver.step(state_in, state_out, control, contacts, dt)
+            state_in, state_out = state_out, state_in
+            if with_contact_island:
+                box_z.append(float(state_in.body_q.numpy()[0, 2]))
+        q_final = state_in.body_q.numpy()[link_idx, 3:]
+        angle = float(2.0 * np.arctan2(q_final[1], q_final[3]))
+        rebound = max(box_z[40:]) - float(np.median(box_z[-20:])) if box_z else 0.0
+        return angle, rebound
+
+    ref_angle, _ = run_damped_scene("bdf2", 2.5e-4, False)
+    err_bdf1 = abs(run_damped_scene("bdf1", 2.0e-3, False)[0] - ref_angle)
+    err_bdf2_h2 = abs(run_damped_scene("bdf2", 2.0e-3, False)[0] - ref_angle)
+    err_bdf2_h1 = abs(run_damped_scene("bdf2", 1.0e-3, False)[0] - ref_angle)
+    # True second-order damping shrinks error ~4x on halving dt and beats BDF1 decisively.
+    test.assertLess(err_bdf2_h2, 0.15 * err_bdf1)
+    test.assertLess(err_bdf2_h1, 0.35 * err_bdf2_h2)
+
+    # With a contacting box island in the same step (both external contacts and owned pipeline):
+    ang_ext, rebound_ext = run_damped_scene("bdf2", 2.0e-3, True, owned_pipe=False)
+    ang_own, rebound_own = run_damped_scene("bdf2", 2.0e-3, True, owned_pipe=True)
+    test.assertAlmostEqual(ang_ext, ang_own, delta=1.0e-5)
+    test.assertLess(abs(ang_ext - ref_angle), 0.15 * err_bdf1)
+    test.assertLess(rebound_ext, 5.0e-5)
+    test.assertLess(rebound_own, 5.0e-5)
+
+    # A tip that is a contact candidate at every step and never touches leaves its island second order.
+    ang_near, _ = run_damped_scene("bdf2", 2.0e-3, True, near_ground=True)
+    test.assertLess(abs(ang_near - ref_angle), 0.15 * err_bdf1)
 
 
 class TestSolverVBD(unittest.TestCase):
@@ -9538,6 +9721,103 @@ add_function_test(
     devices=cuda_devices,
 )
 
+add_function_test(
+    TestSolverVBD,
+    "test_rigid_bdf2_restarts_history_after_state_edit",
+    _rigid_bdf2_restarts_history_after_state_edit,
+    devices=devices,
+)
+add_function_test(
+    TestSolverVBD,
+    "test_rigid_bdf2_validates_scope",
+    _rigid_bdf2_validates_scope,
+    devices=devices,
+)
+add_function_test(
+    TestSolverVBD,
+    "test_rigid_bdf2_per_island_contact_and_damping_second_order",
+    _rigid_bdf2_per_island_contact_and_damping_second_order,
+    devices=devices,
+)
+
+
+def _rigid_bdf2_per_island_leaves_model_and_control_untouched(test, device):
+    """Per-island BDF2 keeps model and control arrays strictly read-only throughout step()."""
+    b = newton.ModelBuilder(gravity=(0.0, 0.0, -9.81))
+    b.add_ground_plane()
+    box = b.add_body(xform=wp.transform(wp.vec3(-1.0, 0.0, 0.05), wp.quat_identity()), mass=0.5)
+    b.add_shape_box(box, hx=0.05, hy=0.05, hz=0.05)
+    link = b.add_link(
+        xform=wp.transform(wp.vec3(1.0, 0.0, 1.5), wp.quat_identity()),
+        mass=0.4,
+        inertia=wp.mat33(np.eye(3) * (0.4 / 12.0)),
+    )
+    hinge = b.add_joint_revolute(
+        parent=-1,
+        child=link,
+        axis=wp.vec3(0.0, 1.0, 0.0),
+        parent_xform=wp.transform(wp.vec3(1.0, 0.0, 2.0), wp.quat_identity()),
+        child_xform=wp.transform(wp.vec3(0.0, 0.0, 0.5), wp.quat_identity()),
+        target_ke=50.0,
+        target_kd=4.0,
+        limit_lower=-1.5,
+        limit_upper=1.5,
+        limit_ke=100.0,
+        limit_kd=3.0,
+    )
+    b.add_articulation([hinge])
+    b.color()
+    model = b.finalize(device=device)
+    pipe = newton.CollisionPipeline(model)
+    contacts = pipe.contacts()
+    control = model.control()
+    control.joint_target_qd.fill_(1.25)
+
+    snap_before = {
+        "mass": model.body_mass.numpy().copy(),
+        "inertia": model.body_inertia.numpy().copy(),
+        "inv_mass": model.body_inv_mass.numpy().copy(),
+        "inv_inertia": model.body_inv_inertia.numpy().copy(),
+        "target_kd": model.joint_target_kd.numpy().copy(),
+        "limit_kd": model.joint_limit_kd.numpy().copy(),
+        "target_qd": control.joint_target_qd.numpy().copy(),
+    }
+    solver = newton.solvers.SolverVBD(
+        model,
+        iterations=3,
+        rigid_joint_global_iterations=1,
+        rigid_time_integration="bdf2",
+    )
+    mid_step_checked = {"ran": False}
+    orig_solve_kkt = solver._solve_structural_graph_kkt
+
+    def check_mid_step(state_in, ctl, cts, dt, **kw):
+        # Even in the middle of step() (while BDF2 scaling is active!), model and control must be unmutated!
+        np.testing.assert_array_equal(model.body_mass.numpy(), snap_before["mass"])
+        np.testing.assert_array_equal(model.body_inertia.numpy(), snap_before["inertia"])
+        np.testing.assert_array_equal(model.body_inv_mass.numpy(), snap_before["inv_mass"])
+        np.testing.assert_array_equal(model.body_inv_inertia.numpy(), snap_before["inv_inertia"])
+        np.testing.assert_array_equal(model.joint_target_kd.numpy(), snap_before["target_kd"])
+        np.testing.assert_array_equal(model.joint_limit_kd.numpy(), snap_before["limit_kd"])
+        np.testing.assert_array_equal(ctl.joint_target_qd.numpy(), snap_before["target_qd"])
+        mid_step_checked["ran"] = True
+        return orig_solve_kkt(state_in, ctl, cts, dt, **kw)
+
+    solver._solve_structural_graph_kkt = check_mid_step
+    s0, s1 = model.state(), model.state()
+    for _ in range(4):
+        pipe.collide(s0, contacts)
+        solver.step(s0, s1, control, contacts, 1.0 / 240.0)
+        s0, s1 = s1, s0
+    test.assertTrue(mid_step_checked["ran"])
+
+
+add_function_test(
+    TestSolverVBD,
+    "test_rigid_bdf2_per_island_leaves_model_and_control_untouched",
+    _rigid_bdf2_per_island_leaves_model_and_control_untouched,
+    devices=devices,
+)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2, failfast=True)

@@ -63,8 +63,11 @@ from .rigid_vbd_kernels import (
     _compliant_alm_coefficients,
     _evaluate_drive_axis,
     _evaluate_limit_axis,
+    _global_limit_support,
     _load_solve_weight,
     _material_force_terms,
+    _pose_com_diff,
+    _reset_world_selected,
     _resolve_active_drive_row,
     _unwrap_hinge_angle,
     build_joint_projectors,
@@ -72,7 +75,11 @@ from .rigid_vbd_kernels import (
     compute_kappa_dot,
     contact_surface_separation,
     evaluate_rigid_contact_from_collision,
+    pose_from_displacement,
+    rotation_vector_compose,
 )
+from .rigid_vbd_kkt_chains import ChainCondensation
+from .rigid_vbd_kkt_chains import island_in_scope as _chain_island_in_scope
 
 wp.set_module_options({"enable_backward": False})
 
@@ -147,9 +154,6 @@ _CR_TAIL_MAX_ROWS = 64
 _PAIRED_OPEN_CHAIN_MIN_BODIES = 64
 """Smallest open chain admitted to the paired body-row solve."""
 
-_PAIRED_OPEN_CHAIN_MAX_BODIES = 256
-"""Largest open chain admitted to the paired body-row solve."""
-
 _SPATIAL_GPU_BLOCK_DIM = 32
 """One-warp blocks for register-heavy spatial-matrix kernels."""
 
@@ -210,7 +214,7 @@ block-Thomas tail. Below this the split adds barriers without recovering
 enough width, and a single-closure loop measurably regresses.
 """
 
-_FUSED_TREE_MIN_LEVELS = 4
+_FUSED_TREE_MIN_LEVELS = 2
 """Smallest leaf-rake schedule worth collapsing into one synchronized block.
 
 Below this the per-level launches already fit in the dependent-launch budget
@@ -229,13 +233,13 @@ _STRUCTURAL_MEMORY_CAPACITY_DIVISOR = 8
 """Maximum physical-device fraction reserved by the optional global backend."""
 
 _STRUCTURAL_MEMORY_CAP_BYTES = 1 << 30
-"""Deterministic 1 GiB ceiling when device capacity is absent or very large.
+"""Deterministic 1 GiB fallback budget when device capacity is unavailable (CPU or unknown).
 
 The preflight uses immutable ``Device.total_memory``, never volatile free
 memory. Planned persistent accelerator payload is bounded to one eighth of a
-known device capacity and never more than this ceiling. This is not a memory
-reservation and cannot guarantee allocation when other processes or existing
-model state have already occupied the device.
+known CUDA device capacity, or to this 1 GiB fallback when capacity is absent.
+This is not a memory reservation and cannot guarantee allocation when other
+processes or existing model state have already occupied the device.
 """
 
 _INVERSE_RESIDUAL_TOLERANCE = wp.constant(1.0e-2)
@@ -424,9 +428,66 @@ def _inverse_spatial_robust(matrix: wp.spatial_matrix):
     return inverse
 
 
+@wp.func_native("""
+#if defined(__CUDA_ARCH__)
+return fma(a, b, c);
+#else
+return a * b + c;
+#endif
+""")
+def _fma_f64(a: wp.float64, b: wp.float64, c: wp.float64) -> wp.float64: ...
+
+
+@wp.func
+def _inverse_spatial(matrix: wp.spatial_matrixd):
+    """Invert a 6x6 float64 matrix by a register-resident 3x3 Schur split."""
+    a = wp.mat33d(0.0)
+    b = wp.mat33d(0.0)
+    c = wp.mat33d(0.0)
+    d = wp.mat33d(0.0)
+    for row in range(3):
+        for column in range(3):
+            a[row, column] = matrix[row, column]
+            b[row, column] = matrix[row, column + 3]
+            c[row, column] = matrix[row + 3, column]
+            d[row, column] = matrix[row + 3, column + 3]
+
+    a_inverse = wp.inverse(a)
+    a_inverse_b = a_inverse * b
+    c_a_inverse = c * a_inverse
+    schur = d - c_a_inverse * b
+    schur_inverse = wp.inverse(schur)
+    upper_right = -(a_inverse_b * schur_inverse)
+    lower_left = -(schur_inverse * c_a_inverse)
+    upper_left = a_inverse - upper_right * c_a_inverse
+
+    result = wp.spatial_matrixd(0.0)
+    for row in range(3):
+        for column in range(3):
+            result[row, column] = upper_left[row, column]
+            result[row, column + 3] = upper_right[row, column]
+            result[row + 3, column] = lower_left[row, column]
+            result[row + 3, column + 3] = schur_inverse[row, column]
+    return result
+
+
 @wp.func
 def _inverse_spatial_robust(matrix: wp.spatial_matrixd):
-    return _inverse_spatial_pivoted(matrix)
+    """Use the fast 3x3 Schur inverse unless its float64 residual exceeds tolerance."""
+    inverse = _inverse_spatial(matrix)
+    maximum_error = wp.float64(0.0)
+    finite = True
+    for row in range(6):
+        for column in range(6):
+            value = wp.float64(0.0)
+            for entry in range(6):
+                value = _fma_f64(matrix[row, entry], inverse[entry, column], value)
+            target = wp.float64(1.0) if row == column else wp.float64(0.0)
+            finite = finite and wp.isfinite(value)
+            maximum_error = wp.max(maximum_error, wp.abs(value - target))
+    if not finite or maximum_error > wp.float64(1.0e-9):
+        inverse = _inverse_spatial_pivoted(matrix)
+    return inverse
 
 
 @wp.func
@@ -447,10 +508,25 @@ def _spatial_block(matrix: wp.spatial_matrix, row_block: int, column_block: int)
 
 
 @wp.func
+def _spatial_vector_nonzero(value: wp.spatial_vector) -> bool:
+    return (
+        value[0] != 0.0 or value[1] != 0.0 or value[2] != 0.0 or value[3] != 0.0 or value[4] != 0.0 or value[5] != 0.0
+    )
+
+
+@wp.func
 def _scale_spatial_vector(scale: wp.spatial_vector, value: wp.spatial_vector):
     result = wp.spatial_vector()
     for row in range(6):
         result[row] = scale[row] * value[row]
+    return result
+
+
+@wp.func
+def _scale_spatial_vector(scale: wp.spatial_vector, value: wp.spatial_vectord):
+    result = wp.spatial_vector()
+    for row in range(6):
+        result[row] = float(wp.float64(scale[row]) * value[row])
     return result
 
 
@@ -501,9 +577,25 @@ def clear_structural_contact_objective(
 
 
 @wp.kernel
+def reset_translation_solve_state(
+    island_contact_state: wp.array[wp.int32],
+    island_step_scale: wp.array[float],
+    translation_system: wp.array[wp.mat44d],
+    translation_support: wp.array[_TranslationSupport],
+):
+    """Reset island-level translation scratch in one lightweight launch."""
+    island = wp.tid()
+    island_contact_state[island] = 1
+    island_step_scale[island] = 1.0
+    translation_system[island] = wp.mat44d(0.0)
+    translation_support[island] = _TranslationSupport()
+
+
+@wp.kernel
 def reset_structural_solve_state(
     island_count: int,
     has_contacts: int,
+    clear_limit_islands: int,
     body_ids: wp.array[wp.int32],
     body_forces: wp.array[wp.vec3],
     body_torques: wp.array[wp.vec3],
@@ -514,6 +606,7 @@ def reset_structural_solve_state(
     body_correction: wp.array[wp.spatial_vector],
     island_contact_state: wp.array[wp.int32],
     island_step_scale: wp.array[float],
+    limit_search_islands: wp.array[wp.int32],
 ):
     """Reset all per-pass structural scratch in one launch."""
     slot = wp.tid()
@@ -529,6 +622,36 @@ def reset_structural_solve_state(
     if slot < island_count:
         island_contact_state[slot] = 1
         island_step_scale[slot] = 1.0
+        if clear_limit_islands != 0:
+            limit_search_islands[slot] = 0
+
+
+@wp.kernel(module="unique")
+def add_contact_island_rod_kirchhoff_proximal(
+    rod_body_ids: wp.array[wp.int32],
+    rod_body_islands: wp.array[wp.int32],
+    rod_kirchhoff_proximal: wp.array[float],
+    island_contact_state: wp.array[wp.int32],
+    body_hessian_aa: wp.array[wp.mat33],
+):
+    """Add exact zero-bias Cosserat director shear-bending proximal metric on contact-active rod islands.
+
+    Coupled Schur elimination across Cosserat ``ROD`` chains annihilates shear stiffness along the
+    zero-shear Kirchhoff transverse manifold, leaving micro-inertia segments free to whip across
+    open pulley/conduit clearances within one iteration. Retaining ``c_rod * L^2 * K_shear`` on
+    ``body_hessian_aa`` (zero RHS bias) bounds single-step director rotation on contact-bearing
+    islands while leaving contact-free rods (``island_contact_state != -1``) and all equilibria unchanged.
+    """
+    idx = wp.tid()
+    if island_contact_state[rod_body_islands[idx]] != -1:
+        return
+    body = rod_body_ids[idx]
+    prox = rod_kirchhoff_proximal[idx]
+    h_aa = body_hessian_aa[body]
+    h_aa[0, 0] = h_aa[0, 0] + prox
+    h_aa[1, 1] = h_aa[1, 1] + prox
+    h_aa[2, 2] = h_aa[2, 2] + prox
+    body_hessian_aa[body] = h_aa
 
 
 def _make_accumulate_structural_contacts(translation_only: bool, forces_only: bool):
@@ -574,6 +697,9 @@ def _make_accumulate_structural_contacts(translation_only: bool, forces_only: bo
         graph_body_island: wp.array[wp.int32],
         classify_islands: int,
         body_inertia_q: wp.array[wp.transform],
+        body_disp: wp.array[wp.vec3],
+        body_disp_ang: wp.array[wp.vec3],
+        use_displacement: int,
         body_mass: wp.array[float],
         island_translation_free: wp.array[int],
         translation_system: wp.array[wp.mat44d],
@@ -773,6 +899,7 @@ def _make_accumulate_structural_contacts(translation_only: bool, forces_only: bo
                 dt,
                 tangent_C0,
                 contact_damping_bidirectional,
+                0 if wp.static(forces_only) else 1,
             )
 
             if body == body0:
@@ -814,7 +941,10 @@ def _make_accumulate_structural_contacts(translation_only: bool, forces_only: bo
             # No rotational scratch or body-matrix gather is consumed here.
             contribution = wp.mat44d(0.0)
             com_world = wp.transform_point(body_q[body], body_com[body])
-            inertial_delta = wp.transform_point(body_inertia_q[body], body_com[body]) - com_world - carried
+            inertial_delta = _pose_com_diff(body_inertia_q[body], body_q[body], body_com[body]) - carried
+            if use_displacement != 0:
+                # The accumulated displacement holds every solved shift, stored or not.
+                inertial_delta = -body_disp[body]
             mass = wp.float64(0.0)
             if contact_thread == 0:
                 mass = wp.float64(body_mass[body]) / (wp.float64(dt) * wp.float64(dt))
@@ -929,6 +1059,107 @@ def classify_global_contact_islands(
         wp.atomic_min(island_contact_state, island1, -1)
 
 
+@wp.kernel
+def flag_active_contact_islands(
+    rigid_contact_count: wp.array[int],
+    rigid_contact_shape0: wp.array[int],
+    rigid_contact_shape1: wp.array[int],
+    rigid_contact_point0: wp.array[wp.vec3],
+    rigid_contact_point1: wp.array[wp.vec3],
+    rigid_contact_normal: wp.array[wp.vec3],
+    rigid_contact_margin0: wp.array[float],
+    rigid_contact_margin1: wp.array[float],
+    shape_body: wp.array[wp.int32],
+    body_q: wp.array[wp.transform],
+    body_inv_mass: wp.array[float],
+    contact_penalty_k: wp.array[float],
+    contact_normal_rho: wp.array[float],
+    contact_material_ke: wp.array[float],
+    contact_lambda: wp.array[wp.vec3],
+    contact_C0: wp.array[wp.vec3],
+    stab_alpha: float,
+    legacy_hard_contacts: int,
+    contact_compliant_alm: int,
+    body_slot_by_id: wp.array[wp.int32],
+    graph_body_island: wp.array[wp.int32],
+    body_contact_buffer_pre_alloc: int,
+    body_contact_counts: wp.array[wp.int32],
+    active_islands: wp.array[wp.int32],
+):
+    """Mark structural islands that own at least one active rigid contact at body_q."""
+    contact = wp.tid()
+    if contact >= rigid_contact_count[0]:
+        return
+    shape0 = rigid_contact_shape0[contact]
+    shape1 = rigid_contact_shape1[contact]
+    body0 = shape_body[shape0] if shape0 >= 0 else -1
+    body1 = shape_body[shape1] if shape1 >= 0 else -1
+    dynamic0 = body0 >= 0 and body_inv_mass[body0] > 0.0
+    dynamic1 = body1 >= 0 and body_inv_mass[body1] > 0.0
+    if not dynamic0 and not dynamic1:
+        return
+    slot0 = body_slot_by_id[body0] if dynamic0 else -1
+    slot1 = body_slot_by_id[body1] if dynamic1 else -1
+    island0 = graph_body_island[slot0] if slot0 >= 0 else -1
+    island1 = graph_body_island[slot1] if slot1 >= 0 else -1
+    if island0 < 0 and island1 < 0:
+        return
+    if (slot0 >= 0 and body_contact_counts[body0] > body_contact_buffer_pre_alloc) or (
+        slot1 >= 0 and body_contact_counts[body1] > body_contact_buffer_pre_alloc
+    ):
+        if island0 >= 0:
+            active_islands[island0] = 1
+        if island1 >= 0:
+            active_islands[island1] = 1
+        return
+    normal = rigid_contact_normal[contact]
+    point0 = (
+        wp.transform_point(body_q[body0], rigid_contact_point0[contact])
+        if body0 >= 0
+        else rigid_contact_point0[contact]
+    )
+    point1 = (
+        wp.transform_point(body_q[body1], rigid_contact_point1[contact])
+        if body1 >= 0
+        else rigid_contact_point1[contact]
+    )
+    normal_error = -contact_surface_separation(
+        point0,
+        point1,
+        normal,
+        rigid_contact_margin0[contact],
+        rigid_contact_margin1[contact],
+    )
+    multiplier_normal = 0.0
+    stabilized_error = normal_error
+    normal_weight = _load_solve_weight(
+        contact_penalty_k,
+        contact_normal_rho,
+        contact,
+        contact_compliant_alm,
+    )
+    material_k = contact_material_ke[contact]
+    if legacy_hard_contacts == 1 or contact_compliant_alm == 1:
+        multiplier_normal = wp.dot(contact_lambda[contact], normal)
+        C0_normal = wp.dot(normal, contact_C0[contact])
+        stabilized_error = normal_error - stab_alpha * C0_normal
+    normal_primal_k, multiplier_normal_eff = _material_force_terms(
+        normal_weight,
+        material_k,
+        multiplier_normal,
+        contact_compliant_alm,
+    )
+    inactive = multiplier_normal <= 0.0 and (
+        normal_error <= _SMALL_LENGTH_EPS or normal_primal_k * stabilized_error + multiplier_normal_eff <= 0.0
+    )
+    if inactive:
+        return
+    if island0 >= 0:
+        active_islands[island0] = 1
+    if island1 >= 0:
+        active_islands[island1] = 1
+
+
 @wp.func
 def _body_objective_rhs(
     pose: wp.transform,
@@ -942,9 +1173,7 @@ def _body_objective_rhs(
 ):
     rotation = wp.transform_get_rotation(pose)
     inertial_rotation = wp.transform_get_rotation(inertial_pose)
-    com = wp.transform_point(pose, com_local)
-    inertial_com = wp.transform_point(inertial_pose, com_local)
-    force = (mass * dt_inv_sq) * (inertial_com - com) + contact_force
+    force = (mass * dt_inv_sq) * _pose_com_diff(inertial_pose, pose, com_local) + contact_force
     rotation_delta = wp.quat_inverse(rotation) * inertial_rotation
     if rotation_delta[3] < 0.0:
         rotation_delta = wp.quat(
@@ -956,6 +1185,27 @@ def _body_objective_rhs(
     axis, angle = wp.quat_to_axis_angle(rotation_delta)
     torque = wp.quat_rotate(rotation, inertia * (axis * angle * dt_inv_sq)) + contact_torque
     return wp.spatial_vector(force, torque)
+
+
+@wp.func
+def _body_objective_rhs_displacement(
+    pose: wp.transform,
+    mass: float,
+    inertia: wp.mat33,
+    contact_force: wp.vec3,
+    contact_torque: wp.vec3,
+    dt_inv_sq: float,
+    displacement: wp.vec3,
+    rotation_displacement: wp.vec3,
+):
+    """:func:`_body_objective_rhs` from the displacement accumulated since the inertial target.
+
+    The accumulated displacement keeps the digits that the difference of two stored poses
+    rounds away.
+    """
+    rotation = wp.transform_get_rotation(pose)
+    angular = wp.quat_rotate(rotation, inertia * wp.quat_rotate_inv(rotation, rotation_displacement))
+    return wp.spatial_vector(contact_force - (mass * dt_inv_sq) * displacement, contact_torque - dt_inv_sq * angular)
 
 
 @wp.func
@@ -1000,6 +1250,9 @@ def build_body_surrogate(
     dt: float,
     body_q: wp.array[wp.transform],
     body_inertia_q: wp.array[wp.transform],
+    body_disp: wp.array[wp.vec3],
+    body_disp_ang: wp.array[wp.vec3],
+    use_displacement: int,
     body_mass: wp.array[float],
     body_inv_mass: wp.array[float],
     body_inertia: wp.array[wp.mat33],
@@ -1078,7 +1331,18 @@ def build_body_surrogate(
         contact_torques[body] if has_contacts != 0 else zero_v,
         dt_inv_sq,
     )
-    if body_path_inverse[slot] != 0:
+    if use_displacement != 0:
+        rhs = _body_objective_rhs_displacement(
+            pose,
+            body_mass[body],
+            body_inertia[body],
+            contact_forces[body] if has_contacts != 0 else zero_v,
+            contact_torques[body] if has_contacts != 0 else zero_v,
+            dt_inv_sq,
+            body_disp[body],
+            body_disp_ang[body],
+        )
+    if (body_path_inverse[slot] & 1) != 0:
         inverse = _inverse_spatial_robust(matrix)
         body_matrix_out[slot] = inverse
         body_rhs_out[slot] = inverse * rhs
@@ -1339,9 +1603,243 @@ def add_joint_stress_majorizer(
         body_stress[destinations[1]] = stress_child
 
 
+@wp.kernel
+def clear_stored_row_multipliers(
+    world_mask: wp.array[wp.bool],
+    reset_all: bool,
+    world_count: int,
+    joint_world: wp.array[wp.int32],
+    joint_ids: wp.array[wp.int32],
+    row_node: wp.array[wp.int32],
+    solution: wp.array[wp.spatial_vector],
+):
+    """Zero the stored multipliers of the rows of reset worlds: their next stage builds no stress from them."""
+    row = wp.tid()
+    if _reset_world_selected(joint_world[joint_ids[row]], world_mask, reset_all, world_count):
+        node = row_node[row]
+        if node < 0:
+            node = -2 - node
+        solution[node] = wp.spatial_vector()
+
+
+@wp.kernel
+def add_clean_saddle_stress_majorizer(
+    joint_stress_slot: wp.array[wp.vec2i],
+    joint_ids: wp.array[wp.int32],
+    row_order: wp.array[wp.int32],
+    joint_type: wp.array[int],
+    joint_parent: wp.array[int],
+    joint_child: wp.array[int],
+    joint_X_p: wp.array[wp.transform],
+    joint_X_c: wp.array[wp.transform],
+    body_q: wp.array[wp.transform],
+    body_com: wp.array[wp.vec3],
+    body_inv_mass: wp.array[float],
+    body_slot: wp.array[wp.int32],
+    jacobian_parent: wp.array[wp.spatial_matrix],
+    jacobian_child: wp.array[wp.spatial_matrix],
+    row_node: wp.array[wp.int32],
+    row_scale: wp.array[wp.spatial_vector],
+    row_active: wp.array[wp.int32],
+    prev_solution: wp.array[wp.spatial_vector],
+    body_stress: wp.array[wp.mat33],
+):
+    """Populate the PSD rotational stress majorizer of a non-rod float32 tree from the multiplier
+    mu = row_scale * prev_solution[r_node] that the bucket's last solve stored: the preceding stage
+    of the step or, at the first stage, the last solve of the preceding step (zero after
+    construction and after reset). The row force at the pose a stage starts from, C_0^-1 * c(x),
+    is K times the free-fall gap of the step at the first stage and K times float32 pose rounding
+    near rigidity; mu is bounded by subtree inertia uniformly as K -> inf. A row that is inactive
+    in this stage adds no stress.
+    """
+    row = row_order[wp.tid()]
+    joint = joint_ids[row]
+    parent, child = joint_parent[joint], joint_child[joint]
+    destinations = joint_stress_slot[joint]
+    stress_parent = wp.mat33(0.0)
+    stress_child = wp.mat33(0.0)
+    if joint_type[joint] == JointType.ROD and parent >= 0:
+        if destinations[0] >= 0:
+            body_stress[destinations[0]] = stress_parent
+        if destinations[1] >= 0:
+            body_stress[destinations[1]] = stress_child
+        return
+    r_node = row_node[row]
+    if r_node < 0:
+        r_node = -2 - r_node
+    reaction = wp.spatial_vector()
+    if row_active[row] != 0:
+        reaction = _scale_spatial_vector(row_scale[row], prev_solution[r_node])
+    for side in range(2):
+        body = parent if side == 0 else child
+        if body >= 0:
+            slot = body_slot[body]
+            if slot >= 0 and body_inv_mass[body] > 0.0:
+                frame = joint_X_p[joint] if side == 0 else joint_X_c[joint]
+                lever = wp.quat_rotate(
+                    wp.transform_get_rotation(body_q[body]),
+                    wp.transform_get_translation(frame) - body_com[body],
+                )
+                jacobian = jacobian_parent[row] if side == 0 else jacobian_child[row]
+                force = -wp.spatial_top(wp.transpose(jacobian) * reaction)
+                curvature = wp.dot(lever, force) * wp.identity(3, float) - 0.5 * (
+                    wp.outer(lever, force) + wp.outer(force, lever)
+                )
+                eigenvectors, eigenvalues = wp.eig3(curvature)
+                positive = wp.mat33(0.0)
+                for axis in range(3):
+                    positive[axis, axis] = wp.max(eigenvalues[axis], 0.0)
+                positive = eigenvectors * positive * wp.transpose(eigenvectors)
+                if side == 0:
+                    stress_parent = positive
+                else:
+                    stress_child = positive
+    if destinations[0] >= 0:
+        body_stress[destinations[0]] = stress_parent
+    if destinations[1] >= 0:
+        body_stress[destinations[1]] = stress_child
+
+
+@wp.kernel
+def sync_tree_saddle_to_alm_duals(
+    joint_ids: wp.array[wp.int32],
+    row_node: wp.array[wp.int32],
+    row_scale: wp.array[wp.spatial_vector],
+    row_active: wp.array[wp.int32],
+    solution: wp.array[Any],
+    joint_type: wp.array[wp.int32],
+    joint_parent: wp.array[wp.int32],
+    joint_child: wp.array[wp.int32],
+    joint_X_p: wp.array[wp.transform],
+    joint_X_c: wp.array[wp.transform],
+    joint_axis: wp.array[wp.vec3],
+    joint_qd_start: wp.array[wp.int32],
+    joint_dof_dim: wp.array2d[wp.int32],
+    joint_constraint_start: wp.array[wp.int32],
+    joint_material_k: wp.array[float],
+    joint_penalty_kd: wp.array[float],
+    body_q: wp.array[wp.transform],
+    body_q_prev: wp.array[wp.transform],
+    body_q_rest: wp.array[wp.transform],
+    body_slot_by_id: wp.array[wp.int32],
+    graph_body_island: wp.array[wp.int32],
+    island_step_scale: wp.array[float],
+    limit_search_islands: wp.array[wp.int32],
+    only_unflagged_islands: int,
+    dt: float,
+    joint_lambda_lin: wp.array[wp.vec3],
+    joint_lambda_ang: wp.array[wp.vec3],
+):
+    """Synchronize the elastic KKT saddle reaction ``mu_S`` into Compliant ALM ``joint_lambda``.
+
+    At the zero-memory saddle point ``mu_S = K c(x^+) + (d/dt) dc(x^+)`` is solved directly in
+    tangent displacement space without subtracting rounded ``float32`` world poses, remaining
+    uniformly bounded by subtree weight ``O(M g)`` as ``K -> inf``. Subtracting only the bounded
+    viscous share ``(d/dt) dc(x^+)`` yields the exact physical Lagrange multiplier ``K c(x^+)``.
+    """
+    row = wp.tid()
+    if row_active[row] == 0:
+        return
+    j = joint_ids[row]
+    jt = joint_type[j]
+    if jt == JointType.ROD:
+        return
+    child = joint_child[j]
+    if child < 0:
+        return
+    parent = joint_parent[j]
+    slot = body_slot_by_id[child]
+    if slot < 0 and parent >= 0:
+        slot = body_slot_by_id[parent]
+    alpha = 1.0
+    if slot >= 0:
+        isl = graph_body_island[slot]
+        if isl >= 0:
+            if only_unflagged_islands != 0 and limit_search_islands[isl] != 0:
+                return
+            alpha = wp.clamp(island_step_scale[isl], 0.0, 1.0)
+    if alpha <= 0.0:
+        return
+
+    r_node = row_node[row]
+    if r_node < 0:
+        r_node = -2 - r_node
+    reaction = _scale_spatial_vector(row_scale[row], solution[r_node])
+    f_top = wp.spatial_top(reaction)
+    f_bot = wp.spatial_bottom(reaction)
+    c_start = joint_constraint_start[j]
+
+    X_wp = body_q[parent] * joint_X_p[j] if parent >= 0 else joint_X_p[j]
+    X_wc = body_q[child] * joint_X_c[j]
+    q_wp = wp.transform_get_rotation(X_wp)
+    lin_count = 0
+    ang_count = 0
+    qd_start = joint_qd_start[j]
+    if jt == JointType.PRISMATIC:
+        lin_count = 1
+    elif jt == JointType.REVOLUTE:
+        ang_count = 1
+    elif jt == JointType.D6:
+        lin_count = joint_dof_dim[j, 0]
+        ang_count = joint_dof_dim[j, 1]
+    p_lin, p_ang = build_joint_projectors(jt, joint_axis, qd_start, lin_count, ang_count, q_wp)
+
+    sk = wp.max(joint_material_k[c_start], 0.0)
+    sd = wp.max(joint_penalty_kd[c_start], 0.0) / dt
+    mu_lin = wp.vec3(0.0)
+    if sk > 0.0:
+        mu_lin = p_lin * f_top
+        if sd > 0.0:
+            X_wp_prev = body_q_prev[parent] * joint_X_p[j] if parent >= 0 else joint_X_p[j]
+            X_wc_prev = body_q_prev[child] * joint_X_c[j]
+            dx_cur = wp.transform_get_translation(X_wc) - wp.transform_get_translation(X_wp)
+            dx_prev = wp.transform_get_translation(X_wc_prev) - wp.transform_get_translation(X_wp_prev)
+            mu_lin = mu_lin - sd * (p_lin * (dx_cur - dx_prev))
+    joint_lambda_lin[j] = (1.0 - alpha) * joint_lambda_lin[j] + alpha * mu_lin
+
+    if jt != JointType.BALL:
+        bk = wp.max(joint_material_k[c_start + 1], 0.0)
+        bd = wp.max(joint_penalty_kd[c_start + 1], 0.0) / dt
+        mu_ang = wp.vec3(0.0)
+        if bk > 0.0:
+            mu_ang = p_ang * f_bot
+            if bd > 0.0:
+                X_wp_prev = body_q_prev[parent] * joint_X_p[j] if parent >= 0 else joint_X_p[j]
+                X_wc_prev = body_q_prev[child] * joint_X_c[j]
+                X_wp_rest = body_q_rest[parent] * joint_X_p[j] if parent >= 0 else joint_X_p[j]
+                X_wc_rest = body_q_rest[child] * joint_X_c[j]
+                q_wc = wp.transform_get_rotation(X_wc)
+                q_wp_prev = wp.transform_get_rotation(X_wp_prev)
+                q_wc_prev = wp.transform_get_rotation(X_wc_prev)
+                q_wp_rest = wp.transform_get_rotation(X_wp_rest)
+                q_wc_rest = wp.transform_get_rotation(X_wc_rest)
+                _kap, j_ang_w = compute_joint_kappa_and_jacobian(
+                    joint_axis, qd_start + lin_count, ang_count, q_wp, q_wc, q_wp_rest, q_wc_rest
+                )
+                om_p = quat_velocity(q_wp, q_wp_prev, dt)
+                om_c = quat_velocity(q_wc, q_wc_prev, dt)
+                ang_rate = dt * (p_ang * compute_kappa_dot(j_ang_w, om_p, om_c))
+                mu_ang = mu_ang - bd * ang_rate
+        joint_lambda_ang[j] = (1.0 - alpha) * joint_lambda_ang[j] + alpha * mu_ang
+
+
 @wp.func
 def _spatial_diagonal(matrix: wp.spatial_matrix):
     return wp.spatial_vector(matrix[0, 0], matrix[1, 1], matrix[2, 2], matrix[3, 3], matrix[4, 4], matrix[5, 5])
+
+
+@wp.func
+def _inactive_limit_majorizer(
+    has_limit: bool,
+    limit_tangent: float,
+    limit_lambda: float,
+    step_stiffness: float,
+    support: float,
+) -> float:
+    if has_limit and limit_tangent == 0.0 and limit_lambda != 0.0:
+        _, majorizer, _ = _compliant_alm_coefficients(step_stiffness, support)
+        return majorizer
+    return limit_tangent
 
 
 def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
@@ -1349,7 +1847,8 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
 
     The variants share one source; ``wp.static`` removes the fused stress code from the
     general kernel and the unreachable non-rod code from the all-rod kernel, so neither
-    pays registers for the other's work.
+    pays registers for the other's work. ``limit_flag`` may be ``None``; when given, it is
+    raised by a full linearization that finds a limit row loaded or within reach.
     """
 
     def linearize_joint_path_rows(
@@ -1418,6 +1917,8 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
         slope_residual: wp.array[wp.spatial_vector],
         slope_objective: wp.array[wp.spatial_vector],
         slope_mode: wp.array[wp.int32],
+        limit_flag: wp.array[int],
+        limit_island: wp.array[int],
     ):
         """Linearize a joint, or store only its slope inputs on a line-search trial.
 
@@ -1728,8 +2229,11 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
             p_angular = wp.mat33(0.0)
 
         stretch_k = wp.max(joint_material_k[c_start], 0.0)
-        stretch_rho = wp.max(joint_rho[c_start], 0.0)
-        stretch_s, stretch_primal_k, _stretch_a = _compliant_alm_coefficients(stretch_k, stretch_rho)
+        # Articulated constraints solve the exact zero-memory saddle compliance (s_f = 0,
+        # C_S = (K + D/h)^-1): zero stale-multiplier mixing, unconditional BDF1/BDF2 A-stability,
+        # and no auxiliary scaled-rho buffer.
+        stretch_s = 0.0
+        stretch_primal_k = stretch_k
         stretch_d = wp.max(joint_penalty_kd[c_start], 0.0) / dt
         bend_k = 0.0
         bend_s = 0.0
@@ -1737,8 +2241,7 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
         bend_d = 0.0
         if jt != JointType.BALL:
             bend_k = wp.max(joint_material_k[c_start + 1], 0.0)
-            bend_rho = wp.max(joint_rho[c_start + 1], 0.0)
-            bend_s, bend_primal_k, _bend_a = _compliant_alm_coefficients(bend_k, bend_rho)
+            bend_primal_k = bend_k
             bend_d = wp.max(joint_penalty_kd[c_start + 1], 0.0) / dt
         stretch_scale = stretch_primal_k + stretch_d
         bend_offset = bend_s * (p_angular * joint_lambda_ang[joint])
@@ -1751,12 +2254,18 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
         c_angular = wp.vec3(0.0)
 
         if stretch_enabled:
-            parent_com_world = wp.vec3(0.0)
-            if parent >= 0:
-                parent_com_world = wp.transform_point(parent_pose, body_com[parent])
-            child_com_world = wp.transform_point(child_pose, body_com[child])
-            r_parent = x_p - parent_com_world
-            r_child = x_c - child_com_world
+            r_parent = (
+                wp.quat_rotate(
+                    wp.transform_get_rotation(parent_pose),
+                    wp.transform_get_translation(joint_X_p[joint]) - body_com[parent],
+                )
+                if parent >= 0
+                else x_p
+            )
+            r_child = wp.quat_rotate(
+                wp.transform_get_rotation(child_pose),
+                wp.transform_get_translation(joint_X_c[joint]) - body_com[child],
+            )
 
             jp = _set_spatial_block(jp, 0, 0, -p_linear)
             jp = _set_spatial_block(jp, 0, 1, p_linear * wp.skew(r_parent))
@@ -1827,12 +2336,18 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
         # drive or active-limit rows.  This supplies their cross-body tangent to
         # the same KKT solve without adding graph rows or a second solver path.
         target_q_base = joint_target_q_start[joint]
-        parent_com_world = wp.vec3(0.0)
-        if parent >= 0:
-            parent_com_world = wp.transform_point(parent_pose, body_com[parent])
-        child_com_world = wp.transform_point(child_pose, body_com[child])
-        r_parent = x_p - parent_com_world
-        r_child = x_c - child_com_world
+        r_parent = (
+            wp.quat_rotate(
+                wp.transform_get_rotation(parent_pose),
+                wp.transform_get_translation(joint_X_p[joint]) - body_com[parent],
+            )
+            if parent >= 0
+            else x_p
+        )
+        r_child = wp.quat_rotate(
+            wp.transform_get_rotation(child_pose),
+            wp.transform_get_translation(joint_X_c[joint]) - body_com[child],
+        )
         relative_linear = x_c - x_p
         relative_linear_previous = x_c_prev - x_p_prev
         drive_limit_enabled = False
@@ -1874,6 +2389,8 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
                     joint_drive_lambda[dof],
                     inv_dt,
                 )
+                lin_lim_step_k = joint_limit_ke[dof] + joint_limit_kd[dof] * inv_dt
+                lin_lim_sup = _global_limit_support(joint_drive_limit_support[dof], lin_lim_step_k, True)
                 limit_force, limit_tangent = _evaluate_limit_axis(
                     coordinate,
                     lower,
@@ -1882,18 +2399,33 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
                     joint_limit_ke[dof],
                     joint_limit_kd[dof],
                     rate,
-                    joint_drive_limit_support[dof],
+                    lin_lim_sup,
                     joint_limit_lambda[dof],
                     inv_dt,
                 )
-                if has_limit and limit_tangent == 0.0:
-                    # The squared distance to an interval has this curvature bound
-                    # even inside the interval. Anticipate activation without
-                    # adding a limit force or replacing finite compliance by a gate.
-                    _, limit_tangent, _ = _compliant_alm_coefficients(
-                        joint_limit_ke[dof] + joint_limit_kd[dof] * inv_dt,
-                        joint_drive_limit_support[dof],
-                    )
+                limit_tangent = _inactive_limit_majorizer(
+                    has_limit,
+                    limit_tangent,
+                    joint_limit_lambda[dof],
+                    lin_lim_step_k,
+                    lin_lim_sup,
+                )
+                if limit_flag:
+                    if (
+                        not slope_only
+                        and has_limit
+                        and (
+                            limit_force != 0.0
+                            or joint_limit_lambda[dof] != 0.0
+                            or wp.min(coordinate - lower, upper - coordinate) <= 2.0 * wp.abs(rate) * dt
+                        )
+                    ):
+                        limit_slot = body_slot[child]
+                        if parent >= 0:
+                            limit_slot = wp.max(limit_slot, body_slot[parent])
+                        if limit_slot >= 0:
+                            wp.atomic_max(limit_flag, 0, 1)
+                            wp.atomic_max(limit_island, body_island[limit_slot], 1)
                 force = force + limit_force
                 tangent = tangent + limit_tangent
                 normalized_defect = force / tangent if tangent > 0.0 else 0.0
@@ -1972,6 +2504,8 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
                         joint_drive_lambda[dof],
                         inv_dt,
                     )
+                    ang_lim_step_k = joint_limit_ke[dof] + joint_limit_kd[dof] * inv_dt
+                    ang_lim_sup = _global_limit_support(joint_drive_limit_support[dof], ang_lim_step_k, True)
                     limit_force, limit_tangent = _evaluate_limit_axis(
                         coordinate,
                         lower,
@@ -1980,15 +2514,33 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
                         joint_limit_ke[dof],
                         joint_limit_kd[dof],
                         rate,
-                        joint_drive_limit_support[dof],
+                        ang_lim_sup,
                         joint_limit_lambda[dof],
                         inv_dt,
                     )
-                    if has_limit and limit_tangent == 0.0:
-                        _, limit_tangent, _ = _compliant_alm_coefficients(
-                            joint_limit_ke[dof] + joint_limit_kd[dof] * inv_dt,
-                            joint_drive_limit_support[dof],
-                        )
+                    limit_tangent = _inactive_limit_majorizer(
+                        has_limit,
+                        limit_tangent,
+                        joint_limit_lambda[dof],
+                        ang_lim_step_k,
+                        ang_lim_sup,
+                    )
+                    if limit_flag:
+                        if (
+                            not slope_only
+                            and has_limit
+                            and (
+                                limit_force != 0.0
+                                or joint_limit_lambda[dof] != 0.0
+                                or wp.min(coordinate - lower, upper - coordinate) <= 2.0 * wp.abs(rate) * dt
+                            )
+                        ):
+                            limit_slot = body_slot[child]
+                            if parent >= 0:
+                                limit_slot = wp.max(limit_slot, body_slot[parent])
+                            if limit_slot >= 0:
+                                wp.atomic_max(limit_flag, 0, 1)
+                                wp.atomic_max(limit_island, body_island[limit_slot], 1)
                     force = force + limit_force
                     tangent = tangent + limit_tangent
                     normalized_defect = force / tangent if tangent > 0.0 else 0.0
@@ -2264,9 +2816,79 @@ def assemble_joint_path_system(
 
 
 @wp.kernel
+def _cast_path_rows_to_fp64(
+    lower32: wp.array[wp.spatial_matrix],
+    diagonal32: wp.array[wp.spatial_matrix],
+    upper32: wp.array[wp.spatial_matrix],
+    rhs32: wp.array[wp.spatial_vector],
+    lower64: wp.array[wp.spatial_matrixd],
+    diagonal64: wp.array[wp.spatial_matrixd],
+    upper64: wp.array[wp.spatial_matrixd],
+    rhs64: wp.array[wp.spatial_vectord],
+):
+    row = wp.tid()
+    lower64[row] = wp.spatial_matrixd(lower32[row])
+    diagonal64[row] = wp.spatial_matrixd(diagonal32[row])
+    upper64[row] = wp.spatial_matrixd(upper32[row])
+    rhs64[row] = wp.spatial_vectord(rhs32[row])
+
+
+@wp.kernel
+def _cast_path_solution_to_fp32(
+    rhs64: wp.array[wp.spatial_vectord],
+    rhs32: wp.array[wp.spatial_vector],
+):
+    row = wp.tid()
+    val = rhs64[row]
+    out = wp.spatial_vector()
+    for axis in range(6):
+        out[axis] = float(val[axis])
+    rhs32[row] = out
+
+
+@wp.kernel
+def compute_path_correction_fp64(
+    body_ids: wp.array[wp.int32],
+    body_slot_by_id: wp.array[wp.int32],
+    body_incident_rows: wp.array[wp.vec2i],
+    row_active: wp.array[wp.int32],
+    jacobian_parent: wp.array[wp.spatial_matrix],
+    jacobian_child: wp.array[wp.spatial_matrix],
+    multiplier: wp.array[wp.spatial_vectord],
+    body_inverse: wp.array[wp.spatial_matrix],
+    body_free: wp.array[wp.spatial_vector],
+    body_inv_mass: wp.array[float],
+    body_correction: wp.array[wp.spatial_vector],
+):
+    index = wp.tid()
+    body = body_ids[index]
+    slot = body_slot_by_id[body]
+    if body_inv_mass[body] <= 0.0:
+        return
+    reaction = wp.spatial_vectord(0.0)
+    active = int(0)
+    incident_rows = body_incident_rows[index]
+    for incident in range(2):
+        code = incident_rows[incident]
+        if code >= 0:
+            row = code // 2
+            jacobian = jacobian_parent[row] if code % 2 == 0 else jacobian_child[row]
+            reaction = reaction + wp.transpose(wp.spatial_matrixd(jacobian)) * multiplier[row]
+            active = active + row_active[row]
+    if active == 0:
+        body_correction[slot] = wp.spatial_vector()
+        return
+    corr_d = wp.spatial_vectord(body_free[slot]) - wp.spatial_matrixd(body_inverse[slot]) * reaction
+    out = wp.spatial_vector()
+    for axis in range(6):
+        out[axis] = float(corr_d[axis])
+    body_correction[slot] = out
+
+
+@wp.kernel
 def invert_cr_eliminated_in_place(
     eliminated_rows: wp.array[wp.vec3i],
-    diagonal: wp.array[wp.spatial_matrix],
+    diagonal: wp.array[Any],
 ):
     """Replace eliminated diagonal blocks by their inverses in dead slots.
 
@@ -2284,16 +2906,16 @@ def _reduce_cr_row(
     stride: int,
     row_count: int,
     invert_limit: int,
-    lower: wp.array[wp.spatial_matrix],
-    diagonal: wp.array[wp.spatial_matrix],
-    upper: wp.array[wp.spatial_matrix],
-    rhs: wp.array[wp.spatial_vector],
+    lower: wp.array[Any],
+    diagonal: wp.array[Any],
+    upper: wp.array[Any],
+    rhs: wp.array[Any],
 ):
     """Reduce one retained CR row after its neighboring pivots are inverted."""
     row = base + local_row
-    lower_value = wp.spatial_matrix(0.0)
+    lower_value = lower.dtype(0.0)
     diagonal_value = diagonal[row]
-    upper_value = wp.spatial_matrix(0.0)
+    upper_value = upper.dtype(0.0)
     rhs_value = rhs[row]
     if local_row >= stride:
         eliminated = row - stride
@@ -2325,10 +2947,10 @@ def reduce_cr_in_place(
     stride: int,
     invert_limit: int,
     survivor_rows: wp.array[wp.vec3i],
-    lower: wp.array[wp.spatial_matrix],
-    diagonal: wp.array[wp.spatial_matrix],
-    upper: wp.array[wp.spatial_matrix],
-    rhs: wp.array[wp.spatial_vector],
+    lower: wp.array[Any],
+    diagonal: wp.array[Any],
+    upper: wp.array[Any],
+    rhs: wp.array[Any],
 ):
     """Reduce retained CR rows without allocating a second hierarchy."""
     entry = survivor_rows[wp.tid()]
@@ -2340,10 +2962,10 @@ def _solve_strided_cr_coarse_impl(
     base: int,
     stride: int,
     row_count: int,
-    lower: wp.array[wp.spatial_matrix],
-    diagonal: wp.array[wp.spatial_matrix],
-    upper: wp.array[wp.spatial_matrix],
-    rhs: wp.array[wp.spatial_vector],
+    lower: wp.array[Any],
+    diagonal: wp.array[Any],
+    upper: wp.array[Any],
+    rhs: wp.array[Any],
 ):
     """Finish one small retained CR system with block Thomas."""
     active_count = (row_count + stride - 1) // stride
@@ -2366,10 +2988,10 @@ def _solve_strided_cr_coarse_impl(
 @wp.kernel
 def solve_strided_cr_coarse(
     paths: wp.array[wp.vec3i],
-    lower: wp.array[wp.spatial_matrix],
-    diagonal: wp.array[wp.spatial_matrix],
-    upper: wp.array[wp.spatial_matrix],
-    rhs: wp.array[wp.spatial_vector],
+    lower: wp.array[Any],
+    diagonal: wp.array[Any],
+    upper: wp.array[Any],
+    rhs: wp.array[Any],
 ):
     """Solve each path's small retained system in place with block Thomas.
 
@@ -2385,10 +3007,10 @@ def _back_substitute_cr_row(
     local_row: int,
     stride: int,
     row_count: int,
-    lower: wp.array[wp.spatial_matrix],
-    diagonal: wp.array[wp.spatial_matrix],
-    upper: wp.array[wp.spatial_matrix],
-    rhs: wp.array[wp.spatial_vector],
+    lower: wp.array[Any],
+    diagonal: wp.array[Any],
+    upper: wp.array[Any],
+    rhs: wp.array[Any],
 ):
     """Recover one eliminated CR row from its retained neighbors."""
     row = base + local_row
@@ -2402,10 +3024,10 @@ def _back_substitute_cr_row(
 def back_substitute_cr_in_place(
     stride: int,
     eliminated_rows: wp.array[wp.vec3i],
-    lower: wp.array[wp.spatial_matrix],
-    diagonal: wp.array[wp.spatial_matrix],
-    upper: wp.array[wp.spatial_matrix],
-    rhs: wp.array[wp.spatial_vector],
+    lower: wp.array[Any],
+    diagonal: wp.array[Any],
+    upper: wp.array[Any],
+    rhs: wp.array[Any],
 ):
     """Recover eliminated rows into rhs, which now stores the solution."""
     entry = eliminated_rows[wp.tid()]
@@ -2567,14 +3189,252 @@ def solve_cr_tail_persistent_rows(
         stride //= 2
 
 
+@wp.func
+def _mul_row6_mat66_f64(row_vec: wp.spatial_vectord, mat: wp.array3d[wp.float64], slot: int) -> wp.spatial_vectord:
+    out = wp.spatial_vectord()
+    for c in range(6):
+        s = wp.float64(0.0)
+        for t in range(6):
+            s = _fma_f64(row_vec[t], mat[slot, t, c], s)
+        out[c] = s
+    return out
+
+
+@wp.func
+def _dot_row6_vec6_f64(row_vec: wp.spatial_vectord, vec: wp.array2d[wp.float64], slot: int) -> wp.float64:
+    s = wp.float64(0.0)
+    for c in range(6):
+        s = _fma_f64(row_vec[c], vec[slot, c], s)
+    return s
+
+
+@wp.func
+def _reduce_cr_scalar_row_f64(
+    base: int,
+    local_row: int,
+    r: int,
+    stride: int,
+    row_count: int,
+    lower: wp.array3d[wp.float64],
+    diagonal: wp.array3d[wp.float64],
+    upper: wp.array3d[wp.float64],
+    rhs: wp.array2d[wp.float64],
+):
+    row = base + local_row
+    lower_r = wp.spatial_vectord()
+    diag_r = wp.spatial_vectord(
+        diagonal[row, r, 0],
+        diagonal[row, r, 1],
+        diagonal[row, r, 2],
+        diagonal[row, r, 3],
+        diagonal[row, r, 4],
+        diagonal[row, r, 5],
+    )
+    upper_r = wp.spatial_vectord()
+    rhs_r = rhs[row, r]
+
+    if local_row >= stride:
+        eliminated = row - stride
+        lo_in = wp.spatial_vectord(
+            lower[row, r, 0],
+            lower[row, r, 1],
+            lower[row, r, 2],
+            lower[row, r, 3],
+            lower[row, r, 4],
+            lower[row, r, 5],
+        )
+        factor = _mul_row6_mat66_f64(lo_in, diagonal, eliminated)
+        prod_lo = _mul_row6_mat66_f64(factor, lower, eliminated)
+        prod_up = _mul_row6_mat66_f64(factor, upper, eliminated)
+        lower_r = -prod_lo
+        diag_r = diag_r - prod_up
+        rhs_r = rhs_r - _dot_row6_vec6_f64(factor, rhs, eliminated)
+
+    if local_row + stride < row_count:
+        eliminated = row + stride
+        up_in = wp.spatial_vectord(
+            upper[row, r, 0],
+            upper[row, r, 1],
+            upper[row, r, 2],
+            upper[row, r, 3],
+            upper[row, r, 4],
+            upper[row, r, 5],
+        )
+        factor = _mul_row6_mat66_f64(up_in, diagonal, eliminated)
+        prod_lo = _mul_row6_mat66_f64(factor, lower, eliminated)
+        diag_r = diag_r - prod_lo
+        rhs_r = rhs_r - _dot_row6_vec6_f64(factor, rhs, eliminated)
+        if local_row + 2 * stride < row_count:
+            prod_up = _mul_row6_mat66_f64(factor, upper, eliminated)
+            upper_r = -prod_up
+
+    for c in range(6):
+        lower[row, r, c] = lower_r[c]
+        diagonal[row, r, c] = diag_r[c]
+        upper[row, r, c] = upper_r[c]
+    rhs[row, r] = rhs_r
+
+
+@wp.kernel(module="unique", enable_backward=False)
+def reduce_cr_in_place_rows_fp64(
+    stride: int,
+    survivor_rows: wp.array[wp.vec3i],
+    lower_d: wp.array3d[wp.float64],
+    diagonal_d: wp.array3d[wp.float64],
+    upper_d: wp.array3d[wp.float64],
+    rhs_d: wp.array2d[wp.float64],
+):
+    """Reduce retained FP64 CR rows with one scalar row per thread."""
+    idx, r = wp.tid()
+    entry = survivor_rows[idx]
+    _reduce_cr_scalar_row_f64(entry[0], entry[1], r, stride, entry[2], lower_d, diagonal_d, upper_d, rhs_d)
+
+
+@wp.kernel(module="unique", enable_backward=False)
+def solve_cr_tail_persistent_rows_fp64(
+    paths: wp.array[wp.vec3i],
+    lower: wp.array[wp.spatial_matrixd],
+    diagonal: wp.array[wp.spatial_matrixd],
+    upper: wp.array[wp.spatial_matrixd],
+    rhs: wp.array[wp.spatial_vectord],
+    lower_d: wp.array3d[wp.float64],
+    diagonal_d: wp.array3d[wp.float64],
+    upper_d: wp.array3d[wp.float64],
+    rhs_d: wp.array2d[wp.float64],
+):
+    """Finish a strided FP64 CR tail in place with scalar-row FP64 CR reductions."""
+    tid = wp.tid()
+    width = wp.block_dim()
+    lane = tid % width
+    path = paths[tid // width]
+    base = path[0]
+    row_count = path[1]
+    initial_stride = path[2]
+    stride = int(initial_stride)
+    groups = width // 6
+    group = lane // 6
+    r = lane % 6
+    active_count = (row_count + stride - 1) // stride
+    while active_count > _CR_SERIAL_TERMINAL_SIZE:
+        row = stride + 2 * stride * lane
+        while row < row_count:
+            diagonal[base + row] = _inverse_spatial_robust(diagonal[base + row])
+            row += 2 * stride * width
+        _synchronize_cr_block()
+        if group < groups:
+            row = 2 * stride * group
+            while row < row_count:
+                _reduce_cr_scalar_row_f64(base, row, r, stride, row_count, lower_d, diagonal_d, upper_d, rhs_d)
+                row += 2 * stride * groups
+        _synchronize_cr_block()
+        stride *= 2
+        active_count = (row_count + stride - 1) // stride
+    if lane == 0:
+        _solve_strided_cr_coarse_impl(base, stride, row_count, lower, diagonal, upper, rhs)
+    _synchronize_cr_block()
+    stride //= 2
+    while stride >= initial_stride:
+        row = stride + 2 * stride * lane
+        while row < row_count:
+            _back_substitute_cr_row(base, row, stride, row_count, lower, diagonal, upper, rhs)
+            row += 2 * stride * width
+        _synchronize_cr_block()
+        stride //= 2
+
+
+@wp.kernel
+def solve_cr_persistent_fp64_io(
+    paths: wp.array[wp.vec2i],
+    terminal_size: int,
+    lower32: wp.array[wp.spatial_matrix],
+    diagonal32: wp.array[wp.spatial_matrix],
+    upper32: wp.array[wp.spatial_matrix],
+    rhs32: wp.array[wp.spatial_vector],
+    lower: wp.array[wp.spatial_matrixd],
+    diagonal: wp.array[wp.spatial_matrixd],
+    upper: wp.array[wp.spatial_matrixd],
+    rhs: wp.array[wp.spatial_vectord],
+):
+    """Fused FP32->FP64 load + persistent FP64 CR solve + FP64->FP32 store in 1 launch."""
+    tid = wp.tid()
+    block_dim = wp.block_dim()
+    lane = tid % block_dim
+    path = paths[tid // block_dim]
+    base = path[0]
+    row_count = path[1]
+
+    local = lane
+    while local < row_count:
+        slot = base + local
+        lower[slot] = wp.spatial_matrixd(lower32[slot])
+        diagonal[slot] = wp.spatial_matrixd(diagonal32[slot])
+        upper[slot] = wp.spatial_matrixd(upper32[slot])
+        rhs[slot] = wp.spatial_vectord(rhs32[slot])
+        local += block_dim
+    _synchronize_cr_block()
+
+    stride = int(1)
+    active_count = int(row_count)
+    while active_count > terminal_size:
+        eliminated_count = (row_count - stride + 2 * stride - 1) // (2 * stride)
+        local = lane
+        while local < eliminated_count:
+            row = base + stride + 2 * stride * local
+            diagonal[row] = _inverse_spatial_robust(diagonal[row])
+            local += block_dim
+        _synchronize_cr_block()
+
+        survivor_count = (row_count + 2 * stride - 1) // (2 * stride)
+        local = lane
+        while local < survivor_count:
+            _reduce_cr_row(base, 2 * stride * local, stride, row_count, 0, lower, diagonal, upper, rhs)
+            local += block_dim
+        _synchronize_cr_block()
+        stride *= 2
+        active_count = survivor_count
+
+    if lane == 0:
+        _solve_strided_cr_coarse_impl(base, stride, row_count, lower, diagonal, upper, rhs)
+    _synchronize_cr_block()
+
+    stride //= 2
+    while stride >= 1:
+        eliminated_count = (row_count - stride + 2 * stride - 1) // (2 * stride)
+        local = lane
+        while local < eliminated_count:
+            _back_substitute_cr_row(
+                base,
+                stride + 2 * stride * local,
+                stride,
+                row_count,
+                lower,
+                diagonal,
+                upper,
+                rhs,
+            )
+            local += block_dim
+        _synchronize_cr_block()
+        stride //= 2
+
+    local = lane
+    while local < row_count:
+        slot = base + local
+        val = rhs[slot]
+        out = wp.spatial_vector()
+        for axis in range(6):
+            out[axis] = float(val[axis])
+        rhs32[slot] = out
+        local += block_dim
+
+
 @wp.kernel
 def solve_cr_persistent(
     paths: wp.array[wp.vec2i],
     terminal_size: int,
-    lower: wp.array[wp.spatial_matrix],
-    diagonal: wp.array[wp.spatial_matrix],
-    upper: wp.array[wp.spatial_matrix],
-    rhs: wp.array[wp.spatial_vector],
+    lower: wp.array[Any],
+    diagonal: wp.array[Any],
+    upper: wp.array[Any],
+    rhs: wp.array[Any],
 ):
     """Solve one short path per CUDA block without dependent level launches.
 
@@ -2635,10 +3495,10 @@ def solve_cr_persistent(
 @wp.kernel
 def solve_cr_tail_persistent(
     paths: wp.array[wp.vec3i],
-    lower: wp.array[wp.spatial_matrix],
-    diagonal: wp.array[wp.spatial_matrix],
-    upper: wp.array[wp.spatial_matrix],
-    rhs: wp.array[wp.spatial_vector],
+    lower: wp.array[Any],
+    diagonal: wp.array[Any],
+    upper: wp.array[Any],
+    rhs: wp.array[Any],
 ):
     """Finish a strided CR tail in place, preserving factors for outer recovery.
 
@@ -3981,7 +4841,6 @@ def _corrected_pose(
     linear = alpha * wp.spatial_top(correction)
     angular = alpha * wp.spatial_bottom(correction)
     rotation = wp.transform_get_rotation(pose)
-    com = wp.transform_point(pose, com_local)
 
     angle = wp.length(angular)
     delta_rotation = wp.quat_identity()
@@ -3991,8 +4850,8 @@ def _corrected_pose(
         half = 0.5 * angular
         delta_rotation = wp.normalize(wp.quat(half[0], half[1], half[2], 1.0))
     rotation_new = wp.normalize(delta_rotation * rotation)
-    com_new = com + linear
-    position_new = com_new - wp.quat_rotate(rotation_new, com_local)
+    dx_pose = linear + (wp.quat_rotate(rotation, com_local) - wp.quat_rotate(rotation_new, com_local))
+    position_new = wp.transform_get_translation(pose) + dx_pose
     return wp.transform(position_new, rotation_new)
 
 
@@ -4086,6 +4945,9 @@ def accumulate_free_translation_system(
     dt: float,
     body_q: wp.array[wp.transform],
     body_inertia_q: wp.array[wp.transform],
+    body_disp: wp.array[wp.vec3],
+    body_disp_ang: wp.array[wp.vec3],
+    use_displacement: int,
     body_com: wp.array[wp.vec3],
     body_mass: wp.array[float],
     body_inv_mass: wp.array[float],
@@ -4132,7 +4994,9 @@ def accumulate_free_translation_system(
                     return
 
     com_world = wp.transform_point(body_q[body], body_com[body])
-    inertial_delta = wp.transform_point(body_inertia_q[body], body_com[body]) - com_world
+    inertial_delta = _pose_com_diff(body_inertia_q[body], body_q[body], body_com[body])
+    if use_displacement != 0:
+        inertial_delta = -body_disp[body]
     mass = wp.float64(body_mass[body]) / (wp.float64(dt) * wp.float64(dt))
     for col in range(3):
         contribution[3, col] = mass * wp.float64(wp.abs(com_world[col]))
@@ -4169,10 +5033,14 @@ def correct_free_translation(
     carry_remainder: bool,
     support: wp.array[_TranslationSupport],
     body_ids: wp.array[int],
+    use_displacement: int,
+    body_com: wp.array[wp.vec3],
+    body_target_q: wp.array[wp.transform],
     body_q: wp.array[wp.transform],
     pending: wp.array[int],
     remainder: wp.array[wp.vec4],
     trial: wp.array[wp.vec4d],
+    body_disp: wp.array[wp.vec3],
 ):
     """Minimize common translation, optionally applying its isolated update."""
     slot = wp.tid()
@@ -4215,7 +5083,7 @@ def correct_free_translation(
             if wp.dot(tangential, tangential) > capacity * capacity:
                 overloaded = bool(True)
                 remainder[slot] = wp.vec4(0.0, 0.0, 0.0, 1.0)
-    if apply_translation and stop_at_roundoff:
+    if apply_translation and stop_at_roundoff and not overloaded:
         # A coordinate is at roundoff when neither the island residual nor the solved step taken
         # through the metric's own diagonal exceeds a relative tolerance of 2^-22 (two float32
         # epsilons) on the island's inertia-weighted coordinates (packed in row 3, cols 0..2).
@@ -4257,6 +5125,15 @@ def correct_free_translation(
             position = wp.transform_get_translation(pose)
             wanted = shift + carried
             translated = position + wp.vec3(float(wanted[0]), float(wanted[1]), float(wanted[2]))
+            if use_displacement != 0:
+                # The solved shift goes into the displacement and the position is rebuilt from the
+                # inertial target; the unstored part below is what that one rounding leaves.
+                body_disp[body] = body_disp[body] + wp.vec3(float(shift[0]), float(shift[1]), float(shift[2]))
+                translated = wp.transform_get_translation(
+                    pose_from_displacement(
+                        body_target_q[body], body_com[body], body_disp[body], wp.transform_get_rotation(pose)
+                    )
+                )
             body_q[body] = wp.transform(translated, wp.transform_get_rotation(pose))
             if overloaded:
                 plane = support[island]
@@ -4308,16 +5185,20 @@ def accumulate_free_rigid_center(
 ):
     slot = wp.tid()
     island = body_island[slot]
+    # An active contact pair inside the island does no work under collective rigid motion
+    # and must not disqualify it; external dynamic contact blocks translation_system[3, 3].
     if (
         candidate[island] == 0
         or free[island] == 0
-        or state[island] != 1
+        or state[island] < -1
         or translation_system[island][3, 3] != wp.float64(0.0)
     ):
         return
     body = body_ids[slot]
     mass = wp.float64(body_mass[body])
-    position = wp.vec3d(wp.transform_point(body_q[body], body_com[body]))
+    position = wp.vec3d(wp.transform_get_translation(body_q[body])) + wp.vec3d(
+        wp.quat_rotate(wp.transform_get_rotation(body_q[body]), body_com[body])
+    )
     wp.atomic_add(center, island, wp.vec4d(mass * position[0], mass * position[1], mass * position[2], mass))
 
 
@@ -4325,14 +5206,20 @@ def accumulate_free_rigid_center(
 def accumulate_free_rigid_system(
     body_ids: wp.array[int],
     body_island: wp.array[int],
+    island_state: wp.array[int],
     center: wp.array[wp.vec4d],
     scale: wp.array[float],
     correction: wp.array[wp.spatial_vector],
     dt: float,
     body_q: wp.array[wp.transform],
     body_inertia_q: wp.array[wp.transform],
+    body_disp: wp.array[wp.vec3],
+    body_disp_ang: wp.array[wp.vec3],
+    use_displacement: int,
+    body_q_prev: wp.array[wp.transform],
     body_com: wp.array[wp.vec3],
     body_mass: wp.array[float],
+    body_inv_mass: wp.array[float],
     body_inertia: wp.array[wp.mat33],
     contact_hessian_ll: wp.array[wp.mat33],
     contact_hessian_al: wp.array[wp.mat33],
@@ -4340,6 +5227,35 @@ def accumulate_free_rigid_system(
     contact_forces: wp.array[wp.vec3],
     contact_torques: wp.array[wp.vec3],
     dynamic_hessian: wp.array[wp.spatial_matrix],
+    has_contacts: int,
+    friction_epsilon: float,
+    contact_damping_bidirectional: bool,
+    contact_penalty_k: wp.array[float],
+    contact_normal_rho: wp.array[float],
+    contact_material_ke: wp.array[float],
+    contact_material_kd: wp.array[float],
+    contact_material_mu: wp.array[float],
+    contact_tangent_rho: wp.array[float],
+    contact_lambda: wp.array[wp.vec3],
+    contact_C0: wp.array[wp.vec3],
+    stab_alpha: float,
+    legacy_hard_contacts: int,
+    contact_compliant_alm: int,
+    contact_count: wp.array[int],
+    contact_shape0: wp.array[int],
+    contact_shape1: wp.array[int],
+    contact_point0: wp.array[wp.vec3],
+    contact_point1: wp.array[wp.vec3],
+    contact_surface_velocity: wp.array[wp.vec3],
+    contact_offset0: wp.array[wp.vec3],
+    contact_offset1: wp.array[wp.vec3],
+    contact_normal: wp.array[wp.vec3],
+    contact_margin0: wp.array[float],
+    contact_margin1: wp.array[float],
+    shape_body: wp.array[int],
+    contact_buffer_size: int,
+    body_contact_counts: wp.array[int],
+    body_contact_indices: wp.array[int],
     matrix: wp.array[wp.spatial_matrixd],
     rhs: wp.array[wp.spatial_vectord],
 ):
@@ -4350,31 +5266,172 @@ def accumulate_free_rigid_system(
         return
     body = body_ids[slot]
     pose = body_q[body]
-    position = wp.vec3d(wp.transform_point(pose, body_com[body]))
+    position = wp.vec3d(wp.transform_get_translation(pose)) + wp.vec3d(
+        wp.quat_rotate(wp.transform_get_rotation(pose), body_com[body])
+    )
     origin = wp.vec3d(packed[0], packed[1], packed[2]) / packed[3]
     basis = _free_rigid_basis(position - origin)
     inv_dt_sq = 1.0 / (dt * dt)
-    metric = _body_surrogate_matrix(
-        wp.transform_get_rotation(pose),
-        body_mass[body],
-        body_inertia[body],
-        contact_hessian_ll[body],
-        contact_hessian_al[body],
-        contact_hessian_aa[body],
-        dynamic_hessian[slot],
-        inv_dt_sq,
-    )
-    force = _body_objective_rhs(
-        pose,
-        body_inertia_q[body],
-        body_mass[body],
-        body_inertia[body],
-        body_com[body],
-        contact_forces[body],
-        contact_torques[body],
-        inv_dt_sq,
-    )
-    metric_d = wp.spatial_matrixd(metric)
+    if island_state[island] == 1 or has_contacts == 0:
+        # Fast bitwise path when the island has no active internal dynamic pairs.
+        metric = _body_surrogate_matrix(
+            wp.transform_get_rotation(pose),
+            body_mass[body],
+            body_inertia[body],
+            contact_hessian_ll[body],
+            contact_hessian_al[body],
+            contact_hessian_aa[body],
+            dynamic_hessian[slot],
+            inv_dt_sq,
+        )
+        force = _body_objective_rhs(
+            pose,
+            body_inertia_q[body],
+            body_mass[body],
+            body_inertia[body],
+            body_com[body],
+            contact_forces[body],
+            contact_torques[body],
+            inv_dt_sq,
+        )
+        if use_displacement != 0:
+            force = _body_objective_rhs_displacement(
+                pose,
+                body_mass[body],
+                body_inertia[body],
+                contact_forces[body],
+                contact_torques[body],
+                inv_dt_sq,
+                body_disp[body],
+                body_disp_ang[body],
+            )
+        metric_d = wp.spatial_matrixd(metric)
+    else:
+        # Eligible island with active internal self-contact: evaluate ONLY external (static/kinematic)
+        # contacts in registers in FP64. Zero extra launches, zero scratch mutation, zero inertia
+        # cancellation, and exact linear & angular momentum conservation.
+        ext_f = wp.vec3(0.0)
+        ext_tau = wp.vec3(0.0)
+        ext_ll = wp.mat33d(0.0)
+        ext_al = wp.mat33d(0.0)
+        ext_aa = wp.mat33d(0.0)
+        n_contacts = wp.min(body_contact_counts[body], contact_buffer_size)
+        c_total = contact_count[0]
+        for idx in range(n_contacts):
+            c = body_contact_indices[body * contact_buffer_size + idx]
+            if c >= c_total:
+                continue
+            s0, s1 = contact_shape0[c], contact_shape1[c]
+            b0 = shape_body[s0] if s0 >= 0 else -1
+            b1 = shape_body[s1] if s1 >= 0 else -1
+            if b0 != body and b1 != body:
+                continue
+            other = b1 if body == b0 else b0
+            if other >= 0 and body_inv_mass[other] > 0.0:
+                continue
+            p0_loc = contact_point0[c]
+            p1_loc = contact_point1[c]
+            nrm = contact_normal[c]
+            p0 = wp.transform_point(body_q[b0], p0_loc) if b0 >= 0 else p0_loc
+            p1 = wp.transform_point(body_q[b1], p1_loc) if b1 >= 0 else p1_loc
+            n_err = -contact_surface_separation(p0, p1, nrm, contact_margin0[c], contact_margin1[c])
+            mult = wp.vec3(0.0)
+            mult_n = 0.0
+            stab_err = n_err
+            tan_c0 = wp.vec3(0.0)
+            n_weight = _load_solve_weight(contact_penalty_k, contact_normal_rho, c, contact_compliant_alm)
+            mat_k = contact_material_ke[c]
+            if legacy_hard_contacts == 1 or contact_compliant_alm == 1:
+                mult = contact_lambda[c]
+                mult_n = wp.dot(mult, nrm)
+                c0_val = contact_C0[c]
+                c0_n = wp.dot(nrm, c0_val)
+                stab_err = n_err - stab_alpha * c0_n
+                tan_c0 = (1.0 - stab_alpha) * (c0_val - nrm * c0_n)
+            n_pk, mult_n_eff = _material_force_terms(n_weight, mat_k, mult_n, contact_compliant_alm)
+            if mult_n <= 0.0 and (n_err <= _SMALL_LENGTH_EPS or n_pk * stab_err + mult_n_eff <= 0.0):
+                continue
+            surf_vel = wp.vec3(0.0)
+            if contact_surface_velocity:
+                surf_vel = contact_surface_velocity[c]
+            f0, t0, hll0, hal0, haa0, f1, t1, hll1, hal1, haa1 = evaluate_rigid_contact_from_collision(
+                b0,
+                b1,
+                body_q,
+                body_q_prev,
+                body_com,
+                p0_loc,
+                p1_loc,
+                surf_vel,
+                contact_offset0[c],
+                contact_offset1[c],
+                nrm,
+                stab_err,
+                n_weight,
+                mat_k,
+                contact_tangent_rho[c],
+                contact_material_kd[c],
+                mult,
+                contact_material_mu[c],
+                friction_epsilon,
+                legacy_hard_contacts,
+                contact_compliant_alm,
+                dt,
+                tan_c0,
+                contact_damping_bidirectional,
+            )
+            if body == b0:
+                ext_f += f0
+                ext_tau += t0
+                ext_ll += wp.mat33d(hll0)
+                ext_al += wp.mat33d(hal0)
+                ext_aa += wp.mat33d(haa0)
+            else:
+                ext_f += f1
+                ext_tau += t1
+                ext_ll += wp.mat33d(hll1)
+                ext_al += wp.mat33d(hal1)
+                ext_aa += wp.mat33d(haa1)
+        inv_dt2_d = wp.float64(1.0) / (wp.float64(dt) * wp.float64(dt))
+        rot_d = wp.mat33d(wp.quat_to_matrix(wp.transform_get_rotation(pose)))
+        iner_d = inv_dt2_d * rot_d * wp.mat33d(body_inertia[body]) * wp.transpose(rot_d)
+        mass_d = wp.float64(body_mass[body]) * inv_dt2_d
+        h_ll_d = mass_d * wp.identity(3, wp.float64) + ext_ll
+        h_aa_d = iner_d + ext_aa
+        eps_l_d = wp.float64(1.0e-9) * (
+            (h_ll_d[0, 0] + h_ll_d[1, 1] + h_ll_d[2, 2]) / wp.float64(3.0) + wp.float64(1.0)
+        )
+        eps_a_d = wp.float64(1.0e-9) * (
+            (h_aa_d[0, 0] + h_aa_d[1, 1] + h_aa_d[2, 2]) / wp.float64(3.0) + wp.float64(1.0)
+        )
+        metric_d = wp.spatial_matrixd(0.0)
+        for r_i in range(3):
+            for c_i in range(3):
+                metric_d[r_i, c_i] = h_ll_d[r_i, c_i] + (eps_l_d if r_i == c_i else wp.float64(0.0))
+                metric_d[r_i, c_i + 3] = ext_al[c_i, r_i]
+                metric_d[r_i + 3, c_i] = ext_al[r_i, c_i]
+                metric_d[r_i + 3, c_i + 3] = h_aa_d[r_i, c_i] + (eps_a_d if r_i == c_i else wp.float64(0.0))
+        force = _body_objective_rhs(
+            pose,
+            body_inertia_q[body],
+            body_mass[body],
+            body_inertia[body],
+            body_com[body],
+            ext_f,
+            ext_tau,
+            inv_dt_sq,
+        )
+        if use_displacement != 0:
+            force = _body_objective_rhs_displacement(
+                pose,
+                body_mass[body],
+                body_inertia[body],
+                ext_f,
+                ext_tau,
+                inv_dt_sq,
+                body_disp[body],
+                body_disp_ang[body],
+            )
     current = wp.spatial_vectord(correction[slot]) * wp.float64(scale[island])
     defect = wp.spatial_vectord(force) - metric_d * current
     wp.atomic_add(matrix, island, wp.transpose(basis) * metric_d * basis)
@@ -4438,13 +5495,98 @@ def enrich_free_rigid_correction(
     if packed[3] <= wp.float64(0.0) or scale[island] <= 0.0:
         return
     body = body_ids[slot]
-    position = wp.vec3d(wp.transform_point(body_q[body], body_com[body]))
+    position = wp.vec3d(wp.transform_get_translation(body_q[body])) + wp.vec3d(
+        wp.quat_rotate(wp.transform_get_rotation(body_q[body]), body_com[body])
+    )
     origin = wp.vec3d(packed[0], packed[1], packed[2]) / packed[3]
     update = _free_rigid_basis(position - origin) * shift[island]
     value = correction[slot]
     for axis in range(6):
         value[axis] = float(wp.float64(value[axis]) + update[axis] / wp.float64(scale[island]))
     correction[slot] = value
+
+
+@wp.kernel
+def exclude_supported_rigid_centers(
+    body_ids: wp.array[int],
+    body_island: wp.array[int],
+    body_q: wp.array[wp.transform],
+    body_inv_mass: wp.array[float],
+    contact_lambda: wp.array[wp.vec3],
+    contact_count: wp.array[int],
+    contact_shape0: wp.array[int],
+    contact_shape1: wp.array[int],
+    contact_point0: wp.array[wp.vec3],
+    contact_point1: wp.array[wp.vec3],
+    contact_normal: wp.array[wp.vec3],
+    contact_margin0: wp.array[float],
+    contact_margin1: wp.array[float],
+    shape_body: wp.array[int],
+    contact_buffer_size: int,
+    body_contact_counts: wp.array[int],
+    body_contact_indices: wp.array[int],
+    center: wp.array[wp.vec4d],
+):
+    """Drop islands that touch a static or kinematic body from the post-sweep rigid reconciliation.
+
+    Such an island keeps its translation pass, with its friction capacity and stop rules. The
+    activity test is the one of the island classification.
+    """
+    slot = wp.tid()
+    body = body_ids[slot]
+    total = contact_count[0]
+    for i in range(wp.min(body_contact_counts[body], contact_buffer_size)):
+        contact = body_contact_indices[body * contact_buffer_size + i]
+        if contact >= total:
+            continue
+        shape0 = contact_shape0[contact]
+        shape1 = contact_shape1[contact]
+        body0 = shape_body[shape0] if shape0 >= 0 else -1
+        body1 = shape_body[shape1] if shape1 >= 0 else -1
+        other = body1 if body == body0 else body0
+        if other >= 0 and body_inv_mass[other] > 0.0:
+            continue
+        normal = contact_normal[contact]
+        point0 = contact_point0[contact]
+        if body0 >= 0:
+            point0 = wp.transform_point(body_q[body0], point0)
+        point1 = contact_point1[contact]
+        if body1 >= 0:
+            point1 = wp.transform_point(body_q[body1], point1)
+        separation = wp.dot(normal, point1 - point0) - contact_margin0[contact] - contact_margin1[contact]
+        if separation > 0.0 and wp.dot(contact_lambda[contact], normal) <= 0.0:
+            continue
+        center[body_island[slot]] = wp.vec4d(wp.float64(0.0), wp.float64(0.0), wp.float64(0.0), wp.float64(0.0))
+        return
+
+
+@wp.kernel
+def apply_free_rigid_reconciliation(
+    body_ids: wp.array[int],
+    body_island: wp.array[int],
+    center: wp.array[wp.vec4d],
+    correction: wp.array[wp.spatial_vector],
+    body_com: wp.array[wp.vec3],
+    use_displacement: int,
+    body_target_q: wp.array[wp.transform],
+    body_q: wp.array[wp.transform],
+    body_disp: wp.array[wp.vec3],
+    body_disp_ang: wp.array[wp.vec3],
+):
+    """Apply the collective rigid motion of a free island after the local sweeps."""
+    slot = wp.tid()
+    if center[body_island[slot]][3] <= wp.float64(0.0):
+        return
+    body = body_ids[slot]
+    body_q[body] = _corrected_pose(body_q[body], correction[slot], body_com[body], 1.0)
+    if use_displacement != 0:
+        delta = correction[slot]
+        if _spatial_vector_nonzero(delta):
+            body_disp[body] = body_disp[body] + wp.spatial_top(delta)
+            body_disp_ang[body] = rotation_vector_compose(wp.spatial_bottom(delta), body_disp_ang[body])
+            body_q[body] = pose_from_displacement(
+                body_target_q[body], body_com[body], body_disp[body], wp.transform_get_rotation(body_q[body])
+            )
 
 
 @wp.kernel
@@ -4455,7 +5597,11 @@ def apply_global_correction(
     correction: wp.array[wp.spatial_vector],
     island_step_scale: wp.array[float],
     body_com: wp.array[wp.vec3],
+    use_displacement: int,
+    body_target_q: wp.array[wp.transform],
     body_q: wp.array[wp.transform],
+    body_disp: wp.array[wp.vec3],
+    body_disp_ang: wp.array[wp.vec3],
 ):
     slot = wp.tid()
     body = body_ids[slot]
@@ -4463,7 +5609,17 @@ def apply_global_correction(
     if island_contact_state[island] < -1:
         return
     scale = island_step_scale[island]
+    if scale == 0.0 or not _spatial_vector_nonzero(correction[slot]):
+        return
     body_q[body] = _corrected_pose(body_q[body], correction[slot], body_com[body], scale)
+    if use_displacement != 0:
+        delta = correction[slot]
+        if scale != 0.0 and _spatial_vector_nonzero(delta):
+            body_disp[body] = body_disp[body] + scale * wp.spatial_top(delta)
+            body_disp_ang[body] = rotation_vector_compose(scale * wp.spatial_bottom(delta), body_disp_ang[body])
+            body_q[body] = pose_from_displacement(
+                body_target_q[body], body_com[body], body_disp[body], wp.transform_get_rotation(body_q[body])
+            )
 
 
 @wp.kernel
@@ -4473,6 +5629,9 @@ def accumulate_body_directional_derivative(
     enabled: wp.array[bool],
     body_q: wp.array[wp.transform],
     body_inertia_q: wp.array[wp.transform],
+    body_disp: wp.array[wp.vec3],
+    body_disp_ang: wp.array[wp.vec3],
+    use_displacement: int,
     body_mass: wp.array[float],
     body_inv_mass: wp.array[float],
     body_inertia: wp.array[wp.mat33],
@@ -4499,6 +5658,17 @@ def accumulate_body_directional_derivative(
         contact_torques[body],
         1.0 / (dt * dt),
     )
+    if use_displacement != 0:
+        rhs = _body_objective_rhs_displacement(
+            body_q[body],
+            body_mass[body],
+            body_inertia[body],
+            contact_forces[body],
+            contact_torques[body],
+            1.0 / (dt * dt),
+            body_disp[body],
+            body_disp_ang[body],
+        )
     delta = correction[slot]
     linear = wp.float64(0.0)
     for row in range(6):
@@ -4754,6 +5924,54 @@ def _fused_tree_level_schedule(levels: list[list[int]], parent_node: list[int]):
     )
 
 
+def _batched_fused_tree_level_schedule(
+    trees: list[_Tree],
+    node_offsets: list[int],
+) -> tuple[list[int], list[int], list[int], list[int], list[int], list[int], list[int], list[int]]:
+    """Encode heterogeneous leaf-rake schedules back to back with per-tree level offsets."""
+    tree_level_offsets: list[int] = [0]
+    kinds: list[int] = []
+    node_start: list[int] = [0]
+    nodes: list[int] = []
+    recipient_start: list[int] = [0]
+    recipients: list[int] = []
+    message_offsets: list[int] = [0]
+    message_nodes: list[int] = []
+    for candidate, offset in zip(trees, node_offsets, strict=True):
+        parent = candidate.parent_node
+        for level in candidate.elimination_levels:
+            nodes.extend(offset + node for node in level)
+            node_start.append(len(nodes))
+            if len({parent[node] for node in level}) == len(level):
+                kinds.append(1)
+                recipient_start.append(len(recipients))
+                continue
+            kinds.append(0)
+            grouped: dict[int, list[int]] = defaultdict(list)
+            for node in level:
+                grouped[parent[node]].append(node)
+            for recipient in sorted(grouped):
+                recipients.append(offset + recipient)
+                message_nodes.extend(offset + m for m in sorted(grouped[recipient]))
+                message_offsets.append(len(message_nodes))
+            recipient_start.append(len(recipients))
+        tree_level_offsets.append(len(kinds))
+    if not recipients:
+        recipients.append(0)
+    if not message_nodes:
+        message_nodes.append(0)
+    return (
+        tree_level_offsets,
+        kinds,
+        node_start,
+        nodes,
+        recipient_start,
+        recipients,
+        message_offsets,
+        message_nodes,
+    )
+
+
 def _make_fused_tree_levels(levels: list[list[int]], parent_node: list[int], device):
     """Encode the fused leaf-rake schedule as contiguous device arrays."""
     (
@@ -4766,6 +5984,30 @@ def _make_fused_tree_levels(levels: list[list[int]], parent_node: list[int], dev
         message_nodes,
     ) = _fused_tree_level_schedule(levels, parent_node)
     return (
+        wp.array(kinds, dtype=wp.int32, device=device),
+        wp.array(node_start, dtype=wp.int32, device=device),
+        wp.array(nodes, dtype=wp.int32, device=device),
+        wp.array(recipient_start, dtype=wp.int32, device=device),
+        wp.array(recipients, dtype=wp.int32, device=device),
+        wp.array(message_offsets, dtype=wp.int32, device=device),
+        wp.array(message_nodes, dtype=wp.int32, device=device),
+    )
+
+
+def _make_batched_fused_tree_levels(trees: list[_Tree], node_offsets: list[int], device):
+    """Encode heterogeneous leaf-rake schedules as contiguous device arrays."""
+    (
+        tree_level_offsets,
+        kinds,
+        node_start,
+        nodes,
+        recipient_start,
+        recipients,
+        message_offsets,
+        message_nodes,
+    ) = _batched_fused_tree_level_schedule(trees, node_offsets)
+    return (
+        wp.array(tree_level_offsets, dtype=wp.int32, device=device),
         wp.array(kinds, dtype=wp.int32, device=device),
         wp.array(node_start, dtype=wp.int32, device=device),
         wp.array(nodes, dtype=wp.int32, device=device),
@@ -4801,6 +6043,12 @@ def _fused_tree_levels_payload_bytes(levels: list[list[int]], parent_node: list[
     return total
 
 
+def _batched_fused_tree_levels_payload_bytes(trees: list[_Tree], node_offsets: list[int]) -> int:
+    """Count the arrays emitted by ``_make_batched_fused_tree_levels`` exactly."""
+    payloads = _batched_fused_tree_level_schedule(trees, node_offsets)
+    return sum(_array_payload_bytes(len(payload), wp.int32) for payload in payloads)
+
+
 def _fused_tree_levels_supported(levels: list[list[int]], device) -> bool:
     """Avoid per-level launches when one block can replay the leaf schedule."""
     if len(levels) < _FUSED_TREE_MIN_LEVELS:
@@ -4808,6 +6056,20 @@ def _fused_tree_levels_supported(levels: list[list[int]], device) -> bool:
     # CPU uses one lane per tree, so the same kernel needs neither a barrier
     # nor a width limit. Node and shared-recipient ordering remain identical.
     return not device.is_cuda or all(len(level) <= _FUSED_TREE_MAX_LEVEL_WIDTH for level in levels)
+
+
+def _batched_fused_tree_levels_supported(
+    trees: list[_Tree],
+    tree_symbolics: list[_TreeBucketSymbolics],
+    device,
+) -> bool:
+    """Return whether every tree in a bucket supports single-block fused leaf rake."""
+    return bool(trees) and all(
+        not sym.use_tree_contraction
+        and not sym.use_backbone_cr
+        and _fused_tree_levels_supported(candidate.elimination_levels, device)
+        for candidate, sym in zip(trees, tree_symbolics, strict=True)
+    )
 
 
 def _tree_level_launch_count(levels: list[list[int]], parent_node: list[int]) -> int:
@@ -4860,18 +6122,24 @@ def _tree_contraction_schedule(tree: _Tree) -> _TreeContraction:
         adjacency[node][parent] = node
         adjacency[parent][node] = node
 
+    backed = [tree.node_body[node] >= 0 for node in range(node_count)]
     next_edge = node_count
     active = set(range(node_count))
     levels: list[_TreeContractionLevel] = []
     round_index = 0
     while len(active) > 1:
-        candidates = [node for node in active if 0 < len(adjacency[node]) <= 2]
-        # Rake leaves first. Rotate the deterministic degree-two ordering so a
-        # path does not repeatedly favor one end when node identifiers happen
-        # to be monotone along it.
+        # Never eliminate a constraint row node before at least one incident
+        # body has Schur-complemented its inertia into the row (0 bare -C_row
+        # pivots across all trees, including world-anchor rows up to K=1e12).
+        candidates = [node for node in active if 0 < len(adjacency[node]) <= 2 and backed[node]]
+        if not candidates:
+            candidates = [node for node in active if 0 < len(adjacency[node]) <= 2]
+        # Rake leaves first, then body nodes before backed rows. Rotate the
+        # deterministic degree-two ordering so a path stays balanced.
         candidates.sort(
             key=lambda node: (
                 len(adjacency[node]) != 1,
+                tree.node_body[node] < 0,
                 (node - round_index) % node_count,
             )
         )
@@ -4922,6 +6190,8 @@ def _tree_contraction_schedule(tree: _Tree) -> _TreeContraction:
             for local, neighbor in enumerate(local_neighbors):
                 if neighbor >= 0:
                     grouped_messages[neighbor].append(2 * level_index + local)
+                    if tree.node_body[node] >= 0:
+                        backed[neighbor] = True
 
         # Remove the independent nodes, then insert their degree-two fill
         # edges. Every neighbor is a survivor because selected nodes are not
@@ -5075,16 +6345,46 @@ def _structural_payload_budget(device) -> int:
         return _STRUCTURAL_MEMORY_CAP_BYTES
     total_memory = int(device.total_memory)
     if total_memory > 0:
-        return min(
-            total_memory // _STRUCTURAL_MEMORY_CAPACITY_DIVISOR,
-            _STRUCTURAL_MEMORY_CAP_BYTES,
-        )
+        return total_memory // _STRUCTURAL_MEMORY_CAPACITY_DIVISOR
     return _STRUCTURAL_MEMORY_CAP_BYTES
 
 
 def _within_structural_payload_budget(estimated_bytes: int, budget_bytes: int) -> bool:
     """Use an inclusive boundary with Python integers, which cannot overflow."""
     return 0 <= estimated_bytes <= budget_bytes
+
+
+def _tree_anchor_row_count(tree: _Tree) -> int:
+    """Count rows with a single dynamic body (joints to the world or to static bodies)."""
+    degree = [int(parent >= 0) for parent in tree.parent_node]
+    for parent in tree.parent_node:
+        if parent >= 0:
+            degree[parent] += 1
+    return sum(1 for node, row in enumerate(tree.node_row) if row >= 0 and degree[node] == 1)
+
+
+def _tree_reoriented(tree: _Tree, root: int) -> _Tree:
+    """Return the same tree with every edge oriented toward ``root`` (host-only planning aid)."""
+    adjacency: list[list[int]] = [[] for _ in tree.parent_node]
+    for node, parent in enumerate(tree.parent_node):
+        if parent >= 0:
+            adjacency[node].append(parent)
+            adjacency[parent].append(node)
+    parent_node = [-1] * len(tree.parent_node)
+    order = [root]
+    for node in order:
+        for neighbor in adjacency[node]:
+            if neighbor != parent_node[node]:
+                parent_node[neighbor] = node
+                order.append(neighbor)
+    height = [0] * len(tree.parent_node)
+    for node in reversed(order[1:]):
+        height[parent_node[node]] = max(height[parent_node[node]], height[node] + 1)
+    levels: list[list[int]] = [[] for _ in range(height[root])]
+    for node, level in enumerate(height):
+        if node != root:
+            levels[level].append(node)
+    return _Tree(tree.joints, tree.bodies, tree.node_body, tree.node_row, parent_node, tree.coupling_side, levels, root)
 
 
 def _tree_bucket_symbolics(
@@ -5095,6 +6395,13 @@ def _tree_bucket_symbolics(
 ) -> _TreeBucketSymbolics:
     """Select one exact tree route using host-only topology."""
     backbone, branch_levels = _tree_backbone_partition(tree)
+    # A tree rooted at its row to the world (see _make_tree) is planned as it was oriented before,
+    # from that row's body, so the new root does not change the route.
+    anchor_root = tree.node_row[tree.root] >= 0
+    plan_tree = _tree_reoriented(tree, tree.parent_node.index(tree.root)) if anchor_root else tree
+    plan_backbone, plan_branch_levels = (
+        _tree_backbone_partition(plan_tree) if anchor_root else (backbone, branch_levels)
+    )
     if enable_paired_open_chain and not branch_levels:
         alternating = all(
             tree.node_body[node] >= 0 if index % 2 == 0 else tree.node_row[node] >= 0
@@ -5108,7 +6415,7 @@ def _tree_bucket_symbolics(
             )
             if alternating:
                 backbone = reversed_backbone
-        if alternating and _PAIRED_OPEN_CHAIN_MIN_BODIES <= len(tree.bodies) <= _PAIRED_OPEN_CHAIN_MAX_BODIES:
+        if alternating and len(tree.bodies) >= _PAIRED_OPEN_CHAIN_MIN_BODIES:
             return _TreeBucketSymbolics(
                 backbone,
                 branch_levels,
@@ -5131,17 +6438,24 @@ def _tree_bucket_symbolics(
 
     backbone_cr_levels = 0
     stride = 1
-    active_count = len(backbone)
+    active_count = len(plan_backbone)
     while active_count > _CR_SERIAL_TERMINAL_SIZE:
         backbone_cr_levels += 1
         stride *= 2
-        active_count = len(range(0, len(backbone), stride))
+        active_count = len(range(0, len(plan_backbone), stride))
 
-    level_launches = _tree_level_launch_count(tree.elimination_levels, tree.parent_node) + 1
-    backbone_launches = _tree_level_launch_count(branch_levels, tree.parent_node) + 1 + 3 * backbone_cr_levels + 1
+    level_launches = _tree_level_launch_count(plan_tree.elimination_levels, plan_tree.parent_node) + 1
+    backbone_launches = (
+        _tree_level_launch_count(plan_branch_levels, plan_tree.parent_node) + 1 + 3 * backbone_cr_levels + 1
+    )
     contraction = _tree_contraction_schedule(tree)
     contraction_launches = 3 * len(contraction.levels) + 1
     use_tree_contraction = contraction_launches < min(level_launches, backbone_launches)
+    anchor_rows = _tree_anchor_row_count(tree)
+    if anchor_rows >= 2 or (anchor_rows == 1 and not anchor_root):
+        # A row to the world that is a leaf of the leaf rake would be eliminated before its body.
+        # The contraction schedule eliminates every row after one of its bodies.
+        use_tree_contraction = True
     # The unpaired 6x6 CR route can expose near-hard constraint Schur blocks
     # as individual float32 pivots. Closed trees can instead use the guarded
     # body-row paired factorization; open trees retain leaf rake unless the
@@ -5210,7 +6524,7 @@ def _tree_body_row_count(trees: list[_Tree]) -> int:
     return count
 
 
-def _path_bucket_diagnostics(paths: list[_Path], device) -> _BucketDiagnostics:
+def _path_bucket_diagnostics(paths: list[_Path], device, *, factor_dtype=wp.float32) -> _BucketDiagnostics:
     """Plan the exact device payload of one path bucket.
 
     Paths may differ in length; per-island counts report the largest path.
@@ -5229,13 +6543,19 @@ def _path_bucket_diagnostics(paths: list[_Path], device) -> _BucketDiagnostics:
         + 2 * _array_payload_bytes(size, wp.vec2i)
         + _path_cr_schedule_bytes(schedule)
         + _row_pass_payload_bytes(size)
+        + (
+            3 * _array_payload_bytes(size, wp.spatial_matrixd) + _array_payload_bytes(size, wp.spatial_vectord)
+            if factor_dtype == wp.float64
+            else 0
+        )
     )
+    suffix = "_fp64" if factor_dtype == wp.float64 else ""
     if schedule.tails:
-        route = "path_fused_tail_cr"
+        route = "path_fused_tail_cr" + suffix
     elif schedule.persistent:
-        route = "path_persistent_cr"
+        route = "path_persistent_cr" + suffix
     else:
-        route = "path_level_cr"
+        route = "path_level_cr" + suffix
     return _BucketDiagnostics(
         kind="path",
         batch_count=batch_count,
@@ -5271,9 +6591,12 @@ def _tree_bucket_layout(
         shared = symbolics if symbolics is not None else _tree_bucket_symbolics(trees[0])
         tree_symbolics = [shared] * len(trees)
     if not uniform and not all(
-        candidate.use_tree_contraction and not candidate.use_paired_open_backbone for candidate in tree_symbolics
+        (candidate.use_tree_contraction or not candidate.use_backbone_cr) and not candidate.use_paired_open_backbone
+        for candidate in tree_symbolics
     ):
-        raise ValueError("A tree bucket requires one normalized symbolic topology unless every tree is contracted")
+        raise ValueError(
+            "A tree bucket requires one normalized symbolic topology unless every tree uses contraction or leaf rake"
+        )
     node_counts = [len(tree.node_body) for tree in trees]
     node_offsets = np.cumsum([0, *node_counts[:-1]]).tolist()
     parent_node: list[int] = []
@@ -5325,7 +6648,7 @@ def _tree_bucket_diagnostics(
         uniform,
         tree_symbolics,
         node_counts,
-        _node_offsets,
+        node_offsets,
         parent_node,
         levels,
         branch_levels,
@@ -5343,7 +6666,7 @@ def _tree_bucket_diagnostics(
     vector_dtype = wp.spatial_vectord if factor_dtype == wp.float64 else wp.spatial_vector
     estimated_bytes = 0
     estimated_bytes += _array_payload_bytes(batch_count, wp.int32)
-    estimated_bytes += _array_payload_bytes(row_count, wp.int32)
+    estimated_bytes += 2 * _array_payload_bytes(row_count, wp.int32)
     estimated_bytes += _array_payload_bytes(node_count, wp.int32)
     estimated_bytes += _array_payload_bytes(body_count, wp.int32)
     if batch_count > 1:
@@ -5360,27 +6683,30 @@ def _tree_bucket_diagnostics(
     if factor_dtype == wp.float64:
         estimated_bytes += _array_payload_bytes(node_count, matrix_dtype)
     estimated_bytes += _tree_levels_payload_bytes(levels, parent_node, 1)
-    if (
-        uniform
-        and allow_fused_tree_levels
-        and not symbolics.use_tree_contraction
-        and not symbolics.use_backbone_cr
-        and _fused_tree_levels_supported(tree.elimination_levels, device)
-    ):
-        estimated_bytes += _fused_tree_levels_payload_bytes(tree.elimination_levels, tree.parent_node)
+    if allow_fused_tree_levels and _batched_fused_tree_levels_supported(trees, tree_symbolics, device):
+        if uniform:
+            estimated_bytes += _fused_tree_levels_payload_bytes(tree.elimination_levels, tree.parent_node)
+        else:
+            estimated_bytes += _batched_fused_tree_levels_payload_bytes(trees, node_offsets)
     estimated_bytes += _array_payload_bytes(backbone_size, wp.int32)
     estimated_bytes += _tree_levels_payload_bytes(branch_levels, parent_node, 1)
     estimated_bytes += 2 * _array_payload_bytes(backbone_size, matrix_dtype)
     if symbolics.use_paired_open_backbone:
+        pair_matrix_dtype = _SpatialPairMatrixD if factor_dtype == wp.float64 else _SpatialPairMatrix
+        pair_factor_dtype = (
+            _SpatialPairEliminationFactorD if factor_dtype == wp.float64 else _SpatialPairEliminationFactor
+        )
+        pair_vector_dtype = _SpatialPairVectorD if factor_dtype == wp.float64 else _SpatialPairVector
+        pair_response_dtype = _SpatialPairResponseD if factor_dtype == wp.float64 else _SpatialPairResponse
         paired_backbone_count = (len(symbolics.backbone) + 1) // 2
         paired_backbone_size = batch_count * paired_backbone_count
-        estimated_bytes += 3 * _array_payload_bytes(paired_backbone_size, _SpatialPairMatrix)
-        estimated_bytes += _array_payload_bytes(paired_backbone_size, _SpatialPairEliminationFactor)
-        estimated_bytes += _array_payload_bytes(paired_backbone_size, _SpatialPairVector)
-        estimated_bytes += _array_payload_bytes(1, _SpatialPairResponse)
+        estimated_bytes += 3 * _array_payload_bytes(paired_backbone_size, pair_matrix_dtype)
+        estimated_bytes += _array_payload_bytes(paired_backbone_size, pair_factor_dtype)
+        estimated_bytes += _array_payload_bytes(paired_backbone_size, pair_vector_dtype)
+        estimated_bytes += _array_payload_bytes(1, pair_response_dtype)
         if len(tree.bodies) > _PAIRED_OPEN_CHAIN_MIN_BODIES:
-            estimated_bytes += _array_payload_bytes(paired_backbone_size, _SpatialPairVector)
-            estimated_bytes += _array_payload_bytes(1, _SpatialPairResponse)
+            estimated_bytes += _array_payload_bytes(paired_backbone_size, pair_vector_dtype)
+            estimated_bytes += _array_payload_bytes(1, pair_response_dtype)
     fill_count = 0
     if symbolics.use_tree_contraction:
         if any(candidate.contraction is None for candidate in tree_symbolics):
@@ -5388,9 +6714,11 @@ def _tree_bucket_diagnostics(
         schedules = [candidate.contraction for candidate in tree_symbolics]
         estimated_bytes += _tree_contraction_payload_bytes(schedules, node_counts)
         fill_count = sum(schedule.edge_count - count for schedule, count in zip(schedules, node_counts, strict=True))
-    estimated_bytes += _array_payload_bytes(1, wp.spatial_matrix)
+    estimated_bytes += _array_payload_bytes(1, matrix_dtype)
     estimated_bytes += _row_pass_payload_bytes(row_count)
 
+    route_suffix = "_fp64" if factor_dtype == wp.float64 else ""
+    route_name = f"{symbolics.selected_route}{route_suffix}"
     return _BucketDiagnostics(
         kind="tree",
         batch_count=batch_count,
@@ -5401,8 +6729,8 @@ def _tree_bucket_diagnostics(
         cycle_rank_per_island=0,
         closure_count_per_island=0,
         closure_count_total=0,
-        planned_route=symbolics.selected_route,
-        selected_route=symbolics.selected_route,
+        planned_route=route_name,
+        selected_route=route_name,
         fill_edge_count_total=fill_count,
         estimated_bytes=estimated_bytes,
     )
@@ -5541,7 +6869,10 @@ def _shared_structural_payload_bytes(
         + _array_payload_bytes(joint_count, wp.int32)
         + _array_payload_bytes(model_body_count, wp.int32)
         + _array_payload_bytes(model_body_count, wp.transform)
+        + 2 * _array_payload_bytes(model_body_count, wp.vec3)
         + _array_payload_bytes(island_count, wp.bool)
+        + _array_payload_bytes(island_count, wp.int32)
+        + 2 * _array_payload_bytes(1, wp.int32)
         + 2 * _array_payload_bytes(island_count, wp.float64)
         + _array_payload_bytes(1 + 2 * int(is_cuda), wp.int32)
         + _array_payload_bytes(graph_body_count, wp.spatial_vector)
@@ -5562,6 +6893,9 @@ def _shared_structural_payload_bytes(
         + _array_payload_bytes(island_count, wp.float32)
         + 2 * _array_payload_bytes(graph_body_count, wp.spatial_matrix)
         + _array_payload_bytes(graph_body_count, wp.spatial_vector)
+        + _array_payload_bytes(island_count, wp.int32)
+        + _array_payload_bytes(island_count, wp.int32)
+        + _array_payload_bytes(1, wp.int32)
     )
 
 
@@ -5579,9 +6913,20 @@ def _bucket_plan_diagnostics(
 ) -> _BucketDiagnostics:
     """Resize one normalized bucket while reusing its symbolic schedule."""
     if plan.kind == "path":
-        return _path_bucket_diagnostics(components, device)
+        return _path_bucket_diagnostics(
+            components,
+            device,
+            factor_dtype=wp.float64 if plan.diagnostics.planned_route.endswith("_fp64") else wp.float32,
+        )
     if plan.kind == "tree":
-        return _tree_bucket_diagnostics(components, device, symbolics=plan.tree_symbolics)
+        tree_dtype = wp.float64 if plan.diagnostics.planned_route.endswith("_fp64") else wp.float32
+        return _tree_bucket_diagnostics(
+            components,
+            device,
+            symbolics=plan.tree_symbolics,
+            allow_fused_tree_levels=True,
+            factor_dtype=tree_dtype,
+        )
     return _closed_tree_bucket_diagnostics(
         components,
         parent,
@@ -5768,11 +7113,23 @@ def _make_path(
     return _Path(ordered, list(rows_by_body), list(rows_by_body.values()))
 
 
+def _has_rigid_angular_rows(joints, joint_type: np.ndarray) -> bool:
+    """Whether a structure holds a rigid joint with angular rows (not a ball, rod or free joint).
+
+    The contraction route loses such joints near rigidity in float32: a clamped chain of 24 fixed or 64
+    revolute joints at K = 1e9 diverges on it within 120 steps of 1/600 s, while the leaf rake holds it.
+    """
+    kept = (int(JointType.BALL), int(JointType.ROD), int(JointType.FREE))
+    return any(int(joint_type[joint]) not in kept for joint in joints)
+
+
 def _make_tree(
     joints: list[int],
     parent: np.ndarray,
     child: np.ndarray,
     body_inv_mass: np.ndarray,
+    *,
+    root_at_anchor: bool = False,
 ) -> _Tree | None:
     """Build the bipartite body-joint tree used by the exact KKT solve."""
     bodies = sorted(
@@ -5841,6 +7198,18 @@ def _make_tree(
             bodies[node],
         ),
     )
+    # Every route eliminates a node before its parent. A row with a single dynamic body is a leaf,
+    # so under a body root it would be eliminated before that body, as the bare pivot -C, and a stiff
+    # row (K ~ 1e12) then erases the body's inertia in float32. Root the tree at such a row when it is
+    # the only one and the leaf rake gets at most two levels deeper, or always when the tree keeps the
+    # leaf rake (root_at_anchor: it has rigid joints with angular rows, which the contraction route
+    # loses near rigidity in float32). The planner sends the other anchored trees to the contraction route.
+    anchor_rows = [node for node in range(len(bodies), node_count) if len(adjacency[node]) == 1]
+    if len(anchor_rows) == 1:
+        anchor = anchor_rows[0]
+        anchor_height = max(distance_from_first[anchor], distance_from_second[anchor])
+        if root_at_anchor or anchor_height <= max(distance_from_first[root], distance_from_second[root]) + 2:
+            root = anchor
     # The graph is a connected tree. Orient each edge toward the root,
     # then a node's leaf-removal round is its maximum child round plus one.
     # This avoids rescanning all surviving nodes at every level of a long tree.
@@ -5955,7 +7324,13 @@ def _build_trees(
             continue
 
         for dynamic_component in _dynamic_joint_components(component, parent, child, body_inv_mass):
-            tree = _make_tree(dynamic_component, parent, child, body_inv_mass)
+            tree = _make_tree(
+                dynamic_component,
+                parent,
+                child,
+                body_inv_mass,
+                root_at_anchor=_has_rigid_angular_rows(dynamic_component, joint_type),
+            )
             if tree is not None:
                 trees.append(tree)
     return trees
@@ -6083,7 +7458,13 @@ def _build_closed_trees(
 
             if not closure_joints:
                 continue
-            base = _make_tree(base_joints, parent, child, body_inv_mass)
+            base = _make_tree(
+                base_joints,
+                parent,
+                child,
+                body_inv_mass,
+                root_at_anchor=_has_rigid_angular_rows(dynamic_component, joint_type),
+            )
             if base is not None and set(base.bodies) == dynamic_bodies:
                 closed_trees.append(_ClosedTree(base, closure_joints, dynamic_component, base.bodies))
     return closed_trees
@@ -6393,7 +7774,22 @@ def _scatter_closed_tree_body_correction_fp64(
     closure_row_active: wp.array[wp.int32],
     tree_body_count: int,
     closure_count: int,
+    row_node: wp.array[wp.int32],
+    parent_node: wp.array[wp.int32],
+    coupling_side: wp.array[wp.int32],
+    body_matrix: wp.array[wp.spatial_matrix],
+    body_rhs: wp.array[wp.spatial_vector],
     body_scale: wp.array[wp.spatial_vector],
+    tree_row_scale: wp.array[wp.spatial_vector],
+    tree_jp: wp.array[wp.spatial_matrix],
+    tree_jc: wp.array[wp.spatial_matrix],
+    tree_compliance: wp.array[wp.spatial_matrix],
+    tree_residual: wp.array[wp.spatial_vector],
+    closure_parent_node: wp.array[wp.int32],
+    closure_child_node: wp.array[wp.int32],
+    closure_row_scale: wp.array[wp.spatial_vector],
+    closure_jp: wp.array[wp.spatial_matrix],
+    closure_jc: wp.array[wp.spatial_matrix],
     tree_solution: wp.array[wp.spatial_vectord],
     response_solution: wp.array[wp.spatial_matrixd],
     closure_multiplier: wp.array[wp.spatial_vectord],
@@ -6411,15 +7807,86 @@ def _scatter_closed_tree_body_correction_fp64(
     if active == 0:
         body_correction[slot] = wp.spatial_vector()
         return
+
+    bscale = wp.spatial_vector()
+    for axis in range(6):
+        bscale[axis] = 1.0 / wp.sqrt(wp.max(wp.abs(body_matrix[slot][axis, axis]), 1.0e-30))
+    # Detect whether this body owns a single degree-1 world-anchor leaf row in the spanning tree.
+    # Such a leaf row u has parent_node[u] == node and only one dynamic endpoint (the other is < 0).
+    # Eliminating u before node adds K_u ~ 1e12 onto D_node in float64; recovering mu_u from the
+    # body-first 12x12 Schur system S_u = C_u + A_u * D_b^-1 * A_u^T avoids K_u * (J*dx - c) cancellation.
+    leaf_count = int(0)
+    leaf_row = int(-1)
+    leaf_node = int(-1)
+    for cursor in range(body_row_offsets[index], body_row_offsets[index + 1]):
+        r_idx = body_rows[cursor]
+        raw_node = row_node[r_idx]
+        is_leaf_row = raw_node < -1
+        r_node = (-2 - raw_node) if is_leaf_row else raw_node
+        if is_leaf_row and r_node >= 0 and parent_node[r_node] == node:
+            leaf_count += 1
+            leaf_row = r_idx
+            leaf_node = r_node
+
     correction = tree_solution[node]
     for closure in range(closure_count):
         correction = (
             correction
             - response_solution[node * closure_count + closure] * closure_multiplier[batch * closure_count + closure]
         )
+
+    if leaf_count == 1 and leaf_node >= 0:
+        f_eff = _scale_spatial_vector_fp64(bscale, body_rhs[slot])
+        for cursor in range(body_row_offsets[index], body_row_offsets[index + 1]):
+            r_idx = body_rows[cursor]
+            if r_idx == leaf_row:
+                continue
+            raw_node = row_node[r_idx]
+            r_node = (-2 - raw_node) if raw_node < -1 else raw_node
+            mu_r = tree_solution[r_node]
+            for closure in range(closure_count):
+                mu_r = (
+                    mu_r
+                    - response_solution[r_node * closure_count + closure]
+                    * closure_multiplier[batch * closure_count + closure]
+                )
+            side = coupling_side[r_node] if parent_node[r_node] == node else coupling_side[node]
+            jac = tree_jp[r_idx] if side == 0 else tree_jc[r_idx]
+            a_rb = _scale_spatial_matrix_fp64(tree_row_scale[r_idx], jac, bscale)
+            f_eff = f_eff - wp.transpose(a_rb) * mu_r
+        for cursor in range(body_closure_offsets[index], body_closure_offsets[index + 1]):
+            c_idx = body_closure_rows[cursor]
+            mu_c = closure_multiplier[c_idx]
+            if closure_parent_node[c_idx] == node:
+                a_cb = _scale_spatial_matrix_fp64(closure_row_scale[c_idx], closure_jp[c_idx], bscale)
+                f_eff = f_eff - wp.transpose(a_cb) * mu_c
+            if closure_child_node[c_idx] == node:
+                a_cb = _scale_spatial_matrix_fp64(closure_row_scale[c_idx], closure_jc[c_idx], bscale)
+                f_eff = f_eff - wp.transpose(a_cb) * mu_c
+        d_b = _scale_spatial_matrix_fp64(bscale, body_matrix[slot], bscale)
+        inv_db = _inverse_spatial_pivoted(d_b)
+        leaf_jac = tree_jp[leaf_row] if coupling_side[leaf_node] == 0 else tree_jc[leaf_row]
+        rscale = tree_row_scale[leaf_row]
+        a_ub = _scale_spatial_matrix_fp64(rscale, leaf_jac, bscale)
+        c_u = _scale_spatial_matrix_fp64(rscale, tree_compliance[leaf_row], rscale)
+        rhs_u = _scale_spatial_vector_fp64(rscale, tree_residual[leaf_row])
+        schur_u = c_u + a_ub * inv_db * wp.transpose(a_ub)
+        mu_u = _inverse_spatial_pivoted(schur_u) * (rhs_u + a_ub * (inv_db * f_eff))
+        correction = inv_db * (f_eff - wp.transpose(a_ub) * mu_u)
+        # Store mu_u_total + resp_u * mu_closure into tree_solution[leaf_node] so
+        # tree_solution[leaf_node] - resp_u * mu_closure equals exact mu_u!
+        stored_leaf = mu_u
+        for closure in range(closure_count):
+            stored_leaf = (
+                stored_leaf
+                + response_solution[leaf_node * closure_count + closure]
+                * closure_multiplier[batch * closure_count + closure]
+            )
+        tree_solution[leaf_node] = stored_leaf
+
     rounded = wp.spatial_vector()
     for axis in range(6):
-        rounded[axis] = float(wp.float64(body_scale[slot][axis]) * correction[axis])
+        rounded[axis] = float(wp.float64(bscale[axis]) * correction[axis])
     body_correction[slot] = rounded
 
 
@@ -6447,6 +7914,56 @@ def initialize_tree_nodes(
         scale = row_scale[row]
         diagonal[node] = -_scale_spatial_matrix(scale, compliance[row], scale)
         rhs[node] = -_scale_spatial_vector(scale, residual[row])
+
+
+@wp.func
+def _diag_equilibration_scale(matrix: wp.spatial_matrix):
+    scale = wp.spatial_vector()
+    for axis in range(6):
+        scale[axis] = 1.0 / wp.sqrt(wp.max(wp.abs(matrix[axis, axis]), 1.0e-30))
+    return scale
+
+
+@wp.kernel
+def prepare_tree_system(
+    node_body: wp.array[wp.int32],
+    node_row: wp.array[wp.int32],
+    parent_node: wp.array[wp.int32],
+    coupling_side: wp.array[wp.int32],
+    body_matrix: wp.array[wp.spatial_matrix],
+    compliance: wp.array[wp.spatial_matrix],
+    jacobian_parent: wp.array[wp.spatial_matrix],
+    jacobian_child: wp.array[wp.spatial_matrix],
+    body_scale: wp.array[wp.spatial_vector],
+    row_scale: wp.array[wp.spatial_vector],
+    coupling: wp.array[wp.spatial_matrix],
+):
+    """Fused bit-identical equilibrate_tree_bodies + equilibrate_tree_rows + initialize_tree_couplings."""
+    node = wp.tid()
+    own_body = node_body[node]
+    own_bscale = wp.spatial_vector()
+    own_rscale = wp.spatial_vector()
+    if own_body >= 0:
+        own_bscale = _diag_equilibration_scale(body_matrix[own_body])
+        body_scale[own_body] = own_bscale
+    else:
+        own_row = node_row[node]
+        own_rscale = _diag_equilibration_scale(compliance[own_row])
+        row_scale[own_row] = own_rscale
+    parent = parent_node[node]
+    if parent < 0:
+        coupling[node] = wp.spatial_matrix(0.0)
+        return
+    row = node_row[node]
+    node_is_joint = row >= 0
+    if not node_is_joint:
+        row = node_row[parent]
+    body = node_body[parent] if node_is_joint else own_body
+    bscale = _diag_equilibration_scale(body_matrix[body]) if node_is_joint else own_bscale
+    rscale = own_rscale if node_is_joint else _diag_equilibration_scale(compliance[row])
+    jacobian = jacobian_parent[row] if coupling_side[node] == 0 else jacobian_child[row]
+    value = _scale_spatial_matrix(rscale, jacobian, bscale)
+    coupling[node] = value if node_is_joint else wp.transpose(value)
 
 
 @wp.kernel
@@ -6535,9 +8052,9 @@ def accumulate_tree_messages(
 @wp.kernel
 def solve_tree_roots(
     roots: wp.array[wp.int32],
-    diagonal: wp.array[wp.spatial_matrix],
-    rhs: wp.array[wp.spatial_vector],
-    solution: wp.array[wp.spatial_vector],
+    diagonal: wp.array[Any],
+    rhs: wp.array[Any],
+    solution: wp.array[Any],
 ):
     """Solve one independent root block per identically scheduled tree."""
     root = roots[wp.tid()]
@@ -6558,10 +8075,11 @@ def back_substitute_tree_level(
     solution[node] = saved_inverse[node] * (saved_rhs[node] - coupling[node] * solution[parent])
 
 
-@wp.kernel
+@wp.kernel(module="unique")
 def solve_tree_levels_fused(
     tree_node_count: int,
     level_count: int,
+    tree_level_offsets: wp.array[wp.int32],
     level_kind: wp.array[wp.int32],
     level_node_start: wp.array[wp.int32],
     level_nodes: wp.array[wp.int32],
@@ -6571,34 +8089,30 @@ def solve_tree_levels_fused(
     message_nodes: wp.array[wp.int32],
     roots: wp.array[wp.int32],
     parent_node: wp.array[wp.int32],
-    coupling: wp.array[wp.spatial_matrix],
-    diagonal: wp.array[wp.spatial_matrix],
-    rhs: wp.array[wp.spatial_vector],
+    coupling: wp.array[Any],
+    diagonal: wp.array[Any],
+    rhs: wp.array[Any],
 ):
     """Run one tree's whole leaf-rake schedule inside a single block.
 
-    The per-level schedule is a chain of dependent launches whose every level
-    is a strictly sequential step over disjoint nodes.  A chain therefore
-    emits one launch per body, and each launch carries a two-thread grid.
-    Walking the same levels as an inner loop inside one block replays the
-    identical operations in the identical order, so the result is bit-exact,
-    while the dependent launch depth collapses to one.
-
-    Node indices are stored per tree; block ``batch`` shifts them by its own
-    ``batch * tree_node_count`` offset, which keeps this schedule independent
-    of batch size and preserves one block of parallel work per tree.
-
-    ``_TreeBucket`` aliases ``saved_inverse`` onto ``diagonal`` and both
-    ``saved_rhs`` and ``solution`` onto ``rhs``; this kernel is written
-    against that aliasing, exactly as the per-level kernels are.
+    Supports both uniform batches (``tree_node_count > 0``, sharing one schedule)
+    and heterogeneous merged trees (``tree_node_count == 0``, with global node
+    indices and ``tree_level_offsets`` per block), in either ``float32`` or
+    ``float64``. Walking the exact level schedule inside one block per tree is
+    bit-identical to per-level launches while running all trees simultaneously
+    across SMs in one kernel launch.
     """
     thread = wp.tid()
     block = wp.block_dim()
     lane = thread % block
     batch = thread // block
-    base = batch * tree_node_count
+    base = batch * tree_node_count if tree_node_count > 0 else 0
+    level_begin = 0 if tree_node_count > 0 else tree_level_offsets[batch]
+    level_end = level_count if tree_node_count > 0 else tree_level_offsets[batch + 1]
+    span = level_end - level_begin
 
-    for level in range(level_count):
+    for step in range(span):
+        level = level_begin + step
         start = level_node_start[level]
         count = level_node_start[level + 1] - start
         if level_kind[level] == 1:
@@ -6649,8 +8163,8 @@ def solve_tree_levels_fused(
         rhs[root] = _inverse_spatial_robust(diagonal[root]) * rhs[root]
     _synchronize_cr_block()
 
-    for reverse in range(level_count):
-        level = level_count - 1 - reverse
+    for reverse in range(span):
+        level = level_end - 1 - reverse
         start = level_node_start[level]
         count = level_node_start[level + 1] - start
         index = int(lane)
@@ -6800,6 +8314,433 @@ def back_substitute_tree_contraction_level(
     solution[node] = saved_inverse[node] * value
 
 
+@wp.func
+def _actual_row_node(encoded: int):
+    return encoded if encoded >= 0 else (-2 - encoded)
+
+
+@wp.kernel
+def build_tree_body_sqp_rhs(
+    body_nodes: wp.array[wp.int32],
+    body_slots: wp.array[wp.int32],
+    body_row_offsets: wp.array[wp.int32],
+    body_rows: wp.array[wp.int32],
+    graph_body_ids: wp.array[wp.int32],
+    joint_ids: wp.array[wp.int32],
+    joint_parent: wp.array[int],
+    row_node: wp.array[wp.int32],
+    parent_node: wp.array[wp.int32],
+    dt: float,
+    body_q: wp.array[wp.transform],
+    body_inertia_q: wp.array[wp.transform],
+    body_disp: wp.array[wp.vec3],
+    body_disp_ang: wp.array[wp.vec3],
+    use_displacement: int,
+    body_mass: wp.array[float],
+    body_inv_mass: wp.array[float],
+    body_inertia: wp.array[wp.mat33],
+    body_com: wp.array[wp.vec3],
+    body_matrix: wp.array[wp.spatial_matrix],
+    slope_offset: int,
+    slope_jacobian_parent: wp.array[wp.spatial_matrix],
+    slope_jacobian_child: wp.array[wp.spatial_matrix],
+    slope_mode: wp.array[wp.int32],
+    row_scale: wp.array[wp.spatial_vector],
+    coupling: wp.array[wp.spatial_matrix],
+    prev_solution: wp.array[wp.spatial_vector],
+    include_sqp_torque: int,
+    body_rhs_out: wp.array[wp.spatial_vector],
+    body_scale_out: wp.array[wp.spatial_vector],
+):
+    """Fused body inertial RHS, equilibration scale, and division-free SQP torque -(J1 - J0)^T mu^(1)."""
+    index = wp.tid()
+    b_node = body_nodes[index]
+    slot = body_slots[index]
+    body = graph_body_ids[slot]
+    if body_inv_mass[body] <= 0.0:
+        body_rhs_out[slot] = wp.spatial_vector()
+        body_scale_out[slot] = wp.spatial_vector()
+        return
+    dt_inv_sq = 1.0 / (dt * dt)
+    pose = body_q[body]
+    zero_v = wp.vec3(0.0)
+    if use_displacement != 0:
+        rhs = _body_objective_rhs_displacement(
+            pose,
+            body_mass[body],
+            body_inertia[body],
+            zero_v,
+            zero_v,
+            dt_inv_sq,
+            body_disp[body],
+            body_disp_ang[body],
+        )
+    else:
+        rhs = _body_objective_rhs(
+            pose,
+            body_inertia_q[body],
+            body_mass[body],
+            body_inertia[body],
+            body_com[body],
+            zero_v,
+            zero_v,
+            dt_inv_sq,
+        )
+    bscale = _diag_equilibration_scale(body_matrix[slot])
+    if include_sqp_torque != 0:
+        inv_bscale = wp.spatial_vector()
+        for axis in range(6):
+            inv_bscale[axis] = 1.0 / bscale[axis] if bscale[axis] > 0.0 else 0.0
+        delta_f = wp.spatial_vector()
+        for cursor in range(body_row_offsets[index], body_row_offsets[index + 1]):
+            row = body_rows[cursor]
+            slope_row = slope_offset + row
+            if slope_mode[slope_row] == 0:
+                continue
+            r_node = _actual_row_node(row_node[row])
+            u_r = prev_solution[r_node]
+            mu_r = _scale_spatial_vector(row_scale[row], u_r)
+            joint = joint_ids[row]
+            j1 = slope_jacobian_parent[slope_row] if joint_parent[joint] == body else slope_jacobian_child[slope_row]
+            j0_scaled_u = (
+                wp.transpose(coupling[r_node]) * u_r if parent_node[r_node] == b_node else coupling[b_node] * u_r
+            )
+            j0_t_mu = _scale_spatial_vector(inv_bscale, j0_scaled_u)
+            df = wp.transpose(j1) * mu_r - j0_t_mu
+            f0_sq = wp.dot(j0_t_mu, j0_t_mu)
+            df_sq = wp.dot(df, df)
+            w = f0_sq / (f0_sq + 25.0 * df_sq + 1.0e-12)
+            delta_f = delta_f - w * df
+        rhs = rhs + delta_f
+    body_rhs_out[slot] = rhs
+    body_scale_out[slot] = bscale
+
+
+@wp.kernel
+def build_tree_body_sqp_rhs_fp64(
+    body_nodes: wp.array[wp.int32],
+    body_slots: wp.array[wp.int32],
+    body_row_offsets: wp.array[wp.int32],
+    body_rows: wp.array[wp.int32],
+    graph_body_ids: wp.array[wp.int32],
+    joint_ids: wp.array[wp.int32],
+    joint_parent: wp.array[int],
+    row_node: wp.array[wp.int32],
+    dt: float,
+    body_q: wp.array[wp.transform],
+    body_inertia_q: wp.array[wp.transform],
+    body_disp: wp.array[wp.vec3],
+    body_disp_ang: wp.array[wp.vec3],
+    use_displacement: int,
+    body_mass: wp.array[float],
+    body_inv_mass: wp.array[float],
+    body_inertia: wp.array[wp.mat33],
+    body_com: wp.array[wp.vec3],
+    body_matrix: wp.array[wp.spatial_matrix],
+    jacobian_parent_0: wp.array[wp.spatial_matrix],
+    jacobian_child_0: wp.array[wp.spatial_matrix],
+    slope_offset: int,
+    slope_jacobian_parent: wp.array[wp.spatial_matrix],
+    slope_jacobian_child: wp.array[wp.spatial_matrix],
+    slope_mode: wp.array[wp.int32],
+    row_scale: wp.array[wp.spatial_vector],
+    prev_solution: wp.array[wp.spatial_vectord],
+    include_sqp_torque: int,
+    body_rhs_out: wp.array[wp.spatial_vector],
+    body_scale_out: wp.array[wp.spatial_vector],
+):
+    """FP64-factor variant of build_tree_body_sqp_rhs (Stage-0 Jacobians remain intact)."""
+    index = wp.tid()
+    _ = body_nodes[index]
+    slot = body_slots[index]
+    body = graph_body_ids[slot]
+    if body_inv_mass[body] <= 0.0:
+        body_rhs_out[slot] = wp.spatial_vector()
+        body_scale_out[slot] = wp.spatial_vector()
+        return
+    dt_inv_sq = 1.0 / (dt * dt)
+    pose = body_q[body]
+    zero_v = wp.vec3(0.0)
+    if use_displacement != 0:
+        rhs = _body_objective_rhs_displacement(
+            pose,
+            body_mass[body],
+            body_inertia[body],
+            zero_v,
+            zero_v,
+            dt_inv_sq,
+            body_disp[body],
+            body_disp_ang[body],
+        )
+    else:
+        rhs = _body_objective_rhs(
+            pose,
+            body_inertia_q[body],
+            body_mass[body],
+            body_inertia[body],
+            body_com[body],
+            zero_v,
+            zero_v,
+            dt_inv_sq,
+        )
+    bscale = _diag_equilibration_scale(body_matrix[slot])
+    if include_sqp_torque != 0:
+        delta_f = wp.spatial_vector()
+        for cursor in range(body_row_offsets[index], body_row_offsets[index + 1]):
+            row = body_rows[cursor]
+            slope_row = slope_offset + row
+            if slope_mode[slope_row] == 0:
+                continue
+            r_node = _actual_row_node(row_node[row])
+            u_r64 = prev_solution[r_node]
+            u_r = wp.spatial_vector()
+            for axis in range(6):
+                u_r[axis] = float(u_r64[axis])
+            mu_r = _scale_spatial_vector(row_scale[row], u_r)
+            joint = joint_ids[row]
+            is_parent = joint_parent[joint] == body
+            j1 = slope_jacobian_parent[slope_row] if is_parent else slope_jacobian_child[slope_row]
+            j0 = jacobian_parent_0[row] if is_parent else jacobian_child_0[row]
+            j0_t_mu = wp.transpose(j0) * mu_r
+            df = wp.transpose(j1) * mu_r - j0_t_mu
+            f0_sq = wp.dot(j0_t_mu, j0_t_mu)
+            df_sq = wp.dot(df, df)
+            w = f0_sq / (f0_sq + 25.0 * df_sq + 1.0e-12)
+            delta_f = delta_f - w * df
+        rhs = rhs + delta_f
+    body_rhs_out[slot] = rhs
+    body_scale_out[slot] = bscale
+
+
+@wp.kernel
+def initialize_tree_saddle_resolve_rhs(
+    node_body: wp.array[wp.int32],
+    node_row: wp.array[wp.int32],
+    slope_offset: int,
+    body_rhs: wp.array[wp.spatial_vector],
+    body_scale: wp.array[wp.spatial_vector],
+    compliance_0: wp.array[wp.spatial_matrix],
+    slope_compliance: wp.array[wp.spatial_vector],
+    slope_residual: wp.array[wp.spatial_vector],
+    row_scale: wp.array[wp.spatial_vector],
+    rhs_out: wp.array[wp.spatial_vector],
+):
+    """Division-free saddle-RHS resolve: exact nonlinear c(x) and SQP g(x), uniform as C -> 0."""
+    node = wp.tid()
+    body = node_body[node]
+    if body >= 0:
+        rhs_out[node] = _scale_spatial_vector(body_scale[body], body_rhs[body])
+    else:
+        row = node_row[node]
+        s_row = slope_offset + row
+        c_res = slope_residual[s_row]
+        c_cur = slope_compliance[s_row]
+        c_ref = compliance_0[row]
+        masked = wp.spatial_vector()
+        for axis in range(6):
+            c0 = c_ref[axis, axis]
+            c1 = c_cur[axis]
+            masked[axis] = 0.0 if wp.abs(c1 - c0) > 1.0e-5 * wp.max(wp.abs(c0), 1.0e-12) else c_res[axis]
+        rhs_out[node] = -_scale_spatial_vector(row_scale[row], masked)
+
+
+@wp.kernel
+def initialize_tree_saddle_resolve_rhs_fp64(
+    node_body: wp.array[wp.int32],
+    node_row: wp.array[wp.int32],
+    slope_offset: int,
+    body_rhs: wp.array[wp.spatial_vector],
+    body_scale: wp.array[wp.spatial_vector],
+    compliance_0: wp.array[wp.spatial_matrix],
+    slope_compliance: wp.array[wp.spatial_vector],
+    slope_residual: wp.array[wp.spatial_vector],
+    row_scale: wp.array[wp.spatial_vector],
+    rhs_out: wp.array[wp.spatial_vectord],
+):
+    """FP64 division-free saddle-RHS resolve."""
+    node = wp.tid()
+    body = node_body[node]
+    if body >= 0:
+        rhs_out[node] = _scale_spatial_vector_fp64(body_scale[body], body_rhs[body])
+    else:
+        row = node_row[node]
+        s_row = slope_offset + row
+        c_res = slope_residual[s_row]
+        c_cur = slope_compliance[s_row]
+        c_ref = compliance_0[row]
+        masked = wp.spatial_vector()
+        for axis in range(6):
+            c0 = c_ref[axis, axis]
+            c1 = c_cur[axis]
+            masked[axis] = 0.0 if wp.abs(c1 - c0) > 1.0e-5 * wp.max(wp.abs(c0), 1.0e-12) else c_res[axis]
+        rhs_out[node] = -_scale_spatial_vector_fp64(row_scale[row], masked)
+
+
+@wp.kernel
+def pack_paired_tree_backbone_rhs(
+    pair_count: int,
+    backbone_node_count: int,
+    backbone_nodes: wp.array[wp.int32],
+    rhs: wp.array[wp.spatial_vector],
+    pair_rhs: wp.array[_SpatialPairVector],
+):
+    """Pack RHS-only into paired backbone vectors without overwriting stored factors."""
+    index = wp.tid()
+    batch = index // pair_count
+    local_pair = index - batch * pair_count
+    backbone_base = batch * backbone_node_count
+    first_row = 2 * local_pair
+    first_node = backbone_nodes[backbone_base + first_row]
+    rhs_value = _SpatialPairVector()
+    rhs_value.v0 = rhs[first_node]
+    rhs_value.v1 = wp.spatial_vector()
+    if first_row + 1 < backbone_node_count:
+        second_node = backbone_nodes[backbone_base + first_row + 1]
+        rhs_value.v1 = rhs[second_node]
+    pair_rhs[index] = rhs_value
+
+
+@wp.kernel
+def resolve_tree_unique_leaves(
+    leaves: wp.array[wp.int32],
+    parent_node: wp.array[wp.int32],
+    coupling: wp.array[Any],
+    saved_inverse: wp.array[Any],
+    rhs: wp.array[Any],
+):
+    """Forward RHS-only leaf elimination reusing stored pivot inverses."""
+    node = leaves[wp.tid()]
+    parent = parent_node[node]
+    rhs[parent] = rhs[parent] - wp.transpose(coupling[node]) * (saved_inverse[node] * rhs[node])
+
+
+@wp.kernel
+def resolve_tree_messages(
+    recipients: wp.array[wp.int32],
+    recipient_offsets: wp.array[wp.int32],
+    message_nodes: wp.array[wp.int32],
+    coupling: wp.array[Any],
+    saved_inverse: wp.array[Any],
+    saved_rhs: wp.array[Any],
+    rhs: wp.array[Any],
+):
+    """Forward RHS-only shared-recipient elimination reusing stored pivot inverses."""
+    index = wp.tid()
+    recipient = recipients[index]
+    rhs_value = rhs[recipient]
+    for cursor in range(recipient_offsets[index], recipient_offsets[index + 1]):
+        node = message_nodes[cursor]
+        rhs_value = rhs_value - wp.transpose(coupling[node]) * (saved_inverse[node] * saved_rhs[node])
+    rhs[recipient] = rhs_value
+
+
+@wp.kernel(module="unique")
+def resolve_tree_levels_fused(
+    tree_node_count: int,
+    level_count: int,
+    tree_level_offsets: wp.array[wp.int32],
+    level_kind: wp.array[wp.int32],
+    level_node_start: wp.array[wp.int32],
+    level_nodes: wp.array[wp.int32],
+    level_recipient_start: wp.array[wp.int32],
+    level_recipients: wp.array[wp.int32],
+    message_offsets: wp.array[wp.int32],
+    message_nodes: wp.array[wp.int32],
+    roots: wp.array[wp.int32],
+    parent_node: wp.array[wp.int32],
+    coupling: wp.array[Any],
+    diagonal: wp.array[Any],
+    rhs: wp.array[Any],
+):
+    """Single-block RHS-only forward/back substitution reusing Stage-0 tree factors."""
+    thread = wp.tid()
+    block = wp.block_dim()
+    lane = thread % block
+    batch = thread // block
+    base = batch * tree_node_count if tree_node_count > 0 else 0
+    level_begin = 0 if tree_node_count > 0 else tree_level_offsets[batch]
+    level_end = level_count if tree_node_count > 0 else tree_level_offsets[batch + 1]
+    span = level_end - level_begin
+
+    for step in range(span):
+        level = level_begin + step
+        start = level_node_start[level]
+        count = level_node_start[level + 1] - start
+        if level_kind[level] == 1:
+            index = int(lane)
+            while index < count:
+                node = base + level_nodes[start + index]
+                parent = parent_node[node]
+                rhs[parent] = rhs[parent] - wp.transpose(coupling[node]) * (diagonal[node] * rhs[node])
+                index += block
+        else:
+            recipient_start = level_recipient_start[level]
+            recipient_count = level_recipient_start[level + 1] - recipient_start
+            index = int(lane)
+            while index < recipient_count:
+                slot = recipient_start + index
+                recipient = base + level_recipients[slot]
+                rhs_value = rhs[recipient]
+                for cursor in range(message_offsets[slot], message_offsets[slot + 1]):
+                    node = base + message_nodes[cursor]
+                    rhs_value = rhs_value - wp.transpose(coupling[node]) * (diagonal[node] * rhs[node])
+                rhs[recipient] = rhs_value
+                index += block
+        _synchronize_cr_block()
+
+    if lane == 0:
+        root = roots[batch]
+        rhs[root] = _inverse_spatial_robust(diagonal[root]) * rhs[root]
+    _synchronize_cr_block()
+
+    for reverse in range(span):
+        level = level_end - 1 - reverse
+        start = level_node_start[level]
+        count = level_node_start[level + 1] - start
+        index = int(lane)
+        while index < count:
+            node = base + level_nodes[start + index]
+            parent = parent_node[node]
+            rhs[node] = diagonal[node] * (rhs[node] - coupling[node] * rhs[parent])
+            index += block
+        _synchronize_cr_block()
+
+
+@wp.kernel
+def resolve_tree_contraction_messages(
+    original_edge_count: int,
+    nodes: wp.array[wp.int32],
+    edges: wp.array[wp.vec2i],
+    transpose_edges: wp.array[wp.vec2i],
+    recipients: wp.array[wp.int32],
+    recipient_offsets: wp.array[wp.int32],
+    message_slots: wp.array[wp.int32],
+    coupling: wp.array[wp.spatial_matrix],
+    fill_edges: wp.array[wp.spatial_matrix],
+    saved_inverse: wp.array[wp.spatial_matrix],
+    saved_rhs: wp.array[wp.spatial_vector],
+    rhs: wp.array[wp.spatial_vector],
+):
+    """Forward RHS-only rake/compress message accumulation reusing Stage-0 factors."""
+    index = wp.tid()
+    recipient = recipients[index]
+    rhs_value = rhs[recipient]
+    for cursor in range(recipient_offsets[index], recipient_offsets[index + 1]):
+        slot = message_slots[cursor]
+        eliminated_index = slot // 2
+        local = slot - 2 * eliminated_index
+        node = nodes[eliminated_index]
+        a = _load_tree_contraction_edge(
+            edges[eliminated_index][local],
+            transpose_edges[eliminated_index][local],
+            original_edge_count,
+            coupling,
+            fill_edges,
+        )
+        rhs_value = rhs_value - wp.transpose(a) * (saved_inverse[node] * saved_rhs[node])
+    rhs[recipient] = rhs_value
+
+
 @wp.kernel
 def scatter_tree_body_correction_indexed(
     body_nodes: wp.array[wp.int32],
@@ -6808,7 +8749,7 @@ def scatter_tree_body_correction_indexed(
     body_rows: wp.array[wp.int32],
     row_active: wp.array[wp.int32],
     body_scale: wp.array[wp.spatial_vector],
-    solution: wp.array[wp.spatial_vector],
+    solution: wp.array[Any],
     body_correction: wp.array[wp.spatial_vector],
 ):
     """Scatter body nodes from multiple flattened tree instances."""
@@ -7310,7 +9251,8 @@ def _path_cr_schedule_bytes(schedule: _PathCRSchedule) -> int:
 class _PathBucket:
     """Batch of joint paths of any lengths, stored back to back."""
 
-    def __init__(self, paths: list[_Path], device):
+    def __init__(self, paths: list[_Path], device, *, factor_dtype=wp.float32):
+        self.factor_dtype = factor_dtype
         self.device = device
         self.spatial_block_dim = _SPATIAL_GPU_BLOCK_DIM if device.is_cuda else 1
         self.batch_count = len(paths)
@@ -7359,6 +9301,16 @@ class _PathBucket:
         self.compliance = self.diagonal[0]
         self.residual = self.rhs[0]
         self.solution = self.rhs
+        if factor_dtype == wp.float64:
+            self.factor_lower = wp.empty(self.size, dtype=wp.spatial_matrixd, device=device)
+            self.factor_diagonal = wp.empty_like(self.factor_lower)
+            self.factor_upper = wp.empty_like(self.factor_lower)
+            self.factor_rhs = wp.empty(self.size, dtype=wp.spatial_vectord, device=device)
+        else:
+            self.factor_lower = None
+            self.factor_diagonal = None
+            self.factor_upper = None
+            self.factor_rhs = None
 
         self.plan_cr(fused=device.is_cuda)
 
@@ -7398,17 +9350,58 @@ class _PathBucket:
         self.cr_side_stream = (
             wp.Stream(self.device) if fused and self.persistent_paths is not None and long_route else None
         )
-        # Float aliases share the four owned row buffers; no extra device storage.
+        # Scalar aliases share the four owned row buffers; no extra device storage.
         self.cr_float_buffers = (
-            [array.view(float) for array in (self.lower[0], self.diagonal[0], self.upper[0], self.rhs[0])]
+            [
+                array.view(wp.float64)
+                for array in (self.factor_lower, self.factor_diagonal, self.factor_upper, self.factor_rhs)
+            ]
+            if self.device.is_cuda and fused and long_route and self.factor_dtype == wp.float64
+            else [array.view(float) for array in (self.lower[0], self.diagonal[0], self.upper[0], self.rhs[0])]
             if self.device.is_cuda and fused and long_route
             else None
         )
 
     def solve_rows(self):
         """Solve every block-tridiagonal path in four in-place row buffers."""
-        buffers = [self.lower[0], self.diagonal[0], self.upper[0], self.rhs[0]]
-        buffers_f = self.cr_float_buffers
+        use_fp64 = self.factor_dtype == wp.float64
+        if (
+            use_fp64
+            and self.persistent_paths is not None
+            and not self.cr_levels
+            and self.tail_paths is None
+            and self.coarse_paths is None
+        ):
+            wp.launch(
+                solve_cr_persistent_fp64_io,
+                self.persistent_paths.shape[0] * self.spatial_block_dim,
+                inputs=[
+                    self.persistent_paths,
+                    _CR_SERIAL_TERMINAL_SIZE,
+                    self.lower[0],
+                    self.diagonal[0],
+                    self.upper[0],
+                    self.rhs[0],
+                ],
+                outputs=[self.factor_lower, self.factor_diagonal, self.factor_upper, self.factor_rhs],
+                device=self.device,
+                block_dim=self.spatial_block_dim,
+            )
+            return
+        if use_fp64:
+            wp.launch(
+                _cast_path_rows_to_fp64,
+                self.size,
+                inputs=[self.lower[0], self.diagonal[0], self.upper[0], self.rhs[0]],
+                outputs=[self.factor_lower, self.factor_diagonal, self.factor_upper, self.factor_rhs],
+                device=self.device,
+                block_dim=self.spatial_block_dim,
+            )
+            buffers = [self.factor_lower, self.factor_diagonal, self.factor_upper, self.factor_rhs]
+            buffers_f = self.cr_float_buffers
+        else:
+            buffers = [self.lower[0], self.diagonal[0], self.upper[0], self.rhs[0]]
+            buffers_f = self.cr_float_buffers
         invert_limit = _CR_TAIL_MAX_ROWS if self.cr_fused else _CR_SERIAL_TERMINAL_SIZE
         side = self.cr_side_stream
         if side is not None:
@@ -7430,6 +9423,15 @@ class _PathBucket:
             main.wait_stream(side)
         else:
             self._solve_long_rows(buffers, buffers_f, invert_limit)
+        if use_fp64:
+            wp.launch(
+                _cast_path_solution_to_fp32,
+                self.size,
+                inputs=[self.factor_rhs],
+                outputs=[self.rhs[0]],
+                device=self.device,
+                block_dim=self.spatial_block_dim,
+            )
 
     def _solve_long_rows(self, buffers, buffers_f, invert_limit):
         """Reduce paths too long for one block level by level, then finish their tails."""
@@ -7439,13 +9441,13 @@ class _PathBucket:
                     invert_cr_eliminated_in_place,
                     eliminated.shape[0],
                     inputs=[eliminated],
-                    outputs=[self.diagonal[0]],
+                    outputs=[buffers[1]],
                     device=self.device,
                     block_dim=self.spatial_block_dim,
                 )
             if buffers_f is not None:
                 wp.launch(
-                    reduce_cr_in_place_rows,
+                    reduce_cr_in_place_rows_fp64 if self.factor_dtype == wp.float64 else reduce_cr_in_place_rows,
                     (survivors.shape[0], 6),
                     inputs=[stride, survivors],
                     outputs=buffers_f,
@@ -7462,8 +9464,17 @@ class _PathBucket:
                     block_dim=self.spatial_block_dim,
                 )
         if self.tail_paths is not None:
+            tail_kernel = (
+                (
+                    solve_cr_tail_persistent_rows_fp64
+                    if self.factor_dtype == wp.float64
+                    else solve_cr_tail_persistent_rows
+                )
+                if buffers_f is not None
+                else solve_cr_tail_persistent
+            )
             wp.launch(
-                solve_cr_tail_persistent_rows if buffers_f is not None else solve_cr_tail_persistent,
+                tail_kernel,
                 self.tail_paths.shape[0] * self.spatial_block_dim,
                 inputs=[self.tail_paths],
                 outputs=buffers + buffers_f if buffers_f is not None else buffers,
@@ -7523,6 +9534,7 @@ class _TreeBucket:
 
         matrix_dtype = wp.spatial_matrixd if factor_dtype == wp.float64 else wp.spatial_matrix
         vector_dtype = wp.spatial_vectord if factor_dtype == wp.float64 else wp.spatial_vector
+        self.factor_dtype = factor_dtype
         self.device = device
         self.spatial_block_dim = _SPATIAL_GPU_BLOCK_DIM if device.is_cuda else 1
         self.batch_count = len(trees)
@@ -7584,6 +9596,12 @@ class _TreeBucket:
         self.body_row_offsets = wp.array(body_row_offsets, dtype=wp.int32, device=device)
         self.body_rows = wp.array(body_rows, dtype=wp.int32, device=device)
         self.node_row = wp.array(node_row, dtype=wp.int32, device=device)
+        parent_set = set(parent_node)
+        row_node_host = np.full(self.row_count, -1, dtype=np.int32)
+        for n_i, r_i in enumerate(node_row):
+            if r_i >= 0:
+                row_node_host[r_i] = (-2 - n_i) if n_i not in parent_set else n_i
+        self.row_node = wp.array(row_node_host, dtype=wp.int32, device=device)
         self.parent_node = wp.array(parent_node, dtype=wp.int32, device=device)
         self.coupling_side = wp.array(coupling_side, dtype=wp.int32, device=device)
         # Float32 open trees reuse dead row Jacobians for numeric factors.
@@ -7619,23 +9637,37 @@ class _TreeBucket:
         # grids. Keep the exact per-level path and add a bit-identical
         # single-block replay of the same levels for schedules that fit.
         self.tree_levels_host = tree.elimination_levels if uniform else None
-        self.use_fused_tree_levels = (
-            uniform
-            and allow_fused_tree_levels
-            and not symbolics.use_tree_contraction
-            and not symbolics.use_backbone_cr
-            and _fused_tree_levels_supported(tree.elimination_levels, device)
+        self.use_fused_tree_levels = bool(
+            allow_fused_tree_levels and _batched_fused_tree_levels_supported(trees, tree_symbolics, device)
         )
         if self.use_fused_tree_levels:
-            (
-                self.fused_level_kind,
-                self.fused_level_node_start,
-                self.fused_level_nodes,
-                self.fused_level_recipient_start,
-                self.fused_level_recipients,
-                self.fused_message_offsets,
-                self.fused_message_nodes,
-            ) = _make_fused_tree_levels(tree.elimination_levels, tree.parent_node, device)
+            if uniform:
+                self.fused_tree_node_count = int(self.tree_node_count)
+                self.fused_level_count = len(tree.elimination_levels)
+                # Zero-copy placeholder: uniform batches never read tree_level_offsets.
+                self.fused_tree_level_offsets = self.roots
+                (
+                    self.fused_level_kind,
+                    self.fused_level_node_start,
+                    self.fused_level_nodes,
+                    self.fused_level_recipient_start,
+                    self.fused_level_recipients,
+                    self.fused_message_offsets,
+                    self.fused_message_nodes,
+                ) = _make_fused_tree_levels(tree.elimination_levels, tree.parent_node, device)
+            else:
+                self.fused_tree_node_count = 0
+                self.fused_level_count = 0
+                (
+                    self.fused_tree_level_offsets,
+                    self.fused_level_kind,
+                    self.fused_level_node_start,
+                    self.fused_level_nodes,
+                    self.fused_level_recipient_start,
+                    self.fused_level_recipients,
+                    self.fused_message_offsets,
+                    self.fused_message_nodes,
+                ) = _make_batched_fused_tree_levels(trees, node_offsets, device)
         self.backbone_node_count = len(symbolics.backbone) if uniform else None
         self.backbone_nodes = wp.array(backbone_nodes, dtype=wp.int32, device=device)
         self.branch_levels = _make_device_tree_levels(branch_levels, parent_node, device)
@@ -7680,26 +9712,34 @@ class _TreeBucket:
         # The shared backbone kernels also propagate optional closure-response
         # right-hand sides.  A tree has none; one dummy element keeps the same
         # kernels and graph shape without allocating per-node response storage.
-        self.no_closure_response = wp.zeros(1, dtype=wp.spatial_matrix, device=device)
+        self.no_closure_response = wp.zeros(1, dtype=matrix_dtype, device=device)
         self.use_paired_open_backbone = symbolics.use_paired_open_backbone
         # An open backbone borrows _ClosedTreeBucket._solve_paired_backbone_system
         # unbound, so it must carry that method's schedule flags. It has no
         # closure columns, so the lane split has nothing to widen.
         self.use_lane_split_coarse = False
+        self.supports_sqp_chord_resolve = False
+        self.chain_route = None
         if self.use_paired_open_backbone:
+            pair_matrix_dtype = _SpatialPairMatrixD if factor_dtype == wp.float64 else _SpatialPairMatrix
+            pair_factor_dtype = (
+                _SpatialPairEliminationFactorD if factor_dtype == wp.float64 else _SpatialPairEliminationFactor
+            )
+            pair_vector_dtype = _SpatialPairVectorD if factor_dtype == wp.float64 else _SpatialPairVector
+            pair_response_dtype = _SpatialPairResponseD if factor_dtype == wp.float64 else _SpatialPairResponse
             self.closure_count = 0
             self.paired_backbone_count = (self.backbone_node_count + 1) // 2
             self.paired_backbone_size = self.batch_count * self.paired_backbone_count
-            self.paired_lower = wp.zeros(self.paired_backbone_size, dtype=_SpatialPairMatrix, device=self.device)
+            self.paired_lower = wp.zeros(self.paired_backbone_size, dtype=pair_matrix_dtype, device=self.device)
             self.paired_diagonal = wp.zeros_like(self.paired_lower)
             self.paired_upper = wp.zeros_like(self.paired_lower)
             self.paired_elimination_factor = wp.zeros(
                 self.paired_backbone_size,
-                dtype=_SpatialPairEliminationFactor,
+                dtype=pair_factor_dtype,
                 device=self.device,
             )
-            self.paired_rhs = wp.zeros(self.paired_backbone_size, dtype=_SpatialPairVector, device=self.device)
-            self.paired_response = wp.zeros(1, dtype=_SpatialPairResponse, device=self.device)
+            self.paired_rhs = wp.zeros(self.paired_backbone_size, dtype=pair_vector_dtype, device=self.device)
+            self.paired_response = wp.zeros(1, dtype=pair_response_dtype, device=self.device)
             # A retained-factor defect correction pays for itself on longer
             # chains by suppressing float32 elimination drift. Short chains
             # already have a substantially smaller residual than the stock
@@ -7708,7 +9748,7 @@ class _TreeBucket:
                 wp.zeros_like(self.paired_rhs) if self.tree_body_count > _PAIRED_OPEN_CHAIN_MIN_BODIES else None
             )
             self.paired_correction_response = (
-                wp.zeros(1, dtype=_SpatialPairResponse, device=self.device)
+                wp.zeros(1, dtype=pair_response_dtype, device=self.device)
                 if self.paired_correction_rhs is not None
                 else None
             )
@@ -7739,34 +9779,68 @@ class _TreeBucket:
 
     def initialize_system(self, body_matrix, body_rhs, body_scale):
         """Initialize the equilibrated bipartite KKT nodes and edge blocks."""
+        if self.factor_dtype == wp.float64:
+            wp.launch(
+                equilibrate_tree_bodies,
+                self.body_count,
+                inputs=[self.body_slots, body_matrix],
+                outputs=[body_scale],
+                device=self.device,
+            )
+            wp.launch(
+                equilibrate_tree_rows,
+                self.row_count,
+                inputs=[self.compliance],
+                outputs=[self.row_scale],
+                device=self.device,
+            )
+            wp.launch(
+                _initialize_tree_couplings_fp64,
+                self.node_count,
+                inputs=[
+                    self.node_body,
+                    self.node_row,
+                    self.parent_node,
+                    self.coupling_side,
+                    body_scale,
+                    self.row_scale,
+                    self.jacobian_parent,
+                    self.jacobian_child,
+                ],
+                outputs=[self.coupling],
+                device=self.device,
+            )
+            wp.launch(
+                _initialize_tree_nodes_fp64,
+                self.node_count,
+                inputs=[
+                    self.node_body,
+                    self.node_row,
+                    body_matrix,
+                    body_rhs,
+                    body_scale,
+                    self.compliance,
+                    self.residual,
+                    self.row_scale,
+                ],
+                outputs=[self.diagonal, self.rhs],
+                device=self.device,
+            )
+            return
         wp.launch(
-            equilibrate_tree_bodies,
-            self.body_count,
-            inputs=[self.body_slots, body_matrix],
-            outputs=[body_scale],
-            device=self.device,
-        )
-        wp.launch(
-            equilibrate_tree_rows,
-            self.row_count,
-            inputs=[self.compliance],
-            outputs=[self.row_scale],
-            device=self.device,
-        )
-        wp.launch(
-            initialize_tree_couplings,
+            prepare_tree_system,
             self.node_count,
             inputs=[
                 self.node_body,
                 self.node_row,
                 self.parent_node,
                 self.coupling_side,
-                body_scale,
-                self.row_scale,
+                body_matrix,
+                self.compliance,
                 self.jacobian_parent,
                 self.jacobian_child,
             ],
-            outputs=[self.coupling],
+            outputs=[body_scale, self.row_scale, self.coupling],
             device=self.device,
             block_dim=self.spatial_block_dim,
         )
@@ -7843,8 +9917,9 @@ class _TreeBucket:
             solve_tree_levels_fused,
             self.batch_count * self.spatial_block_dim,
             inputs=[
-                self.tree_node_count,
-                len(self.tree_levels_host),
+                self.fused_tree_node_count,
+                self.fused_level_count,
+                self.fused_tree_level_offsets,
                 self.fused_level_kind,
                 self.fused_level_node_start,
                 self.fused_level_nodes,
@@ -7983,6 +10058,8 @@ class _TreeBucket:
         node_row = self.node_row.numpy()
         node_row[node_row >= 0] = inverse[node_row[node_row >= 0]]
         self.node_row.assign(node_row)
+        row_node = self.row_node.numpy()
+        self.row_node.assign(row_node[order])
         self.body_rows.assign(inverse[self.body_rows.numpy()])
         self.row_slices = [
             (
@@ -8234,6 +10311,298 @@ class _TreeBucket:
                 device=self.device,
             )
 
+    def resolve_tree(
+        self,
+        graph_body_ids,
+        joint_parent,
+        dt: float,
+        body_q,
+        body_inertia_q,
+        body_disp,
+        body_disp_ang,
+        use_displacement: int,
+        body_mass,
+        body_inv_mass,
+        body_inertia,
+        body_com,
+        body_matrix,
+        slope_offset: int,
+        slope_jacobian_parent,
+        slope_jacobian_child,
+        slope_compliance,
+        slope_residual,
+        slope_mode,
+        body_rhs,
+        body_scale,
+        body_correction,
+        *,
+        allow_paired_open_backbone=False,
+        include_sqp_torque=True,
+    ):
+        if not self.supports_sqp_chord_resolve:
+            return False
+        if self.use_backbone_cr and not (self.use_paired_open_backbone and allow_paired_open_backbone):
+            return False
+        if self.factor_dtype == wp.float64:
+            wp.launch(
+                build_tree_body_sqp_rhs_fp64,
+                self.body_count,
+                inputs=[
+                    self.body_nodes,
+                    self.body_slots,
+                    self.body_row_offsets,
+                    self.body_rows,
+                    graph_body_ids,
+                    self.joint_ids,
+                    joint_parent,
+                    self.row_node,
+                    dt,
+                    body_q,
+                    body_inertia_q,
+                    body_disp,
+                    body_disp_ang,
+                    use_displacement,
+                    body_mass,
+                    body_inv_mass,
+                    body_inertia,
+                    body_com,
+                    body_matrix,
+                    self.jacobian_parent,
+                    self.jacobian_child,
+                    slope_offset,
+                    slope_jacobian_parent,
+                    slope_jacobian_child,
+                    slope_mode,
+                    self.row_scale,
+                    self.rhs,
+                    int(include_sqp_torque),
+                ],
+                outputs=[body_rhs, body_scale],
+                device=self.device,
+            )
+        else:
+            wp.launch(
+                build_tree_body_sqp_rhs,
+                self.body_count,
+                inputs=[
+                    self.body_nodes,
+                    self.body_slots,
+                    self.body_row_offsets,
+                    self.body_rows,
+                    graph_body_ids,
+                    self.joint_ids,
+                    joint_parent,
+                    self.row_node,
+                    self.parent_node,
+                    dt,
+                    body_q,
+                    body_inertia_q,
+                    body_disp,
+                    body_disp_ang,
+                    use_displacement,
+                    body_mass,
+                    body_inv_mass,
+                    body_inertia,
+                    body_com,
+                    body_matrix,
+                    slope_offset,
+                    slope_jacobian_parent,
+                    slope_jacobian_child,
+                    slope_mode,
+                    self.row_scale,
+                    self.coupling,
+                    self.rhs,
+                    int(include_sqp_torque),
+                ],
+                outputs=[body_rhs, body_scale],
+                device=self.device,
+            )
+        wp.launch(
+            initialize_tree_saddle_resolve_rhs_fp64
+            if self.factor_dtype == wp.float64
+            else initialize_tree_saddle_resolve_rhs,
+            self.node_count,
+            inputs=[
+                self.node_body,
+                self.node_row,
+                slope_offset,
+                body_rhs,
+                body_scale,
+                self.compliance,
+                slope_compliance,
+                slope_residual,
+                self.row_scale,
+            ],
+            outputs=[self.rhs],
+            device=self.device,
+            block_dim=self.spatial_block_dim,
+        )
+        if self.use_paired_open_backbone and allow_paired_open_backbone:
+            wp.launch(
+                pack_paired_tree_backbone_rhs,
+                self.paired_backbone_size,
+                inputs=[
+                    self.paired_backbone_count,
+                    self.backbone_node_count,
+                    self.backbone_nodes,
+                    self.rhs,
+                ],
+                outputs=[self.paired_rhs],
+                device=self.device,
+                block_dim=self.spatial_block_dim,
+            )
+            _ClosedTreeBucket._solve_paired_backbone_system(
+                self,
+                False,
+                self.paired_rhs,
+                self.paired_response,
+            )
+            wp.launch(
+                scatter_paired_tree_backbone_solution,
+                self.paired_backbone_size,
+                inputs=[
+                    self.paired_backbone_count,
+                    self.backbone_node_count,
+                    0,
+                    self.backbone_nodes,
+                    self.paired_rhs,
+                    self.paired_response,
+                ],
+                outputs=[self.rhs, self.no_closure_response],
+                device=self.device,
+                block_dim=self.spatial_block_dim,
+            )
+        elif self.use_tree_contraction:
+            for (
+                nodes,
+                _neighbors,
+                edges,
+                transpose_edges,
+                _generated_edges,
+                recipients,
+                offsets,
+                slots,
+            ) in self.contraction_levels:
+                wp.launch(
+                    resolve_tree_contraction_messages,
+                    recipients.shape[0],
+                    inputs=[
+                        self.node_count,
+                        nodes,
+                        edges,
+                        transpose_edges,
+                        recipients,
+                        offsets,
+                        slots,
+                        self.coupling,
+                        self.contraction_fill_edges,
+                        self.saved_inverse,
+                        self.saved_rhs,
+                    ],
+                    outputs=[self.rhs],
+                    device=self.device,
+                    block_dim=self.spatial_block_dim,
+                )
+            wp.launch(
+                solve_tree_roots,
+                self.batch_count,
+                inputs=[self.contraction_roots, self.diagonal, self.rhs],
+                outputs=[self.solution],
+                device=self.device,
+            )
+            for nodes, neighbors, edges, transpose_edges, _, _, _, _ in reversed(self.contraction_levels):
+                wp.launch(
+                    back_substitute_tree_contraction_level,
+                    nodes.shape[0],
+                    inputs=[
+                        self.node_count,
+                        nodes,
+                        neighbors,
+                        edges,
+                        transpose_edges,
+                        self.coupling,
+                        self.contraction_fill_edges,
+                    ],
+                    outputs=[self.saved_inverse, self.saved_rhs, self.solution],
+                    device=self.device,
+                    block_dim=self.spatial_block_dim,
+                )
+        elif self.use_fused_tree_levels:
+            wp.launch(
+                resolve_tree_levels_fused,
+                self.batch_count * self.spatial_block_dim,
+                inputs=[
+                    self.fused_tree_node_count,
+                    self.fused_level_count,
+                    self.fused_tree_level_offsets,
+                    self.fused_level_kind,
+                    self.fused_level_node_start,
+                    self.fused_level_nodes,
+                    self.fused_level_recipient_start,
+                    self.fused_level_recipients,
+                    self.fused_message_offsets,
+                    self.fused_message_nodes,
+                    self.roots,
+                    self.parent_node,
+                    self.coupling,
+                ],
+                outputs=[self.diagonal, self.rhs],
+                device=self.device,
+                block_dim=self.spatial_block_dim,
+            )
+        else:
+            for leaves, recipients, recipient_offsets, message_nodes, recipients_are_unique in self.levels:
+                if recipients_are_unique:
+                    wp.launch(
+                        resolve_tree_unique_leaves,
+                        leaves.shape[0],
+                        inputs=[leaves, self.parent_node, self.coupling, self.saved_inverse],
+                        outputs=[self.rhs],
+                        device=self.device,
+                        block_dim=self.spatial_block_dim,
+                    )
+                else:
+                    wp.launch(
+                        resolve_tree_messages,
+                        recipients.shape[0],
+                        inputs=[
+                            recipients,
+                            recipient_offsets,
+                            message_nodes,
+                            self.coupling,
+                            self.saved_inverse,
+                            self.saved_rhs,
+                        ],
+                        outputs=[self.rhs],
+                        device=self.device,
+                        block_dim=self.spatial_block_dim,
+                    )
+            wp.launch(
+                solve_tree_roots,
+                self.batch_count,
+                inputs=[self.roots, self.diagonal, self.rhs],
+                outputs=[self.solution],
+                device=self.device,
+            )
+            self.back_substitute_levels(self.levels)
+
+        wp.launch(
+            scatter_tree_body_correction_indexed,
+            self.body_count,
+            inputs=[
+                self.body_nodes,
+                self.body_slots,
+                self.body_row_offsets,
+                self.body_rows,
+                self.row_active,
+                body_scale,
+                self.solution,
+            ],
+            outputs=[body_correction],
+            device=self.device,
+        )
+        return True
+
 
 @wp.func
 def _inverse_spatial_cooperative(
@@ -8293,16 +10662,6 @@ def _cooperative_matrix_product(a: wp.array[wp.float64], ao: int, b: wp.array[wp
     for k in range(6):
         value = value + a[ao + row * 6 + k] * b[bo + k * 6 + col]
     return value
-
-
-@wp.func_native("""
-#if defined(__CUDA_ARCH__)
-return fma(a, b, c);
-#else
-return a * b + c;
-#endif
-""")
-def _fma_f64(a: wp.float64, b: wp.float64, c: wp.float64) -> wp.float64: ...
 
 
 @wp.func
@@ -8699,6 +11058,7 @@ class _ClosedTreeBucket:
             tree_symbolics = _tree_bucket_symbolics(component.tree, include_contraction=False)
         self.device = device
         self.side_streams = None
+        self.chain_route = None
         self.tree = _TreeBucket(
             [candidate.tree for candidate in components],
             body_slot,
@@ -9352,7 +11712,22 @@ class _ClosedTreeBucket:
                 self.closure_row_active,
                 tree.tree_body_count,
                 self.closure_count,
+                tree.row_node,
+                tree.parent_node,
+                tree.coupling_side,
+                body_matrix,
+                body_rhs,
                 body_scale,
+                tree.row_scale,
+                tree.jacobian_parent,
+                tree.jacobian_child,
+                tree.compliance,
+                tree.residual,
+                self.closure_parent_node,
+                self.closure_child_node,
+                self.closure_row_scale,
+                self.closure_jacobian_parent,
+                self.closure_jacobian_child,
                 tree.solution,
                 self.response_solution,
                 self.closure_multiplier,
@@ -9509,6 +11884,119 @@ class _ClosedTreeBucket:
                 )
 
 
+_FP32_MANTISSA_RECIPROCAL = float(1 << 24)
+
+
+def _rigid_at_step(rigidity: float, step: float | None) -> bool:
+    """Whether a rigidity ``omega^2`` [s^-2] reaches ``omega^2 h^2 >= 2^24`` at a step ``h`` [s].
+
+    With no step known (``None``) every positive rigidity counts as rigid: the safe side of each decision.
+    """
+    if rigidity <= 0.0:
+        return False
+    return step is None or rigidity * step * step >= _FP32_MANTISSA_RECIPROCAL
+
+
+@wp.kernel
+def flag_nonlinear_correction(
+    body_flags: wp.array[wp.int32],
+    body_island: wp.array[wp.int32],
+    island_contact_state: wp.array[wp.int32],
+    island_step_scale: wp.array[float],
+    correction: wp.array[wp.spatial_vector],
+    needed: wp.array[wp.int32],
+):
+    """Flag a correction whose rotation the linearized rows do not resolve in single precision.
+
+    A body turned by ``theta`` moves a joint anchor by ``theta^2 / 2`` of its arm beyond the linearization. Once
+    that reaches the binary32 resolution ``2^-24`` a second Newton stage changes the result.
+    """
+    slot = wp.tid()
+    if (body_flags[slot] & 8) == 0:
+        return
+    island = body_island[slot]
+    if island_contact_state[island] < -1:
+        return
+    turn = island_step_scale[island] * wp.spatial_bottom(correction[slot])
+    if 0.5 * wp.dot(turn, turn) * 16777216.0 >= 1.0:
+        needed[0] = 1
+
+
+@wp.kernel
+def flag_any_island(
+    island_flags: wp.array[wp.int32],
+    needed: wp.array[wp.int32],
+):
+    """Set ``needed[0]`` when a structural island is flagged."""
+    if island_flags[wp.tid()] != 0:
+        needed[0] = 1
+
+
+def _compute_joint_delassus_mobilities(
+    model,
+    parent: np.ndarray,
+    child: np.ndarray,
+    body_inv_mass_host: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute single-body pivot translational [kg^-1] and rotational [(kg*m^2)^-1] mobilities.
+
+    In paired cyclic reduction, each ``(body b, row j)`` saddle pivot evaluates the Woodbury
+    complement ``B_b^-1 + B_b^-1 J_{j,b}^T (C_j - J_{j,b} B_b^-1 J_{j,b}^T)^-1 J_{j,b} B_b^-1`` on
+    a single incident body ``b in {parent[j], child[j]}``. Taking ``max_b ||J_{j,b} M_b^-1 J_{j,b}^T||``
+    gives ``k_lin * w_lin`` and ``k_ang * w_ang`` exact squared natural-frequency units ``[s^-2]``,
+    invariant under arbitrary mass and length unit rescalings, and matches the exact IEEE-754
+    ``float32`` Woodbury cancellation threshold ``chi_nom = omega^2 h_nom^2 = 2^24``.
+    """
+    n_joints = len(parent)
+    w_lin = np.zeros(n_joints, dtype=np.float64)
+    w_ang = np.zeros(n_joints, dtype=np.float64)
+    if n_joints == 0 or model.body_count == 0:
+        return w_lin, w_ang
+    xp = np.asarray(model.joint_X_p.numpy(), dtype=np.float64)
+    xc = np.asarray(model.joint_X_c.numpy(), dtype=np.float64)
+    com = np.asarray(model.body_com.numpy(), dtype=np.float64)
+    inv_inertia = np.asarray(model.body_inv_inertia.numpy(), dtype=np.float64)
+    # The largest inverse inertia bounds the rigidity of every row direction of a body. The mean understates
+    # the stiffest direction of a thin body (its twist), which is the one that cancels first.
+    body_max_inv_i = np.linalg.eigvalsh(inv_inertia).max(axis=1) if len(inv_inertia) else np.zeros(0)
+    for j in range(n_joints):
+        c = int(child[j])
+        if c < 0:
+            continue
+        p = int(parent[j])
+        wl = 0.0
+        wa = 0.0
+        if body_inv_mass_host[c] > 0.0:
+            rc = xc[j, :3] - com[c]
+            ic = float(body_max_inv_i[c])
+            wl = max(wl, float(body_inv_mass_host[c]) + float(np.dot(rc, rc)) * ic)
+            wa = max(wa, ic)
+        if p >= 0 and body_inv_mass_host[p] > 0.0:
+            rp = xp[j, :3] - com[p]
+            ip = float(body_max_inv_i[p])
+            wl = max(wl, float(body_inv_mass_host[p]) + float(np.dot(rp, rp)) * ip)
+            wa = max(wa, ip)
+        w_lin[j] = wl
+        w_ang[j] = wa
+    return w_lin, w_ang
+
+
+def _tree_is_branched_and_depth(
+    tree: _Tree, parent: np.ndarray, child: np.ndarray, inv_mass: np.ndarray
+) -> tuple[bool, int]:
+    """Return whether ``tree`` contains a branching dynamic junction (degree >= 3) and its joint depth."""
+    deg: dict[int, int] = defaultdict(int)
+    for j in tree.joints:
+        p, c = int(parent[j]), int(child[j])
+        if p >= 0 and inv_mass[p] > 0.0:
+            deg[p] += 1
+        if c >= 0 and inv_mass[c] > 0.0:
+            deg[c] += 1
+    is_branched = any(count >= 3 for count in deg.values())
+    joint_depth = max(1, (len(tree.elimination_levels) + 1) // 2)
+    return is_branched, joint_depth
+
+
 class StructuralGraphKKT:
     """Graph-capturable compliance-KKT backend for paths, trees, and cyclic graphs."""
 
@@ -9522,8 +12010,17 @@ class StructuralGraphKKT:
         supported_joint_types: set[int] | None = None,
         ignore_free_completion_joints=False,
         enable_stream_concurrency=False,
+        joint_max_stiffness: np.ndarray | None = None,
+        joint_linear_stiffness: np.ndarray | None = None,
+        joint_angular_stiffness: np.ndarray | None = None,
+        plan_step: float | None = None,
     ):
         self.device = model.device
+        # Routes and factor precisions depend on the step through chi = omega^2 h^2; this plan is made for
+        # plan_step (None: no step known, every decision takes its safe side), and plan_change(dt) tells whether
+        # another step needs another plan.
+        self.plan_step = None if plan_step is None else float(plan_step)
+        self.plan_rigidities: tuple[float, ...] = ()
         # Independent row, contact and closed-tree work may overlap on CUDA.
         # Reproducible modes keep one stream and therefore one reduction order.
         self.side_streams = (
@@ -9546,6 +12043,7 @@ class StructuralGraphKKT:
         self._fuse_rod_stress = False
         self.use_fused_solve_reset = True
         self.use_fused_contact_classification = True
+        self.chain_route = None
 
         body_inv_mass_host = np.asarray(body_inv_mass.numpy(), dtype=float)
         self.dynamic_body_mask_host = body_inv_mass_host > 0.0
@@ -9601,16 +12099,100 @@ class StructuralGraphKKT:
         # heuristic. If a repeated-topology batch is too large, retain the
         # largest deterministic prefix that fits and leave the rest to VBD.
         # Paths of every length share one bucket and one launch per CR level.
+        w_lin_h, w_ang_h = _compute_joint_delassus_mobilities(model, parent, child, body_inv_mass_host)
+        joint_omega2 = np.zeros(len(joint_type), dtype=np.float64)
+        if joint_linear_stiffness is not None and joint_angular_stiffness is not None:
+            joint_omega2 = np.maximum(
+                np.asarray(joint_linear_stiffness, dtype=np.float64) * w_lin_h,
+                np.asarray(joint_angular_stiffness, dtype=np.float64) * w_ang_h,
+            )
+        elif joint_max_stiffness is not None:
+            k_max_h = np.asarray(joint_max_stiffness, dtype=np.float64)
+            is_ball = joint_type == int(JointType.BALL)
+            eff_w = np.where(is_ball, w_lin_h, np.maximum(w_lin_h, w_ang_h))
+            joint_omega2 = k_max_h * eff_w
+        # joint_omega2 [s^-2]: squared natural frequency of a joint's stiffest row against its mobility. A
+        # decision below compares a rigidity r [s^-2] times plan_step^2 with 2^24 (_rigid_at_step);
+        # plan_rigidities keeps every r whose decision changes with the step.
+        plan_rigidities: list[float] = []
+
         plans: list[_BucketPlan] = []
+        path_factor_dtype = wp.float32
+        if paths and not allow_general_joint_paths:
+            qd_start_h = np.asarray(model.joint_qd_start.numpy(), dtype=np.int64)
+            dof_dim_h = np.asarray(model.joint_dof_dim.numpy(), dtype=np.int64)
+            ke_h = np.asarray(model.joint_target_ke.numpy(), dtype=np.float64)
+            path_rigidity = 0.0
+            path_contrast = 0.0
+            for cand_path in paths:
+                max_omega2_drive = 0.0
+                max_lin_w, min_lin_w = 0.0, np.inf
+                max_ang_w, min_ang_w = 0.0, np.inf
+                for j in cand_path.joints:
+                    d0 = int(qd_start_h[j])
+                    lc, ac = int(dof_dim_h[j, 0]), int(dof_dim_h[j, 1])
+                    if lc > 0 and w_lin_h[j] > 0.0:
+                        lpos = ke_h[d0 : d0 + lc]
+                        lpos = lpos[lpos > 0.0]
+                        if lpos.size > 0:
+                            lw_hi = float(lpos.max()) * float(w_lin_h[j])
+                            lw_lo = float(lpos.min()) * float(w_lin_h[j])
+                            max_lin_w = max(max_lin_w, lw_hi)
+                            min_lin_w = min(min_lin_w, lw_lo)
+                            max_omega2_drive = max(max_omega2_drive, lw_hi)
+                    if ac > 0 and w_ang_h[j] > 0.0:
+                        apos = ke_h[d0 + lc : d0 + lc + ac]
+                        apos = apos[apos > 0.0]
+                        if apos.size > 0:
+                            aw_hi = float(apos.max()) * float(w_ang_h[j])
+                            aw_lo = float(apos.min()) * float(w_ang_h[j])
+                            max_ang_w = max(max_ang_w, aw_hi)
+                            min_ang_w = min(min_ang_w, aw_lo)
+                            max_omega2_drive = max(max_omega2_drive, aw_hi)
+                lin_c = (max_lin_w / min_lin_w) if (0.0 < min_lin_w < np.inf) else 1.0
+                ang_c = (max_ang_w / min_ang_w) if (0.0 < min_ang_w < np.inf) else 1.0
+                n_rows_sq = float(len(cand_path.joints)) ** 2
+                path_rigidity = max(path_rigidity, n_rows_sq * max_omega2_drive)
+                path_contrast = max(path_contrast, n_rows_sq * max(lin_c, ang_c))
+            if path_contrast >= _FP32_MANTISSA_RECIPROCAL or _rigid_at_step(path_rigidity, self.plan_step):
+                path_factor_dtype = wp.float64
+            if path_contrast < _FP32_MANTISSA_RECIPROCAL:
+                plan_rigidities.append(path_rigidity)
         if paths:
             ordered = sorted(paths, key=_component_order_key)
-            plans.append(_BucketPlan("path", ordered, _path_bucket_diagnostics(ordered, self.device)))
+            plans.append(
+                _BucketPlan(
+                    "path",
+                    ordered,
+                    _path_bucket_diagnostics(ordered, self.device, factor_dtype=path_factor_dtype),
+                )
+            )
         for group in grouped_trees.values():
             ordered = sorted(group, key=_component_order_key)
+            # Dimensionless conditioning: chi = omega^2 h^2 of the stiffest joint at the planned step. Paired
+            # cyclic reduction cancels in every (body, row) pair; tip-to-root leaf rake does not.
+            max_tree_omega2 = max(
+                (float(joint_omega2[joint]) for candidate in ordered for joint in candidate.joints),
+                default=0.0,
+            )
+            tree_is_rigid = _rigid_at_step(max_tree_omega2, self.plan_step)
+            rigid_angular_tree = any(_has_rigid_angular_rows(candidate.joints, joint_type) for candidate in ordered)
+            paired_allowed = bool(enable_paired_open_chains and self.device.is_cuda and rigid_angular_tree)
+            paired_probe = _tree_bucket_symbolics(ordered[0], enable_paired_open_chain=True) if paired_allowed else None
+            # Ultra-long near-rigid open chains (>= 512 joints) retain O(log N) paired CR in float64;
+            # shorter near-rigid chains use single-block fused leaf rake in float32/float64.
+            use_fp64_paired_cr = bool(
+                paired_probe is not None
+                and paired_probe.use_paired_open_backbone
+                and tree_is_rigid
+                and len(ordered[0].joints) >= _FUSED_TREE_MAX_LEVEL_WIDTH
+            )
             symbolics = _tree_bucket_symbolics(
                 ordered[0],
-                enable_paired_open_chain=bool(enable_paired_open_chains and self.device.is_cuda),
+                enable_paired_open_chain=paired_allowed and (not tree_is_rigid or use_fp64_paired_cr),
             )
+            if paired_probe is not None and paired_probe.use_paired_open_backbone:
+                plan_rigidities.append(max_tree_omega2)
             # Generic rake/compress changes the pivot order of an indefinite
             # compliance KKT system.  Its homogeneous routes have independent
             # numerical coverage, but a mixed rod/rigid
@@ -9625,7 +12207,16 @@ class StructuralGraphKKT:
                 and any(joint_type[joint] != int(JointType.ROD) for joint in candidate.joints)
                 for candidate in ordered
             )
-            if mixed_rod_tree and symbolics.use_tree_contraction:
+            # A tree with exactly one row to the world is rooted at that row, so every row follows a body and
+            # float32 holds it up to K = 1e12. Free trees and trees with two or more rows to the world, whose
+            # leaf rake eliminates the other rows to the world first, take float64 factors once the
+            # single-pivot rigidity of the planned step reaches the IEEE-754 float32 mantissa reciprocal 2^24.
+            unanchored_tree = _tree_anchor_row_count(ordered[0]) != 1
+            near_rigid_tree = tree_is_rigid and unanchored_tree
+            if unanchored_tree:
+                plan_rigidities.append(max_tree_omega2)
+            tree_factor_dtype = wp.float64 if (near_rigid_tree or use_fp64_paired_cr) else wp.float32
+            if (mixed_rod_tree or rigid_angular_tree or near_rigid_tree) and symbolics.use_tree_contraction:
                 symbolics = replace(
                     symbolics,
                     contraction=None,
@@ -9636,7 +12227,13 @@ class StructuralGraphKKT:
                 _BucketPlan(
                     "tree",
                     ordered,
-                    _tree_bucket_diagnostics(ordered, self.device, symbolics=symbolics),
+                    _tree_bucket_diagnostics(
+                        ordered,
+                        self.device,
+                        symbolics=symbolics,
+                        allow_fused_tree_levels=True,
+                        factor_dtype=tree_factor_dtype,
+                    ),
                     symbolics,
                 )
             )
@@ -9680,6 +12277,52 @@ class StructuralGraphKKT:
                     symbolics_by_tree,
                 )
             )
+        # Heterogeneous fused leaf-rake trees of the same precision and rod class
+        # also share one multi-CTA bucket so distinct digits/limbs solve in parallel
+        # across SMs in one kernel launch rather than serial per-topology buckets.
+        if self.device.is_cuda:
+            fused_rake_groups: dict[tuple[bool, bool], list[_BucketPlan]] = defaultdict(list)
+            for plan in plans:
+                if (
+                    plan.kind == "tree"
+                    and isinstance(plan.tree_symbolics, _TreeBucketSymbolics)
+                    and not plan.tree_symbolics.use_tree_contraction
+                    and not plan.tree_symbolics.use_backbone_cr
+                    and _fused_tree_levels_supported(plan.components[0].elimination_levels, self.device)
+                ):
+                    is_fp64 = plan.diagnostics.planned_route.endswith("_fp64")
+                    has_rod = any(
+                        int(joint_type[j]) == int(JointType.ROD) for cand in plan.components for j in cand.joints
+                    )
+                    in_chain_scope = all(
+                        _chain_island_in_scope(cand, joint_type, parent, child, body_inv_mass_host)
+                        for cand in plan.components
+                    )
+                    fused_rake_groups[(is_fp64, has_rod, in_chain_scope)].append(plan)
+            for (is_fp64, _has_rod, _in_chain_scope), rake_plans in fused_rake_groups.items():
+                if len(rake_plans) > 1:
+                    symbolics_by_tree = {
+                        id(tree): plan.tree_symbolics for plan in rake_plans for tree in plan.components
+                    }
+                    ordered = sorted(
+                        (tree for plan in rake_plans for tree in plan.components), key=_component_order_key
+                    )
+                    plans = [plan for plan in plans if all(plan is not merged for merged in rake_plans)]
+                    merged_dtype = wp.float64 if is_fp64 else wp.float32
+                    plans.append(
+                        _BucketPlan(
+                            "tree",
+                            ordered,
+                            _tree_bucket_diagnostics(
+                                ordered,
+                                self.device,
+                                symbolics=symbolics_by_tree,
+                                allow_fused_tree_levels=True,
+                                factor_dtype=merged_dtype,
+                            ),
+                            symbolics_by_tree,
+                        )
+                    )
         plans.sort(key=lambda plan: _component_order_key(plan.components[0]))
 
         selected_component_ids: set[int] = set()
@@ -9788,14 +12431,17 @@ class StructuralGraphKKT:
 
         for plan in selected_plans:
             if plan.kind == "path":
-                bucket = _PathBucket(plan.components, self.device)
+                bucket = _PathBucket(plan.components, self.device, factor_dtype=path_factor_dtype)
                 self.path_buckets.append(bucket)
             elif plan.kind == "tree":
+                tree_dtype = wp.float64 if plan.diagnostics.planned_route.endswith("_fp64") else wp.float32
                 bucket = _TreeBucket(
                     plan.components,
                     body_slot,
                     self.device,
                     symbolics=plan.tree_symbolics,
+                    allow_fused_tree_levels=True,
+                    factor_dtype=tree_dtype,
                 )
                 self.tree_buckets.append(bucket)
             else:
@@ -9811,6 +12457,7 @@ class StructuralGraphKKT:
                 self.closed_tree_buckets.append(bucket)
             bucket._diagnostics = plan.diagnostics
             bucket._estimated_bytes = plan.diagnostics.estimated_bytes
+            bucket._components = plan.components
 
         self.buckets = [
             *self.path_buckets,
@@ -9823,6 +12470,66 @@ class StructuralGraphKKT:
             bucket.side_streams = self.side_streams
             if self.side_streams is not None:
                 bucket.tree.group_rows_by_joint_type(model.joint_type.numpy())
+        candidates = [*self.tree_buckets, *self.closed_tree_buckets]
+        self.chain_route, row_offsets = ChainCondensation.plan(
+            [
+                (
+                    bucket._components,
+                    np.concatenate((bucket.tree.joint_ids_host, bucket.closure_joint_ids.numpy()))
+                    if isinstance(bucket, _ClosedTreeBucket)
+                    else bucket.joint_ids_host,
+                )
+                for bucket in candidates
+            ],
+            joint_type,
+            parent,
+            child,
+            body_inv_mass_host,
+            model.body_count,
+            self.device,
+        )
+        chain_diag_ids: set[int] = set()
+        for bucket, offset in zip(candidates, row_offsets, strict=True):
+            if offset is None:
+                continue
+            chain_diag_ids.add(id(bucket._diagnostics))
+            bucket.chain_route = self.chain_route
+            bucket._diagnostics = replace(bucket._diagnostics, selected_route="chain_condensation")
+            tree = bucket.tree if isinstance(bucket, _ClosedTreeBucket) else bucket
+            (
+                tree.jacobian_parent,
+                tree.jacobian_child,
+                tree.compliance,
+                tree.residual,
+                tree.row_active,
+            ) = self.chain_route.rows(offset, tree.row_count)
+            if tree.row_slices is not None:
+                starts = np.cumsum([0] + [group[1] for group in tree.row_slices])
+                tree.row_slices = [
+                    (
+                        tree.joint_ids[start:end],
+                        end - start,
+                        tree.jacobian_parent[start:end],
+                        tree.jacobian_child[start:end],
+                        tree.compliance[start:end],
+                        tree.residual[start:end],
+                        tree.row_active[start:end],
+                    )
+                    for start, end in zip(starts[:-1].tolist(), starts[1:].tolist(), strict=True)
+                ]
+            if isinstance(bucket, _ClosedTreeBucket):
+                (
+                    bucket.closure_jacobian_parent,
+                    bucket.closure_jacobian_child,
+                    bucket.closure_compliance,
+                    bucket.closure_residual,
+                    bucket.closure_row_active,
+                ) = self.chain_route.rows(offset + tree.row_count, bucket.closure_size)
+        if chain_diag_ids:
+            self._bucket_diagnostics = tuple(
+                replace(diag, selected_route="chain_condensation") if id(diag) in chain_diag_ids else diag
+                for diag in self._bucket_diagnostics
+            )
         # Row passes visit each launch's rows grouped by joint type; line-search slopes replay the
         # stored rows in identity order.
         self.row_block_dim = _ROW_PASS_GPU_BLOCK_DIM if self.device.is_cuda else 1
@@ -9900,6 +12607,9 @@ class StructuralGraphKKT:
             device=self.device,
         )
         self.rigid_mode_center = wp.zeros(len(components), dtype=wp.vec4d, device=self.device)
+        # State handed to the rigid-mode system after the local sweeps: every island evaluates
+        # its external contacts only (the translation pass does not classify internal pairs).
+        self.rigid_reconcile_state = wp.full(len(components), -1, dtype=wp.int32, device=self.device)
         self.rigid_mode_matrix = wp.zeros(len(components), dtype=wp.spatial_matrixd, device=self.device)
         self.rigid_mode_rhs = wp.zeros(len(components), dtype=wp.spatial_vectord, device=self.device)
         self.rigid_mode_shift = wp.zeros(len(components), dtype=wp.spatial_vectord, device=self.device)
@@ -9908,11 +12618,100 @@ class StructuralGraphKKT:
         self.graph_joint_ids = wp.array(graph_joint_ids, dtype=wp.int32, device=self.device)
         self.body_slot_by_id = wp.array(body_slot_by_id, dtype=wp.int32, device=self.device)
         self._plan_stress_incidence(parent, child, body_slot_by_id, body_inv_mass_host, graph_joint_ids)
-        # Path assembly consumes inverse metrics; the surrogate build writes them directly.
+        lim_ke_h = model.joint_limit_ke.numpy()
+        lim_lo_h = model.joint_limit_lower.numpy()
+        lim_hi_h = model.joint_limit_upper.numpy()
+        joint_has_limit = (
+            (lim_ke_h > 0.0) & ((lim_lo_h > -MAXVAL) | (lim_hi_h < MAXVAL))
+            if len(lim_ke_h) > 0
+            else np.zeros(0, dtype=bool)
+        )
+        drv_ke_h = model.joint_target_ke.numpy()
+        drv_kd_h = model.joint_target_kd.numpy()
+        lim_kd_h = model.joint_limit_kd.numpy()
+        self.has_any_joint_drives_or_limits = bool(
+            np.any(joint_has_limit)
+            or (len(drv_ke_h) > 0 and np.any((drv_ke_h > 0.0) | (drv_kd_h > 0.0) | (lim_kd_h > 0.0)))
+        )
+
+        def _bucket_joint_ids_host(b):
+            return (
+                [*b.tree.joint_ids_host, *b.closure_joint_ids.numpy()]
+                if isinstance(b, _ClosedTreeBucket)
+                else b.joint_ids_host
+            )
+
+        self.plan_rigidities = tuple(plan_rigidities)
+        # Largest joint omega^2 [s^-2] of every non-rod bucket (0 for buckets with rod rows); a step of size h
+        # skips the predicted-pose stress term of a bucket whose omega^2 h^2 reaches 2^24 (bucket_skips_stress).
+        self.bucket_omega2 = {
+            id(bucket): (
+                0.0
+                if any(joint_type[j] == int(JointType.ROD) for j in _bucket_joint_ids_host(bucket))
+                else max((float(joint_omega2[j]) for j in _bucket_joint_ids_host(bucket)), default=0.0)
+            )
+            for bucket in self.buckets
+        }
+        # Fallback of the second-stage decision for a captured graph without conditional nodes
+        # (second_stage_without_flag): the largest depth^2 * omega^2 [s^-2] over branched non-rod trees
+        # (0 without float32 tree buckets).
+        branched_tree_rigidity = 0.0
+        for plan in selected_plans:
+            if plan.kind != "tree":
+                continue
+            for tree_cand in plan.components:
+                if any(joint_type[j] == int(JointType.ROD) for j in tree_cand.joints):
+                    continue
+                is_branched, joint_depth = _tree_is_branched_and_depth(tree_cand, parent, child, body_inv_mass_host)
+                if not is_branched:
+                    continue
+                tree_omega2 = max((float(joint_omega2[j]) for j in tree_cand.joints), default=0.0)
+                branched_tree_rigidity = max(branched_tree_rigidity, float(joint_depth * joint_depth) * tree_omega2)
+        has_float32_trees = any(b.solution.dtype == wp.spatial_vector for b in self.tree_buckets)
+        self.branched_tree_rigidity = branched_tree_rigidity if has_float32_trees else 0.0
+        # A non-rod float32 tree builds the stress term of every stage from the multipliers its
+        # last solve stored (add_clean_saddle_stress_majorizer), at every joint stiffness.
+        self.stored_stress_buckets = {
+            id(bucket)
+            for bucket in self.tree_buckets
+            if bucket.solution.dtype == wp.spatial_vector
+            and not any(joint_type[j] == int(JointType.ROD) for j in bucket.joint_ids_host)
+        }
+        self.has_any_joint_limits = bool(np.any(joint_has_limit))
+        for bucket in self.tree_buckets:
+            # The sweep owns the stress rows of rod joints, so rod trees keep it.
+            has_rod = any(int(joint_type[j]) == int(JointType.ROD) for j in bucket.joint_ids_host)
+            bucket.supports_sqp_chord_resolve = bool(
+                bucket.chain_route is None
+                and not has_rod
+                and not (bucket.use_backbone_cr and not bucket.use_paired_open_backbone)
+            )
+        self.has_resolvable_trees = any(b.supports_sqp_chord_resolve for b in self.tree_buckets)
+        # Path assembly consumes bit 0; resolved-tree sweep skipping consumes bit 2
+        # (zero extra device bytes).
         body_path_inverse = np.zeros(self.graph_body_count, dtype=np.int32)
         for bucket in self.path_buckets:
             path_slots = body_slot_by_id[bucket.body_ids_host]
-            body_path_inverse[path_slots[path_slots >= 0]] = 1
+            body_path_inverse[path_slots[path_slots >= 0]] |= 1
+        resolved_dynamic_bodies: set[int] = set()
+        for bucket in self.tree_buckets:
+            if bucket.supports_sqp_chord_resolve:
+                res_slots = body_slot_by_id[bucket.body_ids_host]
+                body_path_inverse[res_slots[res_slots >= 0]] |= 4
+                for body_id in bucket.body_ids_host.tolist():
+                    if body_inv_mass_host[int(body_id)] > 0.0:
+                        resolved_dynamic_bodies.add(int(body_id))
+        self.all_dynamic_rigid_resolved = bool(
+            self.has_resolvable_trees and len(resolved_dynamic_bodies) == int(np.sum(body_inv_mass_host > 0.0))
+        )
+        # Bit 3: bodies of the float32 non-rod trees. The rotation of their first correction decides
+        # whether a second stage follows (flag_second_stage; zero extra device bytes).
+        for bucket in self.tree_buckets:
+            if id(bucket) in self.stored_stress_buckets:
+                stage_slots = body_slot_by_id[bucket.body_ids_host]
+                body_path_inverse[stage_slots[stage_slots >= 0]] |= 8
+        self.has_second_stage_bodies = bool(self.stored_stress_buckets)
+        self.second_stage_needed = wp.zeros(1, dtype=wp.int32, device=self.device)
         self.body_path_inverse = wp.array(body_path_inverse, dtype=wp.int32, device=self.device)
         slope_rows = sum(
             bucket.tree.size + bucket.closure_size if isinstance(bucket, _ClosedTreeBucket) else bucket.size
@@ -9925,10 +12724,18 @@ class StructuralGraphKKT:
         self.slope_objective = wp.zeros(slope_rows, dtype=wp.spatial_vector, device=self.device)
         self.slope_mode = wp.zeros(slope_rows, dtype=wp.int32, device=self.device)
         self.line_search_pose = wp.empty_like(model.body_q)
+        self.line_search_disp = wp.zeros(model.body_count, dtype=wp.vec3, device=self.device)
+        self.line_search_disp_ang = wp.zeros(model.body_count, dtype=wp.vec3, device=self.device)
         self.line_search_enabled = wp.ones(len(components), dtype=bool, device=self.device)
         self.line_search_slope = wp.zeros(len(components), dtype=wp.float64, device=self.device)
         self.line_search_initial_slope = wp.empty_like(self.line_search_slope)
         self.line_search_pending = wp.ones(1, dtype=int, device=self.device)
+        self.limit_search_needed = wp.zeros(1, dtype=int, device=self.device)
+        self.limit_search_islands = wp.zeros(len(components), dtype=wp.int32, device=self.device)
+        # Islands with an active rigid contact, and whether there is one: the predicate of the solve under contact.
+        self.contact_solve_islands = wp.zeros(len(components), dtype=wp.int32, device=self.device)
+        self.contact_solve_needed = wp.zeros(1, dtype=wp.int32, device=self.device)
+        self.has_limit_rows = bool(np.any(joint_has_limit))
         self.line_search_trial = wp.zeros(1, dtype=int, device=self.device) if self.device.is_cuda else None
         self.translation_iterations_remaining = (
             wp.empty(1, dtype=int, device=self.device) if self.device.is_cuda else None
@@ -10027,6 +12834,85 @@ class StructuralGraphKKT:
             device=self.device,
         )
 
+    def clear_stored_stress(self, world_mask, world_count, joint_world):
+        """Zero the multipliers from which the next stage of the selected worlds would build its stress term."""
+        for bucket in self.tree_buckets:
+            if id(bucket) in self.stored_stress_buckets:
+                wp.launch(
+                    clear_stored_row_multipliers,
+                    bucket.size,
+                    inputs=[
+                        world_mask,
+                        world_mask is None,
+                        world_count,
+                        joint_world,
+                        bucket.joint_ids,
+                        bucket.row_node,
+                    ],
+                    outputs=[bucket.solution],
+                    device=self.device,
+                )
+
+    def plan_change(self, dt: float) -> int:
+        """Compare the decisions of this plan with those a step of size ``dt`` asks for.
+
+        Returns 1 when ``dt`` needs a more robust route or factor precision than was planned, -1 when it would
+        allow a faster one, and 0 when every decision is the same.
+        """
+        change = 0
+        for rigidity in self.plan_rigidities:
+            was = _rigid_at_step(rigidity, self.plan_step)
+            now = _rigid_at_step(rigidity, float(dt))
+            if now and not was:
+                return 1
+            if was and not now:
+                change = -1
+        return change
+
+    def flag_second_stage(self) -> wp.array:
+        """Set ``second_stage_needed`` from the correction the last solve applied and return it."""
+        self.second_stage_needed.zero_()
+        wp.launch(
+            flag_nonlinear_correction,
+            self.graph_body_count,
+            inputs=[
+                self.body_path_inverse,
+                self.graph_body_island,
+                self.island_contact_state,
+                self.island_step_scale,
+                self.body_correction,
+            ],
+            outputs=[self.second_stage_needed],
+            device=self.device,
+            block_dim=self.spatial_block_dim,
+        )
+        return self.second_stage_needed
+
+    def flag_contact_solve(self) -> wp.array:
+        """Set ``contact_solve_needed`` when ``contact_solve_islands`` marks an island and return it."""
+        self.contact_solve_needed.zero_()
+        wp.launch(
+            flag_any_island,
+            self.contact_solve_islands.shape[0],
+            inputs=[self.contact_solve_islands],
+            outputs=[self.contact_solve_needed],
+            device=self.device,
+        )
+        return self.contact_solve_needed
+
+    def second_stage_without_flag(self, dt: float) -> bool:
+        """Whether a step of size ``dt`` that cannot read ``second_stage_needed`` takes the second stage.
+
+        A captured graph without conditional nodes has no device predicate. The decision then comes from the
+        structure and the step: branched float32 trees take the stage once ``depth^2 * omega^2 * dt^2``
+        reaches 2^24. A mechanism that does not turn gets the same result as with the flag.
+        """
+        return self.branched_tree_rigidity * float(dt) * float(dt) >= _FP32_MANTISSA_RECIPROCAL
+
+    def bucket_skips_stress(self, bucket, dt: float) -> bool:
+        """Whether a step of size ``dt`` skips the predicted-pose stress term of ``bucket`` (near rigidity)."""
+        return self.bucket_omega2.get(id(bucket), 0.0) * float(dt) * float(dt) >= _FP32_MANTISSA_RECIPROCAL
+
     def solve(
         self,
         *,
@@ -10034,6 +12920,9 @@ class StructuralGraphKKT:
         contacts,
         body_q,
         body_inertia_q,
+        body_disp,
+        body_disp_ang,
+        use_displacement,
         body_q_prev,
         body_q_rest,
         body_mass,
@@ -10088,8 +12977,64 @@ class StructuralGraphKKT:
         body_contact_indices,
         refresh_contacts=None,
         translation_only=False,
+        resolve_only=False,
+        resolve_sqp_torque=True,
         contact_stream=None,
+        friction_epsilon=0.0,
+        contact_damping_bidirectional=False,
+        contact_penalty_k=None,
+        contact_normal_rho=None,
+        contact_material_ke=None,
+        contact_material_kd=None,
+        contact_material_mu=None,
+        contact_tangent_rho=None,
+        contact_lambda=None,
+        contact_C0=None,
+        contact_stab_alpha=0.0,
+        legacy_hard_contacts=0,
+        contact_compliant_alm=1,
+        sync_alm_duals=False,
     ):
+        def solve_chain_route():
+            self.chain_route.solve(
+                body_slot_by_id=self.body_slot_by_id,
+                graph_body_island=self.graph_body_island,
+                island_contact_state=self.island_contact_state,
+                include_stress=1,
+                stress_offsets=self.stress_offsets,
+                body_stress=self.body_stress,
+                body_correction=self.body_correction,
+                dt=dt,
+                body_q=body_q,
+                body_inertia_q=body_inertia_q,
+                body_disp=body_disp,
+                body_disp_ang=body_disp_ang,
+                use_displacement=use_displacement,
+                body_q_prev=body_q_prev,
+                body_mass=body_mass,
+                body_inv_mass=body_inv_mass,
+                body_inertia=body_inertia,
+                body_com=body_com,
+                contacts=contacts,
+                shape_body=shape_body,
+                body_contact_buffer_size=body_contact_buffer_size,
+                body_contact_counts=body_contact_counts,
+                body_contact_indices=body_contact_indices,
+                friction_epsilon=friction_epsilon,
+                contact_damping_bidirectional=contact_damping_bidirectional,
+                contact_penalty_k=contact_penalty_k,
+                contact_normal_rho=contact_normal_rho,
+                contact_material_ke=contact_material_ke,
+                contact_material_kd=contact_material_kd,
+                contact_material_mu=contact_material_mu,
+                contact_tangent_rho=contact_tangent_rho,
+                contact_lambda=contact_lambda,
+                contact_C0=contact_C0,
+                contact_stab_alpha=contact_stab_alpha,
+                legacy_hard_contacts=legacy_hard_contacts,
+                contact_compliant_alm=contact_compliant_alm,
+            )
+
         def linearizations_closure(bucket):
             return (
                 bucket.closure_joint_ids,
@@ -10199,6 +13144,7 @@ class StructuralGraphKKT:
                         continue
                     grouped_rows = self._row_order(linearization_joint_ids)
                     with _stream_scope(stream):
+                        flag_limits = not self._fuse_rod_stress and not slope_only and self.has_limit_rows
                         wp.launch(
                             _linearize_fused_rod_rows if self._fuse_rod_stress else linearize_joint_path_rows,
                             linearization_size,
@@ -10270,6 +13216,8 @@ class StructuralGraphKKT:
                                 self.slope_residual,
                                 self.slope_objective,
                                 self.slope_mode,
+                                self.limit_search_needed if (flag_limits and contacts is None) else None,
+                                self.limit_search_islands if flag_limits else None,
                             ],
                             device=self.device,
                             block_dim=self.row_block_dim,
@@ -10297,7 +13245,12 @@ class StructuralGraphKKT:
                                 device=self.device,
                                 block_dim=self.spatial_block_dim,
                             )
-                        if build_majorizer and not self._fuse_rod_stress:
+                        if (
+                            build_majorizer
+                            and not self._fuse_rod_stress
+                            and not self.bucket_skips_stress(bucket, dt)
+                            and id(bucket) not in self.stored_stress_buckets
+                        ):
                             wp.launch(
                                 add_joint_stress_majorizer,
                                 linearization_size,
@@ -10323,6 +13276,34 @@ class StructuralGraphKKT:
                                 device=self.device,
                                 block_dim=self.row_block_dim,
                             )
+                        elif build_majorizer and not self._fuse_rod_stress and id(bucket) in self.stored_stress_buckets:
+                            wp.launch(
+                                add_clean_saddle_stress_majorizer,
+                                linearization_size,
+                                inputs=[
+                                    self.joint_stress_slot,
+                                    linearization_joint_ids,
+                                    grouped_rows,
+                                    joint_type,
+                                    joint_parent,
+                                    joint_child,
+                                    joint_X_p,
+                                    joint_X_c,
+                                    body_q,
+                                    body_com,
+                                    body_inv_mass,
+                                    self.body_slot_by_id,
+                                    jacobian_parent,
+                                    jacobian_child,
+                                    bucket.row_node,
+                                    bucket.row_scale,
+                                    bucket.row_active,
+                                    bucket.solution,
+                                ],
+                                outputs=[self.body_stress],
+                                device=self.device,
+                                block_dim=self.row_block_dim,
+                            )
             for stream in forked:
                 main.wait_stream(stream)
             if contact_stream is not None:
@@ -10337,6 +13318,9 @@ class StructuralGraphKKT:
                         dt,
                         body_q,
                         body_inertia_q,
+                        body_disp,
+                        body_disp_ang,
+                        use_displacement,
                         body_mass,
                         body_inv_mass,
                         body_inertia,
@@ -10389,9 +13373,10 @@ class StructuralGraphKKT:
             )
             refresh_contacts(translation)
 
-        def directional_derivative(*, refresh=True):
+        def directional_derivative(*, refresh=True, stored_joint_slope=None):
             contact_side = self.side_streams[1] if self.side_streams is not None else None
-            if contact_side is None and refresh:
+            refresh_objective = refresh and contacts is not None and refresh_contacts is not None
+            if contact_side is None and refresh_objective:
                 refresh_contact_objective(forces_only=True)
             self.line_search_slope.zero_()
             if contact_side is not None:
@@ -10399,7 +13384,7 @@ class StructuralGraphKKT:
                 main = wp.get_stream(self.device)
                 contact_side.wait_stream(main)
             with _stream_scope(contact_side):
-                if contact_side is not None and refresh:
+                if contact_side is not None and refresh_objective:
                     refresh_contact_objective(forces_only=True)
                 wp.launch(
                     accumulate_body_directional_derivative,
@@ -10410,6 +13395,9 @@ class StructuralGraphKKT:
                         self.line_search_enabled,
                         body_q,
                         body_inertia_q,
+                        body_disp,
+                        body_disp_ang,
+                        use_displacement,
                         body_mass,
                         body_inv_mass,
                         body_inertia,
@@ -10423,8 +13411,11 @@ class StructuralGraphKKT:
                     device=self.device,
                     block_dim=self.spatial_block_dim,
                 )
-            # Without a refresh the pose is the one the full linearization just stored.
-            linearize(build_majorizer=False, build_body=False, slope_only=True, stored_slope=not refresh)
+            # Contact line search reuses stored step-zero rows; contact-free limit search
+            # evaluates joint slope only when a limit island actually requests the search,
+            # paying zero slope-buffer writes on ordinary standby steps.
+            use_stored = (not refresh) if stored_joint_slope is None else stored_joint_slope
+            linearize(build_majorizer=False, build_body=False, slope_only=True, stored_slope=use_stored)
             if contact_side is not None:
                 main.wait_stream(contact_side)
 
@@ -10447,6 +13438,9 @@ class StructuralGraphKKT:
                         dt,
                         body_q,
                         body_inertia_q,
+                        body_disp,
+                        body_disp_ang,
+                        use_displacement,
                         body_com,
                         body_mass,
                         body_inv_mass,
@@ -10483,8 +13477,17 @@ class StructuralGraphKKT:
                         carry,
                         self.translation_support,
                         self.graph_body_ids,
+                        use_displacement,
+                        body_com,
+                        body_inertia_q,
                     ],
-                    outputs=[body_q, self.line_search_pending, self.translation_remainder, self.translation_trial],
+                    outputs=[
+                        body_q,
+                        self.line_search_pending,
+                        self.translation_remainder,
+                        self.translation_trial,
+                        body_disp,
+                    ],
                     device=self.device,
                 )
 
@@ -10492,12 +13495,164 @@ class StructuralGraphKKT:
             # Local contact reconciliation can disturb common translation.
             # Resolve only this three-dimensional mode; internal joint errors
             # and internal contact separations are invariant under the shift.
-            self.island_step_scale.fill_(1.0)
+            if not self.use_fused_solve_reset:
+                self.island_step_scale.fill_(1.0)
             self.body_correction.zero_()
             if contacts is None:
                 # Nothing to reconcile without contacts: one projection, always applied.
                 balance_translation(apply_translation=True, stop_at_roundoff=False)
                 return
+
+            def reconcile_free_rigid_modes():
+                # The local sweeps take angular momentum out of an island that has a contact
+                # inside it, and the translation pass above restores three of the six rigid
+                # modes. Rod rows and internal contacts do no work under a rigid motion of the
+                # island, so the inertial residual restricted to those modes is the island's
+                # momentum defect. Islands that touch a static or kinematic body keep the
+                # translation pass only.
+                self.rigid_mode_center.zero_()
+                self.rigid_mode_matrix.zero_()
+                self.rigid_mode_rhs.zero_()
+                wp.launch(
+                    accumulate_free_rigid_center,
+                    self.graph_body_count,
+                    inputs=[
+                        self.graph_body_ids,
+                        self.graph_body_island,
+                        self.island_translation_free,
+                        self.rigid_mode_candidate,
+                        self.island_contact_state,
+                        self.translation_system,
+                        body_q,
+                        body_com,
+                        body_mass,
+                    ],
+                    outputs=[self.rigid_mode_center],
+                    device=self.device,
+                )
+                wp.launch(
+                    exclude_supported_rigid_centers,
+                    self.graph_body_count,
+                    inputs=[
+                        self.graph_body_ids,
+                        self.graph_body_island,
+                        body_q,
+                        body_inv_mass,
+                        contact_lambda,
+                        contacts.rigid_contact_count,
+                        contacts.rigid_contact_shape0,
+                        contacts.rigid_contact_shape1,
+                        contacts.rigid_contact_point0,
+                        contacts.rigid_contact_point1,
+                        contacts.rigid_contact_normal,
+                        contacts.rigid_contact_margin0,
+                        contacts.rigid_contact_margin1,
+                        shape_body,
+                        body_contact_buffer_size,
+                        body_contact_counts,
+                        body_contact_indices,
+                    ],
+                    outputs=[self.rigid_mode_center],
+                    device=self.device,
+                )
+                wp.launch(
+                    accumulate_free_rigid_system,
+                    self.graph_body_count,
+                    inputs=[
+                        self.graph_body_ids,
+                        self.graph_body_island,
+                        self.rigid_reconcile_state,
+                        self.rigid_mode_center,
+                        self.island_step_scale,
+                        self.body_correction,
+                        dt,
+                        body_q,
+                        body_inertia_q,
+                        body_disp,
+                        body_disp_ang,
+                        use_displacement,
+                        body_q_prev,
+                        body_com,
+                        body_mass,
+                        body_inv_mass,
+                        body_inertia,
+                        contact_hessian_ll,
+                        contact_hessian_al,
+                        contact_hessian_aa,
+                        contact_forces,
+                        contact_torques,
+                        dynamic_contact_hessian,
+                        1,
+                        float(friction_epsilon),
+                        bool(contact_damping_bidirectional),
+                        contact_penalty_k,
+                        contact_normal_rho,
+                        contact_material_ke,
+                        contact_material_kd,
+                        contact_material_mu,
+                        contact_tangent_rho,
+                        contact_lambda,
+                        contact_C0,
+                        float(contact_stab_alpha),
+                        int(legacy_hard_contacts),
+                        int(contact_compliant_alm),
+                        contacts.rigid_contact_count,
+                        contacts.rigid_contact_shape0,
+                        contacts.rigid_contact_shape1,
+                        contacts.rigid_contact_point0,
+                        contacts.rigid_contact_point1,
+                        contacts.rigid_contact_surface_velocity,
+                        contacts.rigid_contact_offset0,
+                        contacts.rigid_contact_offset1,
+                        contacts.rigid_contact_normal,
+                        contacts.rigid_contact_margin0,
+                        contacts.rigid_contact_margin1,
+                        shape_body,
+                        body_contact_buffer_size,
+                        body_contact_counts,
+                        body_contact_indices,
+                    ],
+                    outputs=[self.rigid_mode_matrix, self.rigid_mode_rhs],
+                    device=self.device,
+                )
+                wp.launch(
+                    solve_free_rigid_system,
+                    self.island_count,
+                    inputs=[self.rigid_mode_center, self.rigid_mode_matrix, self.rigid_mode_rhs],
+                    outputs=[self.rigid_mode_shift],
+                    device=self.device,
+                )
+                wp.launch(
+                    enrich_free_rigid_correction,
+                    self.graph_body_count,
+                    inputs=[
+                        self.graph_body_ids,
+                        self.graph_body_island,
+                        self.rigid_mode_center,
+                        self.rigid_mode_shift,
+                        self.island_step_scale,
+                        body_q,
+                        body_com,
+                    ],
+                    outputs=[self.body_correction],
+                    device=self.device,
+                )
+                wp.launch(
+                    apply_free_rigid_reconciliation,
+                    self.graph_body_count,
+                    inputs=[
+                        self.graph_body_ids,
+                        self.graph_body_island,
+                        self.rigid_mode_center,
+                        self.body_correction,
+                        body_com,
+                        use_displacement,
+                        body_inertia_q,
+                    ],
+                    outputs=[body_q, body_disp, body_disp_ang],
+                    device=self.device,
+                )
+
             track_pending = self.device.is_cpu or (self.device.is_capturing and wp.is_conditional_graph_supported())
             if track_pending:
                 self.line_search_pending.fill_(1)
@@ -10541,27 +13696,161 @@ class StructuralGraphKKT:
                         wp.capture_if(self.line_search_pending, translate, refresh=iteration > 0)
                     else:
                         translate(refresh=iteration > 0)
+            if self.has_free_rigid_modes and contacts.rigid_contact_max > 0 and contact_penalty_k is not None:
+                reconcile_free_rigid_modes()
             return
 
-        # Only the contact line search below reads the stored step-zero slope rows.
-        linearize(contact_stream=contact_stream, store_slope_rows=contacts is not None and refresh_contacts is not None)
-
-        # Trees consume the body metric directly. Path Schur systems consume
-        # its inverse, which the surrogate build already wrote for path bodies.
-        if not self.use_fused_solve_reset:
-            self.body_correction.zero_()
-        for bucket in self.tree_buckets:
-            bucket.solve_tree(
-                self.body_matrix,
-                self.body_rhs,
-                self.body_scale,
-                self.body_correction,
-                allow_paired_open_backbone=contacts is None,
+        if resolve_only:
+            if not self.has_resolvable_trees:
+                return
+            if not self.use_fused_solve_reset:
+                self.body_correction.zero_()
+            any_resolved = False
+            slope_offset = 0
+            for bucket in self.tree_buckets:
+                row_offset = slope_offset
+                slope_offset += bucket.size
+                if not bucket.supports_sqp_chord_resolve:
+                    continue
+                if bucket.use_backbone_cr and not (bucket.use_paired_open_backbone and contacts is None):
+                    continue
+                grouped_rows = self._row_order(bucket.joint_ids)
+                wp.launch(
+                    _linearize_fused_rod_rows if self._fuse_rod_stress else linearize_joint_path_rows,
+                    bucket.size,
+                    inputs=[
+                        bucket.joint_ids,
+                        grouped_rows,
+                        joint_type,
+                        joint_enabled,
+                        joint_parent,
+                        joint_child,
+                        joint_X_p,
+                        joint_X_c,
+                        joint_axis,
+                        joint_rod_rest_kb_local,
+                        joint_rod_rest_twist,
+                        joint_qd_start,
+                        joint_target_q_start,
+                        joint_dof_dim,
+                        joint_constraint_start,
+                        joint_material_k,
+                        joint_rho,
+                        joint_penalty_kd,
+                        joint_lambda_lin,
+                        joint_lambda_ang,
+                        joint_C0_lin,
+                        joint_C0_ang,
+                        joint_sigma_start,
+                        joint_C_fric,
+                        joint_target_ke,
+                        joint_target_kd,
+                        joint_target_q,
+                        joint_target_qd,
+                        joint_limit_lower,
+                        joint_limit_upper,
+                        joint_limit_ke,
+                        joint_limit_kd,
+                        joint_rest_angle,
+                        joint_angle_prev,
+                        joint_drive_limit_support,
+                        joint_drive_lambda,
+                        joint_limit_lambda,
+                        stab_alpha,
+                        body_q,
+                        body_q_prev,
+                        body_q_rest,
+                        body_com,
+                        dt,
+                        True,
+                        self.body_slot_by_id,
+                        self.graph_body_island,
+                        self.body_correction,
+                        self.line_search_slope,
+                    ],
+                    outputs=[
+                        bucket.jacobian_parent,
+                        bucket.jacobian_child,
+                        bucket.compliance,
+                        bucket.residual,
+                        bucket.row_active,
+                        False,
+                        self.joint_stress_slot,
+                        body_inv_mass,
+                        self.body_stress,
+                        True,
+                        row_offset,
+                        self.slope_jacobian_parent,
+                        self.slope_jacobian_child,
+                        self.slope_compliance,
+                        self.slope_residual,
+                        self.slope_objective,
+                        self.slope_mode,
+                        self.limit_search_needed,
+                        self.limit_search_islands,
+                    ],
+                    device=self.device,
+                    block_dim=self.row_block_dim,
+                )
+                ok = bucket.resolve_tree(
+                    self.graph_body_ids,
+                    joint_parent,
+                    dt,
+                    body_q,
+                    body_inertia_q,
+                    body_disp,
+                    body_disp_ang,
+                    use_displacement,
+                    body_mass,
+                    body_inv_mass,
+                    body_inertia,
+                    body_com,
+                    self.body_matrix,
+                    row_offset,
+                    self.slope_jacobian_parent,
+                    self.slope_jacobian_child,
+                    self.slope_compliance,
+                    self.slope_residual,
+                    self.slope_mode,
+                    self.body_rhs,
+                    self.body_scale,
+                    self.body_correction,
+                    allow_paired_open_backbone=contacts is None,
+                    include_sqp_torque=resolve_sqp_torque,
+                )
+                any_resolved = any_resolved or ok
+            if not any_resolved:
+                return
+        else:
+            # Only the contact line search below reads the stored step-zero slope rows.
+            linearize(
+                contact_stream=contact_stream,
+                store_slope_rows=contacts is not None and refresh_contacts is not None,
             )
-        for bucket in self.closed_tree_buckets:
-            bucket.solve_tree(self.body_matrix, self.body_rhs, self.body_scale, self.body_correction)
 
-        for bucket in self.path_buckets:
+            # Trees consume the body metric directly. Path Schur systems consume
+            # its inverse, which the surrogate build already wrote for path bodies.
+            if not self.use_fused_solve_reset:
+                self.body_correction.zero_()
+            for bucket in self.tree_buckets:
+                if bucket.chain_route is not None:
+                    continue
+                bucket.solve_tree(
+                    self.body_matrix,
+                    self.body_rhs,
+                    self.body_scale,
+                    self.body_correction,
+                    allow_paired_open_backbone=contacts is None,
+                )
+        if not resolve_only:
+            for bucket in self.closed_tree_buckets:
+                if bucket.chain_route is not None:
+                    continue
+                bucket.solve_tree(self.body_matrix, self.body_rhs, self.body_scale, self.body_correction)
+            if self.chain_route is not None:
+                solve_chain_route()
+
+        for bucket in [] if resolve_only else self.path_buckets:
             # Scalar-row CUDA assembly exposes the six independent output rows
             # without changing Schur equations or adding temporary buffers.
             row_parallel = self.device.is_cuda
@@ -10592,7 +13881,7 @@ class StructuralGraphKKT:
             )
             bucket.solve_rows()
             wp.launch(
-                compute_path_correction,
+                compute_path_correction_fp64 if bucket.factor_rhs is not None else compute_path_correction,
                 bucket.body_size,
                 inputs=[
                     bucket.body_ids,
@@ -10601,7 +13890,7 @@ class StructuralGraphKKT:
                     bucket.row_active,
                     bucket.jacobian_parent,
                     bucket.jacobian_child,
-                    bucket.solution[0],
+                    bucket.factor_rhs if bucket.factor_rhs is not None else bucket.solution[0],
                     self.body_inverse,
                     self.body_free,
                     body_inv_mass,
@@ -10679,20 +13968,27 @@ class StructuralGraphKKT:
                     outputs=[self.rigid_mode_center],
                     device=self.device,
                 )
+                has_c = int(contacts is not None and contacts.rigid_contact_max > 0 and contact_penalty_k is not None)
                 wp.launch(
                     accumulate_free_rigid_system,
                     self.graph_body_count,
                     inputs=[
                         self.graph_body_ids,
                         self.graph_body_island,
+                        self.island_contact_state,
                         self.rigid_mode_center,
                         self.island_step_scale,
                         self.body_correction,
                         dt,
                         body_q,
                         body_inertia_q,
+                        body_disp,
+                        body_disp_ang,
+                        use_displacement,
+                        body_q_prev,
                         body_com,
                         body_mass,
+                        body_inv_mass,
                         body_inertia,
                         contact_hessian_ll,
                         contact_hessian_al,
@@ -10700,6 +13996,35 @@ class StructuralGraphKKT:
                         contact_forces,
                         contact_torques,
                         dynamic_contact_hessian,
+                        has_c,
+                        float(friction_epsilon),
+                        bool(contact_damping_bidirectional),
+                        contact_penalty_k if has_c else None,
+                        contact_normal_rho if has_c else None,
+                        contact_material_ke if has_c else None,
+                        contact_material_kd if has_c else None,
+                        contact_material_mu if has_c else None,
+                        contact_tangent_rho if has_c else None,
+                        contact_lambda if has_c else None,
+                        contact_C0 if has_c else None,
+                        float(contact_stab_alpha),
+                        int(legacy_hard_contacts),
+                        int(contact_compliant_alm),
+                        contacts.rigid_contact_count if has_c else None,
+                        contacts.rigid_contact_shape0 if has_c else None,
+                        contacts.rigid_contact_shape1 if has_c else None,
+                        contacts.rigid_contact_point0 if has_c else None,
+                        contacts.rigid_contact_point1 if has_c else None,
+                        contacts.rigid_contact_surface_velocity if has_c else None,
+                        contacts.rigid_contact_offset0 if has_c else None,
+                        contacts.rigid_contact_offset1 if has_c else None,
+                        contacts.rigid_contact_normal if has_c else None,
+                        contacts.rigid_contact_margin0 if has_c else None,
+                        contacts.rigid_contact_margin1 if has_c else None,
+                        shape_body,
+                        body_contact_buffer_size,
+                        body_contact_counts,
+                        body_contact_indices,
                     ],
                     outputs=[self.rigid_mode_matrix, self.rigid_mode_rhs],
                     device=self.device,
@@ -10731,18 +14056,29 @@ class StructuralGraphKKT:
                 wp.capture_if(self.translation_active, enrich_rigid_modes)
             else:
                 enrich_rigid_modes()
-        if contacts is not None and refresh_contacts is not None:
-            wp.copy(self.line_search_pose, body_q)
+
+        def _run_directional_search():
+            if use_displacement:
+                wp.launch(
+                    _snapshot_search_state,
+                    body_q.shape[0],
+                    inputs=[body_q, body_disp, body_disp_ang],
+                    outputs=[self.line_search_pose, self.line_search_disp, self.line_search_disp_ang],
+                    device=self.device,
+                )
+            else:
+                wp.copy(self.line_search_pose, body_q)
 
             self.line_search_enabled.fill_(True)
-            # Factorization and translation balancing only changed scratch;
-            # the caller's contact objective still describes this body pose.
-            directional_derivative(refresh=False)
+            # Contact search reuses step-zero slope rows; contact-free limit search
+            # evaluates step-zero joint slope only here when requested.
+            directional_derivative(refresh=False, stored_joint_slope=contacts is not None)
             wp.launch(
-                _begin_directional_search,
+                _begin_limit_search if contacts is None else _begin_directional_search,
                 self.island_count,
                 inputs=[self.island_contact_state, self.line_search_slope],
                 outputs=[
+                    *([self.limit_search_needed, self.limit_search_islands] if contacts is None else []),
                     self.line_search_enabled,
                     self.island_step_scale,
                     self.line_search_initial_slope,
@@ -10762,14 +14098,20 @@ class StructuralGraphKKT:
                         self.island_step_scale,
                         body_com,
                         self.line_search_pose,
+                        self.line_search_disp,
+                        self.line_search_disp_ang,
+                        use_displacement,
+                        body_inertia_q,
                     ],
-                    outputs=[body_q, self.line_search_pending],
+                    outputs=[body_q, self.line_search_pending, body_disp, body_disp_ang],
                     device=self.device,
                 )
                 directional_derivative()
                 if trial is None:
                     wp.launch(
-                        _update_counted_directional_search,
+                        _update_counted_directional_search_tolerant
+                        if contacts is None
+                        else _update_counted_directional_search,
                         self.island_count,
                         inputs=[
                             self.line_search_enabled,
@@ -10783,7 +14125,7 @@ class StructuralGraphKKT:
                     wp.launch(_advance_directional_trial, 1, outputs=[self.line_search_trial], device=self.device)
                     return
                 wp.launch(
-                    _update_directional_search,
+                    _update_directional_search_tolerant if contacts is None else _update_directional_search,
                     self.island_count,
                     inputs=[
                         self.line_search_enabled,
@@ -10818,26 +14160,167 @@ class StructuralGraphKKT:
                     self.island_step_scale,
                     body_com,
                     self.line_search_pose,
+                    self.line_search_disp,
+                    self.line_search_disp_ang,
+                    use_displacement,
+                    body_inertia_q,
                 ],
-                outputs=[body_q, self.line_search_pending],
+                outputs=[body_q, self.line_search_pending, body_disp, body_disp_ang],
                 device=self.device,
             )
-            return
 
-        wp.launch(
-            apply_global_correction,
-            self.graph_body_count,
-            inputs=[
-                self.graph_body_ids,
-                self.graph_body_island,
-                self.island_contact_state,
-                self.body_correction,
-                self.island_step_scale,
-                body_com,
-            ],
-            outputs=[body_q],
-            device=self.device,
-        )
+        def _run_plain_correction():
+            wp.launch(
+                apply_global_correction,
+                self.graph_body_count,
+                inputs=[
+                    self.graph_body_ids,
+                    self.graph_body_island,
+                    self.island_contact_state,
+                    self.body_correction,
+                    self.island_step_scale,
+                    body_com,
+                    use_displacement,
+                    body_inertia_q,
+                ],
+                outputs=[body_q, body_disp, body_disp_ang],
+                device=self.device,
+            )
+
+        if contacts is not None:
+            if refresh_contacts is not None:
+                _run_directional_search()
+            else:
+                _run_plain_correction()
+        elif not self.has_limit_rows:
+            _run_plain_correction()
+        else:
+            # Islands that did not ask for the search take the plain correction now.
+            wp.launch(
+                _apply_unflagged_correction,
+                self.graph_body_count,
+                inputs=[
+                    self.graph_body_ids,
+                    self.graph_body_island,
+                    self.island_contact_state,
+                    self.limit_search_islands,
+                    self.body_correction,
+                    self.island_step_scale,
+                    body_com,
+                    use_displacement,
+                    body_inertia_q,
+                ],
+                outputs=[body_q, body_disp, body_disp_ang],
+                device=self.device,
+            )
+            if self.device.is_cpu or (self.device.is_capturing and wp.is_conditional_graph_supported()):
+                wp.capture_if(self.limit_search_needed, on_true=_run_directional_search)
+            elif self.device.is_capturing:
+                # Older CUDA graphs cannot branch on the device predicate. The
+                # fixed search preserves already-corrected, unrequested islands.
+                _run_directional_search()
+            elif int(self.limit_search_needed.numpy()[0]) != 0:
+                _run_directional_search()
+
+        if sync_alm_duals and not translation_only:
+            self.sync_resolved_tree_alm_duals(
+                joint_type=joint_type,
+                joint_parent=joint_parent,
+                joint_child=joint_child,
+                joint_X_p=joint_X_p,
+                joint_X_c=joint_X_c,
+                joint_axis=joint_axis,
+                joint_qd_start=joint_qd_start,
+                joint_dof_dim=joint_dof_dim,
+                joint_constraint_start=joint_constraint_start,
+                joint_material_k=joint_material_k,
+                joint_penalty_kd=joint_penalty_kd,
+                body_q=body_q,
+                body_q_prev=body_q_prev,
+                body_q_rest=body_q_rest,
+                dt=dt,
+                joint_lambda_lin=joint_lambda_lin,
+                joint_lambda_ang=joint_lambda_ang,
+                only_unflagged_islands=False,
+            )
+
+    def sync_resolved_tree_alm_duals(
+        self,
+        *,
+        joint_type,
+        joint_parent,
+        joint_child,
+        joint_X_p,
+        joint_X_c,
+        joint_axis,
+        joint_qd_start,
+        joint_dof_dim,
+        joint_constraint_start,
+        joint_material_k,
+        joint_penalty_kd,
+        body_q,
+        body_q_prev,
+        body_q_rest,
+        dt: float,
+        joint_lambda_lin,
+        joint_lambda_ang,
+        only_unflagged_islands: bool = False,
+    ) -> None:
+        """Write solved open-tree saddle multipliers ``mu_S`` into ALM ``joint_lambda``."""
+        unflagged = int(only_unflagged_islands)
+        for bucket in self.tree_buckets:
+            if not bucket.supports_sqp_chord_resolve:
+                continue
+            wp.launch(
+                sync_tree_saddle_to_alm_duals,
+                bucket.size,
+                inputs=[
+                    bucket.joint_ids,
+                    bucket.row_node,
+                    bucket.row_scale,
+                    bucket.row_active,
+                    bucket.solution,
+                    joint_type,
+                    joint_parent,
+                    joint_child,
+                    joint_X_p,
+                    joint_X_c,
+                    joint_axis,
+                    joint_qd_start,
+                    joint_dof_dim,
+                    joint_constraint_start,
+                    joint_material_k,
+                    joint_penalty_kd,
+                    body_q,
+                    body_q_prev,
+                    body_q_rest,
+                    self.body_slot_by_id,
+                    self.graph_body_island,
+                    self.island_step_scale,
+                    self.limit_search_islands,
+                    unflagged,
+                    dt,
+                ],
+                outputs=[joint_lambda_lin, joint_lambda_ang],
+                device=self.device,
+                block_dim=self.row_block_dim,
+            )
+
+
+@wp.kernel
+def _snapshot_search_state(
+    body_q: wp.array[wp.transform],
+    body_disp: wp.array[wp.vec3],
+    body_disp_ang: wp.array[wp.vec3],
+    pose_out: wp.array[wp.transform],
+    disp_out: wp.array[wp.vec3],
+    disp_ang_out: wp.array[wp.vec3],
+):
+    """Snapshot pose and displacement of every body before a directional search (one launch)."""
+    tid = wp.tid()
+    pose_out[tid] = body_q[tid]
+    disp_out[tid] = body_disp[tid]
+    disp_ang_out[tid] = body_disp_ang[tid]
 
 
 @wp.kernel
@@ -10860,6 +14343,66 @@ def _begin_directional_search(
         scale[island] = 0.0
 
 
+@wp.kernel
+def _begin_limit_search(
+    contact_state: wp.array[int],
+    merit: wp.array[wp.float64],
+    flag: wp.array[int],
+    needed: wp.array[int],
+    enabled: wp.array[bool],
+    scale: wp.array[float],
+    initial_slope: wp.array[wp.float64],
+    pending: wp.array[int],
+):
+    """Begin the contact-free search on the islands whose linearization asked for it."""
+    island = wp.tid()
+    slope = merit[island]
+    initial_slope[island] = slope
+    if island == 0:
+        pending[0] = 1
+        flag[0] = 0
+    wanted = needed[island] != 0
+    good = wanted and contact_state[island] >= -1 and wp.isfinite(slope) and slope < wp.float64(0.0)
+    enabled[island] = good
+    if not good:
+        scale[island] = 0.0
+
+
+@wp.kernel
+def _apply_unflagged_correction(
+    body_ids: wp.array[wp.int32],
+    graph_body_island: wp.array[wp.int32],
+    island_contact_state: wp.array[wp.int32],
+    needed: wp.array[int],
+    correction: wp.array[wp.spatial_vector],
+    island_step_scale: wp.array[float],
+    body_com: wp.array[wp.vec3],
+    use_displacement: int,
+    body_target_q: wp.array[wp.transform],
+    body_q: wp.array[wp.transform],
+    body_disp: wp.array[wp.vec3],
+    body_disp_ang: wp.array[wp.vec3],
+):
+    """:func:`apply_global_correction` for islands that did not request the limit search."""
+    slot = wp.tid()
+    body = body_ids[slot]
+    island = graph_body_island[slot]
+    if island_contact_state[island] < -1 or needed[island] != 0:
+        return
+    scale = island_step_scale[island]
+    if scale == 0.0 or not _spatial_vector_nonzero(correction[slot]):
+        return
+    body_q[body] = _corrected_pose(body_q[body], correction[slot], body_com[body], scale)
+    if use_displacement != 0:
+        delta = correction[slot]
+        if scale != 0.0 and _spatial_vector_nonzero(delta):
+            body_disp[body] = body_disp[body] + scale * wp.spatial_top(delta)
+            body_disp_ang[body] = rotation_vector_compose(scale * wp.spatial_bottom(delta), body_disp_ang[body])
+            body_q[body] = pose_from_displacement(
+                body_target_q[body], body_com[body], body_disp[body], wp.transform_get_rotation(body_q[body])
+            )
+
+
 @wp.func
 def _directional_search_step(
     island: int,
@@ -10867,11 +14410,12 @@ def _directional_search_step(
     merit: wp.array[wp.float64],
     initial_slope: wp.array[wp.float64],
     last_trial: bool,
+    tolerance: float,
     scale: wp.array[float],
     pending: wp.array[int],
 ):
     slope = merit[island]
-    if enabled[island] and (not wp.isfinite(slope) or slope > wp.float64(0.0)):
+    if enabled[island] and (not wp.isfinite(slope) or slope > wp.float64(-tolerance) * initial_slope[island]):
         # Interpolate the directional residual, whose value at zero is negative.
         # Safeguarding guarantees contraction even for nonquadratic forces.
         # A proposed step is always re-evaluated; interpolation is not acceptance.
@@ -10895,7 +14439,19 @@ def _update_directional_search(
     scale: wp.array[float],
     pending: wp.array[int],
 ):
-    _directional_search_step(wp.tid(), enabled, merit, initial_slope, last_trial, scale, pending)
+    _directional_search_step(wp.tid(), enabled, merit, initial_slope, last_trial, 0.1, scale, pending)
+
+
+@wp.kernel
+def _update_directional_search_tolerant(
+    enabled: wp.array[bool],
+    merit: wp.array[wp.float64],
+    initial_slope: wp.array[wp.float64],
+    last_trial: bool,
+    scale: wp.array[float],
+    pending: wp.array[int],
+):
+    _directional_search_step(wp.tid(), enabled, merit, initial_slope, last_trial, 0.1, scale, pending)
 
 
 @wp.kernel
@@ -10908,7 +14464,20 @@ def _update_counted_directional_search(
     pending: wp.array[int],
 ):
     """:func:`_update_directional_search` with the trial index read on device."""
-    _directional_search_step(wp.tid(), enabled, merit, initial_slope, trial[0] == 4, scale, pending)
+    _directional_search_step(wp.tid(), enabled, merit, initial_slope, trial[0] == 4, 0.1, scale, pending)
+
+
+@wp.kernel
+def _update_counted_directional_search_tolerant(
+    enabled: wp.array[bool],
+    merit: wp.array[wp.float64],
+    initial_slope: wp.array[wp.float64],
+    trial: wp.array[int],
+    scale: wp.array[float],
+    pending: wp.array[int],
+):
+    """:func:`_update_directional_search_tolerant` with the trial index read on device."""
+    _directional_search_step(wp.tid(), enabled, merit, initial_slope, trial[0] == 4, 0.1, scale, pending)
 
 
 @wp.kernel
@@ -10924,8 +14493,14 @@ def _apply_trial_correction(
     scale: wp.array[float],
     body_com: wp.array[wp.vec3],
     original: wp.array[wp.transform],
+    original_disp: wp.array[wp.vec3],
+    original_disp_ang: wp.array[wp.vec3],
+    use_displacement: int,
+    body_target_q: wp.array[wp.transform],
     body_q: wp.array[wp.transform],
     pending: wp.array[int],
+    body_disp: wp.array[wp.vec3],
+    body_disp_ang: wp.array[wp.vec3],
 ):
     slot = wp.tid()
     if slot == 0:
@@ -10933,11 +14508,68 @@ def _apply_trial_correction(
     body = body_ids[slot]
     alpha = scale[body_island[slot]]
     body_q[body] = original[body]
+    if use_displacement != 0:
+        body_disp[body] = original_disp[body]
+        body_disp_ang[body] = original_disp_ang[body]
     if alpha > 0.0:
         body_q[body] = _corrected_pose(original[body], correction[slot], body_com[body], alpha)
+        if use_displacement != 0:
+            delta = correction[slot]
+            if _spatial_vector_nonzero(delta):
+                body_disp[body] = original_disp[body] + alpha * wp.spatial_top(delta)
+                body_disp_ang[body] = rotation_vector_compose(alpha * wp.spatial_bottom(delta), original_disp_ang[body])
+                body_q[body] = pose_from_displacement(
+                    body_target_q[body], body_com[body], body_disp[body], wp.transform_get_rotation(body_q[body])
+                )
 
 
 # Resolve numeric overloads before graph capture.
+
+wp.overload(
+    resolve_tree_unique_leaves,
+    [
+        wp.array[wp.int32],
+        wp.array[wp.int32],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_vector],
+    ],
+)
+wp.overload(
+    resolve_tree_unique_leaves,
+    [
+        wp.array[wp.int32],
+        wp.array[wp.int32],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_vectord],
+    ],
+)
+wp.overload(
+    resolve_tree_messages,
+    [
+        wp.array[wp.int32],
+        wp.array[wp.int32],
+        wp.array[wp.int32],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_vector],
+        wp.array[wp.spatial_vector],
+    ],
+)
+wp.overload(
+    resolve_tree_messages,
+    [
+        wp.array[wp.int32],
+        wp.array[wp.int32],
+        wp.array[wp.int32],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_vectord],
+        wp.array[wp.spatial_vectord],
+    ],
+)
+
 wp.overload(
     solve_block_ldlt_persistent,
     [int, wp.array[wp.spatial_matrix], wp.array[wp.spatial_vector]],
@@ -11139,3 +14771,191 @@ wp.overload(
 )
 wp.overload(invert_tree_leaves, [wp.array[wp.int32], wp.array[wp.spatial_matrix]])
 wp.overload(invert_tree_leaves, [wp.array[wp.int32], wp.array[wp.spatial_matrixd]])
+wp.overload(
+    solve_tree_roots,
+    [
+        wp.array[wp.int32],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_vector],
+        wp.array[wp.spatial_vector],
+    ],
+)
+wp.overload(
+    solve_tree_roots,
+    [
+        wp.array[wp.int32],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_vectord],
+        wp.array[wp.spatial_vectord],
+    ],
+)
+wp.overload(
+    scatter_tree_body_correction_indexed,
+    [
+        wp.array[wp.int32],
+        wp.array[wp.int32],
+        wp.array[wp.int32],
+        wp.array[wp.int32],
+        wp.array[wp.int32],
+        wp.array[wp.spatial_vector],
+        wp.array[wp.spatial_vector],
+        wp.array[wp.spatial_vector],
+    ],
+)
+wp.overload(
+    scatter_tree_body_correction_indexed,
+    [
+        wp.array[wp.int32],
+        wp.array[wp.int32],
+        wp.array[wp.int32],
+        wp.array[wp.int32],
+        wp.array[wp.int32],
+        wp.array[wp.spatial_vector],
+        wp.array[wp.spatial_vectord],
+        wp.array[wp.spatial_vector],
+    ],
+)
+
+wp.overload(invert_cr_eliminated_in_place, [wp.array[wp.vec3i], wp.array[wp.spatial_matrix]])
+wp.overload(invert_cr_eliminated_in_place, [wp.array[wp.vec3i], wp.array[wp.spatial_matrixd]])
+wp.overload(
+    reduce_cr_in_place,
+    [
+        int,
+        int,
+        wp.array[wp.vec3i],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_vector],
+    ],
+)
+wp.overload(
+    reduce_cr_in_place,
+    [
+        int,
+        int,
+        wp.array[wp.vec3i],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_vectord],
+    ],
+)
+wp.overload(
+    solve_strided_cr_coarse,
+    [
+        wp.array[wp.vec3i],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_vector],
+    ],
+)
+wp.overload(
+    solve_strided_cr_coarse,
+    [
+        wp.array[wp.vec3i],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_vectord],
+    ],
+)
+wp.overload(
+    back_substitute_cr_in_place,
+    [
+        int,
+        wp.array[wp.vec3i],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_vector],
+    ],
+)
+wp.overload(
+    back_substitute_cr_in_place,
+    [
+        int,
+        wp.array[wp.vec3i],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_vectord],
+    ],
+)
+wp.overload(
+    solve_cr_persistent,
+    [
+        wp.array[wp.vec2i],
+        int,
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_vector],
+    ],
+)
+wp.overload(
+    solve_cr_persistent,
+    [
+        wp.array[wp.vec2i],
+        int,
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_vectord],
+    ],
+)
+wp.overload(
+    solve_cr_tail_persistent,
+    [
+        wp.array[wp.vec3i],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_matrix],
+        wp.array[wp.spatial_vector],
+    ],
+)
+wp.overload(
+    solve_cr_tail_persistent,
+    [
+        wp.array[wp.vec3i],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_matrixd],
+        wp.array[wp.spatial_vectord],
+    ],
+)
+for _sol_dtype in (wp.spatial_vector, wp.spatial_vectord):
+    wp.overload(
+        sync_tree_saddle_to_alm_duals,
+        [
+            wp.array[wp.int32],
+            wp.array[wp.int32],
+            wp.array[wp.spatial_vector],
+            wp.array[wp.int32],
+            wp.array[_sol_dtype],
+            wp.array[wp.int32],
+            wp.array[wp.int32],
+            wp.array[wp.int32],
+            wp.array[wp.transform],
+            wp.array[wp.transform],
+            wp.array[wp.vec3],
+            wp.array[wp.int32],
+            wp.array2d[wp.int32],
+            wp.array[wp.int32],
+            wp.array[float],
+            wp.array[float],
+            wp.array[wp.transform],
+            wp.array[wp.transform],
+            wp.array[wp.transform],
+            wp.array[wp.int32],
+            wp.array[wp.int32],
+            wp.array[float],
+            wp.array[wp.int32],
+            int,
+            float,
+            wp.array[wp.vec3],
+            wp.array[wp.vec3],
+        ],
+    )
