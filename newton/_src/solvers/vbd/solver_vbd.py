@@ -634,23 +634,6 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 retention is set separately by ``rigid_avbd_gamma``.
             rigid_avbd_gamma: Per-step retention factor for persisted lambda in joints,
                 particle-body attachments, and validated contacts. Lower values discard history faster.
-            rigid_contact_tangent_scale: Numerical scale for the automatic compliant-ALM
-                tangential contact metric [dimensionless]. Must be finite and at least one. Both endpoints and the
-                dual update use the same scaled eigenvalues; material stiffness, friction coefficients,
-                torsional/rolling metrics and Coulomb fixed points are unchanged. The existing simultaneous-body
-                solve metric remains in effect for dynamic bodies in the same color.
-                Larger values are not monotonically better and can slow convergence of other modes.
-                Along each principal tangent axis, the Coulomb projection disk has displacement radius
-                ``mu * f_n / rho_{t,i}``, which shrinks in inverse proportion to the scale. The distance to its
-                boundary also depends on the current displacement and retained tangential multiplier.
-                When the radius approaches float32 pose resolution, a representable correction can
-                overshoot the disk and cause friction chatter or drift. A row already at rest inside
-                the disk can still stick. Use the smallest scale the task needs.
-                This solver-side conditioning option requires internal rigid integration when greater
-                than one; it is not an authored material property or a USD attribute.
-
-                .. experimental::
-                    ``rigid_contact_tangent_scale`` may change or be removed without prior notice.
             rigid_contact_history: Whether to persist body-body numeric contact state
                 across steps using ``Contacts.rigid_contact_match_index``. Matched rows
                 restore the normal and projected tangential multipliers in both latest
@@ -672,6 +655,23 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 or run one uncaptured solver step before capture.
                 ``None`` (default) reads ``model.vbd.rigid_contact_history`` when
                 registered, otherwise uses ``False``.
+            rigid_contact_tangent_scale: Numerical scale for the automatic compliant-ALM
+                tangential contact metric [dimensionless]. Must be finite and at least one. Both endpoints and the
+                dual update use the same scaled eigenvalues; material stiffness, friction coefficients,
+                torsional/rolling metrics and Coulomb fixed points are unchanged. The existing simultaneous-body
+                solve metric remains in effect for dynamic bodies in the same color.
+                Larger values are not monotonically better and can slow convergence of other modes.
+                Along each principal tangent axis, the Coulomb projection disk has displacement radius
+                ``mu * f_n / rho_{t,i}``, which shrinks in inverse proportion to the scale. The distance to its
+                boundary also depends on the current displacement and retained tangential multiplier.
+                When the radius approaches float32 pose resolution, a representable correction can
+                overshoot the disk and cause friction chatter or drift. A row already at rest inside
+                the disk can still stick. Use the smallest scale the task needs.
+                This solver-side conditioning option requires internal rigid integration when greater
+                than one; it is not an authored material property or a USD attribute.
+
+                .. experimental::
+                    ``rigid_contact_tangent_scale`` may change or be removed without prior notice.
             rigid_contact_damping_bidirectional: Whether body-body contact damping also acts while the
                 bodies separate. Its coefficient is the mean of the two shapes' ``kd``, subject to per-contact
                 material overrides. The default ``False`` damps only the compression gained since the step
@@ -862,6 +862,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             raise ValueError("rigid_adaptive_initialization requires internal rigid integration.")
         self._rigid_adaptive_initialization = bool(rigid_adaptive_initialization)
 
+        if isinstance(rigid_contact_tangent_scale, bool | np.bool_):
+            raise TypeError("rigid_contact_tangent_scale must be a real number, not bool.")
         if not np.isfinite(rigid_contact_tangent_scale) or rigid_contact_tangent_scale < 1.0:
             raise ValueError("rigid_contact_tangent_scale must be finite and at least one.")
         if rigid_contact_tangent_scale > 1.0 and integrate_with_external_rigid_solver:

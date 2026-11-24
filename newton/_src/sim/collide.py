@@ -2333,6 +2333,13 @@ class CollisionPipeline:
                 heightfield_capacity = heightfield_mask[:shape_count_routed]
                 plane_capacity = plane_mask[:shape_count_routed]
                 planar_sdf_capacity = capacity(planar_sdf_mask)
+                # Pairs of two fixed hydroelastic shapes route to HydroelasticSDF before
+                # reaching shape_pairs_mesh_mesh or planar recovery.
+                hydro_mask = None
+                if hydroelastic_sdf is not None and model.shape_flags is not None:
+                    hydro_mask = route_mask & ((model.shape_flags.numpy() & int(ShapeFlags.HYDROELASTIC)) != 0)
+                    if variant_options is not None:
+                        hydro_mask &= ~variant_options.row_mask
                 if model._texture_sdf_data is not None:
                     # Both shapes need textures, and at least one must be an
                     # eligible probe. Dense meshes cannot use recovery storage.
@@ -2340,15 +2347,18 @@ class CollisionPipeline:
                     recovery_probe = capacity(recovery_probe_mask)
                     if explicit_pairs_host is not None:
                         a, b = explicit_pairs_host.T
-                        self._mesh_recovery_pair_max = int(
-                            np.count_nonzero(
-                                textured_mesh[a] & textured_mesh[b] & (recovery_probe[a] | recovery_probe[b])
-                            )
-                        )
+                        recovery_pairs = textured_mesh[a] & textured_mesh[b] & (recovery_probe[a] | recovery_probe[b])
+                        if hydro_mask is not None:
+                            recovery_pairs &= ~(hydro_mask[a] & hydro_mask[b])
+                        self._mesh_recovery_pair_max = int(np.count_nonzero(recovery_pairs))
                     else:
                         self._mesh_recovery_pair_max = _compute_per_world_mask_pair_max(
                             model, recovery_probe, textured_mesh
                         )
+                        if hydro_mask is not None:
+                            self._mesh_recovery_pair_max -= _compute_per_world_mask_pair_max(
+                                model, recovery_probe & hydro_mask, textured_mesh & hydro_mask
+                            )
                 if self.broad_phase_mode == "explicit" and self.shape_pairs_filtered is not None:
                     # Explicit pair types are fixed at pipeline construction, including
                     # intentional cross-world pairs, so size only the stages they can reach.
@@ -2372,6 +2382,8 @@ class CollisionPipeline:
                                 & ~(box_mask[shape_a] & box_mask[shape_b])
                             )
                         )
+                        if hydro_mask is not None:
+                            mesh_mesh_routes &= ~(hydro_mask[shape_a] & hydro_mask[shape_b])
                         shape_scale = model.shape_scale.numpy()
                         infinite_plane_mask = plane_capacity & (shape_scale[:, 0] == 0.0) & (shape_scale[:, 1] == 0.0)
                         mesh_plane_routes = (mesh_capacity[shape_a] & infinite_plane_mask[shape_b]) | (
@@ -2380,10 +2392,11 @@ class CollisionPipeline:
                         max_mesh_mesh_pairs = int(np.count_nonzero(mesh_mesh_routes))
                         max_mesh_plane_pairs = int(np.count_nonzero(mesh_plane_routes))
                 else:
-                    max_mesh_mesh_pairs = min(
-                        self.shape_pairs_max,
-                        _compute_per_world_mask_pair_max(model, capacity(mesh_sdf_pair_mask)),
-                    )
+                    mesh_sdf_capacity = capacity(mesh_sdf_pair_mask)
+                    mesh_mesh_pair_bound = _compute_per_world_mask_pair_max(model, mesh_sdf_capacity)
+                    if hydro_mask is not None:
+                        mesh_mesh_pair_bound -= _compute_per_world_mask_pair_max(model, mesh_sdf_capacity & hydro_mask)
+                    max_mesh_mesh_pairs = min(self.shape_pairs_max, mesh_mesh_pair_bound)
                     max_mesh_plane_pairs = min(
                         self.shape_pairs_max,
                         _compute_per_world_mask_pair_max(model, mesh_capacity, plane_capacity),

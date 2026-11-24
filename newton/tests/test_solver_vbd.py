@@ -10694,6 +10694,60 @@ add_function_test(
 )
 
 
+def test_rigid_same_color_contact_metric_avoids_alternating_release(test, device):
+    """A fixed-stiffness contact split across rows must still resolve at an even sweep count."""
+    with wp.ScopedDevice(device):
+        builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+        rows, stiffness, dt = 64, 5.0e8, 1.0 / 600.0
+        cfg = builder.ShapeConfig(density=0.0, ke=stiffness / rows, kd=0.0, mu=0.0, margin=0.0, gap=0.005)
+        for z in (0.0, 0.199):
+            body = builder.add_body(
+                xform=wp.transform(wp.vec3(0.0, 0.0, z), wp.quat_identity()),
+                mass=1.0,
+                inertia=wp.mat33(np.eye(3) * 0.01),
+                lock_inertia=True,
+            )
+            builder.add_shape_sphere(body, radius=0.1, cfg=cfg)
+        builder.color()
+        model = builder.finalize(device=device)
+        test.assertEqual(len(model.body_color_groups), 1)
+        solver = newton.solvers.SolverVBD(model, iterations=4, rigid_body_contact_buffer_size=rows)
+        pipeline = newton.CollisionPipeline(model, broad_phase="nxn")
+        contacts = pipeline.contacts()
+        state_in, state_out = model.state(), model.state()
+        pipeline.collide(state_in, contacts)
+        test.assertEqual(int(contacts.rigid_contact_count.numpy()[0]), 1)
+        # Split one physical spring into identical quadrature rows, keeping sum(ke) fixed.
+        for name in (
+            "rigid_contact_shape0",
+            "rigid_contact_shape1",
+            "rigid_contact_point0",
+            "rigid_contact_point1",
+            "rigid_contact_offset0",
+            "rigid_contact_offset1",
+            "rigid_contact_normal",
+            "rigid_contact_margin0",
+            "rigid_contact_margin1",
+        ):
+            array = getattr(contacts, name)
+            array[:rows].assign(np.repeat(array.numpy()[:1], rows, axis=0))
+        contacts.rigid_contact_count.fill_(rows)
+        initial = state_in.body_q.numpy().astype(np.float64)[:, 2]
+        inertia = np.eye(2) / dt**2
+        hessian = inertia + stiffness * np.array([[1.0, -1.0], [-1.0, 1.0]])
+        reference = np.linalg.solve(hessian, inertia @ initial + stiffness * np.array([-0.2, 0.2]))
+        solver.step(state_in, state_out, model.control(), contacts, dt)
+        np.testing.assert_allclose(state_out.body_q.numpy()[:, 2], reference, rtol=0.0, atol=2.0e-6)
+
+
+add_function_test(
+    TestSolverVBD,
+    "test_rigid_same_color_contact_metric_avoids_alternating_release",
+    test_rigid_same_color_contact_metric_avoids_alternating_release,
+    devices=devices,
+)
+
+
 def test_post_finalize_body_color_groups_without_body_colors(test, device):
     """Derive solver body colors from body_color_groups when Model.body_colors is None."""
     with wp.ScopedDevice(device):

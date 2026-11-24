@@ -17,9 +17,10 @@ passing ``--no-deterministic`` disables contact matching and history, which
 lifts the scene-wide deterministic face limit. The cube task passes without
 them at larger world counts; the pen task needs them and is not reliable with
 ``--no-deterministic``. Free objects are solved after the gripper. The pen
-scene raises the experimental tangent-weight scale to 10, which holds the pen
-in its narrow pad patches. The cube scene keeps the default weight: it does
-not need the scale, and at a scale of 1000 one of two cups fell over.
+scene raises the experimental tangent-weight scale to 30, holding the pen
+within 2 degrees in its narrow pad patches. The cube scene keeps the default
+weight: it does not need the scale, and at scales of 100 and 1000 a cup turned
+or fell over after release.
 Linear joint stiffness is increased to reduce hand sag while the
 default one-way contact damping is retained. The experimental adaptive initialization
 reduces the pen's rotation in the grip. The opt-in contact activation guard, enabled
@@ -385,12 +386,14 @@ class Example:
         )
         if self.solver_name == "vbd":
             # At the default tangential row weight the pen turns in the grip of its narrow pad
-            # patches and fails its check. A scale of 10 holds it within 4 degrees and leaves
-            # the dropped pen at rest in the cup. Scales of 100 and 1000 hold the pen within
-            # about one degree but slow other friction modes: the dropped pen kept shifting in
-            # the cup, and in the cube scene a scale of 1000 pushed one of two cups over. The cube does
-            # not need the scale and keeps the default.
-            tangent_scale = 10.0 if self.scene == SceneType.PEN else 1.0
+            # patches and fails its check. A scale of 10 holds it within 4 degrees and a scale of
+            # 30 within 2 degrees; with either, about nine dropped pens in ten are at rest in the
+            # cup at the end of the run. Scales of 100 and 1000 hold the pen within about one
+            # degree but slow other friction modes: the dropped pen keeps shifting in the cup in
+            # about a quarter of the worlds, and in the cube scene a scale of 100 turned one of
+            # eight cups after the release and a scale of 1000 pushed one of two cups over. The
+            # cube does not need the scale and keeps the default.
+            tangent_scale = 30.0 if self.scene == SceneType.PEN else 1.0
             self.solver = newton.solvers.SolverVBD(
                 self.model,
                 iterations=self.sim_iterations,

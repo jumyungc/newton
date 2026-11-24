@@ -18,6 +18,7 @@ from newton._src.geometry.contact_reduction_hydroelastic import (
     _from_fixed,
     _to_fixed,
 )
+from newton._src.geometry.flags import MeshProperties
 from newton._src.geometry.sdf_hydroelastic import (
     _extract_mc_corner_pair,
     _mc_corner_offset,
@@ -3898,6 +3899,108 @@ add_function_test(
     test_hydroelastic_traversal_buffers_have_headroom,
     devices=cuda_devices,
     check_output=False,
+)
+
+
+def test_hydroelastic_excludes_mesh_mesh_and_planar_recovery_routes(test, device):
+    """Pairs of two hydroelastic meshes route to HydroelasticSDF and must not allocate mesh-mesh or recovery storage."""
+    plate = newton.Mesh.create_box(0.04, 0.04, 0.004, compute_inertia=False)
+    plate.build_sdf(device=device, max_resolution=32)
+    hydro_cfg = newton.ModelBuilder.ShapeConfig(is_hydroelastic=True, ke=1.0e5, gap=0.001, margin=0.0)
+    rigid_cfg = newton.ModelBuilder.ShapeConfig(is_hydroelastic=False, ke=1.0e5, gap=0.001, margin=0.0)
+
+    builder_hydro_only = newton.ModelBuilder()
+    b0 = builder_hydro_only.add_body(xform=wp.transform(wp.vec3(0.0, 0.0, 0.0), wp.quat_identity()))
+    b1 = builder_hydro_only.add_body(xform=wp.transform(wp.vec3(0.0, 0.0, 0.005), wp.quat_identity()))
+    s0 = builder_hydro_only.add_shape_mesh(b0, mesh=plate, cfg=hydro_cfg)
+    s1 = builder_hydro_only.add_shape_mesh(b1, mesh=plate, cfg=hydro_cfg)
+    model_hydro_only = builder_hydro_only.finalize(device=device)
+
+    props = model_hydro_only._shape_mesh_properties.numpy()
+    test.assertTrue(bool(np.any((props & int(MeshProperties.RECOVERY_PROBE)) != 0)))
+
+    for broad_phase in ("nxn", "sap", "explicit"):
+        with test.subTest(case="hydro_only", broad_phase=broad_phase):
+            pairs = wp.array([(s0, s1)], dtype=wp.vec2i, device=device) if broad_phase == "explicit" else None
+            pipeline = newton.CollisionPipeline(model_hydro_only, broad_phase=broad_phase, shape_pairs_filtered=pairs)
+            contacts = pipeline.contacts()
+            test.assertIsNotNone(pipeline.hydroelastic_sdf)
+            test.assertEqual(pipeline._mesh_recovery_pair_max, 0)
+            test.assertIsNone(contacts._mesh_recovery_contacts)
+            test.assertEqual(pipeline.narrow_phase.max_mesh_mesh_pairs, 0)
+            pipeline.collide(model_hydro_only.state(), contacts)
+            test.assertGreater(int(contacts.rigid_contact_count.numpy()[0]), 0)
+
+    variant_mesh = newton.ModelBuilder()
+    vb = variant_mesh.add_body(label="plate")
+    variant_mesh.add_shape_mesh(vb, mesh=plate, cfg=rigid_cfg)
+    variant_sphere = newton.ModelBuilder()
+    vs = variant_sphere.add_body(label="sphere")
+    variant_sphere.add_shape_sphere(vs, radius=0.01, cfg=rigid_cfg)
+
+    builder_mixed = newton.ModelBuilder()
+    mb0 = builder_mixed.add_body(xform=wp.transform(wp.vec3(0.0, 0.0, 0.0), wp.quat_identity()))
+    mb1 = builder_mixed.add_body(xform=wp.transform(wp.vec3(0.0, 0.0, 0.005), wp.quat_identity()))
+    mb2 = builder_mixed.add_body(xform=wp.transform(wp.vec3(0.0, 0.0, 0.008), wp.quat_identity()), label="var")
+    ms0 = builder_mixed.add_shape_mesh(mb0, mesh=plate, cfg=hydro_cfg)
+    ms1 = builder_mixed.add_shape_mesh(mb1, mesh=plate, cfg=hydro_cfg)
+    builder_mixed.add_body_variants(mb2, [variant_sphere, variant_mesh], initial=0)
+    ms2 = builder_mixed.shape_count - 1
+    model_mixed = builder_mixed.finalize(device=device)
+
+    for broad_phase in ("nxn", "sap", "explicit"):
+        with test.subTest(case="mixed_with_variant", broad_phase=broad_phase):
+            bodies = wp.array([mb2], dtype=wp.int32, device=device)
+            model_mixed.select_body_variants(wp.array([0], dtype=wp.int32, device=device), bodies=bodies)
+            pairs = (
+                wp.array([(ms0, ms1), (ms0, ms2), (ms1, ms2)], dtype=wp.vec2i, device=device)
+                if broad_phase == "explicit"
+                else None
+            )
+            pipeline = newton.CollisionPipeline(model_mixed, broad_phase=broad_phase, shape_pairs_filtered=pairs)
+            contacts = pipeline.contacts()
+            test.assertEqual(pipeline._mesh_recovery_pair_max, 2)
+            test.assertIsNotNone(contacts._mesh_recovery_contacts)
+            test.assertEqual(pipeline.narrow_phase.max_mesh_mesh_pairs, 2)
+            # Switch the initially spherical body to a mesh without rebuilding the pipeline.
+            model_mixed.select_body_variants(wp.array([1], dtype=wp.int32, device=device), bodies=bodies)
+            pipeline.collide(model_mixed.state(), contacts)
+            count = int(contacts.rigid_contact_count.numpy()[0])
+            test.assertGreater(count, 0)
+            test.assertLessEqual(count, contacts.rigid_contact_max)
+            shape0 = contacts.rigid_contact_shape0.numpy()[:count]
+            shape1 = contacts.rigid_contact_shape1.numpy()[:count]
+            test.assertTrue(np.any((shape0 == ms2) | (shape1 == ms2)))
+
+    # Two worlds and a global shape: hydroelastic pairs are subtracted per world segment, so each world keeps
+    # exactly the capacity of its two mixed pairs (hydroelastic-plain and plain-global).
+    builder_worlds = newton.ModelBuilder()
+    builder_worlds.add_shape_mesh(-1, mesh=plate, cfg=hydro_cfg)
+    for _ in range(2):
+        builder_worlds.begin_world()
+        wb0 = builder_worlds.add_body(xform=wp.transform(wp.vec3(0.0, 0.0, 0.003), wp.quat_identity()))
+        wb1 = builder_worlds.add_body(xform=wp.transform(wp.vec3(0.0, 0.0, -0.003), wp.quat_identity()))
+        builder_worlds.add_shape_mesh(wb0, mesh=plate, cfg=hydro_cfg)
+        builder_worlds.add_shape_mesh(wb1, mesh=plate, cfg=rigid_cfg)
+        builder_worlds.end_world()
+    model_worlds = builder_worlds.finalize(device=device)
+
+    for broad_phase in ("nxn", "sap"):
+        with test.subTest(case="worlds_with_global", broad_phase=broad_phase):
+            pipeline = newton.CollisionPipeline(model_worlds, broad_phase=broad_phase)
+            contacts = pipeline.contacts()
+            test.assertEqual(pipeline._mesh_recovery_pair_max, 4)
+            test.assertEqual(pipeline.narrow_phase.max_mesh_mesh_pairs, 4)
+            pipeline.collide(model_worlds.state(), contacts)
+            test.assertEqual(int(pipeline.narrow_phase.shape_pairs_mesh_mesh_count.numpy()[0]), 4)
+            test.assertEqual(int(pipeline.narrow_phase.shape_pairs_sdf_sdf_count.numpy()[0]), 2)
+
+
+add_function_test(
+    TestHydroelastic,
+    "test_hydroelastic_excludes_mesh_mesh_and_planar_recovery_routes",
+    test_hydroelastic_excludes_mesh_mesh_and_planar_recovery_routes,
+    devices=cuda_devices,
 )
 
 

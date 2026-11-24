@@ -689,6 +689,12 @@ torque limit is the coefficient times the normal force. Both defaults are
 nonzero. Pair coefficients use the geometric mean, so zero on either shape
 disables that channel. For small parts and thin cables, reduce the
 coefficients or set them to zero if angular resistance is too strong.
+The limits apply to every contact row. The rows of a hydroelastic patch each
+carry the pair's coefficients, so their limits add up to the coefficient times
+the patch's elastic normal load, on top of the moment that the rows' sliding forces
+carry. ``nut_bolt_hydro`` and ``robot_panda_hydro`` set both coefficients to
+zero: with the defaults the nut does not turn and the Panda does not place its
+object.
 
 **Body coloring.** VBD updates bodies in the same color group in parallel.
 Automatic coloring uses joint and tendon connections, but does not include
@@ -1349,7 +1355,7 @@ before the next step:
 - :attr:`ModelFlags.JOINT_REFERENCE_POSE_PROPERTIES` for rod rest
   rotations in ``model.joint_rest_q``.
 - :attr:`ModelFlags.JOINT_PROPERTIES` after toggling ``model.joint_enabled`` or
-  editing mimic constraint enablement, reference poses, or coefficients.
+  editing a joint-owned mimic's reference joint, coefficients, or joint frames.
 - :attr:`ModelFlags.BODY_PROPERTIES` after changing kinematic flags.
 - :attr:`ModelFlags.BODY_INERTIAL_PROPERTIES` after changing body mass or inertia.
 

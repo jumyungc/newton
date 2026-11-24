@@ -2807,7 +2807,10 @@ For reduced hydroelastic pairs, it next prefers the same normal-bin,
 voxel-bin, or anchor source, preserving coincident histories when face
 fingerprints change. This preference does not override a closer contact or
 the position and normal thresholds. Unreduced and other contact paths use only
-the identical-key preference.
+the identical-key preference. Both preferences read the sub-key, so they apply
+while the shape pair and the sub-key share one sort key (up to ``2**20`` shapes
+for these models); with the separate pair key described above, an exact tie
+goes by sorted row index.
 
 **Sticky mode**
 

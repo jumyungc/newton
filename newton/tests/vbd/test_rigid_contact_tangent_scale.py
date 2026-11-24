@@ -156,6 +156,9 @@ def test_tangent_scale_validation(test, device):
     """Reject invalid conditioning scales and incompatible solver modes."""
     with wp.ScopedDevice(device):
         model, _ = _make_contact_fixture(device)
+        for bad_bool in (False, True, np.bool_(False), np.bool_(True)):
+            with test.subTest(scale=bad_bool), test.assertRaisesRegex(TypeError, "rigid_contact_tangent_scale"):
+                newton.solvers.SolverVBD(model, rigid_contact_tangent_scale=bad_bool)
         for scale in (0.0, 0.5, -1.0, float("nan"), float("inf"), -float("inf")):
             with test.subTest(scale=scale), test.assertRaisesRegex(ValueError, "rigid_contact_tangent_scale"):
                 newton.solvers.SolverVBD(model, rigid_contact_tangent_scale=scale)

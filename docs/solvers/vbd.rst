@@ -872,11 +872,14 @@ to its boundary also depends on the current displacement and retained
 tangential multiplier. For the resting cup of the ``robot_panda_hydro`` scenes
 at a 600 Hz substep, a scale of 1000 leaves a radius of a few nanometers,
 below the float32 spacing of the cup's position (15 to 60 nm). In the pen
-scene a scale of 10 holds the pen and leaves the dropped pen at rest in the
-cup; at 100 and 1000 the pen is held tighter but keeps shifting in the cup. In
-the cube scene a scale of 1000 pushed one of two cups over, so that scene ships with
-the default. Use the smallest scale the task needs, and only in scenes that
-need it.
+scene a scale of 10 holds the pen within 4 degrees of horizontal and the
+shipped scale of 30 within 2 degrees; with either, about nine dropped pens in
+ten are at rest in the cup at the end of the run (moving slower than 50 µm/s).
+At 100 and 1000 the pen is held within about one degree but keeps shifting in
+the cup in about a quarter of the worlds. In the cube scene a scale of 100
+turned one of eight cups after the release and a scale of 1000 pushed one of
+two cups over, so that scene ships with the default. Use the smallest scale
+the task needs, and only in scenes that need it.
 A value above one requires internal rigid integration; it raises
 ``ValueError`` with ``integrate_with_external_rigid_solver=True``.
 Contact matching/history and an appropriate body solve order remain separate
@@ -918,13 +921,23 @@ With positive :math:`k_d` and the default
 ``rigid_contact_damping_bidirectional=False``, the compliant ALM path instead
 eliminates internal compression and compression-increment damping together. At a dual fixed point
 the material force is
-:math:`k\max(C, 0) + (k_d/h)\max(C - \max(C_{\text{prev}}, 0), 0)`, with
-:math:`C_{\text{prev}}` the penetration at the step start. Clamping the previous
-penetration prevents a gap before first touch from producing a damping impulse
-at :math:`C=0`. Unloading is undamped. The finite-iteration normal response and
-metric are given by ``_compliant_contact_normal_response``, rather than the
-undamped formulas above. The sliding, torsional and rolling friction bounds use
-only the elastic part of that normal response, not the total damped normal force.
+:math:`k\max(C, 0) + (k_d/h)\max(C - p_0, 0)`, with
+:math:`p_0 = \max(C_{\text{prev}}, 0)` and :math:`C_{\text{prev}}` the penetration
+at the step start. Clamping the previous penetration prevents a gap before first
+touch from producing a damping impulse at :math:`C=0`. Unloading is undamped.
+At a finite iteration, the eliminated compression :math:`e` solves
+:math:`\rho_n(C - e) + \lambda_n = k\max(e, 0) + (k_d/h)\max(e - p_0, 0)`:
+for :math:`e \le p_0` the row uses the undamped :math:`f_n` and :math:`k_{\text{eff}}`
+above, while for :math:`e > p_0` (with :math:`k_{\text{tot}} = k + k_d/h`) the
+excess force
+:math:`\Delta f_n = \tfrac{k_{\text{tot}}}{k_{\text{tot}} + \rho_n}\big(\lambda_n - k\,p_0 + \rho_n(C - p_0)\big)`
+gives total normal force :math:`k\,p_0 + \Delta f_n`, elastic normal force
+:math:`k\,p_0 + \tfrac{k}{k_{\text{tot}}}\Delta f_n`, and primal metric
+:math:`\tfrac{k_{\text{tot}}\rho_n}{k_{\text{tot}} + \rho_n}`.
+The sliding, torsional and rolling friction bounds use only that elastic normal
+force, not the total damped normal force.
+In this mode, a thin-wall mesh recovery contact is a hard row and has no compression to damp:
+it takes the undamped formulas above for any :math:`k_d`.
 
 At a finite iteration budget, the eliminated compression can differ from the
 geometric penetration. A cold row can therefore have no damping even while
