@@ -73,9 +73,8 @@ class Example:
         builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
         newton.solvers.SolverVBD.register_custom_attributes(builder)
 
-        # Set the requested linear mass using Newton's per-segment capsule volume.
-        segment_volume = math.pi * self.cable_radius**2 * segment_length + 4.0 / 3.0 * math.pi * self.cable_radius**3
-        cable_density = self.linear_density * segment_length / segment_volume
+        # Rod mass uses the cross-sectional area and centerline length, excluding overlapping caps.
+        cable_density = self.linear_density / (math.pi * self.cable_radius**2)
         cable_cfg = builder.default_shape_cfg.copy()
         cable_cfg.density = cable_density
         cable_cfg.has_shape_collision = False
@@ -103,7 +102,6 @@ class Example:
             wrap_in_articulation=False,
             color=wp.vec3(0.22, 0.68, 0.95),
             label="viscoelastic_cable",
-            body_frame_origin="com",
         )
         self.rod_bodies = rod_bodies
         self.rod_joints = rod_joints
@@ -158,7 +156,6 @@ class Example:
         self.solver = newton.solvers.SolverVBD(
             self.model,
             iterations=self.sim_iterations,
-            rigid_compliant_alm=True,
         )
 
         self.state_0 = self.model.state()
