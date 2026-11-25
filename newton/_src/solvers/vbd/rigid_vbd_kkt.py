@@ -2393,6 +2393,7 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
                     joint_limit_kd[dof],
                     rate,
                     lin_lim_sup,
+                    0.0,
                     joint_limit_lambda[dof],
                     inv_dt,
                 )
@@ -2507,6 +2508,7 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
                         joint_limit_kd[dof],
                         rate,
                         ang_lim_sup,
+                        0.0,
                         joint_limit_lambda[dof],
                         inv_dt,
                     )
