@@ -96,10 +96,8 @@ def _build_branched_fixed_tree(device):
     return builder.finalize(device=device)
 
 
-def _build_ball_loop(device, *, report_forces=False):
+def _build_ball_loop(device):
     builder = newton.ModelBuilder(gravity=(0.0, -9.81, 0.0), up_axis=newton.Axis.Y)
-    if report_forces:
-        builder.request_state_attributes("body_parent_f")
     positions = np.asarray(
         [(-0.5, 1.5, 0.0), (0.5, 1.5, 0.0), (0.5, 0.5, 0.0), (-0.5, 0.5, 0.0)],
         dtype=np.float32,
@@ -211,7 +209,7 @@ def _build_supported_joint_gallery(device):
                 body,
                 parent_xform=wp.transform(wp.vec3(0.0, 0.5 * index, 0.0), wp.quat_identity()),
                 axis=newton.Axis.Z,
-                target_pos=0.1,
+                target_q=0.1,
                 target_ke=1.0e4,
                 target_kd=20.0,
             )
@@ -221,7 +219,7 @@ def _build_supported_joint_gallery(device):
                 body,
                 parent_xform=wp.transform(wp.vec3(0.0, 0.5 * index, 0.0), wp.quat_identity()),
                 axis=newton.Axis.X,
-                target_pos=0.1,
+                target_q=0.1,
                 target_ke=1.0e4,
                 target_kd=20.0,
             )
@@ -473,7 +471,6 @@ def test_global_joint_contact_reconciliation(test, device):
 def test_global_joint_parent_force(test, device):
     """Include the coupled correction in the reported inbound joint wrench."""
     builder = newton.ModelBuilder(gravity=(0.0, 0.0, -9.81), up_axis=newton.Axis.Z)
-    builder.request_state_attributes("body_parent_f")
     body = builder.add_link(
         xform=wp.transform(wp.vec3(0.0, 0.0, -1.0), wp.quat_identity()),
         mass=2.0,
@@ -489,10 +486,11 @@ def test_global_joint_parent_force(test, device):
     state_in = model.state()
     state_out = model.state()
     solver = newton.solvers.SolverXPBD(model, iterations=2, rigid_joint_global_iterations=1)
-    solver.step(state_in, state_out, None, None, 1.0 / 240.0)
+    observables = solver.observables({"body_parent_f"})
+    solver.step(state_in, state_out, None, None, 1.0 / 240.0, observables=observables)
     wp.synchronize_device(device)
 
-    parent_force = state_out.body_parent_f.numpy()[body]
+    parent_force = observables.body_parent_f.numpy()[body]
     expected_weight = float(model.body_mass.numpy()[body]) * 9.81
     np.testing.assert_allclose(parent_force[:2], 0.0, atol=1.0e-5)
     test.assertAlmostEqual(float(parent_force[2]), expected_weight, delta=0.001 * expected_weight)
@@ -503,7 +501,10 @@ def test_closed_loop_parent_force(test, device):
     """Report closed-loop forces without changing motion, including captured replay."""
     results = []
     for output_mode in ("disabled", "state", "observables"):
-        model = _build_ball_loop(device, report_forces=output_mode == "state")
+        model = _build_ball_loop(device)
+        if output_mode == "state":
+            with test.assertWarnsRegex(DeprecationWarning, r"Model\.request_state_attributes.*1\.7"):
+                model.request_state_attributes("body_parent_f")
         solver = newton.solvers.SolverXPBD(model, iterations=2, rigid_joint_global_iterations=1)
         observables = solver.observables({"body_parent_f"}) if output_mode == "observables" else None
         source, target = model.state(), model.state()

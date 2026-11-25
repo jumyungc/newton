@@ -68,6 +68,8 @@ ENABLED = True
 
 _HUB_DOF = 6 * HUB_MAX
 _COLUMNS = 1 + _HUB_DOF
+_SCHUR_CHUNKS = 8
+_HUB_CONTACT_LANES = 16
 
 
 @wp.func
@@ -718,6 +720,7 @@ def assemble_chain_segments(
 @wp.kernel
 def reduce_chains(
     stride: int,
+    matrix_column: int,
     segment_index: wp.array[wp.int32],
     segment_chain_length: wp.array[wp.int32],
     segment_columns: wp.array[wp.int32],
@@ -735,7 +738,7 @@ def reduce_chains(
         return
     has_left = index > 0
     has_right = index + stride < length
-    if column == _COLUMNS:
+    if column == matrix_column:
         diagonal = segment_diagonal[s]
         new_left = wp.spatial_matrixd(0.0)
         new_right = wp.spatial_matrixd(0.0)
@@ -808,7 +811,7 @@ def back_substitute_chains(
 
 
 @wp.kernel
-def accumulate_chain_schur(
+def accumulate_chain_schur_chunks(
     island_segment_start: wp.array[wp.int32],
     island_hub_start: wp.array[wp.int32],
     segment_mask: wp.array[wp.int32],
@@ -816,20 +819,24 @@ def accumulate_chain_schur(
     segment_hub_diagonal: wp.array2d[wp.spatial_matrixd],
     segment_hub_wrench: wp.array2d[wp.spatial_vectord],
     segment_solution: wp.array2d[wp.spatial_vectord],
-    schur: wp.array3d[wp.float64],
-    schur_rhs: wp.array2d[wp.float64],
+    schur_chunks: wp.array4d[wp.float64],
+    schur_rhs_chunks: wp.array3d[wp.float64],
 ):
-    """Atomic-free, bit-deterministic register Schur reduction; thread ``(island, hub_dof_r, column)``."""
-    e, r, column = wp.tid()
+    """Atomic-free chunked lower-triangular Schur reduction; thread ``(island, chunk, hub_dof_r, column)``."""
+    e, chunk, r, column = wp.tid()
     hub_count = island_hub_start[e + 1] - island_hub_start[e]
     dof_count = 6 * hub_count
     if r >= dof_count or column >= 1 + dof_count:
         return
+    if column > 0 and (column - 1) > r:
+        return
 
     hub = r // 6
     i = r - 6 * hub
-    seg_begin = island_segment_start[e]
-    seg_end = island_segment_start[e + 1]
+    isl_begin = island_segment_start[e]
+    isl_count = island_segment_start[e + 1] - isl_begin
+    seg_begin = isl_begin + (isl_count * chunk) // _SCHUR_CHUNKS
+    seg_end = isl_begin + (isl_count * (chunk + 1)) // _SCHUR_CHUNKS
     acc = wp.float64(0.0)
 
     if column == 0:
@@ -847,7 +854,7 @@ def accumulate_chain_schur(
                 + border[5, i] * sol[5]
             )
             acc = acc + segment_hub_wrench[s, hub][i] - dot
-        schur_rhs[e, r] = acc
+        schur_rhs_chunks[e, chunk, r] = acc
     else:
         c = column - 1
         col_hub = c // 6
@@ -870,39 +877,51 @@ def accumulate_chain_schur(
                 acc = acc + segment_hub_diagonal[s, hub][i, j] - dot
             else:
                 acc = acc - dot
-        schur[e, r, c] = acc
+        schur_chunks[e, chunk, r, c] = acc
 
 
 @wp.kernel
-def solve_chain_hubs(
+def finalize_chain_schur(
     island_hub_start: wp.array[wp.int32],
-    island_row_start: wp.array[wp.int32],
+    schur_chunks: wp.array4d[wp.float64],
+    schur_rhs_chunks: wp.array3d[wp.float64],
+    schur: wp.array3d[wp.float64],
+    schur_rhs: wp.array2d[wp.float64],
+):
+    """Deterministic fixed-order sum over ``_SCHUR_CHUNKS`` with exact symmetry mirror."""
+    e, r, column = wp.tid()
+    hub_count = island_hub_start[e + 1] - island_hub_start[e]
+    dof_count = 6 * hub_count
+    if r >= dof_count or column >= 1 + dof_count:
+        return
+    if column == 0:
+        acc = wp.float64(0.0)
+        for chunk in range(_SCHUR_CHUNKS):
+            acc = acc + schur_rhs_chunks[e, chunk, r]
+        schur_rhs[e, r] = acc
+    else:
+        c = column - 1
+        if c > r:
+            return
+        acc = wp.float64(0.0)
+        for chunk in range(_SCHUR_CHUNKS):
+            acc = acc + schur_chunks[e, chunk, r, c]
+        schur[e, r, c] = acc
+        if c != r:
+            schur[e, c, r] = acc
+
+
+@wp.kernel
+def accumulate_hub_ext_contacts(
     hub_body: wp.array[wp.int32],
-    hub_row: wp.array[wp.int32],
-    hub_row_parent: wp.array[wp.int32],
-    hub_row_child: wp.array[wp.int32],
+    hub_island: wp.array[wp.int32],
     body_island: wp.array[wp.int32],
     body_is_segment: wp.array[wp.int32],
-    body_slot_by_id: wp.array[wp.int32],
-    include_stress: int,
-    stress_offsets: wp.array[wp.int32],
-    body_stress: wp.array[wp.mat33],
-    jacobian_parent: wp.array[wp.spatial_matrix],
-    jacobian_child: wp.array[wp.spatial_matrix],
-    compliance: wp.array[wp.spatial_matrix],
-    residual: wp.array[wp.spatial_vector],
-    row_active: wp.array[wp.int32],
     has_contacts: int,
     dt: float,
     body_q: wp.array[wp.transform],
-    body_inertia_q: wp.array[wp.transform],
-    body_disp: wp.array[wp.vec3],
-    body_disp_ang: wp.array[wp.vec3],
-    use_displacement: int,
     body_q_prev: wp.array[wp.transform],
-    body_mass: wp.array[float],
     body_inv_mass: wp.array[float],
-    body_inertia: wp.array[wp.mat33],
     body_com: wp.array[wp.vec3],
     contact_damping_bidirectional: bool,
     contact_normal_rho: wp.array[float],
@@ -931,6 +950,157 @@ def solve_chain_hubs(
     body_contact_buffer_pre_alloc: int,
     body_contact_counts: wp.array[wp.int32],
     body_contact_indices: wp.array[wp.int32],
+    hub_ext_block_lanes: wp.array2d[wp.spatial_matrixd],
+    hub_ext_wrench_lanes: wp.array2d[wp.spatial_vectord],
+):
+    """Parallel per-hub external contact scan across ``(hub_count, _HUB_CONTACT_LANES)`` threads."""
+    h, lane = wp.tid()
+    ext_contact_block = wp.spatial_matrixd(0.0)
+    ext_force = wp.vec3d(0.0)
+    ext_torque = wp.vec3d(0.0)
+
+    if has_contacts != 0:
+        body = hub_body[h]
+        e = hub_island[h]
+        contact_count = rigid_contact_count[0]
+        num_contacts = wp.min(body_contact_counts[body], body_contact_buffer_pre_alloc)
+        m = int(lane)
+        while m < num_contacts:
+            contact = body_contact_indices[body * body_contact_buffer_pre_alloc + m]
+            m += _HUB_CONTACT_LANES
+            if contact >= contact_count:
+                continue
+            shape0 = rigid_contact_shape0[contact]
+            shape1 = rigid_contact_shape1[contact]
+            body0 = shape_body[shape0] if shape0 >= 0 else -1
+            body1 = shape_body[shape1] if shape1 >= 0 else -1
+            if body0 != body and body1 != body:
+                continue
+            other_body = body1 if body == body0 else body0
+            if other_body >= 0 and body_island[other_body] == e and body_is_segment[other_body] != 0:
+                continue
+
+            point0_local = rigid_contact_point0[contact]
+            point1_local = rigid_contact_point1[contact]
+            point0_offset = rigid_contact_offset0[contact]
+            point1_offset = rigid_contact_offset1[contact]
+            normal = rigid_contact_normal[contact]
+            point0 = point0_local if body0 < 0 else wp.transform_point(body_q[body0], point0_local)
+            point1 = point1_local if body1 < 0 else wp.transform_point(body_q[body1], point1_local)
+            normal_error = -contact_surface_separation(
+                point0, point1, normal, rigid_contact_margin0[contact], rigid_contact_margin1[contact]
+            )
+            normal_weight = contact_normal_rho[contact]
+            material_k = contact_material_ke[contact]
+            multiplier = contact_lambda[contact]
+            multiplier_normal = wp.dot(multiplier, normal)
+            C0 = contact_C0[contact]
+            C0_normal = wp.dot(normal, C0)
+            stabilized_error = normal_error - C0_normal
+            tangent_C0 = (1.0 - stab_alpha) * (C0 - normal * C0_normal)
+            normal_primal_k, multiplier_normal_eff = _material_force_terms(normal_weight, material_k, multiplier_normal)
+            if multiplier_normal <= 0.0 and (
+                normal_error <= _SMALL_LENGTH_EPS or normal_primal_k * stabilized_error + multiplier_normal_eff <= 0.0
+            ):
+                continue
+            surface_velocity = wp.vec3(0.0)
+            if rigid_contact_surface_velocity:
+                surface_velocity = rigid_contact_surface_velocity[contact]
+            friction_mu = contact_material_mu[contact]
+            (
+                force0,
+                torque0,
+                stiffness,
+                _h_al0,
+                _h_aa0,
+                force1,
+                torque1,
+                _h_ll1,
+                _h_al1,
+                _h_aa1,
+            ) = evaluate_rigid_contact_normal_sliding(
+                body0,
+                body1,
+                body_q,
+                body_q_prev,
+                body_com,
+                point0_local,
+                point1_local,
+                surface_velocity,
+                point0_offset,
+                point1_offset,
+                normal,
+                stabilized_error,
+                normal_weight,
+                material_k,
+                contact_tangent_rho[contact],
+                contact_material_kd[contact],
+                multiplier,
+                friction_mu[0],
+                dt,
+                tangent_C0,
+                contact_damping_bidirectional,
+                1,
+            )
+            mu_torsional = friction_mu[1]
+            mu_rolling = friction_mu[2]
+            normal_load = wp.max(normal_primal_k * stabilized_error + multiplier_normal_eff, 0.0)
+            ang_block = wp.spatial_matrixd(0.0)
+            if normal_load > 0.0 and (mu_torsional > 0.0 or mu_rolling > 0.0):
+                pure_torque_b, k_angular = evaluate_rigid_contact_angular_friction(
+                    body0,
+                    body1,
+                    body_q,
+                    body_q_prev,
+                    normal,
+                    normal_load,
+                    mu_torsional,
+                    mu_rolling,
+                    contact_torsional_rho[contact],
+                    contact_rolling_rho[contact],
+                    contact_lambda_angular[contact],
+                )
+                torque0 -= pure_torque_b
+                torque1 += pure_torque_b
+                ang_block = _angular_contact_block_d(k_angular)
+            if body == body0:
+                ext_force = ext_force + wp.vec3d(force0)
+                ext_torque = ext_torque + wp.vec3d(torque0)
+                r_s_me, r_c_me = _contact_levers_d(body0, body_q, body_com, point0_local, point0_offset)
+            else:
+                ext_force = ext_force + wp.vec3d(force1)
+                ext_torque = ext_torque + wp.vec3d(torque1)
+                r_s_me, r_c_me = _contact_levers_d(body1, body_q, body_com, point1_local, point1_offset)
+            mine_block = _contact_pair_block_d(stiffness, normal, r_s_me, r_c_me, r_s_me, r_c_me) + ang_block
+            scale = wp.float64(2.0) if (other_body >= 0 and body_inv_mass[other_body] > 0.0) else wp.float64(1.0)
+            ext_contact_block = ext_contact_block + scale * mine_block
+
+    hub_ext_block_lanes[h, lane] = ext_contact_block
+    hub_ext_wrench_lanes[h, lane] = wp.spatial_vectord(
+        ext_force[0], ext_force[1], ext_force[2], ext_torque[0], ext_torque[1], ext_torque[2]
+    )
+
+
+@wp.kernel
+def assemble_chain_hub_bases(
+    hub_body: wp.array[wp.int32],
+    hub_island: wp.array[wp.int32],
+    hub_local_index: wp.array[wp.int32],
+    body_slot_by_id: wp.array[wp.int32],
+    include_stress: int,
+    stress_offsets: wp.array[wp.int32],
+    body_stress: wp.array[wp.mat33],
+    dt: float,
+    body_q: wp.array[wp.transform],
+    body_inertia_q: wp.array[wp.transform],
+    body_disp: wp.array[wp.vec3],
+    body_disp_ang: wp.array[wp.vec3],
+    use_displacement: int,
+    body_mass: wp.array[float],
+    body_inertia: wp.array[wp.mat33],
+    body_com: wp.array[wp.vec3],
+    hub_ext_block_lanes: wp.array2d[wp.spatial_matrixd],
+    hub_ext_wrench_lanes: wp.array2d[wp.spatial_vectord],
     schur: wp.array3d[wp.float64],
     schur_rhs: wp.array2d[wp.float64],
     keep_hub_base: int,
@@ -938,182 +1108,93 @@ def solve_chain_hubs(
     hub_rhs_out: wp.array2d[wp.spatial_vectord],
     hub_block: wp.array3d[wp.spatial_matrixd],
     hub_vector: wp.array2d[wp.spatial_vectord],
+):
+    """Assemble condensed hub diagonal/off-diagonal blocks in parallel across all hubs."""
+    h = wp.tid()
+    body = hub_body[h]
+    e = hub_island[h]
+    i = hub_local_index[h]
+    slot = body_slot_by_id[body]
+
+    ext_contact_block = wp.spatial_matrixd(0.0)
+    ext_wrench = wp.spatial_vectord(0.0)
+    for lane in range(_HUB_CONTACT_LANES):
+        ext_contact_block = ext_contact_block + hub_ext_block_lanes[h, lane]
+        ext_wrench = ext_wrench + hub_ext_wrench_lanes[h, lane]
+    ext_force = wp.vec3d(ext_wrench[0], ext_wrench[1], ext_wrench[2])
+    ext_torque = wp.vec3d(ext_wrench[3], ext_wrench[4], ext_wrench[5])
+
+    pose = body_q[body]
+    base_block = _finalize_body_diagonal_d(
+        body,
+        slot,
+        dt,
+        pose,
+        body_mass,
+        body_inertia,
+        ext_contact_block,
+        wp.float64(0.0),
+        include_stress,
+        stress_offsets,
+        body_stress,
+    )
+    base_rhs = _body_inertial_rhs_d(
+        body,
+        dt,
+        pose,
+        body_inertia_q[body],
+        body_disp,
+        body_disp_ang,
+        use_displacement,
+        body_mass,
+        body_inertia,
+        body_com,
+        ext_force,
+        ext_torque,
+    )
+    if keep_hub_base != 0:
+        hub_base_out[e, i] = base_block
+        hub_rhs_out[e, i] = base_rhs
+
+    block = base_block
+    vector = base_rhs
+    for r in range(6):
+        vector[r] = vector[r] + schur_rhs[e, 6 * i + r]
+        for c in range(6):
+            block[r, c] = block[r, c] + schur[e, 6 * i + r, 6 * i + c]
+    hub_block[e, i, i] = block
+    hub_vector[e, i] = vector
+    for j in range(i):
+        below = wp.spatial_matrixd(0.0)
+        for r in range(6):
+            for c in range(6):
+                below[r, c] = schur[e, 6 * i + r, 6 * j + c]
+        hub_block[e, i, j] = below
+
+
+@wp.kernel
+def solve_chain_hubs(
+    island_hub_start: wp.array[wp.int32],
+    island_row_start: wp.array[wp.int32],
+    hub_body: wp.array[wp.int32],
+    hub_row: wp.array[wp.int32],
+    hub_row_parent: wp.array[wp.int32],
+    hub_row_child: wp.array[wp.int32],
+    body_slot_by_id: wp.array[wp.int32],
+    jacobian_parent: wp.array[wp.spatial_matrix],
+    jacobian_child: wp.array[wp.spatial_matrix],
+    compliance: wp.array[wp.spatial_matrix],
+    residual: wp.array[wp.spatial_vector],
+    row_active: wp.array[wp.int32],
+    hub_block: wp.array3d[wp.spatial_matrixd],
+    hub_vector: wp.array2d[wp.spatial_vectord],
     hub_solution: wp.array2d[wp.float64],
     body_correction: wp.array[wp.spatial_vector],
 ):
-    """Assemble and solve the ``6 * hub_count`` condensed hub system of island ``e`` in ``float64``."""
+    """Add hub-to-hub joint rows and solve the ``6 * hub_count`` condensed Cholesky system of island ``e``."""
     e = wp.tid()
     first_hub = island_hub_start[e]
     hub_count = island_hub_start[e + 1] - first_hub
-
-    for i in range(hub_count):
-        body = hub_body[first_hub + i]
-        slot = body_slot_by_id[body]
-        ext_contact_block = wp.spatial_matrixd(0.0)
-        ext_force = wp.vec3d(0.0)
-        ext_torque = wp.vec3d(0.0)
-
-        if has_contacts != 0:
-            contact_count = rigid_contact_count[0]
-            num_contacts = wp.min(body_contact_counts[body], body_contact_buffer_pre_alloc)
-            for m in range(num_contacts):
-                contact = body_contact_indices[body * body_contact_buffer_pre_alloc + m]
-                if contact >= contact_count:
-                    continue
-                shape0 = rigid_contact_shape0[contact]
-                shape1 = rigid_contact_shape1[contact]
-                body0 = shape_body[shape0] if shape0 >= 0 else -1
-                body1 = shape_body[shape1] if shape1 >= 0 else -1
-                if body0 != body and body1 != body:
-                    continue
-                other_body = body1 if body == body0 else body0
-                if other_body >= 0 and body_island[other_body] == e and body_is_segment[other_body] != 0:
-                    continue
-
-                point0_local = rigid_contact_point0[contact]
-                point1_local = rigid_contact_point1[contact]
-                point0_offset = rigid_contact_offset0[contact]
-                point1_offset = rigid_contact_offset1[contact]
-                normal = rigid_contact_normal[contact]
-                point0 = point0_local if body0 < 0 else wp.transform_point(body_q[body0], point0_local)
-                point1 = point1_local if body1 < 0 else wp.transform_point(body_q[body1], point1_local)
-                normal_error = -contact_surface_separation(
-                    point0, point1, normal, rigid_contact_margin0[contact], rigid_contact_margin1[contact]
-                )
-                normal_weight = contact_normal_rho[contact]
-                material_k = contact_material_ke[contact]
-                multiplier = contact_lambda[contact]
-                multiplier_normal = wp.dot(multiplier, normal)
-                C0 = contact_C0[contact]
-                C0_normal = wp.dot(normal, C0)
-                stabilized_error = normal_error - C0_normal
-                tangent_C0 = (1.0 - stab_alpha) * (C0 - normal * C0_normal)
-                normal_primal_k, multiplier_normal_eff = _material_force_terms(
-                    normal_weight, material_k, multiplier_normal
-                )
-                if multiplier_normal <= 0.0 and (
-                    normal_error <= _SMALL_LENGTH_EPS
-                    or normal_primal_k * stabilized_error + multiplier_normal_eff <= 0.0
-                ):
-                    continue
-                surface_velocity = wp.vec3(0.0)
-                if rigid_contact_surface_velocity:
-                    surface_velocity = rigid_contact_surface_velocity[contact]
-                friction_mu = contact_material_mu[contact]
-                (
-                    force0,
-                    torque0,
-                    stiffness,
-                    _h_al0,
-                    _h_aa0,
-                    force1,
-                    torque1,
-                    _h_ll1,
-                    _h_al1,
-                    _h_aa1,
-                ) = evaluate_rigid_contact_normal_sliding(
-                    body0,
-                    body1,
-                    body_q,
-                    body_q_prev,
-                    body_com,
-                    point0_local,
-                    point1_local,
-                    surface_velocity,
-                    point0_offset,
-                    point1_offset,
-                    normal,
-                    stabilized_error,
-                    normal_weight,
-                    material_k,
-                    contact_tangent_rho[contact],
-                    contact_material_kd[contact],
-                    multiplier,
-                    friction_mu[0],
-                    dt,
-                    tangent_C0,
-                    contact_damping_bidirectional,
-                    1,
-                )
-                mu_torsional = friction_mu[1]
-                mu_rolling = friction_mu[2]
-                normal_load = wp.max(normal_primal_k * stabilized_error + multiplier_normal_eff, 0.0)
-                ang_block = wp.spatial_matrixd(0.0)
-                if normal_load > 0.0 and (mu_torsional > 0.0 or mu_rolling > 0.0):
-                    pure_torque_b, k_angular = evaluate_rigid_contact_angular_friction(
-                        body0,
-                        body1,
-                        body_q,
-                        body_q_prev,
-                        normal,
-                        normal_load,
-                        mu_torsional,
-                        mu_rolling,
-                        contact_torsional_rho[contact],
-                        contact_rolling_rho[contact],
-                        contact_lambda_angular[contact],
-                    )
-                    torque0 -= pure_torque_b
-                    torque1 += pure_torque_b
-                    ang_block = _angular_contact_block_d(k_angular)
-                if body == body0:
-                    ext_force = ext_force + wp.vec3d(force0)
-                    ext_torque = ext_torque + wp.vec3d(torque0)
-                    r_s_me, r_c_me = _contact_levers_d(body0, body_q, body_com, point0_local, point0_offset)
-                else:
-                    ext_force = ext_force + wp.vec3d(force1)
-                    ext_torque = ext_torque + wp.vec3d(torque1)
-                    r_s_me, r_c_me = _contact_levers_d(body1, body_q, body_com, point1_local, point1_offset)
-                mine_block = _contact_pair_block_d(stiffness, normal, r_s_me, r_c_me, r_s_me, r_c_me) + ang_block
-                scale = wp.float64(2.0) if (other_body >= 0 and body_inv_mass[other_body] > 0.0) else wp.float64(1.0)
-                ext_contact_block = ext_contact_block + scale * mine_block
-
-        pose = body_q[body]
-        base_block = _finalize_body_diagonal_d(
-            body,
-            slot,
-            dt,
-            pose,
-            body_mass,
-            body_inertia,
-            ext_contact_block,
-            wp.float64(0.0),
-            include_stress,
-            stress_offsets,
-            body_stress,
-        )
-        base_rhs = _body_inertial_rhs_d(
-            body,
-            dt,
-            pose,
-            body_inertia_q[body],
-            body_disp,
-            body_disp_ang,
-            use_displacement,
-            body_mass,
-            body_inertia,
-            body_com,
-            ext_force,
-            ext_torque,
-        )
-        if keep_hub_base != 0:
-            hub_base_out[e, i] = base_block
-            hub_rhs_out[e, i] = base_rhs
-
-        block = base_block
-        vector = base_rhs
-        for r in range(6):
-            vector[r] = vector[r] + schur_rhs[e, 6 * i + r]
-            for c in range(6):
-                block[r, c] = block[r, c] + schur[e, 6 * i + r, 6 * i + c]
-        hub_block[e, i, i] = block
-        hub_vector[e, i] = vector
-        for j in range(i):
-            below = wp.spatial_matrixd(0.0)
-            for r in range(6):
-                for c in range(6):
-                    below[r, c] = schur[e, 6 * i + r, 6 * j + c]
-            hub_block[e, i, j] = below
 
     for entry in range(island_row_start[e], island_row_start[e + 1]):
         row = hub_row[entry]
@@ -1442,6 +1523,20 @@ class ChainCondensation:
         route.body_hub = ints(body_hub)
         route.body_island = ints(body_island)
         route.body_is_segment = ints(body_is_segment)
+        hub_isl_list: list[int] = []
+        hub_loc_list: list[int] = []
+        max_hub_count = 1
+        for isl_idx in range(island_count):
+            h_cnt = int(island_hub_start[isl_idx + 1] - island_hub_start[isl_idx])
+            max_hub_count = max(max_hub_count, h_cnt)
+            for loc_i in range(h_cnt):
+                hub_isl_list.append(isl_idx)
+                hub_loc_list.append(loc_i)
+        route.max_hub_count = max_hub_count
+        route.max_hub_dof = 6 * max_hub_count
+        route.max_columns = 1 + route.max_hub_dof
+        route.hub_island = ints(hub_isl_list)
+        route.hub_local_index = ints(hub_loc_list)
         route.segment_kirchhoff_proximal = wp.zeros(route.segment_count, dtype=wp.float64, device=device)
 
         route.jacobian_parent = wp.zeros(row_count, dtype=wp.spatial_matrix, device=device)
@@ -1454,17 +1549,31 @@ class ChainCondensation:
         route.segment_left = wp.zeros(count, dtype=wp.spatial_matrixd, device=device)
         route.segment_right = wp.zeros(count, dtype=wp.spatial_matrixd, device=device)
         route.segment_inverse = wp.zeros(count, dtype=wp.spatial_matrixd, device=device)
-        route.segment_rhs = wp.zeros((count, _COLUMNS), dtype=wp.spatial_vectord, device=device)
-        route.segment_solution = wp.zeros((count, _COLUMNS), dtype=wp.spatial_vectord, device=device)
-        route.segment_border = wp.zeros((count, HUB_MAX), dtype=wp.spatial_matrixd, device=device)
-        route.segment_hub_diagonal = wp.zeros((count, HUB_MAX), dtype=wp.spatial_matrixd, device=device)
-        route.segment_hub_wrench = wp.zeros((count, HUB_MAX), dtype=wp.spatial_vectord, device=device)
+        route.segment_rhs = wp.zeros((count, route.max_columns), dtype=wp.spatial_vectord, device=device)
+        route.segment_solution = wp.zeros((count, route.max_columns), dtype=wp.spatial_vectord, device=device)
+        route.segment_border = wp.zeros((count, route.max_hub_count), dtype=wp.spatial_matrixd, device=device)
+        route.segment_hub_diagonal = wp.zeros((count, route.max_hub_count), dtype=wp.spatial_matrixd, device=device)
+        route.segment_hub_wrench = wp.zeros((count, route.max_hub_count), dtype=wp.spatial_vectord, device=device)
         route.segment_mask = wp.zeros(count, dtype=wp.int32, device=device)
-        route.schur = wp.zeros((island_count, _HUB_DOF, _HUB_DOF), dtype=wp.float64, device=device)
-        route.schur_rhs = wp.zeros((island_count, _HUB_DOF), dtype=wp.float64, device=device)
-        route.hub_block = wp.zeros((island_count, HUB_MAX, HUB_MAX), dtype=wp.spatial_matrixd, device=device)
-        route.hub_vector = wp.zeros((island_count, HUB_MAX), dtype=wp.spatial_vectord, device=device)
-        route.hub_solution = wp.zeros((island_count, _HUB_DOF), dtype=wp.float64, device=device)
+        route.schur_chunks = wp.zeros(
+            (island_count, _SCHUR_CHUNKS, route.max_hub_dof, route.max_hub_dof), dtype=wp.float64, device=device
+        )
+        route.schur_rhs_chunks = wp.zeros(
+            (island_count, _SCHUR_CHUNKS, route.max_hub_dof), dtype=wp.float64, device=device
+        )
+        route.schur = wp.zeros((island_count, route.max_hub_dof, route.max_hub_dof), dtype=wp.float64, device=device)
+        route.schur_rhs = wp.zeros((island_count, route.max_hub_dof), dtype=wp.float64, device=device)
+        route.hub_ext_block_lanes = wp.zeros(
+            (route.hub_count, _HUB_CONTACT_LANES), dtype=wp.spatial_matrixd, device=device
+        )
+        route.hub_ext_wrench_lanes = wp.zeros(
+            (route.hub_count, _HUB_CONTACT_LANES), dtype=wp.spatial_vectord, device=device
+        )
+        route.hub_block = wp.zeros(
+            (island_count, route.max_hub_count, route.max_hub_count), dtype=wp.spatial_matrixd, device=device
+        )
+        route.hub_vector = wp.zeros((island_count, route.max_hub_count), dtype=wp.spatial_vectord, device=device)
+        route.hub_solution = wp.zeros((island_count, route.max_hub_dof), dtype=wp.float64, device=device)
         route._hub_base_debug = None
         route._hub_rhs_debug = None
         return route, offsets
@@ -1634,8 +1743,14 @@ class ChainCondensation:
         for stride in self.strides:
             wp.launch(
                 reduce_chains,
-                (self.segment_count, _COLUMNS + 1),
-                inputs=[stride, self.segment_index, self.segment_chain_length, self.segment_columns],
+                (self.segment_count, self.max_columns + 1),
+                inputs=[
+                    stride,
+                    self.max_columns,
+                    self.segment_index,
+                    self.segment_chain_length,
+                    self.segment_columns,
+                ],
                 outputs=[
                     self.segment_diagonal,
                     self.segment_left,
@@ -1648,7 +1763,7 @@ class ChainCondensation:
         for stride in reversed(self.strides or [1]):
             wp.launch(
                 back_substitute_chains,
-                (self.segment_count, _COLUMNS),
+                (self.segment_count, self.max_columns),
                 inputs=[
                     stride,
                     self.segment_index,
@@ -1664,8 +1779,8 @@ class ChainCondensation:
                 device=device,
             )
         wp.launch(
-            accumulate_chain_schur,
-            (self.island_count, _HUB_DOF, _COLUMNS),
+            accumulate_chain_schur_chunks,
+            (self.island_count, _SCHUR_CHUNKS, self.max_hub_dof, self.max_columns),
             inputs=[
                 self.island_segment_start,
                 self.island_hub_start,
@@ -1675,41 +1790,29 @@ class ChainCondensation:
                 self.segment_hub_wrench,
                 self.segment_solution,
             ],
+            outputs=[self.schur_chunks, self.schur_rhs_chunks],
+            device=device,
+        )
+        wp.launch(
+            finalize_chain_schur,
+            (self.island_count, self.max_hub_dof, self.max_columns),
+            inputs=[self.island_hub_start, self.schur_chunks, self.schur_rhs_chunks],
             outputs=[self.schur, self.schur_rhs],
             device=device,
         )
         wp.launch(
-            solve_chain_hubs,
-            self.island_count,
+            accumulate_hub_ext_contacts,
+            (self.hub_count, _HUB_CONTACT_LANES),
             inputs=[
-                self.island_hub_start,
-                self.island_row_start,
                 self.hub_body,
-                self.hub_row,
-                self.hub_row_parent,
-                self.hub_row_child,
+                self.hub_island,
                 self.body_island,
                 self.body_is_segment,
-                body_slot_by_id,
-                int(include_stress),
-                stress_offsets,
-                body_stress,
-                self.jacobian_parent,
-                self.jacobian_child,
-                self.compliance,
-                self.residual,
-                self.row_active,
                 has_contacts,
                 dt,
                 body_q,
-                body_inertia_q,
-                body_disp,
-                body_disp_ang,
-                int(use_displacement),
                 body_q_prev,
-                body_mass,
                 body_inv_mass,
-                body_inertia,
                 body_com,
                 bool(contact_damping_bidirectional),
                 contact_normal_rho if has_contacts else None,
@@ -1738,6 +1841,32 @@ class ChainCondensation:
                 body_contact_buffer_size,
                 body_contact_counts,
                 body_contact_indices,
+            ],
+            outputs=[self.hub_ext_block_lanes, self.hub_ext_wrench_lanes],
+            device=device,
+        )
+        wp.launch(
+            assemble_chain_hub_bases,
+            self.hub_count,
+            inputs=[
+                self.hub_body,
+                self.hub_island,
+                self.hub_local_index,
+                body_slot_by_id,
+                int(include_stress),
+                stress_offsets,
+                body_stress,
+                dt,
+                body_q,
+                body_inertia_q,
+                body_disp,
+                body_disp_ang,
+                int(use_displacement),
+                body_mass,
+                body_inertia,
+                body_com,
+                self.hub_ext_block_lanes,
+                self.hub_ext_wrench_lanes,
                 self.schur,
                 self.schur_rhs,
                 keep_debug,
@@ -1745,6 +1874,29 @@ class ChainCondensation:
             outputs=[
                 self._hub_base_debug,
                 self._hub_rhs_debug,
+                self.hub_block,
+                self.hub_vector,
+            ],
+            device=device,
+        )
+        wp.launch(
+            solve_chain_hubs,
+            self.island_count,
+            inputs=[
+                self.island_hub_start,
+                self.island_row_start,
+                self.hub_body,
+                self.hub_row,
+                self.hub_row_parent,
+                self.hub_row_child,
+                body_slot_by_id,
+                self.jacobian_parent,
+                self.jacobian_child,
+                self.compliance,
+                self.residual,
+                self.row_active,
+            ],
+            outputs=[
                 self.hub_block,
                 self.hub_vector,
                 self.hub_solution,

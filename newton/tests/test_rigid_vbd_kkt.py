@@ -9156,6 +9156,8 @@ def _rod_kirchhoff_proximal_and_unilateral_active_set_hessian(test, device):
 
     # Verify Kirchhoff director proximal uses each rod body's own half-arm r_b and excludes non-rod hubs.
     builder = newton.ModelBuilder()
+    builder.inertia_absolute_tolerance = 1.0e-20
+    builder.inertia_correction = 0.0
     hub = builder.add_link(xform=wp.transform(wp.vec3(0.0, 0.0, 0.0), wp.quat_identity()))
     builder.add_shape_box(hub, hx=0.04, hy=0.01, hz=0.01)
     j_hub = builder.add_joint_revolute(
@@ -9216,6 +9218,8 @@ def _rod_kirchhoff_proximal_and_unilateral_active_set_hessian(test, device):
         chain_prox = rod_solver._structural_graph_kkt.chain_route.segment_kirchhoff_proximal.numpy()
         test.assertGreater(float(np.max(chain_prox)), 0.0)
         test.assertAlmostEqual(float(np.max(chain_prox)), rod_prox[seg0], places=5)
+        test.assertEqual(rod_solver._structural_graph_kkt.chain_route.max_hub_count, 1)
+        test.assertEqual(rod_solver._structural_graph_kkt.chain_route.max_columns, 7)
 
 
 def _r22_depth_rigidity_mixed_skip_and_bdf2_wrench(test, device):
@@ -9327,6 +9331,8 @@ def _r22_depth_rigidity_mixed_skip_and_bdf2_wrench(test, device):
         bucket = solver._structural_graph_kkt.tree_buckets[0]
         test.assertTrue(bucket.use_paired_open_backbone)
         test.assertEqual(bucket.factor_dtype, wp.float64)
+        test.assertIn(id(bucket), solver._structural_graph_kkt.stored_stress_buckets)
+        test.assertTrue(solver._structural_graph_kkt.has_second_stage_bodies)
         s0, s1 = model.state(), model.state()
         ctl = model.control()
         cp.collide(s0, contacts)

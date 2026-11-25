@@ -1605,7 +1605,7 @@ def clear_stored_row_multipliers(
     joint_world: wp.array[wp.int32],
     joint_ids: wp.array[wp.int32],
     row_node: wp.array[wp.int32],
-    solution: wp.array[wp.spatial_vector],
+    solution: wp.array[Any],
 ):
     """Zero the stored multipliers of the rows of reset worlds: their next stage builds no stress from them."""
     row = wp.tid()
@@ -1613,7 +1613,7 @@ def clear_stored_row_multipliers(
         node = row_node[row]
         if node < 0:
             node = -2 - node
-        solution[node] = wp.spatial_vector()
+        solution[node] = solution.dtype()
 
 
 @wp.kernel
@@ -1635,7 +1635,7 @@ def add_clean_saddle_stress_majorizer(
     row_node: wp.array[wp.int32],
     row_scale: wp.array[wp.spatial_vector],
     row_active: wp.array[wp.int32],
-    prev_solution: wp.array[wp.spatial_vector],
+    prev_solution: wp.array[Any],
     body_stress: wp.array[wp.mat33],
 ):
     """Populate the PSD rotational stress majorizer of a non-rod float32 tree from the multiplier
@@ -12682,12 +12682,13 @@ class StructuralGraphKKT:
                 branched_tree_rigidity = max(branched_tree_rigidity, float(joint_depth * joint_depth) * tree_omega2)
         has_float32_trees = any(b.solution.dtype == wp.spatial_vector for b in self.tree_buckets)
         self.branched_tree_rigidity = branched_tree_rigidity if has_float32_trees else 0.0
-        # A non-rod float32 tree builds the stress term of every stage from the multipliers its
-        # last solve stored (add_clean_saddle_stress_majorizer), at every joint stiffness.
+        # Every non-rod tree (both float32 and float64 factorizations) builds the stress term of
+        # every stage from the multipliers its last solve stored (add_clean_saddle_stress_majorizer),
+        # avoiding K * c(y) centripetal and float32-pose-rounding inflation at every joint stiffness.
         self.stored_stress_buckets = {
             id(bucket)
             for bucket in self.tree_buckets
-            if bucket.solution.dtype == wp.spatial_vector
+            if bucket.solution.dtype in (wp.spatial_vector, wp.spatial_vectord)
             and not any(joint_type[j] == int(JointType.ROD) for j in bucket.joint_ids_host)
         }
         self.has_any_joint_limits = bool(np.any(joint_has_limit))
@@ -12717,8 +12718,8 @@ class StructuralGraphKKT:
         self.all_dynamic_rigid_resolved = bool(
             self.has_resolvable_trees and len(resolved_dynamic_bodies) == int(np.sum(body_inv_mass_host > 0.0))
         )
-        # Bit 3: bodies of the float32 non-rod trees. The rotation of their first correction decides
-        # whether a second stage follows (flag_second_stage; zero extra device bytes).
+        # Bit 3: bodies of every non-rod tree. When the first stage rotates any body far enough that
+        # second-order geometric kinematics L * dtheta^2 matter, flag_second_stage triggers a second stage.
         for bucket in self.tree_buckets:
             if id(bucket) in self.stored_stress_buckets:
                 stage_slots = body_slot_by_id[bucket.body_ids_host]
@@ -14938,6 +14939,42 @@ wp.overload(
     ],
 )
 for _sol_dtype in (wp.spatial_vector, wp.spatial_vectord):
+    wp.overload(
+        clear_stored_row_multipliers,
+        [
+            wp.array[wp.bool],
+            bool,
+            int,
+            wp.array[wp.int32],
+            wp.array[wp.int32],
+            wp.array[wp.int32],
+            wp.array[_sol_dtype],
+        ],
+    )
+    wp.overload(
+        add_clean_saddle_stress_majorizer,
+        [
+            wp.array[wp.vec2i],
+            wp.array[wp.int32],
+            wp.array[wp.int32],
+            wp.array[int],
+            wp.array[int],
+            wp.array[int],
+            wp.array[wp.transform],
+            wp.array[wp.transform],
+            wp.array[wp.transform],
+            wp.array[wp.vec3],
+            wp.array[float],
+            wp.array[wp.int32],
+            wp.array[wp.spatial_matrix],
+            wp.array[wp.spatial_matrix],
+            wp.array[wp.int32],
+            wp.array[wp.spatial_vector],
+            wp.array[wp.int32],
+            wp.array[_sol_dtype],
+            wp.array[wp.mat33],
+        ],
+    )
     wp.overload(
         sync_tree_saddle_to_alm_duals,
         [
