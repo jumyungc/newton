@@ -3907,6 +3907,38 @@ def refresh_body_structural_k(
 
 
 @wp.kernel
+def refresh_body_unrepresented_structural_k(
+    joint_type: wp.array[int],
+    joint_enabled: wp.array[bool],
+    joint_parent: wp.array[int],
+    joint_child: wp.array[int],
+    joint_constraint_start: wp.array[wp.int32],
+    joint_constraint_dim: wp.array[wp.int32],
+    joint_material_k: wp.array[float],
+    joint_global_stress_slot: wp.array[wp.vec2i],
+    body_structural_k: wp.array[float],
+):
+    """Accumulate linear stiffness of enabled joints not solved in the global KKT backend."""
+    joint_id = wp.tid()
+    if not joint_enabled[joint_id] or joint_constraint_dim[joint_id] <= 0:
+        return
+    if _joint_is_globally_represented(joint_id, joint_global_stress_slot):
+        return
+
+    c_start = joint_constraint_start[joint_id]
+    k_linear = joint_material_k[c_start]
+    if joint_type[joint_id] == JointType.ROD and joint_constraint_dim[joint_id] > 1:
+        k_linear = wp.max(k_linear, joint_material_k[c_start + 1])
+    if k_linear > 0.0:
+        parent_id = joint_parent[joint_id]
+        child_id = joint_child[joint_id]
+        if parent_id >= 0:
+            wp.atomic_max(body_structural_k, parent_id, k_linear)
+        if child_id >= 0:
+            wp.atomic_max(body_structural_k, child_id, k_linear)
+
+
+@wp.kernel
 def refresh_joint_material_params(
     joint_type: wp.array[int],
     joint_qd_start: wp.array[int],
@@ -4911,8 +4943,9 @@ def snapshot_body_body_contact_history(
     prev_lambda_angular[i] = contact_lambda_angular[i]
 
 
-@wp.kernel
-def step_body_body_contact_C0_lambda(
+@wp.func
+def _step_body_body_contact_C0_lambda_row(
+    i: int,
     rigid_contact_count: wp.array[int],
     rigid_contact_shape0: wp.array[int],
     rigid_contact_shape1: wp.array[int],
@@ -4929,6 +4962,7 @@ def step_body_body_contact_C0_lambda(
     body_inv_inertia: wp.array[wp.mat33],
     body_com: wp.array[wp.vec3],
     body_structural_k: wp.array[float],
+    body_tangent_structural_k: wp.array[float],
     proxy_flag: int,
     body_q: wp.array[wp.transform],
     lambda_retention: float,
@@ -4940,7 +4974,6 @@ def step_body_body_contact_C0_lambda(
     step_start_q: wp.array[wp.transform],
     recovery_body: wp.array[int],
     contact_material_mu: wp.array[wp.vec3],
-    # In/out
     contact_normal_rho: wp.array[float],
     contact_C0: wp.array[wp.vec3],
     contact_lambda: wp.array[wp.vec3],
@@ -4949,13 +4982,6 @@ def step_body_body_contact_C0_lambda(
     contact_rolling_rho: wp.array[wp.mat22],
     contact_lambda_angular: wp.array[wp.vec3],
 ):
-    """Apply per-step lambda retention and refresh contact C0 and ALM rho.
-
-    ALM retention needs a compressive warm-start (``lambda·n > 0``), a live row
-    (``ke > 0`` and ``rho_n > 0``), and positive ``lambda_retention``.
-    ALM rho is automatic from support and independent of history.
-    """
-    i = wp.tid()
     if i >= rigid_contact_count[0]:
         return
 
@@ -5044,7 +5070,7 @@ def step_body_body_contact_C0_lambda(
         b1,
         body_flags,
         body_inv_mass,
-        body_structural_k,
+        body_tangent_structural_k,
         proxy_flag,
     )
     tangent_rho = _contact_auto_tangent_rho(tangent_support, normal_rho, structural_support)
@@ -5089,6 +5115,170 @@ def step_body_body_contact_C0_lambda(
     contact_rolling_rho[i] = rolling_rho
     contact_lambda[i] = lam_new
     contact_lambda_angular[i] = lam_angular_new
+
+
+@wp.kernel
+def step_body_body_contact_C0_lambda(
+    rigid_contact_count: wp.array[int],
+    rigid_contact_shape0: wp.array[int],
+    rigid_contact_shape1: wp.array[int],
+    rigid_contact_point0: wp.array[wp.vec3],
+    rigid_contact_point1: wp.array[wp.vec3],
+    rigid_contact_offset0: wp.array[wp.vec3],
+    rigid_contact_offset1: wp.array[wp.vec3],
+    rigid_contact_normal: wp.array[wp.vec3],
+    rigid_contact_margin0: wp.array[float],
+    rigid_contact_margin1: wp.array[float],
+    shape_body: wp.array[int],
+    body_flags: wp.array[int],
+    body_inv_mass: wp.array[float],
+    body_inv_inertia: wp.array[wp.mat33],
+    body_com: wp.array[wp.vec3],
+    body_structural_k: wp.array[float],
+    proxy_flag: int,
+    body_q: wp.array[wp.transform],
+    lambda_retention: float,
+    inv_dt_sq: float,
+    contact_material_ke: wp.array[float],
+    normal_alpha: float,
+    recovery: MeshRecoveryData,
+    contact_generation: wp.array[int],
+    step_start_q: wp.array[wp.transform],
+    recovery_body: wp.array[int],
+    contact_material_mu: wp.array[wp.vec3],
+    # In/out
+    contact_normal_rho: wp.array[float],
+    contact_C0: wp.array[wp.vec3],
+    contact_lambda: wp.array[wp.vec3],
+    contact_tangent_rho: wp.array[wp.mat22],
+    contact_torsional_rho: wp.array[float],
+    contact_rolling_rho: wp.array[wp.mat22],
+    contact_lambda_angular: wp.array[wp.vec3],
+):
+    """Apply per-step lambda retention and refresh contact C0 and ALM rho.
+
+    ALM retention needs a compressive warm-start (``lambda·n > 0``), a live row
+    (``ke > 0`` and ``rho_n > 0``), and positive ``lambda_retention``.
+    ALM rho is automatic from support and independent of history.
+    """
+    _step_body_body_contact_C0_lambda_row(
+        wp.tid(),
+        rigid_contact_count,
+        rigid_contact_shape0,
+        rigid_contact_shape1,
+        rigid_contact_point0,
+        rigid_contact_point1,
+        rigid_contact_offset0,
+        rigid_contact_offset1,
+        rigid_contact_normal,
+        rigid_contact_margin0,
+        rigid_contact_margin1,
+        shape_body,
+        body_flags,
+        body_inv_mass,
+        body_inv_inertia,
+        body_com,
+        body_structural_k,
+        body_structural_k,
+        proxy_flag,
+        body_q,
+        lambda_retention,
+        inv_dt_sq,
+        contact_material_ke,
+        normal_alpha,
+        recovery,
+        contact_generation,
+        step_start_q,
+        recovery_body,
+        contact_material_mu,
+        contact_normal_rho,
+        contact_C0,
+        contact_lambda,
+        contact_tangent_rho,
+        contact_torsional_rho,
+        contact_rolling_rho,
+        contact_lambda_angular,
+    )
+
+
+@wp.kernel
+def step_body_body_contact_C0_lambda_split(
+    rigid_contact_count: wp.array[int],
+    rigid_contact_shape0: wp.array[int],
+    rigid_contact_shape1: wp.array[int],
+    rigid_contact_point0: wp.array[wp.vec3],
+    rigid_contact_point1: wp.array[wp.vec3],
+    rigid_contact_offset0: wp.array[wp.vec3],
+    rigid_contact_offset1: wp.array[wp.vec3],
+    rigid_contact_normal: wp.array[wp.vec3],
+    rigid_contact_margin0: wp.array[float],
+    rigid_contact_margin1: wp.array[float],
+    shape_body: wp.array[int],
+    body_flags: wp.array[int],
+    body_inv_mass: wp.array[float],
+    body_inv_inertia: wp.array[wp.mat33],
+    body_com: wp.array[wp.vec3],
+    body_structural_k: wp.array[float],
+    body_tangent_structural_k: wp.array[float],
+    proxy_flag: int,
+    body_q: wp.array[wp.transform],
+    lambda_retention: float,
+    inv_dt_sq: float,
+    contact_material_ke: wp.array[float],
+    normal_alpha: float,
+    recovery: MeshRecoveryData,
+    contact_generation: wp.array[int],
+    step_start_q: wp.array[wp.transform],
+    recovery_body: wp.array[int],
+    contact_material_mu: wp.array[wp.vec3],
+    # In/out
+    contact_normal_rho: wp.array[float],
+    contact_C0: wp.array[wp.vec3],
+    contact_lambda: wp.array[wp.vec3],
+    contact_tangent_rho: wp.array[wp.mat22],
+    contact_torsional_rho: wp.array[float],
+    contact_rolling_rho: wp.array[wp.mat22],
+    contact_lambda_angular: wp.array[wp.vec3],
+):
+    """Refresh contact C0 and ALM rho with unrepresented-only tangent structural floor."""
+    _step_body_body_contact_C0_lambda_row(
+        wp.tid(),
+        rigid_contact_count,
+        rigid_contact_shape0,
+        rigid_contact_shape1,
+        rigid_contact_point0,
+        rigid_contact_point1,
+        rigid_contact_offset0,
+        rigid_contact_offset1,
+        rigid_contact_normal,
+        rigid_contact_margin0,
+        rigid_contact_margin1,
+        shape_body,
+        body_flags,
+        body_inv_mass,
+        body_inv_inertia,
+        body_com,
+        body_structural_k,
+        body_tangent_structural_k,
+        proxy_flag,
+        body_q,
+        lambda_retention,
+        inv_dt_sq,
+        contact_material_ke,
+        normal_alpha,
+        recovery,
+        contact_generation,
+        step_start_q,
+        recovery_body,
+        contact_material_mu,
+        contact_normal_rho,
+        contact_C0,
+        contact_lambda,
+        contact_tangent_rho,
+        contact_torsional_rho,
+        contact_rolling_rho,
+        contact_lambda_angular,
+    )
 
 
 @wp.kernel
@@ -6524,10 +6714,12 @@ def create_solve_rigid_body(has_tendons: bool, has_joint_constraints: bool):
                 body_contact_free_angular_compliance[body_index] = wp.mat33(0.0)
             body_q_new[body_index] = q_current
             return
-        if skip_body_slot_by_id and refresh_contact_angular_conditioning == 0:
+        if skip_body_slot_by_id:
             skip_slot = skip_body_slot_by_id[body_index]
             if skip_slot >= 0 and (skip_body_flags[skip_slot] & 4) != 0:
                 if not skip_limit_islands or skip_limit_islands[skip_body_island[skip_slot]] == 0:
+                    if wp.static(has_joint_constraints) and refresh_contact_angular_conditioning == 1:
+                        body_contact_free_angular_compliance[body_index] = wp.mat33(0.0)
                     body_q_new[body_index] = q_current
                     return
 
@@ -8726,6 +8918,9 @@ def flag_bdf2_contact_islands(
     shape_body: wp.array[wp.int32],
     body_q: wp.array[wp.transform],
     body_qd: wp.array[wp.spatial_vector],
+    body_f: wp.array[wp.spatial_vector],
+    body_inv_mass: wp.array[float],
+    body_inv_inertia: wp.array[wp.mat33],
     body_com: wp.array[wp.vec3],
     bdf2_body_island: wp.array[wp.int32],
     # Output
@@ -8735,7 +8930,7 @@ def flag_bdf2_contact_islands(
 
     A candidate inside the detection gap whose surfaces cannot meet in this step leaves the order of its island
     alone. The reach is twice the distance the pair closes in one step at its present approach speed, plus one
-    step of free fall. A first touch that is missed is flagged in the next step, which restarts the history.
+    step of acceleration under gravity and any external spatial wrench ``body_f``.
     """
     contact = wp.tid()
     if contact >= rigid_contact_count[0]:
@@ -8752,23 +8947,46 @@ def flag_bdf2_contact_islands(
     point1 = rigid_contact_point1[contact]
     velocity0 = wp.vec3(0.0)
     velocity1 = wp.vec3(0.0)
+    accel0 = wp.vec3(0.0)
+    accel1 = wp.vec3(0.0)
     fall = float(0.0)
     if body0 >= 0:
-        point0 = wp.transform_point(body_q[body0], point0)
-        arm0 = point0 - wp.transform_point(body_q[body0], body_com[body0])
+        q0 = body_q[body0]
+        r0 = wp.transform_get_rotation(q0)
+        point0 = wp.transform_point(q0, point0)
+        arm0 = point0 - wp.transform_point(q0, body_com[body0])
         velocity0 = wp.spatial_top(body_qd[body0]) + wp.cross(wp.spatial_bottom(body_qd[body0]), arm0)
-        fall = wp.max(fall, wp.length(gravity[wp.max(body_world[body0], 0)]))
+        g0 = gravity[wp.max(body_world[body0], 0)]
+        fall = wp.max(fall, wp.length(g0))
+        inv_m0 = body_inv_mass[body0]
+        if inv_m0 > 0.0 and body_f:
+            w0 = body_f[body0]
+            alpha0 = wp.quat_rotate(r0, body_inv_inertia[body0] * wp.quat_rotate_inv(r0, wp.spatial_bottom(w0)))
+            accel0 = g0 + inv_m0 * wp.spatial_top(w0) + wp.cross(alpha0, arm0)
+        elif inv_m0 > 0.0:
+            accel0 = g0
     if body1 >= 0:
-        point1 = wp.transform_point(body_q[body1], point1)
-        arm1 = point1 - wp.transform_point(body_q[body1], body_com[body1])
+        q1 = body_q[body1]
+        r1 = wp.transform_get_rotation(q1)
+        point1 = wp.transform_point(q1, point1)
+        arm1 = point1 - wp.transform_point(q1, body_com[body1])
         velocity1 = wp.spatial_top(body_qd[body1]) + wp.cross(wp.spatial_bottom(body_qd[body1]), arm1)
-        fall = wp.max(fall, wp.length(gravity[wp.max(body_world[body1], 0)]))
+        g1 = gravity[wp.max(body_world[body1], 0)]
+        fall = wp.max(fall, wp.length(g1))
+        inv_m1 = body_inv_mass[body1]
+        if inv_m1 > 0.0 and body_f:
+            w1 = body_f[body1]
+            alpha1 = wp.quat_rotate(r1, body_inv_inertia[body1] * wp.quat_rotate_inv(r1, wp.spatial_bottom(w1)))
+            accel1 = g1 + inv_m1 * wp.spatial_top(w1) + wp.cross(alpha1, arm1)
+        elif inv_m1 > 0.0:
+            accel1 = g1
     normal = rigid_contact_normal[contact]
     separation = contact_surface_separation(
         point0, point1, normal, rigid_contact_margin0[contact], rigid_contact_margin1[contact]
     )
     closing = wp.max(0.0, -wp.dot(normal, velocity1 - velocity0))
-    if separation > 2.0 * dt * (closing + fall * dt):
+    closing_accel = wp.max(fall, -wp.dot(normal, accel1 - accel0))
+    if separation > 2.0 * dt * (closing + closing_accel * dt):
         return
     if island0 >= 0:
         bdf2_island_has_contact[island0] = 1

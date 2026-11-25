@@ -12182,15 +12182,21 @@ class StructuralGraphKKT:
             )
             tree_is_rigid = _rigid_at_step(max_tree_omega2, self.plan_step)
             rigid_angular_tree = any(_has_rigid_angular_rows(candidate.joints, joint_type) for candidate in ordered)
-            paired_allowed = bool(enable_paired_open_chains and self.device.is_cuda and rigid_angular_tree)
+            # Depth-and-rigidity precision law: when both single-joint rigidity chi_max and squared chain
+            # depth N_b^2 reach the IEEE-754 float32 mantissa threshold (2^22 with 2-bit safety margin),
+            # float32 contraction loses precision across global tension accumulation; promote to O(log N) fp64 CR.
+            deep_rigid_chain = bool(tree_is_rigid and len(ordered[0].bodies) * len(ordered[0].bodies) >= (1 << 22))
+            paired_allowed = bool(
+                enable_paired_open_chains and self.device.is_cuda and (rigid_angular_tree or deep_rigid_chain)
+            )
             paired_probe = _tree_bucket_symbolics(ordered[0], enable_paired_open_chain=True) if paired_allowed else None
-            # Ultra-long near-rigid open chains (>= 512 joints) retain O(log N) paired CR in float64;
-            # shorter near-rigid chains use single-block fused leaf rake in float32/float64.
+            # Near-rigid open chains (> 256 bodies, beyond single-block fused leaf-rake width) retain O(log N)
+            # paired CR in float64; shorter chains stay on single-block fused float32 leaf rake with stored stress.
             use_fp64_paired_cr = bool(
                 paired_probe is not None
                 and paired_probe.use_paired_open_backbone
                 and tree_is_rigid
-                and len(ordered[0].joints) >= _FUSED_TREE_MAX_LEVEL_WIDTH
+                and len(ordered[0].bodies) > _FUSED_TREE_MAX_LEVEL_WIDTH
             )
             symbolics = _tree_bucket_symbolics(
                 ordered[0],
@@ -12217,8 +12223,10 @@ class StructuralGraphKKT:
             # leaf rake eliminates the other rows to the world first, take float64 factors once the
             # single-pivot rigidity of the planned step reaches the IEEE-754 float32 mantissa reciprocal 2^24.
             unanchored_tree = _tree_anchor_row_count(ordered[0]) != 1
-            near_rigid_tree = tree_is_rigid and unanchored_tree
-            if unanchored_tree:
+            tree_body_depth = len(ordered[0].elimination_levels) // 2
+            deep_tree = tree_body_depth * tree_body_depth >= (1 << 22)
+            near_rigid_tree = tree_is_rigid and (unanchored_tree or deep_tree)
+            if unanchored_tree or deep_tree or deep_rigid_chain:
                 plan_rigidities.append(max_tree_omega2)
             tree_factor_dtype = wp.float64 if (near_rigid_tree or use_fp64_paired_cr) else wp.float32
             if (mixed_rod_tree or rigid_angular_tree or near_rigid_tree) and symbolics.use_tree_contraction:
@@ -13714,7 +13722,9 @@ class StructuralGraphKKT:
                 slope_offset += bucket.size
                 if not bucket.supports_sqp_chord_resolve:
                     continue
-                if bucket.use_backbone_cr and not (bucket.use_paired_open_backbone and contacts is None):
+                if bucket.use_backbone_cr and not (
+                    bucket.use_paired_open_backbone and (contacts is None or bucket.factor_dtype == wp.float64)
+                ):
                     continue
                 grouped_rows = self._row_order(bucket.joint_ids)
                 wp.launch(
@@ -13817,7 +13827,7 @@ class StructuralGraphKKT:
                     self.body_rhs,
                     self.body_scale,
                     self.body_correction,
-                    allow_paired_open_backbone=contacts is None,
+                    allow_paired_open_backbone=contacts is None or bucket.factor_dtype == wp.float64,
                     include_sqp_torque=resolve_sqp_torque,
                 )
                 any_resolved = any_resolved or ok
@@ -13842,7 +13852,7 @@ class StructuralGraphKKT:
                     self.body_rhs,
                     self.body_scale,
                     self.body_correction,
-                    allow_paired_open_backbone=contacts is None,
+                    allow_paired_open_backbone=contacts is None or bucket.factor_dtype == wp.float64,
                 )
         if not resolve_only:
             for bucket in self.closed_tree_buckets:

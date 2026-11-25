@@ -6906,7 +6906,13 @@ def _structural_kkt_joint_force_keeps_rod_on_contact_taut(test, device):
         )
         # 0.79 g/m: a segment weighs about a milligram (the rod's mass rule differs between Newton versions)
         cfg = newton.ModelBuilder.ShapeConfig(
-            density=0.79e-3 / (np.pi * 5.0e-4**2), ke=1.0e8, kd=0.0, mu=0.0, gap=5.0e-4
+            density=0.79e-3 / (np.pi * 5.0e-4**2),
+            ke=1.0e8,
+            kd=0.0,
+            mu=0.0,
+            mu_torsional=0.0,
+            mu_rolling=0.0,
+            gap=5.0e-4,
         )
         bodies, rod_joints = builder.add_rod(
             rod=rod,
@@ -9161,7 +9167,8 @@ def _rod_kirchhoff_proximal_and_unilateral_active_set_hessian(test, device):
     )
     seg0 = builder.add_link(xform=wp.transform(wp.vec3(0.0, 0.0, 0.0305), wp.quat_identity()))
     seg1 = builder.add_link(xform=wp.transform(wp.vec3(0.0, 0.0, 0.0315), wp.quat_identity()))
-    for sb in (seg0, seg1):
+    seg2 = builder.add_link(xform=wp.transform(wp.vec3(0.0, 0.0, 0.0325), wp.quat_identity()))
+    for sb in (seg0, seg1, seg2):
         builder.add_shape_capsule(sb, radius=2.0e-4, half_height=5.0e-4)
     j_rod0 = builder.add_joint_rod(
         parent=hub,
@@ -9179,7 +9186,15 @@ def _rod_kirchhoff_proximal_and_unilateral_active_set_hessian(test, device):
         bend_stiffness=1.0,
         stretch_stiffness=2.0e6,
     )
-    builder.add_articulation([j_hub, j_rod0, j_rod1])
+    j_rod2 = builder.add_joint_rod(
+        parent=seg1,
+        child=seg2,
+        parent_xform=wp.transform(wp.vec3(0.0, 0.0, 5.0e-4), wp.quat_identity()),
+        child_xform=wp.transform(wp.vec3(0.0, 0.0, -5.0e-4), wp.quat_identity()),
+        bend_stiffness=1.0,
+        stretch_stiffness=2.0e6,
+    )
+    builder.add_articulation([j_hub, j_rod0, j_rod1, j_rod2])
     builder.color()
     rod_model = builder.finalize(device=device)
     rod_solver = newton.solvers.SolverVBD(
@@ -9193,8 +9208,130 @@ def _rod_kirchhoff_proximal_and_unilateral_active_set_hessian(test, device):
     rod_ids = rod_solver._rod_kirchhoff_body_ids.numpy().tolist()
     rod_prox = dict(zip(rod_ids, rod_solver._rod_kirchhoff_proximal.numpy().tolist(), strict=True))
     test.assertNotIn(hub, rod_prox)
-    test.assertAlmostEqual(rod_prox[seg0], 2.0 * (5.0e-4**2) * 2.0e6, places=6)
-    test.assertAlmostEqual(rod_prox[seg1], (5.0e-4**2) * 2.0e6, places=6)
+    test.assertAlmostEqual(rod_prox[seg0], 0.5 * (5.0e-4**2) * 2.0e6, places=6)
+    test.assertAlmostEqual(rod_prox[seg2], 0.25 * (5.0e-4**2) * 2.0e6, places=6)
+    test.assertEqual(float(rod_solver.body_tangent_structural_k.numpy()[seg0]), 0.0)
+    test.assertGreater(float(rod_solver.body_structural_k.numpy()[seg0]), 1.0e6)
+    if rod_solver._structural_graph_kkt.chain_route is not None:
+        chain_prox = rod_solver._structural_graph_kkt.chain_route.segment_kirchhoff_proximal.numpy()
+        test.assertGreater(float(np.max(chain_prox)), 0.0)
+        test.assertAlmostEqual(float(np.max(chain_prox)), rod_prox[seg0], places=5)
+
+
+def _r22_depth_rigidity_mixed_skip_and_bdf2_wrench(test, device):
+    """Verify r22 upgrades:
+    1. Contact-enabled fp64 paired CR on >256-body near-rigid chains + >=2048-body near-rigid ball chains.
+    2. Per-island skip of redundant post-solve sweeps on contact-free trees in mixed contact scenes.
+    3. External-wrench reach in flag_bdf2_contact_islands when body_f drives first-step impact.
+    """
+    # 1. Mixed contact + contact-free resolved tree: 3 sweeps must preserve 1-sweep tree joint accuracy.
+    gaps_by_iters = {}
+    for iters in (1, 3):
+        builder = newton.ModelBuilder(gravity=(0.0, 0.0, -9.81))
+        builder.add_ground_plane()
+        cfg = newton.ModelBuilder.ShapeConfig(ke=1.0e6, kd=100.0, mu=0.5)
+        box = builder.add_body(xform=wp.transform(wp.vec3(-2.0, 0.0, 0.105), wp.quat_identity()), mass=1.0)
+        builder.add_shape_box(box, hx=0.1, hy=0.1, hz=0.1, cfg=cfg)
+        joints = []
+        prev = -1
+        for idx in range(32):
+            b = builder.add_link(
+                xform=wp.transform(wp.vec3((idx + 0.5) * 0.04, 0.0, 5.0), wp.quat_identity()),
+                mass=0.05,
+                inertia=wp.mat33(1.0e-5, 0.0, 0.0, 0.0, 1.0e-5, 0.0, 0.0, 0.0, 1.0e-5),
+            )
+            px = wp.transform(wp.vec3(0.0 if prev < 0 else 0.02, 0.0, 5.0 if prev < 0 else 0.0), wp.quat_identity())
+            cx = wp.transform(wp.vec3(-0.02, 0.0, 0.0), wp.quat_identity())
+            joints.append(
+                builder.add_joint_revolute(
+                    parent=prev, child=b, axis=wp.vec3(0.0, 1.0, 0.0), parent_xform=px, child_xform=cx
+                )
+            )
+            prev = b
+        builder.add_articulation(joints)
+        builder.color(balance_colors=False)
+        model = builder.finalize(device=device)
+        cp = newton.CollisionPipeline(model)
+        contacts = cp.contacts()
+        solver = newton.solvers.SolverVBD(
+            model,
+            iterations=iters,
+            rigid_joint_linear_ke=1.0e9,
+            rigid_joint_angular_ke=1.0e9,
+            rigid_joint_global_iterations=1,
+        )
+        s0, s1 = model.state(), model.state()
+        ctl = model.control()
+        for _ in range(40):
+            cp.collide(s0, contacts)
+            solver.step(s0, s1, ctl, contacts, 2.0e-3)
+            s0, s1 = s1, s0
+        q_chain = s0.body_q.numpy()[1:]
+        gaps_by_iters[iters] = q_chain
+        test.assertLess(float(s0.body_q.numpy()[box, 2]), 0.105)
+    np.testing.assert_allclose(gaps_by_iters[3], gaps_by_iters[1], atol=1.0e-6, rtol=1.0e-6)
+
+    # 2. External wrench reach in flag_bdf2_contact_islands across a 5 mm gap.
+    builder = newton.ModelBuilder(gravity=(0.0, 0.0, -9.81))
+    builder.add_ground_plane()
+    cfg = newton.ModelBuilder.ShapeConfig(ke=1.0e6, kd=100.0, mu=0.5, gap=0.02)
+    sphere = builder.add_body(xform=wp.transform(wp.vec3(0.0, 0.0, 0.105), wp.quat_identity()), mass=1.0)
+    builder.add_shape_sphere(sphere, radius=0.1, cfg=cfg)
+    builder.color(balance_colors=False)
+    model = builder.finalize(device=device)
+    cp = newton.CollisionPipeline(model)
+    contacts = cp.contacts()
+    solver = newton.solvers.SolverVBD(model, iterations=3, rigid_time_integration="bdf2")
+    s0, s1 = model.state(), model.state()
+    ctl = model.control()
+    cp.collide(s0, contacts)
+    f_arr = np.zeros((1, 6), dtype=np.float32)
+    f_arr[0, 2] = -500.0
+    s0.body_f.assign(f_arr)
+    solver.step(s0, s1, ctl, contacts, 5.0e-3)
+    test.assertEqual(int(solver._bdf2_island_has_contact.numpy()[0]), 1)
+
+    # 3. CUDA-only: >256-body near-rigid chain with contacts & >=2048-body near-rigid ball chain select fp64 paired CR.
+    if wp.get_device(device).is_cuda:
+        builder = newton.ModelBuilder(gravity=(0.0, 0.0, -9.81))
+        builder.add_ground_plane()
+        joints = []
+        prev = -1
+        for idx in range(260):
+            b = builder.add_link(
+                xform=wp.transform(wp.vec3((idx + 0.5) * 0.05, 0.0, 50.0), wp.quat_identity()),
+                mass=0.05,
+                inertia=wp.mat33(1.0e-5, 0.0, 0.0, 0.0, 1.0e-5, 0.0, 0.0, 0.0, 1.0e-5),
+            )
+            px = wp.transform(wp.vec3(0.0 if prev < 0 else 0.025, 0.0, 50.0 if prev < 0 else 0.0), wp.quat_identity())
+            cx = wp.transform(wp.vec3(-0.025, 0.0, 0.0), wp.quat_identity())
+            joints.append(
+                builder.add_joint_revolute(
+                    parent=prev, child=b, axis=wp.vec3(0.0, 1.0, 0.0), parent_xform=px, child_xform=cx
+                )
+            )
+            prev = b
+        builder.add_articulation(joints)
+        builder.color(balance_colors=False)
+        model = builder.finalize(device=device)
+        cp = newton.CollisionPipeline(model)
+        contacts = cp.contacts()
+        solver = newton.solvers.SolverVBD(
+            model,
+            iterations=1,
+            rigid_joint_linear_ke=1.0e12,
+            rigid_joint_angular_ke=1.0e12,
+            rigid_joint_global_iterations=1,
+        )
+        solver._plan_structural_graph_kkt(2.0e-3)
+        bucket = solver._structural_graph_kkt.tree_buckets[0]
+        test.assertTrue(bucket.use_paired_open_backbone)
+        test.assertEqual(bucket.factor_dtype, wp.float64)
+        s0, s1 = model.state(), model.state()
+        ctl = model.control()
+        cp.collide(s0, contacts)
+        solver.step(s0, s1, ctl, contacts, 2.0e-3)
+        test.assertTrue(np.all(np.isfinite(s1.body_q.numpy())))
 
 
 add_function_test(
@@ -9219,6 +9356,12 @@ add_function_test(
     TestVBDRigidKKT,
     "test_rod_kirchhoff_proximal_and_unilateral_active_set_hessian",
     _rod_kirchhoff_proximal_and_unilateral_active_set_hessian,
+    devices=get_test_devices(mode="basic"),
+)
+add_function_test(
+    TestVBDRigidKKT,
+    "test_r22_depth_rigidity_mixed_skip_and_bdf2_wrench",
+    _r22_depth_rigidity_mixed_skip_and_bdf2_wrench,
     devices=get_test_devices(mode="basic"),
 )
 

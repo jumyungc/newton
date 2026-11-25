@@ -100,6 +100,7 @@ from .rigid_vbd_kernels import (
     init_body_particle_contacts,
     init_rod_rest_bend_twist,
     refresh_body_structural_k,
+    refresh_body_unrepresented_structural_k,
     refresh_joint_material_params,
     reset_particle_body_attachment_state,
     reset_rigid_bdf2_worlds,
@@ -108,6 +109,7 @@ from .rigid_vbd_kernels import (
     select_variant_bounding_radius,
     snapshot_body_body_contact_history,
     step_body_body_contact_C0_lambda,
+    step_body_body_contact_C0_lambda_split,
     step_joint_C0_lambda_rho,
     update_body_velocity,
     update_duals_body_body_contacts,
@@ -1930,6 +1932,9 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                     model.shape_body,
                     state_in.body_q,
                     state_in.body_qd,
+                    state_in.body_f,
+                    self.body_inv_mass_effective,
+                    self.body_inv_inertia_effective,
                     model.body_com,
                     self._bdf2_body_island,
                 ],
@@ -2154,6 +2159,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         else:
             self._structural_budget_warned_key = None
         if not backend.active:
+            self._refresh_tangent_structural_k()
             return
 
         self._rigid_vbd_kkt = rigid_vbd_kkt
@@ -2179,6 +2185,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 for b_id in (int(j_p[j_idx]), int(j_c[j_idx])):
                     if b_id >= 0:
                         non_rod_bodies.add(b_id)
+            jdofs_host = self._to_numpy(self.model.joint_qd_start, dtype=np.int32)
+            jtarget_ke_host = self._to_numpy(self.model.joint_target_ke, dtype=np.float64)
             prox_by_body: dict[int, float] = {}
             for j_idx in range(len(jt_host)):
                 if int(jt_host[j_idx]) != int(JointType.ROD) or int(j_en[j_idx]) == 0:
@@ -2186,8 +2194,13 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 p_b, c_b = int(j_p[j_idx]), int(j_c[j_idx])
                 if c_b < 0:
                     continue
-                k_lin = float(self._joint_linear_k_host[j_idx])
-                if k_lin <= 0.0:
+                dof0_j = int(jdofs_host[j_idx])
+                k_shear = (
+                    float(jtarget_ke_host[dof0_j])
+                    if 0 <= dof0_j < len(jtarget_ke_host)
+                    else float(self._joint_linear_k_host[j_idx])
+                )
+                if k_shear <= 0.0:
                     continue
                 lp = float(np.linalg.norm(xp[j_idx, :3] - com[p_b])) if p_b >= 0 else 0.0
                 lc = float(np.linalg.norm(xc[j_idx, :3] - com[c_b]))
@@ -2199,9 +2212,10 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                         and b_id in body_to_isl
                         and b_id not in non_rod_bodies
                     ):
-                        # Single-body shear rotational diagonal r_b^2 * K_shear = (1/4) * L_b^2 * K_shear
-                        # using body b's own half-arm r_b so hub lever arms never pollute terminal segments or hubs.
-                        prox_by_body[b_id] = prox_by_body.get(b_id, 0.0) + r_arm * r_arm * k_lin
+                        # Contact-active Kirchhoff director rotational proximal (1/4) * r_b^2 * K_shear
+                        # (= (1/8) * L_b^2 * K_shear for an interior segment of half-arm r_b = L_b / 2),
+                        # shared across global tree KKT and ChainCondensation while isolating terminal hubs.
+                        prox_by_body[b_id] = prox_by_body.get(b_id, 0.0) + 0.25 * r_arm * r_arm * k_shear
             if prox_by_body:
                 ordered_rod_bodies = sorted(prox_by_body)
                 self._rod_kirchhoff_body_ids = wp.array(ordered_rod_bodies, dtype=wp.int32, device=self.device)
@@ -2213,6 +2227,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 )
                 if backend.chain_route is not None:
                     backend.chain_route.set_segment_kirchhoff_proximal(prox_by_body)
+        self._refresh_tangent_structural_k()
 
     @override
     def _non_graphable_model_flags(self) -> int:
@@ -2946,7 +2961,35 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         ``JOINT_DOF_PROPERTIES`` change to rod stretch/shear stiffness, which feeds it.
         """
         self.body_structural_k = wp.empty(self.model.body_count, dtype=float, device=self.device)
+        self.body_tangent_structural_k = wp.empty(self.model.body_count, dtype=float, device=self.device)
         self._refresh_structural_k()
+
+    def _refresh_tangent_structural_k(self) -> None:
+        """Refresh tangent structural floor from joints not globally solved by ``StructuralGraphKKT``."""
+        self.body_tangent_structural_k.zero_()
+        if self.model.joint_count == 0:
+            return
+        backend = getattr(self, "_structural_graph_kkt", None)
+        stress_slot = backend.joint_stress_slot if backend is not None else None
+        if stress_slot is None:
+            wp.copy(self.body_tangent_structural_k, self.body_structural_k)
+            return
+        wp.launch(
+            kernel=refresh_body_unrepresented_structural_k,
+            dim=self.model.joint_count,
+            inputs=[
+                self.model.joint_type,
+                self.model.joint_enabled,
+                self.model.joint_parent,
+                self.model.joint_child,
+                self.joint_constraint_start,
+                self.joint_constraint_dim,
+                self.joint_material_k,
+                stress_slot,
+            ],
+            outputs=[self.body_tangent_structural_k],
+            device=self.device,
+        )
 
     def _refresh_structural_k(self) -> None:
         """Refresh the structural summary in place, without reallocating it.
@@ -2956,6 +2999,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         """
         self.body_structural_k.zero_()
         if self.model.joint_count == 0:
+            self.body_tangent_structural_k.zero_()
             return
         wp.launch(
             kernel=refresh_body_structural_k,
@@ -2972,6 +3016,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             outputs=[self.body_structural_k],
             device=self.device,
         )
+        self._refresh_tangent_structural_k()
 
     def _refresh_joint_material_params(self) -> None:
         """Refresh cached Rod material stiffness and damping after model changes.
@@ -3526,6 +3571,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             else:
                 self._solve_structural_graph_kkt(state_in, control, contacts, dt)
 
+        has_contact_candidates = contacts is not None and self.model.shape_count > 0 and contacts.rigid_contact_max > 0
+        resolved_trees_settled = False
         for iter_num in range(self.iterations):
             rigid_due = self.collision_pipeline is not None and self._rigid_collision_is_due(iter_num)
             soft_due = self.particle_enable_self_contact and self._self_contact_is_due(iter_num)
@@ -3550,7 +3597,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 # precision (flag_nonlinear_correction): a property of the motion, read on the device.
                 # When rigid_joint_global_resolve is requested on a contact-free step, perform a
                 # second back-solve on the current factorization (Shamanskii chord step).
-                if backend is not None and len(global_indices) == 1:
+                if backend is not None and len(self._rigid_joint_global_iteration_indices) == 1:
                     if backend.has_second_stage_bodies:
                         needed = backend.flag_second_stage()
                         if self.device.is_capturing and not wp.is_conditional_graph_supported():
@@ -3571,6 +3618,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                             resolve_sqp_torque=True,
                         )
                 ran_stage_first = True
+                if has_contact_candidates:
+                    resolved_trees_settled = True
                 global_iteration = False
             # Material can redistribute between fixed guides even without any rigid bodies.
             if self.tendon_segment_lambda is not None and not self.integrate_with_external_rigid_solver:
@@ -3588,12 +3637,42 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 dt,
                 residual_out,
                 defer_joint_dual=global_iteration,
-                skip_resolved_trees=ran_stage_first,
+                skip_resolved_trees=ran_stage_first or resolved_trees_settled,
             )
             if global_iteration:
                 structural_solve(iter_num)
+                if has_contact_candidates:
+                    resolved_trees_settled = True
                 self._update_rigid_body_contact_duals(state_in, contacts, dt)
                 self._update_rigid_joint_duals(state_in, control, contacts, dt)
+                if (
+                    resolved_trees_settled
+                    and self.rigid_compliant_alm
+                    and backend is not None
+                    and backend.has_resolvable_trees
+                ):
+                    if has_contact_candidates and self._rigid_vbd_kkt is not None:
+                        self._flag_active_contact_islands(state_in, contacts, backend.limit_search_islands)
+                    backend.sync_resolved_tree_alm_duals(
+                        joint_type=self.model.joint_type,
+                        joint_parent=self.model.joint_parent,
+                        joint_child=self.model.joint_child,
+                        joint_X_p=self.model.joint_X_p,
+                        joint_X_c=self.model.joint_X_c,
+                        joint_axis=self.model.joint_axis,
+                        joint_qd_start=self.model.joint_qd_start,
+                        joint_dof_dim=self.model.joint_dof_dim,
+                        joint_constraint_start=self.joint_constraint_start,
+                        joint_material_k=self.joint_material_k,
+                        joint_penalty_kd=self._step_joint_penalty_kd(),
+                        body_q=state_in.body_q,
+                        body_q_prev=self.body_q_prev,
+                        body_q_rest=self.model.body_q,
+                        dt=dt,
+                        joint_lambda_lin=self.joint_lambda_lin,
+                        joint_lambda_ang=self.joint_lambda_ang,
+                        only_unflagged_islands=has_contact_candidates or backend.has_any_joint_limits,
+                    )
             self._solve_particle_iteration(state_in, state_out, contacts, dt, residual_out)
             if iter_num in self._particle_global_iteration_indices:
                 self._solve_particle_global_vbd(state_in, state_out, contacts, dt)
@@ -4658,8 +4737,9 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         if not self._integrates_rigid_bodies or contacts.rigid_contact_max == 0:
             return
         model = self.model
+        use_split_tangent_k = self._global_joint_stress_slot(contacts) is not None
         wp.launch(
-            kernel=step_body_body_contact_C0_lambda,
+            kernel=step_body_body_contact_C0_lambda_split if use_split_tangent_k else step_body_body_contact_C0_lambda,
             dim=contacts.rigid_contact_max,
             inputs=[
                 contacts.rigid_contact_count,
@@ -4678,6 +4758,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 self.body_inv_inertia_effective,
                 model.body_com,
                 self.body_structural_k,
+                *([self.body_tangent_structural_k] if use_split_tangent_k else []),
                 int(BodyFlags.PROXY),
                 body_q,
                 lambda_retention,
@@ -5737,7 +5818,6 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         has_rigid_contact_candidates = contacts is not None and model.shape_count > 0 and contacts.rigid_contact_max > 0
         can_skip_resolved = (
             skip_resolved_trees
-            and refresh_contact_angular_conditioning == 0
             and backend is not None
             and backend.has_resolvable_trees
             and not self._has_joint_mimics
