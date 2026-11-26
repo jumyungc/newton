@@ -3844,6 +3844,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                             model.shape_material_mu,
                             model.shape_material_mu_torsional,
                             model.shape_material_mu_rolling,
+                            model.shape_material_friction_mode,
                             restore_compliant_tangent_warmstart,
                             contacts.rigid_contact_match_index,
                             contacts.rigid_contact_match_generation,
@@ -3878,6 +3879,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                             model.shape_material_mu,
                             model.shape_material_mu_torsional,
                             model.shape_material_mu_rolling,
+                            model.shape_material_friction_mode,
                         ],
                         outputs=[
                             self.body_body_contact_material_kd,
@@ -3960,6 +3962,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 model.shape_material_ke,
                 model.shape_material_kd,
                 model.shape_material_mu,
+                model.shape_material_friction_mode,
             ],
             outputs=[
                 self.body_particle_contact_material_ke,
