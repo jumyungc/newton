@@ -100,6 +100,7 @@ from .rigid_vbd_kernels import (
     init_body_body_contacts_alm,
     init_body_particle_contacts,
     init_rod_rest_bend_twist,
+    prepare_rod_visco_step,
     refresh_body_structural_k,
     refresh_joint_material_params,
     relax_rod_visco_history,
@@ -146,8 +147,8 @@ _DEPRECATED_RIGID_COMPLIANT_ALM_UNSET: Any = _RigidCompliantAlmUnset()
 
 _PARTICLE_CONTACT_GATHER_BLOCK_DIM = 128
 
-# Rod relaxation attributes, packed per joint in this order.
-_ROD_RELAXATION_ATTRIBUTES = ("visco_bend_ratio", "visco_bend_tau", "visco_stretch_ratio", "visco_stretch_tau")
+# Rod relaxation attributes (one ``wp.vec4`` component per branch), packed per joint as mat44 rows in this order.
+_ROD_RELAXATION_ATTRIBUTES = ("visco_tau", "visco_bend_ratio", "visco_twist_ratio", "visco_stretch_ratio")
 
 # ``NewtonVbdSceneAPI`` settings: constructor argument -> (dtype, default, USD attribute name).
 # Read by both ``register_custom_attributes`` and ``SolverVBD.__init__``.
@@ -741,9 +742,9 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
               ``model.vbd.dahl_eps_max`` and ``model.vbd.dahl_tau``. Register them with
               ``SolverVBD.register_custom_attributes`` before building the model. Dahl friction is
               enabled only when positive Dahl parameters are authored.
-            - Standard-linear-solid relaxation of rod bending and stretch is controlled by the
-              ``model.vbd.visco_*`` ratio/tau attributes (see :meth:`register_custom_attributes`). It is
-              enabled when a positive pair is authored before the solver is constructed. This mode
+            - Relaxation of rod bending, twist and stretch (up to four Maxwell branches) is controlled by
+              the ``model.vbd.visco_*`` attributes (see :meth:`register_custom_attributes`). It is
+              enabled when an active branch is authored before the solver is constructed. This mode
               requires direct VBD integration and is not supported as a ``SolverCoupled`` entry.
 
         """
@@ -989,15 +990,18 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         )
 
         options = {"deterministic": effective_deterministic, "deterministic_max_records": 0}
-        # Rod relaxation (bend ratio, bend tau, stretch ratio, stretch tau); an empty array disables it.
+        # Rod relaxation branches (see _ROD_RELAXATION_ATTRIBUTES); an empty array disables it.
         relaxation = self._rod_relaxation_values()
         if relaxation is not None and not integrates_rigid_bodies:
             raise ValueError("Rod relaxation requires SolverVBD to integrate the rigid bodies.")
         self.joint_visco = (
-            wp.empty(0, dtype=wp.vec4, device=self.device)
+            wp.empty(0, dtype=wp.mat44, device=self.device)
             if relaxation is None
-            else wp.array(relaxation, dtype=wp.vec4, device=self.device)
+            else wp.array(relaxation, dtype=wp.mat44, device=self.device)
         )
+        # Per-joint branch sums frozen for one timestep: row gains (bend, twist, stretch) and offsets.
+        self.joint_visco_gain = wp.zeros(self.joint_visco.shape[0], dtype=wp.vec3, device=self.device)
+        self.joint_visco_offset = wp.zeros(self.joint_visco.shape[0], dtype=wp.vec4, device=self.device)
         if integrates_rigid_bodies:
             rigid_modules = (
                 rigid_vbd_kernels,
@@ -2118,25 +2122,25 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         return result if dtype is None else result.astype(dtype, copy=False)
 
     def _rod_relaxation_values(self) -> np.ndarray | None:
-        """Return validated per-joint ``(bend ratio, bend tau, stretch ratio, stretch tau)`` rows.
+        """Return validated per-joint ``(tau, bend ratio, twist ratio, stretch ratio)`` x branch matrices.
 
-        Returns None when the attributes are not registered or no ``(ratio, tau)`` pair is positive.
+        Returns None when the attributes are not registered or no branch has a positive time and ratio.
         """
         attrs = getattr(self.model, "vbd", None)
         arrays = [getattr(attrs, name, None) for name in _ROD_RELAXATION_ATTRIBUTES]
         if any(array is None for array in arrays):
             return None
-        values = np.stack([self._to_numpy(array, dtype=np.float32) for array in arrays], axis=-1)
+        values = np.stack([self._to_numpy(array, dtype=np.float32) for array in arrays], axis=1)
         if not np.all(np.isfinite(values)) or np.any(values < 0.0):
             raise ValueError(f"model.vbd.{{{', '.join(_ROD_RELAXATION_ATTRIBUTES)}}} values must be finite and >= 0.")
-        return values if np.any((values[:, 0::2] > 0.0) & (values[:, 1::2] > 0.0)) else None
+        return values if np.any((values[:, 0] > 0.0) & np.any(values[:, 1:] > 0.0, axis=1)) else None
 
     def _refresh_rod_relaxation(self) -> None:
         """Copy edited relaxation parameters into the existing buffer so captured graphs stay valid."""
         relaxation = self._rod_relaxation_values()
         if self.joint_visco.shape[0] > 0:
-            # All pairs zero keeps the buffer, with zero gains.
-            values = np.zeros((self.joint_visco.shape[0], 4), np.float32) if relaxation is None else relaxation
+            # No active branch keeps the buffer, with zero gains.
+            values = np.zeros((self.joint_visco.shape[0], 4, 4), np.float32) if relaxation is None else relaxation
             self.joint_visco.assign(values)
         elif relaxation is not None:
             raise ValueError("Rod relaxation authored after construction requires a new SolverVBD.")
@@ -2460,8 +2464,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             defaults: explicit constructor argument > ``model.vbd.*`` > built-in default. Scene-authored
             stiffness and damping must be finite and non-negative.
           - ``vbd:dahl_eps_max`` and ``vbd:dahl_tau`` for optional rod angular Dahl friction
-          - ``vbd:visco_bend_ratio``, ``vbd:visco_bend_tau``, ``vbd:visco_stretch_ratio``, and
-            ``vbd:visco_stretch_tau`` for optional rod relaxation, with its State history
+          - ``vbd:visco_tau``, ``vbd:visco_bend_ratio``, ``vbd:visco_twist_ratio``, and
+            ``vbd:visco_stretch_ratio`` for optional rod relaxation, with its State history
             ``vbd:visco_history``
 
         Attributes are declared in the ``vbd`` namespace so they can be authored
@@ -2476,19 +2480,20 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         entirely when no joint enables it at construction, so reconstruct the
         solver after making them positive.
 
-        Rod relaxation adds a standard-linear-solid (Zener) Maxwell branch to a row of authored
-        (equilibrium) stiffness ``k``: the response to a held strain decays as
-        ``k * (1 + ratio * exp(-t / tau))``. ``ratio`` [dimensionless] scales the row's authored
-        stiffness, so it follows that stiffness when the segment length changes; ``tau`` [s] is the
-        relaxation time. Bend parameters relax bending (not twist) and stretch parameters relax axial
-        extension. A branch is active where both values are positive; enable it before constructing
-        the solver, after which edits take effect through
-        ``notify_model_changed(newton.ModelFlags.JOINT_DOF_FORCE_PROPERTIES)``. The relaxation history
-        ``(bend_x, bend_y, axial extension)`` [dimensionless, dimensionless, m] is trajectory data
-        stored on :class:`~newton.State` (zero means relaxed in the rest configuration) and is
-        restored by :meth:`reset`; :meth:`relax_rod_history` instead relaxes it in the current pose.
-        Use direct VBD integration: ``SolverCoupled`` does not synchronize this material history
-        and rejects an SLS-enabled VBD entry.
+        Rod relaxation adds up to four Maxwell branches (a Prony series) to the bend, twist and axial
+        stretch rows of a rod joint. Each attribute is a ``wp.vec4`` whose component ``b`` belongs to
+        branch ``b``: ``visco_tau`` [s] is its relaxation time, shared by the three rows, and each
+        ``visco_*_ratio`` [dimensionless] scales that row's authored (equilibrium) stiffness ``k``, so
+        the response to a held strain decays as ``k * (1 + sum_b ratio_b * exp(-t / tau_b))`` and
+        follows ``k`` when the segment length changes. A branch drives a row where its time and that
+        row's ratio are positive; enable at least one before constructing the solver, after which
+        edits take effect through ``notify_model_changed(newton.ModelFlags.JOINT_DOF_FORCE_PROPERTIES)``.
+        The relaxation history is a ``wp.mat44`` per joint whose row ``b`` holds branch ``b``'s
+        ``(bend_x, bend_y, twist, axial extension)`` [dimensionless, dimensionless, rad, m]. It is
+        trajectory data stored on :class:`~newton.State` (zero means relaxed in the rest
+        configuration) and is restored by :meth:`reset`; :meth:`relax_rod_history` instead relaxes
+        it in the current pose. Use direct VBD integration: ``SolverCoupled`` does not synchronize
+        this material history and rejects an SLS-enabled VBD entry.
 
         .. experimental::
 
@@ -2528,8 +2533,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                     name=name,
                     frequency=Model.AttributeFrequency.JOINT,
                     assignment=Model.AttributeAssignment.MODEL,
-                    dtype=wp.float32,
-                    default=0.0,
+                    dtype=wp.vec4,
+                    default=wp.vec4(0.0),
                     namespace="vbd",
                 )
             )
@@ -2538,8 +2543,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 name="visco_history",
                 frequency=Model.AttributeFrequency.JOINT,
                 assignment=Model.AttributeAssignment.STATE,
-                dtype=wp.vec3,
-                default=wp.vec3(0.0),
+                dtype=wp.mat44,
+                default=wp.mat44(0.0),
                 namespace="vbd",
             )
         )
@@ -3169,12 +3174,12 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         """Set the rod relaxation history of selected worlds to the deformation of ``state.body_q``.
 
         The rods then start as a material fully relaxed in their current pose, for example a cable
-        held in a measured shape long enough for its transient branch to decay. A new
+        held in a measured shape long enough for its transient branches to decay. A new
         :class:`~newton.State` instead starts with the model default history (zero: relaxed in the
         rest configuration), which a deformed pose loads at its instantaneous stiffness. Call this
         after authoring the pose (or :func:`~newton.eval_fk`) and before the next :meth:`step`;
-        :meth:`reset` restores the model default. It does nothing when no relaxation pair was
-        active at construction, and it is graph-capturable. Only the transient SLS branch is
+        :meth:`reset` restores the model default. It does nothing when no relaxation branch was
+        active at construction, and it is graph-capturable. Only the transient branches are
         relaxed: the equilibrium spring, rest shape, velocities, and Dahl history are unchanged.
 
         .. experimental::
@@ -3200,7 +3205,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         model = self.model
         for name, array, dtype, count in (
             ("body_q", state.body_q, wp.transform, model.body_count),
-            ("vbd.visco_history", history, wp.vec3, model.joint_count),
+            ("vbd.visco_history", history, wp.mat44, model.joint_count),
         ):
             if array is None or array.dtype != dtype or array.shape != (count,) or array.device != self.device:
                 raise ValueError(f"state.{name} must match this model's shape, dtype, and device; use model.state().")
@@ -4284,6 +4289,17 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                     device=self.device,
                 )
 
+            # Sum the rod relaxation branches of the input history once per timestep.
+            if self.joint_visco.shape[0] > 0:
+                wp.launch(
+                    kernel=prepare_rod_visco_step,
+                    inputs=[dt, self.joint_visco, self._rod_visco_history(state_in)],
+                    outputs=[self.joint_visco_gain, self.joint_visco_offset],
+                    dim=model.joint_count,
+                    block_dim=self._rigid_joint_block_dim,
+                    device=self.device,
+                )
+
             # The forward step and any enabled rod update have consumed the mask.
             self._rigid_pose_rebaseline_mask.zero_()
 
@@ -4926,8 +4942,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                     self.joint_penalty_kd,
                     self.joint_sigma_start,
                     self.joint_C_fric,
-                    self.joint_visco,
-                    self._rod_visco_history(state_in),
+                    self.joint_visco_gain,
+                    self.joint_visco_offset,
                     model.joint_target_ke,
                     model.joint_target_kd,
                     control.joint_target_q,

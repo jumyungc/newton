@@ -14,9 +14,33 @@ from newton.solvers.experimental.coupled import SolverCoupled
 from newton.tests._usd_deformable_test_utils import _add_cable_curve, _deformable_stage
 from newton.tests.unittest_utils import add_function_test, get_test_devices, requires
 
+# Columns of one branch's relaxation history.
+_BEND, _TWIST, _AXIAL = slice(0, 2), 2, 3
 
-def _axial_rod(device, *, stiffness, damping, mass, ratio, tau, gravity, bend_ratio=0.0, inertia=1.0e-3, frame=None):
-    """One rod joint from the world to a link, loaded along the joint +Z axis by gravity."""
+
+def _branches(*values):
+    """Return a per-joint ``wp.vec4`` with one value per relaxation branch, unused branches zero."""
+    return wp.vec4(*values, *([0.0] * (4 - len(values))))
+
+
+def _axial_rod(
+    device,
+    *,
+    stiffness,
+    damping,
+    mass,
+    ratio,
+    tau,
+    gravity,
+    bend_ratio=0.0,
+    twist_ratio=0.0,
+    inertia=1.0e-3,
+    frame=None,
+):
+    """One rod joint from the world to a link, loaded along the joint +Z axis by gravity.
+
+    ``ratio`` (stretch), ``bend_ratio``, ``twist_ratio`` and ``tau`` are one value or one per branch.
+    """
     builder = newton.ModelBuilder(gravity=(0.0, 0.0, gravity))
     newton.solvers.SolverVBD.register_custom_attributes(builder)
     origin = wp.transform(wp.vec3(0.0, 0.0, 0.1), wp.quat_identity())
@@ -39,22 +63,28 @@ def _axial_rod(device, *, stiffness, damping, mass, ratio, tau, gravity, bend_ra
     builder.add_articulation([joint])
     builder.color()
     model = builder.finalize(device=device)
-    model.vbd.visco_stretch_ratio.fill_(ratio)
-    model.vbd.visco_stretch_tau.fill_(tau)
-    model.vbd.visco_bend_ratio.fill_(bend_ratio)
-    model.vbd.visco_bend_tau.fill_(tau)
+    for name, value in (
+        ("visco_tau", tau),
+        ("visco_stretch_ratio", ratio),
+        ("visco_bend_ratio", bend_ratio),
+        ("visco_twist_ratio", twist_ratio),
+    ):
+        getattr(model.vbd, name).fill_(_branches(*np.atleast_1d(value)))
     return model, link
 
 
-def _creep(model, link, solver, steps, dt, u=0.0, v=0.0, maxwell=0.0, *, stiffness, damping, mass, ratio, tau, load):
-    """Step the solver and the float64 backward-Euler SLS recurrence together; return the reference state."""
+def _creep(model, link, solver, steps, dt, *, stiffness, damping, mass, ratio, tau, load):
+    """Step the solver and the float64 backward-Euler recurrence of its branches together; return the strain."""
     state_0, state_1 = model.state(), model.state()
+    ratio, tau = np.atleast_1d(ratio), np.atleast_1d(tau)
     decay = tau / (tau + dt)
+    u, v, maxwell = 0.0, 0.0, np.zeros_like(decay)
     for _ in range(steps):
         solver.step(state_0, state_1, None, None, dt)
         state_0, state_1 = state_1, state_0
-        lhs = mass / dt**2 + damping / dt + stiffness * (1.0 + decay * ratio)
-        rhs = mass / dt**2 * u + mass / dt * v + damping / dt * u + load + decay * (ratio * stiffness * u - maxwell)
+        lhs = mass / dt**2 + damping / dt + stiffness * (1.0 + np.sum(decay * ratio))
+        rhs = mass / dt**2 * u + mass / dt * v + damping / dt * u + load
+        rhs += np.sum(decay * (ratio * stiffness * u - maxwell))
         u_next = rhs / lhs
         maxwell = decay * (maxwell + ratio * stiffness * (u_next - u))
         v, u = (u_next - u) / dt, u_next
@@ -183,16 +213,17 @@ def test_sls_history_small_step_and_endpoint_precision(test, device):
 
 
 def test_relaxation_parameters_enable_and_validate(test, device):
-    """Activate a branch only for positive (ratio, tau) pairs and reject invalid values."""
-    for ratio, tau, active in ((0.0, 0.5, False), (2.0, 0.0, False), (2.0, 0.5, True)):
+    """Activate only a branch with a positive time and ratio in the same branch, and reject invalid values."""
+    for ratio, tau, active in (((0.0,), (0.5,), False), ((2.0,), (0.0,), False), ((0.0, 2.0), (0.5, 0.0), False)):
         model, _ = _axial_rod(device, stiffness=1.0e3, damping=0.0, mass=1.0, ratio=ratio, tau=tau, gravity=0.0)
         test.assertEqual(newton.solvers.SolverVBD(model).joint_visco.shape[0] > 0, active)
-    model, _ = _axial_rod(device, stiffness=1.0e3, damping=0.0, mass=1.0, ratio=2.0, tau=0.5, gravity=0.0)
-    for name in ("visco_bend_ratio", "visco_bend_tau", "visco_stretch_ratio", "visco_stretch_tau"):
+    model, _ = _axial_rod(device, stiffness=1.0e3, damping=0.0, mass=1.0, ratio=(0.0, 2.0), tau=(0.5, 0.5), gravity=0.0)
+    test.assertGreater(newton.solvers.SolverVBD(model).joint_visco.shape[0], 0)
+    for name in ("visco_tau", "visco_bend_ratio", "visco_twist_ratio", "visco_stretch_ratio"):
         array = getattr(model.vbd, name)
         valid = array.numpy().copy()
         for invalid in (-1.0, float("nan"), float("inf")):
-            array.fill_(invalid)
+            array.fill_(_branches(0.0, 0.0, 0.0, invalid))
             with test.assertRaisesRegex(ValueError, name):
                 newton.solvers.SolverVBD(model)
         array.assign(valid)
@@ -201,13 +232,13 @@ def test_relaxation_parameters_enable_and_validate(test, device):
 
 
 def test_rod_creep_matches_backward_euler(test, device):
-    """Match axial creep under a step load to the float64 backward-Euler SLS recurrence."""
-    params = {"stiffness": 1.0e3, "damping": 5.0, "mass": 1.0e-3, "ratio": 3.0, "tau": 0.4}
+    """Match axial creep under a step load to the float64 backward-Euler recurrence of a fast and a slow branch."""
+    params = {"stiffness": 1.0e3, "damping": 5.0, "mass": 1.0e-3, "ratio": (3.0, 1.0), "tau": (0.4, 2.0)}
     model, link = _axial_rod(device, gravity=9810.0, **params)
     solver = newton.solvers.SolverVBD(model, iterations=20)
     u = _creep(model, link, solver, 200, 0.01, load=9.81, **params)
-    # After 1.25 retardation times tau * (1 + ratio) the strain has crept well past the instantaneous response.
-    test.assertGreater(u, 3.0 * 9.81 / (1.0e3 * (1.0 + 3.0)))
+    # After 2 s the strain has crept well past the instantaneous response 9.81 / (k (1 + 3 + 1)).
+    test.assertGreater(u, 2.0 * 9.81 / (1.0e3 * (1.0 + 4.0)))
 
 
 def test_relaxation_rejects_coupled_state(test, device):
@@ -222,7 +253,7 @@ def test_relaxation_rejects_coupled_state(test, device):
                 joints=range(model.joint_count),
                 in_place=in_place,
             )
-            model.vbd.visco_stretch_ratio.fill_(2.0)
+            model.vbd.visco_stretch_ratio.fill_(_branches(2.0))
             with test.assertRaisesRegex(ValueError, "Rod relaxation.*SolverCoupled.*SolverVBD directly"):
                 SolverCoupled(model, entries=[entry])
 
@@ -251,7 +282,39 @@ def test_held_bend_and_stretch_relaxation(test, device):
         np.testing.assert_array_equal(state_0.vbd.visco_history.numpy(), before)
         np.testing.assert_allclose(state_1.body_q.numpy()[link], pose[link], atol=2.0e-6)
         expected = np.array([_HELD_BEND, 0.0, _HELD_EXTENSION]) * (1.0 - decay_product)
-        np.testing.assert_allclose(state_1.vbd.visco_history.numpy()[0], expected, atol=2.0e-6)
+        np.testing.assert_allclose(state_1.vbd.visco_history.numpy()[0, 0, [0, 1, _AXIAL]], expected, atol=2.0e-6)
+        state_0, state_1 = state_1, state_0
+
+
+def test_held_twist_relaxation_with_two_branches(test, device):
+    """Hold a pure twist with the analytic load of a fast and a slow twist branch, at a changing timestep.
+
+    Catches a twist row that ignores the branches, sums them wrongly, or commits them with one time
+    constant. The bend and axial columns, which no branch drives, track the pose.
+    """
+    ratio, tau, phi = np.array([2.3, 0.7]), np.array([0.12, 5.6]), 0.3
+    model, link = _axial_rod(
+        device, stiffness=1.0e3, damping=0.0, mass=1.0, ratio=0.0, tau=tau, gravity=0.0, twist_ratio=ratio, inertia=0.1
+    )
+    solver = newton.solvers.SolverVBD(model, iterations=20)
+    state_0, state_1 = model.state(), model.state()
+    pose = state_0.body_q.numpy().copy()
+    pose[link, 3:] = (0.0, 0.0, np.sin(0.5 * phi), np.cos(0.5 * phi))
+    state_0.body_q.assign(pose)
+    decay_product = np.ones(2)
+    for dt in [0.01] * 10 + [0.025] * 10:
+        decay_product *= tau / (tau + dt)
+        # Twist stiffness is 1 N*m/rad and the twist coordinate of a pure twist is phi.
+        force = np.zeros((model.body_count, 6), dtype=np.float32)
+        force[link, 5] = phi * (1.0 + np.sum(ratio * decay_product))
+        state_0.body_f.assign(force)
+        solver.step(state_0, state_1, None, None, dt)
+        np.testing.assert_allclose(state_1.body_q.numpy()[link], pose[link], atol=2.0e-6)
+        history = state_1.vbd.visco_history.numpy()[0]
+        # 4e-6 rad is the twist angle of the 2e-6 quaternion tolerance above.
+        np.testing.assert_allclose(history[:2, _TWIST], phi * (1.0 - decay_product), atol=4.0e-6)
+        np.testing.assert_allclose(history[2:, _TWIST], phi, atol=4.0e-6)
+        np.testing.assert_allclose(history[:, [0, 1, _AXIAL]], 0.0, atol=2.0e-6)
         state_0, state_1 = state_1, state_0
 
 
@@ -260,13 +323,13 @@ def test_relaxation_edits_apply_through_notify(test, device):
     params = {"stiffness": 1.0e3, "damping": 5.0, "mass": 1.0e-3, "tau": 0.4}
     model, link = _axial_rod(device, gravity=9810.0, ratio=3.0, **params)
     solver = newton.solvers.SolverVBD(model, iterations=20)
-    model.vbd.visco_stretch_ratio.fill_(1.5)
+    model.vbd.visco_stretch_ratio.fill_(_branches(1.5))
     solver.notify_model_changed(newton.ModelFlags.JOINT_DOF_FORCE_PROPERTIES)
     _creep(model, link, solver, 50, 0.01, load=9.81, ratio=1.5, **params)
     # Enabling relaxation on a solver built without it requires a new solver.
     model, _ = _axial_rod(device, gravity=0.0, ratio=0.0, **params)
     solver = newton.solvers.SolverVBD(model)
-    model.vbd.visco_stretch_ratio.fill_(1.0)
+    model.vbd.visco_stretch_ratio.fill_(_branches(1.0))
     solver.notify_model_changed(newton.ModelFlags.JOINT_PROPERTIES)  # Frame edits do not re-read the material.
     with test.assertRaisesRegex(ValueError, "new SolverVBD"):
         solver.notify_model_changed(newton.ModelFlags.JOINT_DOF_FORCE_PROPERTIES)
@@ -289,8 +352,8 @@ def test_relaxation_edits_apply_through_notify(test, device):
         for _ in range(10):
             solver.step(state_0, state_1, None, None, 0.01)
             state_0, state_1 = state_1, state_0
-        np.testing.assert_allclose(state_0.vbd.visco_history.numpy()[0, 2], 0.04, atol=1.0e-7)
-        model.vbd.visco_stretch_ratio.fill_(3.0)
+        np.testing.assert_allclose(state_0.vbd.visco_history.numpy()[0, 0, _AXIAL], 0.04, atol=1.0e-7)
+        model.vbd.visco_stretch_ratio.fill_(_branches(3.0))
         model.vbd.visco_bend_ratio.zero_()
         solver.notify_model_changed(newton.ModelFlags.JOINT_DOF_FORCE_PROPERTIES)
         solver.iterations = 20
@@ -300,23 +363,25 @@ def test_relaxation_edits_apply_through_notify(test, device):
     np.testing.assert_array_equal(released[0], released[1])
 
 
-def test_bend_relaxation_leaves_twist_unchanged(test, device):
-    """Relax bending only and leave a pure twist motion unchanged."""
-    twist = []
-    for bend_ratio in (0.0, 5.0):
-        model, link = _axial_rod(
-            device, stiffness=1.0e3, damping=0.0, mass=1.0, ratio=0.0, tau=0.5, gravity=0.0, bend_ratio=bend_ratio
-        )
-        solver = newton.solvers.SolverVBD(model, iterations=10)
-        state_0, state_1 = model.state(), model.state()
-        qd = state_0.body_qd.numpy()
-        qd[link, 5] = 1.0
-        state_0.body_qd.assign(qd)
-        for _ in range(20):
-            solver.step(state_0, state_1, None, None, 0.01)
-            state_0, state_1 = state_1, state_0
-        twist.append(state_0.body_q.numpy()[link])
-    np.testing.assert_allclose(twist[0], twist[1], atol=1.0e-6)
+def test_bend_and_twist_relaxation_stay_on_their_rows(test, device):
+    """A bend-only branch leaves a pure twist motion unchanged, and a twist-only branch a pure bend motion."""
+    for relaxed_row, angular_axis in (("bend_ratio", 5), ("twist_ratio", 3)):
+        poses = []
+        for ratio in (0.0, 5.0):
+            model, link = _axial_rod(
+                device, stiffness=1.0e3, damping=0.0, mass=1.0, ratio=0.0, tau=0.5, gravity=0.0, **{relaxed_row: ratio}
+            )
+            solver = newton.solvers.SolverVBD(model, iterations=10)
+            state_0, state_1 = model.state(), model.state()
+            qd = state_0.body_qd.numpy()
+            qd[link, angular_axis] = 1.0
+            state_0.body_qd.assign(qd)
+            for _ in range(20):
+                solver.step(state_0, state_1, None, None, 0.01)
+                state_0, state_1 = state_1, state_0
+            poses.append(state_0.body_q.numpy()[link])
+        with test.subTest(relaxed_row=relaxed_row):
+            np.testing.assert_allclose(poses[0], poses[1], atol=1.0e-6)
 
 
 def test_dahl_and_relaxation_compose(test, device):
@@ -347,7 +412,7 @@ def test_dahl_and_relaxation_compose(test, device):
         runs[name] = (histories, state_0.body_q.numpy()[link].copy())
 
     # Both mechanisms acquire nonzero history, and neither changes the other's.
-    test.assertGreater(np.abs(runs["sls"][0][0][0, :2]).max(), 0.05)
+    test.assertGreater(np.abs(runs["sls"][0][0][0, 0, _BEND]).max(), 0.05)
     test.assertGreater(np.abs(runs["dahl"][0][1][0]).max(), 5.0e-3)
     np.testing.assert_array_equal(runs["both"][0][0], runs["sls"][0][0])
     np.testing.assert_array_equal(runs["both"][0][1], runs["dahl"][0][1])
@@ -375,10 +440,11 @@ def test_relaxation_history_reset_and_capture(test, device):
     results = []
     for captured in (False, True) if wp.get_device(device).is_cuda else (False,):
         model = builder.finalize(device=device)
-        for name, value in (("visco_bend_ratio", 2.0), ("visco_bend_tau", 0.2)):
-            getattr(model.vbd, name).fill_(value)
-        for name, value in (("visco_stretch_ratio", 3.0), ("visco_stretch_tau", 0.3)):
-            getattr(model.vbd, name).fill_(value)
+        # Branch 0 relaxes bend and twist, branch 1 stretch, each with its own time.
+        model.vbd.visco_tau.fill_(_branches(0.2, 0.3))
+        model.vbd.visco_bend_ratio.fill_(_branches(2.0))
+        model.vbd.visco_twist_ratio.fill_(_branches(1.5))
+        model.vbd.visco_stretch_ratio.fill_(_branches(0.0, 3.0))
         solver = newton.solvers.SolverVBD(model, iterations=10)
         state_0, state_1 = model.state(), model.state()
         dt = 1.0 / 600.0
@@ -388,7 +454,7 @@ def test_relaxation_history_reset_and_capture(test, device):
                 solver.step(state_1, state_0, None, None, dt)
         for step in range(30):
             if step in (10, 20):
-                model.vbd.visco_stretch_ratio.fill_(0.0 if step == 10 else 3.0)
+                model.vbd.visco_stretch_ratio.fill_(_branches(0.0, 0.0 if step == 10 else 3.0))
                 solver.notify_model_changed(newton.ModelFlags.JOINT_DOF_FORCE_PROPERTIES)
             if captured:
                 wp.capture_launch(capture.graph)
@@ -435,7 +501,8 @@ def test_relax_history_holds_current_pose(test, device):
 
     A virgin (zero) history in the same pose loads the transient branch, so the same load moves it.
     """
-    relaxed_history = [_HELD_BEND, 0.0, _HELD_EXTENSION]
+    # Every branch row holds the pose's deformation; this pose has no twist.
+    relaxed_history = np.tile([_HELD_BEND, 0.0, 0.0, _HELD_EXTENSION], (4, 1))
     drift = {}
     for relaxed in (True, False):
         model, link, solver, state_0, state_1, pose = _held_link(device)
@@ -468,16 +535,22 @@ def test_relax_history_holds_current_pose(test, device):
 @requires("pxr.Usd")
 def test_usd_cable_curve_authors_relaxation(test, device):
     """Apply relaxation attributes authored on a USD cable curve to every rod joint generated from it."""
-    from pxr import Sdf, UsdGeom
+    from pxr import Gf, Sdf, UsdGeom
 
     stage = _deformable_stage()
     # Newton currently supports SI stages. Ratios are dimensionless and tau is seconds.
     UsdGeom.SetStageMetersPerUnit(stage, 1.0)
     points = [(0.0, 0.0, 1.0), (0.1, 0.0, 1.0), (0.25, 0.0, 1.0), (0.3, 0.0, 1.0)]
     prim = _add_cable_curve(stage, "/World/Cable", points).GetPrim()
-    authored = {"visco_bend_ratio": 9.9, "visco_bend_tau": 3.5, "visco_stretch_ratio": 2.0, "visco_stretch_tau": 0.5}
+    # Branch 0 relaxes bend and twist, branch 1 stretch.
+    authored = {
+        "visco_tau": (3.5, 0.5, 0.0, 0.0),
+        "visco_bend_ratio": (9.9, 0.0, 0.0, 0.0),
+        "visco_twist_ratio": (4.0, 0.0, 0.0, 0.0),
+        "visco_stretch_ratio": (0.0, 2.0, 0.0, 0.0),
+    }
     for name, value in authored.items():
-        prim.CreateAttribute(f"newton:vbd:{name}", Sdf.ValueTypeNames.Float).Set(value)
+        prim.CreateAttribute(f"newton:vbd:{name}", Sdf.ValueTypeNames.Float4).Set(Gf.Vec4f(*value))
     stage.DefinePrim("/World/Copy").GetReferences().AddInternalReference("/World/Cable")
     builder = newton.ModelBuilder()
     newton.solvers.SolverVBD.register_custom_attributes(builder)
@@ -498,10 +571,8 @@ def test_usd_cable_curve_authors_relaxation(test, device):
     builder.color()
     model = builder.finalize(device=device)
     test.assertEqual(len(joints), 2)
-    np.testing.assert_allclose(model.vbd.visco_bend_ratio.numpy()[joints], 9.9, rtol=1.0e-6)
-    np.testing.assert_allclose(model.vbd.visco_bend_tau.numpy()[joints], 3.5, rtol=1.0e-6)
-    np.testing.assert_array_equal(model.vbd.visco_stretch_ratio.numpy()[joints], 2.0)
-    np.testing.assert_array_equal(model.vbd.visco_stretch_tau.numpy()[joints], 0.5)
+    for name, value in authored.items():
+        np.testing.assert_allclose(getattr(model.vbd, name).numpy()[joints], [value, value], rtol=1.0e-6)
     np.testing.assert_array_equal(model.vbd.visco_history.numpy(), 0.0)
     np.testing.assert_array_equal(model.test.wildcard.numpy()[joints], 0.0)
     copied_joints = cable_map["/World/Copy"][1]
@@ -514,7 +585,7 @@ def test_usd_cable_curve_authors_relaxation(test, device):
     direct.add_builder(builder)
     rod_indices = np.flatnonzero(model.joint_type.numpy() == int(newton.JointType.ROD))
     for name, value in authored.items():
-        direct.custom_attributes[f"vbd:{name}"].values = dict.fromkeys(rod_indices, value)
+        direct.custom_attributes[f"vbd:{name}"].values = dict.fromkeys(rod_indices, wp.vec4(*value))
     direct.color()
     copied_model = direct.finalize(device=device)
     results = []
@@ -529,8 +600,8 @@ def test_usd_cable_curve_authors_relaxation(test, device):
         state_0.body_q.assign(q)
         solver.step(state_0, state_1, None, None, 0.001)
         history = state_1.vbd.visco_history.numpy()
-        test.assertGreater(np.max(np.abs(history[joints, :2])), 1.0e-6)
-        test.assertGreater(np.max(np.abs(history[joints, 2])), 1.0e-7)
+        test.assertGreater(np.max(np.abs(history[joints, 0, _BEND])), 1.0e-6)
+        test.assertGreater(np.max(np.abs(history[joints, 1, _AXIAL])), 1.0e-7)
         results.append((state_1.body_q.numpy().copy(), state_1.vbd.visco_history.numpy().copy()))
     np.testing.assert_array_equal(results[0][0], results[1][0])
     np.testing.assert_array_equal(results[0][1], results[1][1])

@@ -171,13 +171,15 @@ class TestUSDDeformableCable(unittest.TestCase):
 
     def test_welded_cable_joint_custom_attributes(self):
         """Use the representative curve's joint attributes and report heterogeneous asset data."""
-        from pxr import Sdf
+        from pxr import Gf, Sdf
 
         stage = self._author_attached_cable_pair(gap=0.0)
         for suffix, ratio in (("A", 2.0), ("B", 3.0)):
             prim = stage.GetPrimAtPath(f"/World/Cable{suffix}")
-            prim.CreateAttribute("newton:vbd:visco_stretch_ratio", Sdf.ValueTypeNames.Float).Set(ratio)
-            prim.CreateAttribute("newton:vbd:visco_stretch_tau", Sdf.ValueTypeNames.Float).Set(0.5)
+            prim.CreateAttribute("newton:vbd:visco_stretch_ratio", Sdf.ValueTypeNames.Float4).Set(
+                Gf.Vec4f(ratio, 0, 0, 0)
+            )
+            prim.CreateAttribute("newton:vbd:visco_tau", Sdf.ValueTypeNames.Float4).Set(Gf.Vec4f(0.5, 0, 0, 0))
         builder = newton.ModelBuilder()
         newton.solvers.SolverVBD.register_custom_attributes(builder)
         with self.assertLogs("newton", level="WARNING") as logs:
@@ -186,8 +188,8 @@ class TestUSDDeformableCable(unittest.TestCase):
         model = builder.finalize(device="cpu")
         rods = model.joint_type.numpy() == int(newton.JointType.ROD)
         self.assertGreater(np.count_nonzero(rods), 0)
-        np.testing.assert_array_equal(model.vbd.visco_stretch_ratio.numpy()[rods], 2.0)
-        np.testing.assert_array_equal(model.vbd.visco_stretch_tau.numpy()[rods], 0.5)
+        np.testing.assert_array_equal(model.vbd.visco_stretch_ratio.numpy()[rods], [[2.0, 0.0, 0.0, 0.0]] * rods.sum())
+        np.testing.assert_array_equal(model.vbd.visco_tau.numpy()[rods], [[0.5, 0.0, 0.0, 0.0]] * rods.sum())
         np.testing.assert_array_equal(model.vbd.visco_stretch_ratio.numpy()[~rods], 0.0)
 
     def test_cable_self_collision_flag(self):

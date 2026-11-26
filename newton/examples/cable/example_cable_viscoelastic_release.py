@@ -1,20 +1,23 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 The Newton Developers
 # SPDX-License-Identifier: Apache-2.0
 
-"""Demonstrate standard-linear-solid (SLS) cable bending in SolverVBD.
+"""Demonstrate viscoelastic cable bending and twisting in SolverVBD.
 
-The left endpoint is clamped while a temporary world joint holds the raised tip,
-then releases it without resetting the material history. Parameters are illustrative,
-not a fit to a measured cable. Increase iterations to assess convergence for a new material.
+A fast and a slow Maxwell branch relax the cable's bend and twist rows. The left
+endpoint is clamped while a temporary world joint holds the raised tip, then releases
+it without resetting the material history. Parameters are illustrative, not a fit to a
+measured cable. Increase iterations to assess convergence for a new material.
 
 Success criteria:
 - The temporary tip hold releases and the free tip drops while the clamp stays fixed.
-- The cable remains finite and the enabled SLS branch acquires bending history.
+- The cable remains finite and every enabled branch acquires bending history.
 
 Runs:
 - `python -m newton.examples cable_viscoelastic_release`
+- `python -m newton.examples cable_viscoelastic_release --visco-ratio 3 --visco-tau 0.5`
+  - One branch: a standard linear solid.
 - `python -m newton.examples cable_viscoelastic_release --no-visco`
-  - The elastic cable releases without a transient SLS branch.
+  - The elastic cable releases without transient branches.
 """
 
 import math
@@ -64,11 +67,16 @@ class Example:
         # Illustrative material parameters; applications should identify these
         # values from their own material data.
         relaxed_bend_stiffness = float(args.bend_rigidity) / segment_length
-        visco_ratio = 0.0 if args.no_visco else float(args.visco_ratio)
-        visco_tau = 0.0 if args.no_visco else float(args.visco_tau)
         bend_damping = float(args.bend_damping) / segment_length
         stretch_stiffness = 200.0 / segment_length
-        self.with_visco = visco_ratio > 0.0 and visco_tau > 0.0
+        # Branch b adds visco_ratio[b] times the relaxed bend and twist stiffness and relaxes with visco_tau[b].
+        if len(args.visco_ratio) != len(args.visco_tau) or len(args.visco_tau) > 4:
+            raise ValueError("--visco-ratio and --visco-tau need the same number of values, at most 4.")
+        visco_ratio, visco_tau = np.zeros(4), np.zeros(4)
+        if not args.no_visco:
+            visco_ratio[: len(args.visco_ratio)] = args.visco_ratio
+            visco_tau[: len(args.visco_tau)] = args.visco_tau
+        self.active_branches = np.flatnonzero((visco_ratio > 0.0) & (visco_tau > 0.0))
 
         builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
         newton.solvers.SolverVBD.register_custom_attributes(builder)
@@ -150,9 +158,10 @@ class Example:
         self.model = builder.finalize(device=sim_device)
         self.model.set_gravity((0.0, 0.0, -9.81))
 
-        # The transient branch is visco_ratio times the relaxed bending stiffness; twist is unchanged.
-        self.model.vbd.visco_bend_ratio.fill_(visco_ratio)
-        self.model.vbd.visco_bend_tau.fill_(visco_tau)
+        # The same relaxation spectrum acts on bending and twisting; stretch stays elastic.
+        self.model.vbd.visco_tau.fill_(wp.vec4(*visco_tau))
+        self.model.vbd.visco_bend_ratio.fill_(wp.vec4(*visco_ratio))
+        self.model.vbd.visco_twist_ratio.fill_(wp.vec4(*visco_ratio))
         self.solver = newton.solvers.SolverVBD(
             self.model,
             iterations=self.sim_iterations,
@@ -220,7 +229,7 @@ class Example:
         self.viewer.end_frame()
 
     def test_final(self):
-        """Verify release, cable mass, and a nonzero enabled SLS response."""
+        """Verify release, cable mass, and nonzero bending history in every enabled branch."""
         if self.state_0.body_q is None or self.state_0.body_qd is None:
             raise RuntimeError("Body state is not available.")
 
@@ -241,10 +250,11 @@ class Example:
         if not np.isclose(cable_mass, self.expected_cable_mass, rtol=0.02):
             raise ValueError(f"Cable mass {cable_mass:.6f} kg does not match the configured linear density.")
 
-        if self.with_visco:
-            viscous_bend = self.state_0.vbd.visco_history.numpy()[self.rod_joints, :2]
-            if np.max(np.linalg.norm(viscous_bend, axis=1)) <= 1.0e-6:
-                raise ValueError("Viscoelastic cable branch accumulated no viscous bending strain.")
+        # History row b holds branch b's (bend_x, bend_y, twist, axial) viscous deformation.
+        history = self.state_0.vbd.visco_history.numpy()[self.rod_joints]
+        for branch in self.active_branches:
+            if np.max(np.linalg.norm(history[:, branch, :2], axis=1)) <= 1.0e-6:
+                raise ValueError(f"Viscoelastic cable branch {branch} accumulated no viscous bending strain.")
 
     @staticmethod
     def create_parser():
@@ -253,7 +263,7 @@ class Example:
         parser.add_argument("--segments", type=int, default=10, help="Number of cable segments")
         parser.add_argument("--substeps", type=int, default=8, help="Simulation substeps per frame")
         parser.add_argument("--release-time", type=float, default=0.5, help="Tip release time [s]")
-        parser.add_argument("--no-visco", action="store_true", help="Disable the transient SLS branch")
+        parser.add_argument("--no-visco", action="store_true", help="Disable the transient branches")
         parser.add_argument(
             "--bend-rigidity",
             type=float,
@@ -263,8 +273,9 @@ class Example:
         parser.add_argument(
             "--visco-ratio",
             type=float,
-            default=3.0,
-            help="Transient-to-relaxed bending stiffness ratio [dimensionless]",
+            nargs="+",
+            default=[2.3, 0.7],
+            help="Transient-to-relaxed bend and twist stiffness ratio of each branch [dimensionless] (at most 4)",
         )
         parser.add_argument(
             "--bend-damping",
@@ -272,7 +283,13 @@ class Example:
             default=4.0e-5,
             help="Bending viscosity [N*m^2*s], divided by segment length",
         )
-        parser.add_argument("--visco-tau", type=float, default=0.5, help="SLS relaxation time [s]")
+        parser.add_argument(
+            "--visco-tau",
+            type=float,
+            nargs="+",
+            default=[0.12, 5.6],
+            help="Relaxation time of each branch [s] (at most 4)",
+        )
         parser.set_defaults(num_frames=360)
         return parser
 
