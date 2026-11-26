@@ -146,13 +146,18 @@ class Example:
             )
 
         builder.color(balance_colors=False)
+        # The grasp this example validates is a same-color one; test mode checks that the coloring still gives it.
+        grasp_bodies = {self.candy, self.left_finger, self.right_finger}
+        self._same_color_grasp = any(
+            grasp_bodies <= {int(body) for body in group} for group in builder.body_color_groups
+        )
         self.model = builder.finalize()
         newton.eval_fk(self.model, self.model.joint_q, self.model.joint_qd, self.model)
 
         self.state_0 = self.model.state()
         self.state_1 = self.model.state()
         self.control = self.model.control()
-        self._target_host = np.zeros(self.model.joint_dof_count, dtype=np.float32)
+        self._target_host = self.model.joint_target_q.numpy().copy()
         self._target_host[:9] = TARGETS[0]
         self.control.joint_target_q.assign(self._target_host)
 
@@ -164,7 +169,6 @@ class Example:
             rigid_joint_linear_ke=1.0e7,
             rigid_joint_angular_ke=1.0e6,
             rigid_body_contact_buffer_size=256,
-            friction_epsilon=1.0e-3,
             rigid_contact_history=True,
         )
 
@@ -265,6 +269,7 @@ class Example:
 
     def test_final(self):
         assert self.frame >= 300, "Run at least 300 frames to complete the close, lift and hold"
+        assert self._same_color_grasp, "The object no longer shares a color group with both fingers"
         body_q = self.state_0.body_q.numpy()
         candy_z = float(body_q[self.candy, 2])
         assert candy_z > 0.14, f"Candy was dropped or thrown: final z = {candy_z:.3f} m (expected > 0.14 m)"

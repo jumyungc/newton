@@ -482,6 +482,31 @@ def test_planar_mesh_recovery_under_load(test, device, *, reduce_contacts=True, 
             test.assertEqual(int(contacts.rigid_contact_match_index.numpy()[0]), 0)
             test.assertAlmostEqual(float(wall_points.numpy()[0, 1]), 0.00005, delta=1.0e-6)
 
+            # This detected recovery row is effectively hard, even with a finite material stiffness.
+            # Its retained normal seed must not undergo the finite-stiffness damper conversion.
+            saved_ke, saved_kd = model.shape_material_ke.numpy().copy(), model.shape_material_kd.numpy().copy()
+            seed_solver = newton.solvers.SolverVBD(model, iterations=1, rigid_avbd_contact_alpha=1.0)
+            # ke = 1 keeps the spring force of the start penetration below the unit seed, so a conversion would
+            # act on it; kd = 0 is the control that the setup itself returns the seed.
+            model.shape_material_ke.fill_(1.0)
+            seed = np.zeros((contacts.rigid_contact_max, 3), dtype=np.float32)
+            seed[0] = contacts.rigid_contact_normal.numpy()[0]
+            recovery_body = wp.zeros(model.body_count, dtype=int, device=device)
+            for kd in (0.0, 150.0):
+                with test.subTest(recovery_seed_kd=kd):
+                    model.shape_material_kd.fill_(kd)
+                    seed_solver._refresh_rigid_contact_state(contacts, True)
+                    seed_solver.body_body_contact_lambda.assign(seed)
+                    recovery_body.zero_()
+                    seed_solver._step_body_body_contact_frame(
+                        contacts, state.body_q, dt, 1.0, recovery_body=recovery_body
+                    )
+                    # Written by the production active-recovery lookup, not merely allocated metadata.
+                    test.assertEqual(int(recovery_body.numpy()[body]), 1)
+                    np.testing.assert_allclose(seed_solver.body_body_contact_lambda.numpy()[0], seed[0], atol=1.0e-6)
+            model.shape_material_ke.assign(saved_ke)
+            model.shape_material_kd.assign(saved_kd)
+
         if not reduce_contacts:
             # Both penalty solvers share the force kernel. A 4 mm deep contact
             # must bound its elastic force using the 1 mm wall thickness.

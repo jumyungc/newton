@@ -681,9 +681,25 @@ contact. By default it acts only while the contact compresses, and only on
 compression gained after touch, so it softens a landing but leaves the
 rebound undamped. Set ``rigid_contact_damping_bidirectional=True`` to damp
 the rebound as well, for example to bring dropped bodies to rest. That mode
-assembles the damper separately from the contact spring; if a very stiff
-``kd`` relative to ``m / dt`` then slows normal load buildup and reduces
-Coulomb friction, raise ``iterations`` or reduce ``dt``.
+assembles the damper separately from the contact spring, and Coulomb friction
+counts only the spring's share of the normal force; if a very stiff ``kd``
+relative to ``m / dt`` holds that share back and the contact slips, raise
+``iterations`` or reduce ``dt``.
+
+**Light bodies under load.** A contact's solve metric follows each body's
+own inertia and the stiffness of its joints, not the load the body carries,
+so a light body that carries much heavier ones builds its contact load over
+many iterations. Three stacked spheres of
+0.1, 1 and 3 kg from the ground up (``ke`` = 1e5 N/m, 60 Hz, 10 iterations)
+are thrown up by 0.47 m; 20 iterations leave 86 mm, 40 leave 6 mm and 80
+leave 1 mm, while the same spheres with the heaviest at the bottom stay
+within 0.2 mm at 10 iterations. Raise ``iterations`` or reduce ``dt`` when a
+light body supports a heavy load; for the same work a smaller step helps more:
+at 240 Hz with 10 iterations the stack above stays within 0.9 mm, where 60 Hz
+with 40 iterations leaves 6 mm. With contact damping, the separately
+assembled damper of ``rigid_contact_damping_bidirectional=True`` also carries
+such a load earlier: at ``kd`` = 1e3 N·s/m the stack above is 15 mm off at
+10 iterations instead of 0.57 m.
 
 **Torsional and rolling friction.** Body-body contacts resist spin about the
 contact normal and rolling in the contact plane.
@@ -698,7 +714,9 @@ coefficients or set them to zero if angular resistance is too strong.
 Automatic coloring uses joint and tendon connections, but does not include
 contacts. Contacting bodies may share a color, which can slow convergence.
 Compliant-ALM contacts between two dynamic bodies of the same color use a
-doubled solve metric to bound their simultaneous corrections. Closing-only
+doubled solve metric to bound their simultaneous corrections. Bodies in
+different color groups are updated sequentially, so their contact solve
+metrics are not doubled. Closing-only
 contact damping is solved together with the contact spring, which can
 improve convergence of stiffly damped contacts and of their friction.
 Same-color pairs, and any contact with
@@ -710,8 +728,8 @@ end, and the friction rows follow it with a lag. More iterations reduce the
 creep; a damped object that shares the fingers' color can be lost to it.
 Contact history with sticky matching holds such a grasp
 (:ref:`vbd-rigid-contact-history`).
-Bodies in different color groups are updated sequentially, so their contact
-solve metrics are not doubled.
+Damped grasps with same-color contacts can still fail at higher iteration
+counts.
 For small scenes with predictable contacts, consider splitting
 existing groups in ``builder.body_color_groups`` to separate frequently
 contacting bodies. Make these edits after ``builder.color()`` and before

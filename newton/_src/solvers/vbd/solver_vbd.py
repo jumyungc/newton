@@ -93,6 +93,7 @@ from .rigid_vbd_kernels import (
     init_body_body_contacts_alm,
     init_body_particle_contacts,
     init_rod_rest_bend_twist,
+    refresh_body_joint_hessian,
     refresh_body_structural_k,
     refresh_joint_material_params,
     reset_particle_body_attachment_state,
@@ -1319,6 +1320,12 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             self.body_contact_free_angular_compliance = wp.zeros(
                 angular_compliance_capacity, dtype=wp.mat33, device=self.device
             )
+            # The joints' stiffness on each body's own block (same capacity), by direction and with drives,
+            # rebuilt in every contact setup because joint frames move with the bodies. A contact's normal
+            # conditioning is the body's response along the normal with these blocks, or its inertia alone.
+            self.body_joint_h_ll = wp.zeros(angular_compliance_capacity, dtype=wp.mat33, device=self.device)
+            self.body_joint_h_al = wp.zeros(angular_compliance_capacity, dtype=wp.mat33, device=self.device)
+            self.body_joint_h_aa = wp.zeros(angular_compliance_capacity, dtype=wp.mat33, device=self.device)
 
             # Per-body contact lists (CSR-like: per-body counts + flat index array).
             # Tight: pre_alloc = 0 when the contact source is absent (no shapes / no particles).
@@ -2199,9 +2206,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         """Initialize the per-body structural stiffness summary from joint state.
 
         ``body_structural_k[b]`` is the max enabled linear-joint stiffness
-        anchored on body ``b`` (rod joints use ``max(stretch, shear)``). Contact
-        conditioning augments each dynamic endpoint's inertial scale with its
-        own summary before combining endpoints.
+        anchored on body ``b`` (rod joints use ``max(stretch, shear)``). It floors
+        the tangent conditioning of the body's contacts.
         Direction- and chain-blind by design: it bounds neighborhood stiffness to
         condition rho and never enters a force law.
         Topology and the non-rod structural constants are construction-time state. The summary
@@ -3727,6 +3733,35 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         if not self._integrates_rigid_bodies or contacts.rigid_contact_max == 0:
             return
         model = self.model
+        if self.body_joint_h_ll.shape[0] > 0:
+            # Joint frames move with the bodies: rebuild the joints' stiffness on each body for this setup.
+            # Free joints have no constraint rows and leave the blocks at zero.
+            wp.launch(
+                kernel=refresh_body_joint_hessian,
+                dim=model.body_count,
+                inputs=[
+                    self.rigid_adjacency,
+                    model.joint_type,
+                    model.joint_enabled,
+                    model.joint_parent,
+                    model.joint_X_p,
+                    model.joint_X_c,
+                    model.joint_axis,
+                    model.joint_qd_start,
+                    model.joint_dof_dim,
+                    self.joint_constraint_start,
+                    self.joint_constraint_dim,
+                    self.joint_material_k,
+                    model.joint_target_ke,
+                    model.joint_target_kd,
+                    1.0 / dt,
+                    body_q,
+                    model.body_com,
+                ],
+                outputs=[self.body_joint_h_ll, self.body_joint_h_al, self.body_joint_h_aa],
+                block_dim=self._rigid_body_block_dim,
+                device=self.device,
+            )
         wp.launch(
             kernel=step_body_body_contact_C0_lambda,
             dim=contacts.rigid_contact_max,
@@ -3747,6 +3782,9 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 self.body_inv_inertia_effective,
                 model.body_com,
                 self.body_structural_k,
+                self.body_joint_h_ll,
+                self.body_joint_h_al,
+                self.body_joint_h_aa,
                 int(BodyFlags.PROXY),
                 body_q,
                 lambda_retention,
@@ -3758,6 +3796,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 self._recovery_step_start_q if mid_step else body_q,
                 recovery_body,
                 self.body_body_contact_material_mu,
+                self.body_body_contact_material_kd,
+                not mid_step and not self.rigid_contact_damping_bidirectional,
             ],
             outputs=[
                 self.body_body_contact_normal_rho,

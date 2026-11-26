@@ -1,0 +1,1 @@
+Fix `SolverVBD` counting a joint's stiffness in every direction when it conditions the normal contact of a jointed body: a joint's rows and drives now count only along the directions and rotations they hold, so a light link on a hinge landing on stiff ground no longer keeps moving at some iteration counts.

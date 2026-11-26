@@ -765,7 +765,10 @@ the elastic normal force is
 
 where :math:`\lambda_n` is the multiplier of the row and :math:`\rho_n` is an
 internal metric that the solver sets every step from the pair's inverse
-Delassus support over :math:`h^2` plus structural stiffness; the user does not set :math:`\rho_n`. The
+Delassus support over :math:`h^2`: the two bodies in series, where each body's
+response includes the stiffness of its joints with the neighboring bodies held. A
+joint's rows and drives stiffen the contact only along the directions and rotations
+they hold, and joint limits are not counted. The user does not set :math:`\rho_n`. The
 force acts along :math:`\mathbf{n}` at the support points with the matching
 torques, and the row adds :math:`k_{\text{eff}}\,\mathbf{n}\mathbf{n}^{\mathsf T}`
 to the body Hessians (``accumulate_body_body_contacts_per_body``). For a
@@ -806,10 +809,11 @@ mean of the two shapes' values, so a zero on either shape removes that
 resistance for the pair.
 
 By default, normal damping resists only compression gained after contact:
-with :math:`\Delta C` the step's increase of penetration along :math:`\mathbf{n}`
-and :math:`C_{\text{raw}}` the penetration before residual stabilization,
-the closing increment is :math:`\Delta C_+ = \max\!\big(\min(\Delta C,\, C_{\text{raw}},\, C),\ 0\big)`
-and the damping reaction at the fixed point is :math:`f_d = (k_d / h)\,\Delta C_+`,
+with :math:`\Delta C` the step's increase of penetration along :math:`\mathbf{n}`,
+the closing increment is :math:`\Delta C_+ = \max\!\big(\min(\Delta C,\, C),\ 0\big)`
+(with a stabilized residual, the smaller of the penetration before and after
+stabilization bounds it) and the damping reaction at the fixed point is
+:math:`f_d = (k_d / h)\,\Delta C_+`,
 excluding travel across an initial gap. While the row carries load, the
 unilateral spring and the closing damper are solved together in the normal
 ALM row. On the active closing branch, this places
@@ -821,9 +825,15 @@ Setting
 for every contact; while the normal row carries load, it adds the force
 :math:`-k_d\,(\mathbf{n}\cdot\mathbf{v}_{\text{rel}})\,\mathbf{n}` during
 separation, and its closing part uses :math:`\Delta C_+` in the same way.
+A mesh recovery contact, whose normal stiffness is infinite, has no closing
+damper in the default mode; the separately assembled damper of the two-sided
+mode still acts on it.
 The multipliers start from zero in
 every step unless ``rigid_contact_history=True`` warm-starts them from the
-matched contacts of the previous step.
+matched contacts of the previous step. In a row that solves a closing damper,
+the part of a warm-started normal multiplier above the spring force of the
+step's starting penetration is stored divided by :math:`1 + k_d/(h\,k)`, so that
+the row's rebuild of its total reaction does not amplify it.
 
 **Particle-body attachments** are compliant augmented-Lagrangian rows of the
 same form as the joint rows (:ref:`vbd-rigid-joints`). With :math:`C =

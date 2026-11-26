@@ -51,6 +51,8 @@ from newton._src.solvers.vbd.rigid_vbd_kernels import (
     _contact_tangent_conditioning_scale,
     _eval_body_particle_contact,
     _eval_soft_ef_contact,
+    _evaluate_contact_normal_row,
+    _evaluate_rigid_contact_for_body,
     _evaluate_rigid_soft_contact_force_norm,
     _joint_angular_rho_seed,
     _pack_tangent_metric,
@@ -68,7 +70,6 @@ from newton._src.solvers.vbd.rigid_vbd_kernels import (
     evaluate_body_particle_contact,
     evaluate_linear_constraint_force_hessian,
     evaluate_rigid_contact_angular_friction,
-    evaluate_rigid_contact_normal_sliding,
     init_body_body_contacts_alm,
     init_body_particle_contacts,
     place_dat_division_plane,
@@ -97,6 +98,141 @@ from newton.tests.unittest_utils import (
 devices = get_test_devices()
 cpu_devices = [device for device in devices if device.is_cpu]
 cuda_devices = [device for device in devices if device.is_cuda]
+
+
+@wp.func
+def evaluate_rigid_contact_normal_sliding(
+    body_a_index: int,
+    body_b_index: int,
+    body_q: wp.array[wp.transform],
+    body_q_prev: wp.array[wp.transform],
+    body_com: wp.array[wp.vec3],
+    contact_point_a_local: wp.vec3,
+    contact_point_b_local: wp.vec3,
+    contact_surface_velocity: wp.vec3,
+    contact_offset_a_local: wp.vec3,
+    contact_offset_b_local: wp.vec3,
+    contact_normal: wp.vec3,
+    penetration_depth: float,
+    raw_penetration_depth: float,
+    normal_solve_weight: float,
+    contact_material_ke: float,
+    contact_tangent_rho: wp.mat22,
+    contact_kd: float,
+    contact_lam: wp.vec3,
+    friction_mu: float,
+    dt: float,
+    friction_c0: wp.vec3,
+    contact_damping_bidirectional: bool,
+):
+    """Evaluate the body solve's normal row, then both bodies' force and Hessian blocks of one contact.
+
+    Returns:
+        10-tuple: (force_a, torque_a, H_ll_a, H_al_a, H_aa_a,
+                   force_b, torque_b, H_ll_b, H_al_b, H_aa_b)
+    """
+    if body_a_index < 0:
+        X_wa = wp.transform_identity()
+        body_a_com_local = wp.vec3(0.0)
+    else:
+        X_wa = body_q[body_a_index]
+        body_a_com_local = body_com[body_a_index]
+
+    if body_b_index < 0:
+        X_wb = wp.transform_identity()
+        body_b_com_local = wp.vec3(0.0)
+    else:
+        X_wb = body_q[body_b_index]
+        body_b_com_local = body_com[body_b_index]
+
+    normal_active, f_n_total, f_n, normal_primal_k, explicit_kd, contact_lam_eff, lam_n = _evaluate_contact_normal_row(
+        body_a_index,
+        body_b_index,
+        body_q_prev,
+        contact_point_a_local,
+        contact_point_b_local,
+        wp.transform_point(X_wa, contact_point_a_local),
+        wp.transform_point(X_wb, contact_point_b_local),
+        contact_normal,
+        penetration_depth,
+        raw_penetration_depth,
+        normal_solve_weight,
+        contact_material_ke,
+        contact_kd,
+        contact_lam,
+        dt,
+        contact_damping_bidirectional,
+    )
+    if not normal_active:
+        zero_vec = wp.vec3(0.0)
+        zero_mat = wp.mat33(0.0)
+        return (zero_vec, zero_vec, zero_mat, zero_mat, zero_mat, zero_vec, zero_vec, zero_mat, zero_mat, zero_mat)
+
+    force_a, torque_a, h_ll, h_al_a, h_aa_a = _evaluate_rigid_contact_for_body(
+        True,
+        body_a_index,
+        body_b_index,
+        body_q_prev,
+        body_a_com_local,
+        contact_point_a_local,
+        contact_point_b_local,
+        contact_surface_velocity,
+        contact_offset_a_local,
+        contact_offset_b_local,
+        contact_normal,
+        normal_primal_k,
+        f_n,
+        f_n_total,
+        wp.min(raw_penetration_depth, penetration_depth),
+        lam_n,
+        contact_lam_eff,
+        contact_tangent_rho,
+        explicit_kd,
+        friction_mu,
+        dt,
+        friction_c0,
+        X_wa,
+        X_wb,
+    )
+    force_b, torque_b, _h_ll_b, h_al_b, h_aa_b = _evaluate_rigid_contact_for_body(
+        False,
+        body_a_index,
+        body_b_index,
+        body_q_prev,
+        body_b_com_local,
+        contact_point_a_local,
+        contact_point_b_local,
+        contact_surface_velocity,
+        contact_offset_a_local,
+        contact_offset_b_local,
+        contact_normal,
+        normal_primal_k,
+        f_n,
+        f_n_total,
+        wp.min(raw_penetration_depth, penetration_depth),
+        lam_n,
+        contact_lam_eff,
+        contact_tangent_rho,
+        explicit_kd,
+        friction_mu,
+        dt,
+        friction_c0,
+        X_wa,
+        X_wb,
+    )
+
+    return (
+        force_a,
+        torque_a,
+        h_ll,
+        h_al_a,
+        h_aa_a,
+        force_b,
+        torque_b,
+        h_ll,
+        h_al_b,
+        h_aa_b,
+    )
 
 
 @wp.kernel
@@ -2015,11 +2151,11 @@ def _angular_contact_friction_isolates_channels(test, device):
 
 
 def _rigid_contact_structural_support_conditions_tangent_rho(test, device):
-    """Verify step setup caps tangent rho with structural support, not D+S."""
+    """Verify step setup caps tangent rho with structural support, not with the normal rho."""
     with wp.ScopedDevice(device):
         # One dynamic body vs world. At the COM, D = inv_dt^2 / inv_mass = 100.
-        # Normal rho adds structural: rho_n = D+S = 250. Tangent inertial A_t = D
-        # only, so the policy gives rho_t = max(A_t, min(rho_n, S)) = S = 150.
+        # The joint block holds the body with 150 in every direction: rho_n = D + 150 = 250.
+        # Tangent inertial A_t = D only, so the policy gives rho_t = max(A_t, min(rho_n, S)) = S = 150.
         normal_rho = wp.zeros(1, dtype=float, device=device)
         tangent_rho = wp.zeros(1, dtype=wp.mat22, device=device)
 
@@ -2043,6 +2179,9 @@ def _rigid_contact_structural_support_conditions_tangent_rho(test, device):
                 wp.zeros(1, dtype=wp.mat33, device=device),
                 wp.zeros(1, dtype=wp.vec3, device=device),
                 wp.array([150.0], dtype=float, device=device),
+                wp.array([np.eye(3) * 150.0], dtype=wp.mat33, device=device),
+                wp.zeros(1, dtype=wp.mat33, device=device),
+                wp.zeros(1, dtype=wp.mat33, device=device),
                 int(newton.BodyFlags.PROXY),
                 wp.array([wp.transform_identity()], dtype=wp.transform, device=device),
                 1.0,
@@ -2054,6 +2193,8 @@ def _rigid_contact_structural_support_conditions_tangent_rho(test, device):
                 wp.array([wp.transform_identity()], dtype=wp.transform, device=device),
                 None,
                 wp.zeros(1, dtype=wp.vec3, device=device),
+                wp.zeros(1, dtype=float, device=device),
+                False,
             ],
             outputs=[
                 normal_rho,
@@ -2071,6 +2212,145 @@ def _rigid_contact_structural_support_conditions_tangent_rho(test, device):
         test.assertLess(tangent_rho.numpy()[0, 0, 0], normal_rho.numpy()[0])
         np.testing.assert_allclose(normal_rho.numpy(), [250.0], rtol=1.0e-6)
         np.testing.assert_allclose(tangent_rho.numpy()[0, 0], [150.0, 150.0], rtol=1.0e-6)
+
+
+def _rigid_contact_conditioning_follows_joint_directions(test, device):
+    """Verify contact normal conditioning counts a joint only along the directions and rotations it holds."""
+    dt = 1.0 / 60.0
+    mass = 1.0
+    radius = 0.1
+    joint_ke = 4.0e4
+    drive_ke = 5.0e3
+    drive_kd = 20.0
+    stretch = 3.0e4
+    shear = 2.0e3
+    com_offset = 0.05
+
+    def normal_rho(
+        case,
+        radius=radius,
+        mass=mass,
+        com_offset=com_offset,
+        joint_ke=joint_ke,
+        contact_ke=1.0e4,
+        skip_validation_inertia=False,
+    ):
+        builder = newton.ModelBuilder()
+        cfg = builder.ShapeConfig(density=0.0, ke=contact_ke, kd=0.0, mu=0.0)
+        builder.add_ground_plane(cfg=cfg)
+        xform = wp.transform((0.0, 0.0, radius), wp.quat_identity())
+        inertia = wp.mat33(np.eye(3) * (0.4 * mass * radius**2))
+        com = wp.vec3(com_offset if case.endswith("_offset") else 0.0, 0.0, 0.0)
+        if case.startswith("free"):
+            body = builder.add_body(xform=xform, com=com, mass=mass, inertia=inertia, lock_inertia=True)
+        else:
+            body = builder.add_link(xform=xform, com=com, mass=mass, inertia=inertia, lock_inertia=True)
+        builder.add_shape_sphere(body, radius=radius, cfg=cfg)
+        if case in ("along", "across", "driven", "along_offset"):
+            axis = (1.0, 0.0, 0.0) if case == "across" else (0.0, 0.0, 1.0)
+            drive = {"target_ke": drive_ke, "target_kd": drive_kd} if case == "driven" else {}
+            joint = builder.add_joint_prismatic(
+                -1, body, parent_xform=xform, child_xform=wp.transform_identity(), axis=axis, **drive
+            )
+            builder.add_articulation([joint])
+        elif case == "hinge_offset":
+            # A hinge about y anchored at the center of mass; the contact sits on a lever about that axis.
+            anchor = wp.transform((com_offset, 0.0, radius), wp.quat_identity())
+            joint = builder.add_joint_revolute(
+                -1,
+                body,
+                parent_xform=anchor,
+                child_xform=wp.transform((com_offset, 0.0, 0.0), wp.quat_identity()),
+                axis=(0.0, 1.0, 0.0),
+            )
+            builder.add_articulation([joint])
+        elif case == "parent_hinge_offset":
+            # The contacting body is the parent of a hinge about y at its origin, straight above the contact; the
+            # child hangs clear of the ground.
+            other = builder.add_link(
+                xform=wp.transform((0.0, 0.0, 5.0 * radius), wp.quat_identity()),
+                mass=mass,
+                inertia=inertia,
+                lock_inertia=True,
+            )
+            root = builder.add_joint_free(body)
+            joint = builder.add_joint_revolute(
+                body,
+                other,
+                parent_xform=wp.transform_identity(),
+                child_xform=wp.transform((0.0, 0.0, -4.0 * radius), wp.quat_identity()),
+                axis=(0.0, 1.0, 0.0),
+            )
+            builder.add_articulation([root, joint])
+        elif case in ("rod_across", "rod_along"):
+            # A rod joint stretches along its local z axis.
+            rotation = wp.quat_identity()
+            if case == "rod_across":
+                rotation = wp.quat_from_axis_angle(wp.vec3(0.0, 1.0, 0.0), 0.5 * math.pi)
+            joint = builder.add_joint_rod(
+                -1,
+                body,
+                parent_xform=wp.transform((0.0, 0.0, radius), rotation),
+                child_xform=wp.transform((0.0, 0.0, 0.0), rotation),
+                stretch_stiffness=stretch,
+                shear_stiffness=shear,
+                bend_stiffness=1.0,
+                twist_stiffness=1.0,
+            )
+            builder.add_articulation([joint])
+        builder.color()
+        model = builder.finalize(device=device, skip_validation_inertia=skip_validation_inertia)
+        solver = newton.solvers.SolverVBD(model, iterations=1, rigid_joint_linear_ke=joint_ke)
+        pipeline = newton.CollisionPipeline(model)
+        contacts = pipeline.contacts()
+        state_0, state_1 = model.state(), model.state()
+        newton.eval_fk(model, model.joint_q, model.joint_qd, state_0)
+        pipeline.collide(state_0, contacts)
+        solver.step(state_0, state_1, None, contacts, dt)
+        test.assertEqual(int(contacts.rigid_contact_count.numpy()[0]), 1)
+        return float(solver.body_body_contact_normal_rho.numpy()[0])
+
+    # The contact is under the center of mass, so the inertial scale is m / dt^2.
+    inertial = mass / dt**2
+    expected = {
+        "free": inertial,
+        "along": inertial,
+        "across": inertial + joint_ke,
+        "driven": inertial + drive_ke + drive_kd / dt,
+        "rod_across": inertial + shear,
+        "rod_along": inertial + stretch,
+        # With the center of mass beside the contact normal a free body also turns. A prismatic joint
+        # holds the rotation, so along its axis the mass alone responds.
+        "free_offset": inertial / (1.0 + com_offset**2 / (0.4 * radius**2)),
+        "along_offset": inertial,
+        # A hinge holds its anchor but lets the body turn about its axis: a contact on a lever about that axis
+        # sees the hinge's linear stiffness in series with the turning inertia, not the two side by side.
+        "hinge_offset": 1.0 / (1.0 / (inertial + joint_ke) + com_offset**2 / (0.4 * mass * radius**2 / dt**2)),
+        # A hinge on the parent side, anchored straight above the contact, holds the contact point itself: its
+        # linear stiffness adds to the free body's scale, with the lever taken from the parent's center of mass.
+        "parent_hinge_offset": inertial / (1.0 + com_offset**2 / (0.4 * radius**2)) + joint_ke,
+    }
+    for case, value in expected.items():
+        with test.subTest(case=case):
+            test.assertAlmostEqual(normal_rho(case), value, delta=1.0e-3 * value)
+
+    # A sub-millimeter body (inertia below the builder's floor, validation skipped) has an inverse inertia whose
+    # determinant exceeds float32 range; its scale must stay exact.
+    with test.subTest(case="submm_hinge_offset"):
+        r_small, m_small, off_small, ke_small = 4.0e-4, 5.0e-7, 2.0e-4, 10.0
+        i_small = 0.4 * m_small * r_small**2
+        test.assertGreater((1.0 / i_small) ** 3, float(np.finfo(np.float32).max))
+        rho_small = normal_rho(
+            "hinge_offset",
+            radius=r_small,
+            mass=m_small,
+            com_offset=off_small,
+            joint_ke=ke_small,
+            contact_ke=10.0,
+            skip_validation_inertia=True,
+        )
+        expected_small = 1.0 / (1.0 / (m_small / dt**2 + ke_small) + off_small**2 / (i_small / dt**2))
+        test.assertAlmostEqual(rho_small, expected_small, delta=1.0e-3 * expected_small)
 
 
 def _history_provenance_matched(device):
@@ -3960,6 +4240,8 @@ def _contact_damping_matches_closed_form(test, device):
     heavy/light pair about 36 mm/s from the solution after ten iterations. The same pair meeting across a
     gap: the row excludes the gap as the separate damper does; a row that counts it stays 278 mm/s from the
     solution.
+    Every case also reads the force export: it must report the force that turned the sphere's momentum, damper
+    included. An export of the row's elastic part alone is 70 % low at first touch on the ground.
     """
     radius, speed, dt = 0.1, 1.0, 1.0 / 60.0
     # Partner mass [kg] (None: the ground plane), start compression [m], kd [N*s/m], two-sided damping,
@@ -4004,21 +4286,24 @@ def _contact_damping_matches_closed_form(test, device):
                 body_qd[-1, 2] = -speed
                 state_0.body_qd.assign(body_qd)
                 pipeline.collide(state_0, contacts)
+                start_body_q = wp.clone(state_0.body_q)  # the step advances the input state's poses in place
                 solver.step(state_0, state_1, None, contacts, dt)
                 body_qd = state_1.body_qd.numpy()
                 closing_velocity = body_qd[-1, 2] - (0.0 if partner_mass is None else body_qd[0, 2])
                 test.assertAlmostEqual(float(closing_velocity), (start - compression) / dt, delta=tolerance)
+                # The exported contact force is the applied one, damper included: it is what turned the moving
+                # sphere's momentum in this step.
+                _body_0, body_1, _point_0, _point_1, force_on_body_1, _count = solver.collect_rigid_contact_forces(
+                    state_1.body_q, start_body_q, contacts, dt
+                )
+                side = 1.0 if int(body_1.numpy()[0]) == model.body_count - 1 else -1.0
+                applied = masses[-1] * (float(body_qd[-1, 2]) + speed) / dt
+                test.assertAlmostEqual(side * float(force_on_body_1.numpy()[0, 2]), applied, delta=0.02 * applied)
 
 
-def _contact_damping_keeps_mixed_color_stack_at_rest(test, device):
-    """Verify that a stiffly damped stack rests when its bodies are split over color groups.
-
-    Three spheres, the lower two in one color group and the top one in another. With the damper of
-    the upper contact assembled separately next to the coupled row of the lower contact, the middle
-    sphere carries both formulations: the stack peaks at 1.2 m/s and still moves at 0.7 m/s after one
-    second. Every closing-only damper is solved in the row, whatever the colors.
-    """
-    radius, dt = 0.1, 1.0 / 60.0
+def _stiffly_damped_sphere_stack():
+    """Return a colored builder with three 1 kg spheres stacked on the ground, ``kd / (dt ke) = 6`` at 60 Hz."""
+    radius = 0.1
     builder = newton.ModelBuilder()
     cfg = builder.ShapeConfig(density=0.0, ke=1.0e5, kd=1.0e4, mu=0.0, mu_torsional=0.0, mu_rolling=0.0)
     builder.add_ground_plane(cfg=cfg)
@@ -4031,6 +4316,19 @@ def _contact_damping_keeps_mixed_color_stack_at_rest(test, device):
         )
         builder.add_shape_sphere(body, radius=radius, cfg=cfg)
     builder.color()
+    return builder
+
+
+def _contact_damping_keeps_mixed_color_stack_at_rest(test, device):
+    """Verify that a stiffly damped stack rests when its bodies are split over color groups.
+
+    Three spheres, the lower two in one color group and the top one in another. With the damper of
+    the upper contact assembled separately next to the coupled row of the lower contact, the middle
+    sphere carries both formulations: the stack peaks at 1.2 m/s and still moves at 0.7 m/s after one
+    second. Every closing-only damper is solved in the row, whatever the colors.
+    """
+    dt = 1.0 / 60.0
+    builder = _stiffly_damped_sphere_stack()
     builder.body_color_groups = [np.array([0, 1], dtype=np.int32), np.array([2], dtype=np.int32)]
     model = builder.finalize(device=device)
     pipeline = newton.CollisionPipeline(model, broad_phase="nxn")
@@ -4045,6 +4343,30 @@ def _contact_damping_keeps_mixed_color_stack_at_rest(test, device):
         peak_speed = max(peak_speed, float(np.abs(state_0.body_qd.numpy()[:, 2]).max()))
     test.assertLess(peak_speed, 0.2)
     test.assertLess(float(np.abs(state_0.body_qd.numpy()[:, 2]).max()), 1.0e-3)
+
+
+def _contact_damping_limits_warm_started_stack_hop(test, device):
+    """Verify that retained contact multipliers do not cause a large upward hop.
+
+    The damped row rebuilds its total reaction from the excess of the stored elastic multiplier
+    over the step-start spring force. A multiplier retained from the previous step carries no
+    damper share of this step. Without rescaling it, that excess is amplified by
+    ``1 + kd / (dt ke)`` and the top sphere hops 31 mm.
+    """
+    dt = 1.0 / 60.0
+    model = _stiffly_damped_sphere_stack().finalize(device=device)
+    pipeline = newton.CollisionPipeline(model, broad_phase="nxn", contact_matching="sticky")
+    solver = newton.solvers.SolverVBD(model, iterations=10, rigid_contact_history=True)
+    contacts = pipeline.contacts()
+    state_0, state_1 = model.state(), model.state()
+    top_start = float(state_0.body_q.numpy()[2, 2])
+    top_peak = top_start
+    for _ in range(120):
+        pipeline.collide(state_0, contacts)
+        solver.step(state_0, state_1, None, contacts, dt)
+        state_0, state_1 = state_1, state_0
+        top_peak = max(top_peak, float(state_0.body_q.numpy()[2, 2]))
+    test.assertLess(top_peak - top_start, 1.0e-3)
 
 
 def _contact_damping_leaves_ground_friction(test, device):
@@ -4066,6 +4388,7 @@ def _contact_damping_leaves_ground_friction(test, device):
     pipeline = newton.CollisionPipeline(model)
     contacts = pipeline.contacts()
     speeds = []
+    # At mu * g the box stops after 24.5 steps: 23 steps keep it sliding, and the first 15 let the contact settle.
     for _ in range(23):
         pipeline.collide(state_0, contacts)
         solver.step(state_0, state_1, None, contacts, dt)
@@ -4089,88 +4412,6 @@ def _contact_damping_row_keeps_float32_scale(test, device):
     np.testing.assert_allclose(large_rho, np.array([2.0e13, 1.0e13, 2.0e5]), rtol=1.0e-5)
     test.assertTrue(np.isfinite(stiff).all())
     test.assertLess(float(stiff[1]), 1.0e5)
-
-
-def _contact_damping_preserves_coulomb_sliding(test, device):
-    """Verify that stiff normal damping between dynamic bodies does not alter Coulomb mu*g slip."""
-    dt, gravity, mu = 1.0 / 120.0, 9.81, 0.1
-    settle_steps, push_steps = 20, 96
-    carrier_half, box_half = (0.9, 0.2, 0.05), (0.1, 0.1, 0.05)
-    carrier_mass, rider_mass = 2.0, 1.0
-    push_force = carrier_mass * 1.5 + mu * rider_mass * gravity
-
-    builder = newton.ModelBuilder(gravity=(0.0, 0.0, -gravity))
-    carriers, riders = [], []
-    for lane_idx, kd in enumerate((0.0, 1000.0)):
-        y = 0.8 * lane_idx
-        builder.add_shape_box(
-            -1,
-            xform=wp.transform((0.6, y, -0.05), wp.quat_identity()),
-            hx=1.8,
-            hy=0.25,
-            hz=0.05,
-            cfg=builder.ShapeConfig(density=0.0, ke=1.0e5, kd=kd, mu=0.0, mu_torsional=0.0, mu_rolling=0.0),
-        )
-        carrier = builder.add_body(xform=wp.transform((0.0, y, carrier_half[2]), wp.quat_identity()))
-        builder.add_shape_box(
-            carrier,
-            hx=carrier_half[0],
-            hy=carrier_half[1],
-            hz=carrier_half[2],
-            cfg=builder.ShapeConfig(
-                density=carrier_mass / (8.0 * carrier_half[0] * carrier_half[1] * carrier_half[2]),
-                ke=1.0e5,
-                kd=kd,
-                mu=mu,
-                mu_torsional=0.0,
-                mu_rolling=0.0,
-            ),
-        )
-        rider = builder.add_body(xform=wp.transform((0.3, y, 2.0 * carrier_half[2] + box_half[2]), wp.quat_identity()))
-        builder.add_shape_box(
-            rider,
-            hx=box_half[0],
-            hy=box_half[1],
-            hz=box_half[2],
-            cfg=builder.ShapeConfig(
-                density=rider_mass / (8.0 * box_half[0] * box_half[1] * box_half[2]),
-                ke=1.0e5,
-                kd=kd,
-                mu=mu,
-                mu_torsional=0.0,
-                mu_rolling=0.0,
-            ),
-        )
-        carriers.append(carrier)
-        riders.append(rider)
-
-    builder.color()
-    model = builder.finalize(device=device)
-    pipeline = newton.CollisionPipeline(model)
-    contacts = pipeline.contacts()
-    solver = newton.solvers.SolverVBD(model, iterations=10)
-    state_0, state_1 = model.state(), model.state()
-
-    wrench = np.zeros((model.body_count, 6), dtype=np.float32)
-    wrench[carriers, 0] = push_force
-    wrench_wp = wp.array(wrench, dtype=wp.spatial_vector, device=device)
-
-    for step in range(settle_steps + push_steps):
-        state_0.clear_forces()
-        if step == settle_steps:
-            start_x = state_0.body_q.numpy()[riders, 0].astype(np.float64)
-        if step >= settle_steps:
-            wp.copy(state_0.body_f, wrench_wp)
-        pipeline.collide(state_0, contacts)
-        solver.step(state_0, state_1, None, contacts, dt)
-        state_0, state_1 = state_1, state_0
-
-    travel = state_0.body_q.numpy()[riders, 0].astype(np.float64) - start_x
-    reference = 0.5 * mu * gravity * dt * dt * push_steps * (push_steps + 1)
-    rel_error = np.abs(travel - reference) / reference
-    spread = abs(float(travel[1] - travel[0])) / reference
-    test.assertLess(float(rel_error.max()), 0.05)
-    test.assertLess(spread, 0.005)
 
 
 def _d6_fully_free_structural_slots_are_inactive(test, device):
@@ -7796,6 +8037,12 @@ add_function_test(
 )
 add_function_test(
     TestSolverVBD,
+    "test_rigid_contact_conditioning_follows_joint_directions",
+    _rigid_contact_conditioning_follows_joint_directions,
+    devices=devices,
+)
+add_function_test(
+    TestSolverVBD,
     "test_rigid_contact_history_capture_requires_preallocation",
     _rigid_contact_history_capture_requires_preallocation,
     devices=cuda_devices,
@@ -7982,6 +8229,12 @@ add_function_test(
 )
 add_function_test(
     TestSolverVBD,
+    "test_contact_damping_limits_warm_started_stack_hop",
+    _contact_damping_limits_warm_started_stack_hop,
+    devices=devices,
+)
+add_function_test(
+    TestSolverVBD,
     "test_contact_damping_leaves_ground_friction",
     _contact_damping_leaves_ground_friction,
     devices=devices,
@@ -7990,12 +8243,6 @@ add_function_test(
     TestSolverVBD,
     "test_contact_damping_row_keeps_float32_scale",
     _contact_damping_row_keeps_float32_scale,
-    devices=devices,
-)
-add_function_test(
-    TestSolverVBD,
-    "test_contact_damping_preserves_coulomb_sliding",
-    _contact_damping_preserves_coulomb_sliding,
     devices=devices,
 )
 add_function_test(
