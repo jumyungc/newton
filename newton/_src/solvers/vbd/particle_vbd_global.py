@@ -916,7 +916,7 @@ class ParticleGlobalVBD:
         self._rho_min = float(rho_min)
         self._global_h = 1.0
         self._global_contacts = None
-        initial_contact_cap = int(solver.body_particle_contact_penalty_k.shape[0])
+        initial_contact_cap = int(solver.body_particle_contact_material_ke.shape[0])
         self._global_contact_k = (
             wp.zeros(initial_contact_cap, dtype=float, device=self.device) if initial_contact_cap > 0 else None
         )
@@ -1145,7 +1145,7 @@ class ParticleGlobalVBD:
                     contacts.soft_contact_body_pos,
                     m.particle_radius,
                     m.shape_margin,
-                    s.body_particle_contact_penalty_k,
+                    s.body_particle_contact_material_ke,
                     m.particle_flags,
                     m.particle_mass,
                     self._global_rhs,
@@ -1214,7 +1214,7 @@ class ParticleGlobalVBD:
                         m.particle_radius,
                         m.shape_margin,
                         c.soft_contact_shape,
-                        s.body_particle_contact_penalty_k,
+                        s.body_particle_contact_material_ke,
                         self._global_energy,
                     ],
                     device=self.device,

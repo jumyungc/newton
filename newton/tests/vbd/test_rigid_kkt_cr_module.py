@@ -41,7 +41,6 @@ def _cr_unique_module_options(test, device):
         newton.solvers.SolverVBD(
             model,
             iterations=1,
-            rigid_compliant_alm=True,
             rigid_joint_global_iterations=1,
             deterministic=mode,
         )
