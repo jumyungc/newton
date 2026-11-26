@@ -1342,6 +1342,8 @@ def _linearize_bucket(model, solver, bucket, body_q, dt, *, track_limits=False):
             solver.joint_drive_lambda,
             solver.joint_limit_lambda,
             solver.rigid_joint_alpha,
+            float(solver.rigid_joint_linear_ke),
+            float(solver.rigid_joint_angular_ke),
             body_q,
             solver.body_q_prev,
             model.body_q,
@@ -9340,6 +9342,248 @@ def _r22_depth_rigidity_mixed_skip_and_bdf2_wrench(test, device):
         test.assertTrue(np.all(np.isfinite(s1.body_q.numpy())))
 
 
+def _light_slider_keeps_coulomb_friction(test, device, locked_rows, global_iterations):
+    """A 1 mg box pressed on a plane with 5 N and pulled at 10 mm/s by a position drive keeps Coulomb friction.
+
+    The tangential contact penalty of the box must not fall back to the inertial support of a milligram, or the
+    friction multiplier stays near zero during the slip. Two ways to get there:
+
+    - ``locked_rows`` with a structural solve: the joint's locked rows belong to the structural solve, so they no
+      longer floor the penalty; the Coulomb floor of an owned pair has to.
+    - no locked row, local sweeps: the drive is all that holds the box, so the support summary of the body has to
+      count the drive's stiffness.
+    """
+    mu, load, spring, speed, dt = 0.3, 5.0, 5.0e3, 1.0e-2, 1.0 / 600.0
+    hx, hz, mass = 0.01, 0.002, 1.0e-6
+    with wp.ScopedDevice(device):
+        builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+        builder.inertia_absolute_tolerance = 1.0e-20
+        builder.inertia_correction = 0.0
+        cfg = newton.ModelBuilder.ShapeConfig(ke=1.0e6, kd=0.0, mu=mu, density=0.0)
+        builder.add_ground_plane(cfg=cfg)
+        pose = wp.transform(wp.vec3(0.0, 0.0, hz), wp.quat_identity())
+        body = builder.add_link(xform=pose, mass=mass, inertia=wp.mat33(np.eye(3) * (2.0 * mass * hx * hx / 3.0)))
+        dof = newton.ModelBuilder.JointDofConfig
+        free_rotations = [dof(axis=axis) for axis in (newton.Axis.X, newton.Axis.Y, newton.Axis.Z)]
+        joint = builder.add_joint_d6(
+            parent=-1,
+            child=body,
+            linear_axes=[
+                dof(axis=newton.Axis.X, target_ke=spring, target_kd=0.0, actuator_mode=newton.JointTargetMode.POSITION),
+                dof(axis=newton.Axis.Z),
+                *([] if locked_rows else [dof(axis=newton.Axis.Y)]),
+            ],
+            angular_axes=[] if locked_rows else free_rotations,
+            parent_xform=pose,
+            child_xform=wp.transform_identity(),
+        )
+        builder.add_articulation([joint])
+        builder.add_shape_box(body, hx=hx, hy=hx, hz=hz, cfg=cfg)
+        builder.color()
+        model = builder.finalize(device=device)
+        pipeline = newton.CollisionPipeline(model)
+        contacts = pipeline.contacts()
+        solver = newton.solvers.SolverVBD(model, iterations=4, rigid_joint_global_iterations=global_iterations)
+        s0, s1, control = model.state(), model.state(), model.control()
+        force = np.zeros((model.body_count, 6), dtype=np.float32)
+        force[body, 2] = -load
+        dof_index = int(model.joint_target_q_start.numpy()[joint])
+        target = np.zeros(control.joint_target_q.shape[0], dtype=np.float32)
+        steps = 300
+        friction, normal = [], []
+        for step in range(1, steps + 1):
+            target[dof_index] = speed * step * dt
+            control.joint_target_q.assign(target)
+            pipeline.collide(s0, contacts)
+            s0.clear_forces()
+            s0.body_f.assign(force)
+            previous = wp.clone(solver.body_q_prev) if step > 1 else wp.clone(s0.body_q)
+            solver.step(s0, s1, control, contacts, dt)
+            if step > 3 * steps // 4:
+                b0, b1, _, _, force_on_1, count = solver.collect_rigid_contact_forces(s1.body_q, previous, contacts, dt)
+                n = int(count.numpy()[0])
+                sign = np.where(b1.numpy()[:n] == body, 1.0, np.where(b0.numpy()[:n] == body, -1.0, 0.0))
+                total = (force_on_1.numpy()[:n] * sign[:, None]).sum(axis=0)
+                friction.append(-total[0])
+                normal.append(total[2])
+            s0, s1 = s1, s0
+        test.assertTrue(np.isfinite(s0.body_q.numpy()).all())
+        np.testing.assert_allclose(np.mean(normal), load, rtol=0.05)
+        np.testing.assert_allclose(np.mean(friction), mu * np.mean(normal), rtol=0.05)
+
+
+def _structural_kkt_keeps_coulomb_friction_on_owned_light_body(test, device):
+    _light_slider_keeps_coulomb_friction(test, device, locked_rows=True, global_iterations=1)
+
+
+def _drive_held_light_body_keeps_coulomb_friction(test, device):
+    _light_slider_keeps_coulomb_friction(test, device, locked_rows=False, global_iterations=0)
+
+
+def _r24_limit_even_parity_mimic_admission_and_256_crossover(test, device):
+    """Verify r24 invariants:
+    1. Even-iteration (I=4, G=1) 1e8 stiff limit arrival has zero active-set parity bounce (#4238 + KKT).
+    2. Complete-objective island admission leaves mimic-coupled islands to local VBD while solving non-mimic islands in KKT.
+    3. Exact 256-body open chain dispatches float64 paired block-CR (>= _FUSED_TREE_MAX_LEVEL_WIDTH).
+    """
+    # 1. Even-iteration (I=4, G=1) 1e8 stiff joint-limit arrival.
+    b_lim = newton.ModelBuilder(gravity=(0.0, 0.0, -9.81))
+    link = b_lim.add_link(
+        xform=wp.transform(wp.vec3(0.15, 0.0, 0.0), wp.quat_identity()),
+        mass=0.2,
+        inertia=wp.mat33(1.0e-3, 0.0, 0.0, 0.0, 1.0e-3, 0.0, 0.0, 0.0, 1.0e-3),
+    )
+    cfg = newton.ModelBuilder.JointDofConfig(
+        axis=wp.vec3(0.0, 1.0, 0.0),
+        limit_lower=-0.25,
+        limit_upper=0.25,
+        limit_ke=1.0e8,
+        limit_kd=10.0,
+    )
+    j_lim = b_lim.add_joint_revolute(
+        parent=-1,
+        child=link,
+        parent_xform=wp.transform_identity(),
+        child_xform=wp.transform(wp.vec3(-0.15, 0.0, 0.0), wp.quat_identity()),
+        axis=cfg,
+    )
+    b_lim.add_articulation([j_lim])
+    b_lim.color()
+    m_lim = b_lim.finalize(device=device)
+    s_lim = newton.solvers.SolverVBD(m_lim, iterations=4, rigid_joint_global_iterations=1)
+    st0, st1 = m_lim.state(), m_lim.state()
+    ctl = m_lim.control()
+    for _ in range(160):
+        s_lim.step(st0, st1, ctl, None, 1.0 / 240.0)
+        st0, st1 = st1, st0
+    q_lim = st0.body_q.numpy()[link, 3:7]
+    angle_y = 2.0 * float(np.arctan2(float(q_lim[1]), float(q_lim[3])))
+    test.assertLess(abs(abs(angle_y) - 0.25), 2.0e-3)
+
+    # 2. Mixed mimic island + non-mimic stiff chain island in one model at G=1.
+    b_mix = newton.ModelBuilder(gravity=(0.0, 0.0, -9.81))
+    unit_i = wp.mat33(1.0e-4, 0.0, 0.0, 0.0, 1.0e-4, 0.0, 0.0, 0.0, 1.0e-4)
+    prox = b_mix.add_link(xform=wp.transform(wp.vec3(0.05, 0.0, 0.0), wp.quat_identity()), mass=0.1, inertia=unit_i)
+    dist = b_mix.add_link(xform=wp.transform(wp.vec3(0.15, 0.0, 0.0), wp.quat_identity()), mass=0.1, inertia=unit_i)
+    tip = b_mix.add_link(xform=wp.transform(wp.vec3(0.25, 0.0, 0.0), wp.quat_identity()), mass=0.1, inertia=unit_i)
+    tip2 = b_mix.add_link(xform=wp.transform(wp.vec3(0.35, 0.0, 0.0), wp.quat_identity()), mass=0.1, inertia=unit_i)
+    j_ref = b_mix.add_joint_d6(
+        parent=-1,
+        child=prox,
+        parent_xform=wp.transform_identity(),
+        child_xform=wp.transform(wp.vec3(-0.05, 0.0, 0.0), wp.quat_identity()),
+        angular_axes=[
+            newton.ModelBuilder.JointDofConfig(
+                axis=wp.vec3(0.0, 1.0, 0.0),
+                target_ke=50.0,
+                target_kd=2.0,
+                actuator_mode=newton.JointTargetMode.POSITION,
+            )
+        ],
+    )
+    j_fol = b_mix.add_joint_d6(
+        parent=prox,
+        child=dist,
+        parent_xform=wp.transform(wp.vec3(0.05, 0.0, 0.0), wp.quat_identity()),
+        child_xform=wp.transform(wp.vec3(-0.05, 0.0, 0.0), wp.quat_identity()),
+        angular_axes=[newton.ModelBuilder.JointDofConfig(axis=wp.vec3(0.0, 1.0, 0.0))],
+    )
+    j_tip = b_mix.add_joint_revolute(
+        parent=dist,
+        child=tip,
+        axis=wp.vec3(0.0, 1.0, 0.0),
+        parent_xform=wp.transform(wp.vec3(0.05, 0.0, 0.0), wp.quat_identity()),
+        child_xform=wp.transform(wp.vec3(-0.05, 0.0, 0.0), wp.quat_identity()),
+    )
+    j_tip2 = b_mix.add_joint_revolute(
+        parent=tip,
+        child=tip2,
+        axis=wp.vec3(0.0, 1.0, 0.0),
+        parent_xform=wp.transform(wp.vec3(0.05, 0.0, 0.0), wp.quat_identity()),
+        child_xform=wp.transform(wp.vec3(-0.05, 0.0, 0.0), wp.quat_identity()),
+    )
+    b_mix.add_articulation([j_ref, j_fol, j_tip, j_tip2])
+    b_mix.set_joint_mimic(j_fol, j_ref, coeffs=(0.0, 1.0))
+
+    chain_joints = []
+    prev_c = -1
+    for k in range(8):
+        cb = b_mix.add_link(
+            xform=wp.transform(wp.vec3(1.0 + 0.05 * (k + 0.5), 0.0, 0.0), wp.quat_identity()),
+            mass=0.1,
+            inertia=unit_i,
+        )
+        px = wp.transform(wp.vec3(1.0 if prev_c < 0 else 0.025, 0.0, 0.0), wp.quat_identity())
+        cx = wp.transform(wp.vec3(-0.025, 0.0, 0.0), wp.quat_identity())
+        chain_joints.append(
+            b_mix.add_joint_revolute(
+                parent=prev_c, child=cb, axis=wp.vec3(0.0, 1.0, 0.0), parent_xform=px, child_xform=cx
+            )
+        )
+        prev_c = cb
+    b_mix.add_articulation(chain_joints)
+    b_mix.color()
+    m_mix = b_mix.finalize(device=device)
+    s_mix = newton.solvers.SolverVBD(
+        m_mix,
+        iterations=8,
+        rigid_joint_linear_ke=1.0e6,
+        rigid_joint_angular_ke=1.0e6,
+        rigid_joint_global_iterations=1,
+    )
+    s_mix._plan_structural_graph_kkt(1.0 / 240.0)
+    kkt_bodies = set(s_mix._structural_graph_kkt.graph_body_ids.numpy().tolist())
+    test.assertNotIn(prox, kkt_bodies)
+    test.assertNotIn(dist, kkt_bodies)
+    test.assertNotIn(tip, kkt_bodies)
+    test.assertNotIn(tip2, kkt_bodies)
+    test.assertIn(prev_c, kkt_bodies)
+    ms0, ms1 = m_mix.state(), m_mix.state()
+    mctl = m_mix.control()
+    target_pos = np.zeros(len(mctl.joint_target_q), dtype=np.float32)
+    target_pos[0] = 0.35
+    mctl.joint_target_q.assign(target_pos)
+    for _ in range(60):
+        s_mix.step(ms0, ms1, mctl, None, 1.0 / 240.0)
+        ms0, ms1 = ms1, ms0
+    test.assertTrue(np.all(np.isfinite(ms0.body_q.numpy())))
+    test.assertLess(float(np.max(np.linalg.norm(ms0.body_qd.numpy()[[prox, dist], :3], axis=-1))), 0.5)
+
+    # 3. Exact 256-body open chain crossover on CUDA dispatches paired_cr in float64.
+    if wp.get_device(device).is_cuda:
+        b256 = newton.ModelBuilder(gravity=(0.0, 0.0, -9.81))
+        j256 = []
+        p256 = -1
+        for idx in range(256):
+            body = b256.add_link(
+                xform=wp.transform(wp.vec3((idx + 0.5) * 0.04, 0.0, 0.0), wp.quat_identity()),
+                mass=0.05,
+                inertia=wp.mat33(1.0e-5, 0.0, 0.0, 0.0, 1.0e-5, 0.0, 0.0, 0.0, 1.0e-5),
+            )
+            px = wp.transform(wp.vec3(0.0 if p256 < 0 else 0.02, 0.0, 0.0), wp.quat_identity())
+            cx = wp.transform(wp.vec3(-0.02, 0.0, 0.0), wp.quat_identity())
+            j256.append(
+                b256.add_joint_revolute(
+                    parent=p256, child=body, axis=wp.vec3(0.0, 1.0, 0.0), parent_xform=px, child_xform=cx
+                )
+            )
+            p256 = body
+        b256.add_articulation(j256)
+        b256.color(balance_colors=False)
+        m256 = b256.finalize(device=device)
+        s256 = newton.solvers.SolverVBD(
+            m256,
+            iterations=1,
+            rigid_joint_linear_ke=1.0e12,
+            rigid_joint_angular_ke=1.0e12,
+            rigid_joint_global_iterations=1,
+        )
+        s256._plan_structural_graph_kkt(1.0e-3)
+        bucket256 = s256._structural_graph_kkt.tree_buckets[0]
+        test.assertTrue(bucket256.use_paired_open_backbone)
+        test.assertEqual(bucket256.factor_dtype, wp.float64)
+
+
 add_function_test(
     TestVBDRigidKKT,
     "test_chain_condensation_matches_dense_solve",
@@ -9368,6 +9612,24 @@ add_function_test(
     TestVBDRigidKKT,
     "test_r22_depth_rigidity_mixed_skip_and_bdf2_wrench",
     _r22_depth_rigidity_mixed_skip_and_bdf2_wrench,
+    devices=get_test_devices(mode="basic"),
+)
+add_function_test(
+    TestVBDRigidKKT,
+    "test_r24_limit_even_parity_mimic_admission_and_256_crossover",
+    _r24_limit_even_parity_mimic_admission_and_256_crossover,
+    devices=get_test_devices(mode="basic"),
+)
+add_function_test(
+    TestVBDRigidKKT,
+    "test_structural_kkt_keeps_coulomb_friction_on_owned_light_body",
+    _structural_kkt_keeps_coulomb_friction_on_owned_light_body,
+    devices=get_test_devices(mode="basic"),
+)
+add_function_test(
+    TestVBDRigidKKT,
+    "test_drive_held_light_body_keeps_coulomb_friction",
+    _drive_held_light_body_keeps_coulomb_friction,
     devices=get_test_devices(mode="basic"),
 )
 

@@ -2892,9 +2892,6 @@ def _eval_joint_axis_drive_limit(
         drive_lambda,
         inv_dt,
     )
-    limit_support = _global_limit_support(
-        axis_support, axis.material_limit_ke + axis.limit_kd * inv_dt, global_limit_rho
-    )
     f_limit, H_limit = _evaluate_limit_axis(
         q,
         axis.lower,
@@ -2903,7 +2900,7 @@ def _eval_joint_axis_drive_limit(
         axis.material_limit_ke,
         axis.limit_kd,
         rate,
-        limit_support,
+        axis_support,
         axis.structural_ke,
         limit_lambda,
         inv_dt,
@@ -2941,9 +2938,6 @@ def _update_joint_axis_drive_limit_state(
         inv_dt,
     )
 
-    limit_support = _global_limit_support(
-        axis_support, axis.material_limit_ke + axis.limit_kd * inv_dt, global_limit_rho
-    )
     joint_limit_lambda[dof_idx] = _update_limit_lambda(
         q,
         axis.lower,
@@ -2952,7 +2946,7 @@ def _update_joint_axis_drive_limit_state(
         axis.material_limit_ke,
         axis.limit_kd,
         rate,
-        limit_support,
+        axis_support,
         joint_limit_lambda[dof_idx],
         inv_dt,
     )
@@ -3901,6 +3895,24 @@ def reset_rigid_state(
                     joint_mimic_lambda[tid, component] = 0.0
 
 
+@wp.func
+def _joint_linear_drive_ke(
+    joint_id: int,
+    joint_type: wp.array[int],
+    joint_qd_start: wp.array[int],
+    joint_dof_dim: wp.array2d[int],
+    joint_target_ke: wp.array[float],
+):
+    """Largest stiffness of the linear position drives of a PRISMATIC or D6 joint, else 0."""
+    k_drive = float(0.0)
+    jt = joint_type[joint_id]
+    if jt == JointType.PRISMATIC or jt == JointType.D6:
+        dof0 = joint_qd_start[joint_id]
+        for i in range(joint_dof_dim[joint_id, 0]):
+            k_drive = wp.max(k_drive, joint_target_ke[dof0 + i])
+    return k_drive
+
+
 @wp.kernel
 def refresh_body_structural_k(
     joint_type: wp.array[int],
@@ -3910,21 +3922,28 @@ def refresh_body_structural_k(
     joint_constraint_start: wp.array[wp.int32],
     joint_constraint_dim: wp.array[wp.int32],
     joint_material_k: wp.array[float],
+    joint_qd_start: wp.array[int],
+    joint_dof_dim: wp.array2d[int],
+    joint_target_ke: wp.array[float],
     body_structural_k: wp.array[float],
 ):
     """Accumulate enabled linear-joint stiffness into a caller-zeroed output.
 
     Uses the first constraint slot for ordinary joints. Rod joints take
     ``max(stretch, shear)`` so independently authored shear is not ignored.
+    A linear position drive holds its body as a locked row does, so its
+    stiffness counts too (a body on a drive alone has no other support).
     """
     joint_id = wp.tid()
-    if not joint_enabled[joint_id] or joint_constraint_dim[joint_id] <= 0:
+    if not joint_enabled[joint_id]:
         return
 
-    c_start = joint_constraint_start[joint_id]
-    k_linear = joint_material_k[c_start]
-    if joint_type[joint_id] == JointType.ROD and joint_constraint_dim[joint_id] > 1:
-        k_linear = wp.max(k_linear, joint_material_k[c_start + 1])
+    k_linear = _joint_linear_drive_ke(joint_id, joint_type, joint_qd_start, joint_dof_dim, joint_target_ke)
+    if joint_constraint_dim[joint_id] > 0:
+        c_start = joint_constraint_start[joint_id]
+        k_linear = wp.max(k_linear, joint_material_k[c_start])
+        if joint_type[joint_id] == JointType.ROD and joint_constraint_dim[joint_id] > 1:
+            k_linear = wp.max(k_linear, joint_material_k[c_start + 1])
     if k_linear > 0.0:
         parent_id = joint_parent[joint_id]
         child_id = joint_child[joint_id]
@@ -3943,20 +3962,25 @@ def refresh_body_unrepresented_structural_k(
     joint_constraint_start: wp.array[wp.int32],
     joint_constraint_dim: wp.array[wp.int32],
     joint_material_k: wp.array[float],
+    joint_qd_start: wp.array[int],
+    joint_dof_dim: wp.array2d[int],
+    joint_target_ke: wp.array[float],
     joint_global_stress_slot: wp.array[wp.vec2i],
     body_structural_k: wp.array[float],
 ):
-    """Accumulate linear stiffness of enabled joints not solved in the global KKT backend."""
+    """Accumulate linear stiffness (locked rows, linear drives) of enabled joints the global KKT backend leaves out."""
     joint_id = wp.tid()
-    if not joint_enabled[joint_id] or joint_constraint_dim[joint_id] <= 0:
+    if not joint_enabled[joint_id]:
         return
     if _joint_is_globally_represented(joint_id, joint_global_stress_slot):
         return
 
-    c_start = joint_constraint_start[joint_id]
-    k_linear = joint_material_k[c_start]
-    if joint_type[joint_id] == JointType.ROD and joint_constraint_dim[joint_id] > 1:
-        k_linear = wp.max(k_linear, joint_material_k[c_start + 1])
+    k_linear = _joint_linear_drive_ke(joint_id, joint_type, joint_qd_start, joint_dof_dim, joint_target_ke)
+    if joint_constraint_dim[joint_id] > 0:
+        c_start = joint_constraint_start[joint_id]
+        k_linear = wp.max(k_linear, joint_material_k[c_start])
+        if joint_type[joint_id] == JointType.ROD and joint_constraint_dim[joint_id] > 1:
+            k_linear = wp.max(k_linear, joint_material_k[c_start + 1])
     if k_linear > 0.0:
         parent_id = joint_parent[joint_id]
         child_id = joint_child[joint_id]
@@ -4999,6 +5023,7 @@ def _step_body_body_contact_C0_lambda_row(
     inv_dt_sq: float,
     contact_material_ke: wp.array[float],
     normal_alpha: float,
+    friction_slip_step: float,
     recovery: MeshRecoveryData,
     contact_generation: wp.array[int],
     step_start_q: wp.array[wp.transform],
@@ -5104,6 +5129,22 @@ def _step_body_body_contact_C0_lambda_row(
         proxy_flag,
     )
     tangent_rho = _contact_auto_tangent_rho(tangent_support, normal_rho, structural_support)
+    # Coulomb floor of an owned body. The structural solve owns some joints of this pair, so their
+    # stiffness left the tangential penalty (structural_support above). The multiplier still has to reach
+    # the cone: keep the smaller of what the row had before the split, min(normal_rho, all joints), and
+    # the penalty at which a slip of friction_slip_step (friction_epsilon * dt) in one step reaches it.
+    # The normal force is the larger of the retained multiplier and the material force of the starting
+    # penetration. A pair without owned joints is untouched.
+    structural_all = _contact_pair_structural_scale(b0, b1, body_flags, body_inv_mass, body_structural_k, proxy_flag)
+    f_n_estimate = wp.max(wp.dot(lam, n), ke * wp.max(C0_n, 0.0))
+    if friction_slip_step > 0.0 and friction_mu[0] > 0.0 and f_n_estimate > 0.0 and structural_all > structural_support:
+        coulomb_floor = wp.min(wp.min(normal_rho, structural_all), friction_mu[0] * f_n_estimate / friction_slip_step)
+        tangent_rho = wp.mat22(
+            wp.max(tangent_rho[0, 0], coulomb_floor),
+            wp.max(tangent_rho[0, 1], coulomb_floor),
+            tangent_rho[1, 0],
+            tangent_rho[1, 1],
+        )
 
     if mu_torsional > 0.0 or mu_rolling > 0.0:
         torsional_support, rolling_support = _contact_angular_conditioning_scales(
@@ -5171,6 +5212,7 @@ def step_body_body_contact_C0_lambda(
     inv_dt_sq: float,
     contact_material_ke: wp.array[float],
     normal_alpha: float,
+    friction_slip_step: float,
     recovery: MeshRecoveryData,
     contact_generation: wp.array[int],
     step_start_q: wp.array[wp.transform],
@@ -5216,6 +5258,7 @@ def step_body_body_contact_C0_lambda(
         inv_dt_sq,
         contact_material_ke,
         normal_alpha,
+        friction_slip_step,
         recovery,
         contact_generation,
         step_start_q,
@@ -5256,6 +5299,7 @@ def step_body_body_contact_C0_lambda_split(
     inv_dt_sq: float,
     contact_material_ke: wp.array[float],
     normal_alpha: float,
+    friction_slip_step: float,
     recovery: MeshRecoveryData,
     contact_generation: wp.array[int],
     step_start_q: wp.array[wp.transform],
@@ -5296,6 +5340,7 @@ def step_body_body_contact_C0_lambda_split(
         inv_dt_sq,
         contact_material_ke,
         normal_alpha,
+        friction_slip_step,
         recovery,
         contact_generation,
         step_start_q,

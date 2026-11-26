@@ -23,12 +23,13 @@ What this route does
 For any structural bucket whose islands consist of unbranched ``JointType.ROD`` chains attached to ``1..HUB_MAX``
 hub bodies:
 
-1. **Pure-float64 inertia + stress + Kirchhoff + unilateral active-set contact assembly**
+1. **Pure-float64 inertia + stress + open-clearance Kirchhoff + unilateral active-set contact assembly**
    (:func:`assemble_chain_segments`): builds each segment's ``6 x 6`` diagonal block, rod-neighbour couplings,
    right-hand side, and segment-hub border/diagonal/wrench contributions directly in ``float64`` from body
-   inertia, joint stress majorizers, the contact-active Cosserat Kirchhoff director proximal metric
-   ``0.25 * L^2 * K_shear``, and unilateral active-set contact Jacobians—never subtracting from ``float32``
-   ``body_matrix``;
+   inertia, joint stress majorizers, the exact parameter-free open-clearance Cosserat shear-director metric
+   ``(sum_{e in d_b} r_{b,e}^2 K_{shear,e}) (I_3 - t_b t_b^T) = (1/2) L_b^2 K_shear (I_3 - t_b t_b^T)`` on
+   unseated broadphase contact segments (``local_contacts > 0 and closed_contacts == 0``), and unilateral
+   active-set contact Jacobians—never subtracting from ``float32`` ``body_matrix``;
 2. **Parallel ``O(log N)`` block cyclic reduction** (:func:`reduce_chains`, :func:`back_substitute_chains`)
    across ``(segment_count, 1 + 6 * hub_count)`` threads in ``float64``;
 3. **100% atomic-free, bit-deterministic register Schur reduction** (:func:`accumulate_chain_schur`) across
@@ -217,7 +218,7 @@ def _finalize_body_diagonal_d(
     body_mass: wp.array[float],
     body_inertia: wp.array[wp.mat33],
     contact_block: wp.spatial_matrixd,
-    kirchhoff_proximal: wp.float64,
+    kirchhoff_block: wp.mat33d,
     include_stress: int,
     stress_offsets: wp.array[wp.int32],
     body_stress: wp.array[wp.mat33],
@@ -235,10 +236,7 @@ def _finalize_body_diagonal_d(
         matrix[axis, axis] = matrix[axis, axis] + mass_d * dt_inv_sq
     for r in range(3):
         for c in range(3):
-            matrix[r + 3, c + 3] = matrix[r + 3, c + 3] + inert_aa[r, c]
-    if kirchhoff_proximal > wp.float64(0.0):
-        for axis in range(3):
-            matrix[axis + 3, axis + 3] = matrix[axis + 3, axis + 3] + kirchhoff_proximal
+            matrix[r + 3, c + 3] = matrix[r + 3, c + 3] + inert_aa[r, c] + kirchhoff_block[r, c]
 
     trace_ll = matrix[0, 0] + matrix[1, 1] + matrix[2, 2]
     trace_aa = matrix[3, 3] + matrix[4, 4] + matrix[5, 5]
@@ -433,7 +431,7 @@ def assemble_chain_segments(
         segment_hub_wrench[s, hub] = wp.spatial_vectord(0.0)
 
     along = wp.vec3(0.0)
-    if has_contacts != 0 and open_contact_weight > 0.0:
+    if has_contacts != 0:
         before = s
         after = s
         if segment_index[s] > 0:
@@ -451,6 +449,8 @@ def assemble_chain_segments(
     contact_block = wp.spatial_matrixd(0.0)
     force_acc = wp.vec3d(0.0)
     torque_acc = wp.vec3d(0.0)
+    local_contacts = int(0)
+    closed_contacts = int(0)
 
     if has_contacts != 0:
         contact_count = rigid_contact_count[0]
@@ -465,6 +465,7 @@ def assemble_chain_segments(
             body1 = shape_body[shape1] if shape1 >= 0 else -1
             if body0 != body and body1 != body:
                 continue
+            local_contacts += 1
             other_body = body1 if body == body0 else body0
             hub = int(-1)
             if other_body >= 0 and body_island[other_body] == island:
@@ -525,6 +526,7 @@ def assemble_chain_segments(
                         contact_block = contact_block + scale * wall_self
                 continue
 
+            closed_contacts += 1
             surface_velocity = wp.vec3(0.0)
             if rigid_contact_surface_velocity:
                 surface_velocity = rigid_contact_surface_velocity[contact]
@@ -627,9 +629,53 @@ def assemble_chain_segments(
                 scale = wp.float64(2.0) if (other_body >= 0 and body_inv_mass[other_body] > 0.0) else wp.float64(1.0)
                 contact_block = contact_block + scale * mine_block
 
-    kirchhoff = wp.float64(0.0)
-    if has_contacts != 0 and island_contact_state[graph_body_island[slot]] == -1:
-        kirchhoff = segment_kirchhoff_proximal[s]
+    # Parameter-free one-owner Cosserat shear-director metric on unseated open-clearance segments:
+    # - Free-span segments (local_contacts == 0) have no nearby obstacle; exact ChainCondensation owns them (0).
+    # - Seated segments (closed_contacts > 0) already carry the unilateral active-set contact Hessian in
+    #   contact_block, which bounds director pitch/yaw without damping steady-state pulley tension transfer (0).
+    # - Unseated broadphase segments (local_contacts > 0 and closed_contacts == 0) hover inside a groove/margin
+    #   with contact_block == 0 while Schur elimination annihilates shear stiffness along the Kirchhoff manifold.
+    #   Retaining the exact frozen-neighbor Cosserat shear-rotation diagonal block
+    #   (sum_{e in d_b} r_{b,e}^2 K_{shear,e}) * (I_3 - t_b t_b^T) = 4 * segment_kirchhoff_proximal[s] * P_perp
+    #   prevents single-step director flip across open clearances with zero empirical constants and zero twist drag.
+    kirchhoff_block = wp.mat33d(0.0)
+    if (
+        has_contacts != 0
+        and island_contact_state[graph_body_island[slot]] == -1
+        and local_contacts > 0
+        and closed_contacts == 0
+    ):
+        shear_rot_k = wp.float64(4.0) * segment_kirchhoff_proximal[s]
+        if shear_rot_k > wp.float64(0.0):
+            along_len_sq = wp.dot(along, along)
+            if along_len_sq <= 1.0e-12:
+                kirchhoff_block = wp.mat33d(
+                    shear_rot_k,
+                    wp.float64(0.0),
+                    wp.float64(0.0),
+                    wp.float64(0.0),
+                    shear_rot_k,
+                    wp.float64(0.0),
+                    wp.float64(0.0),
+                    wp.float64(0.0),
+                    shear_rot_k,
+                )
+            else:
+                td = wp.vec3d(wp.float64(along[0]), wp.float64(along[1]), wp.float64(along[2]))
+                inv_n = wp.float64(1.0) / wp.sqrt(wp.dot(td, td))
+                td = td * inv_n
+                proj = wp.mat33d(
+                    wp.float64(1.0) - td[0] * td[0],
+                    -td[0] * td[1],
+                    -td[0] * td[2],
+                    -td[1] * td[0],
+                    wp.float64(1.0) - td[1] * td[1],
+                    -td[1] * td[2],
+                    -td[2] * td[0],
+                    -td[2] * td[1],
+                    wp.float64(1.0) - td[2] * td[2],
+                )
+                kirchhoff_block = shear_rot_k * proj
 
     pose = body_q[body]
     diagonal = _finalize_body_diagonal_d(
@@ -640,7 +686,7 @@ def assemble_chain_segments(
         body_mass,
         body_inertia,
         contact_block,
-        kirchhoff,
+        kirchhoff_block,
         include_stress,
         stress_offsets,
         body_stress,
@@ -1133,7 +1179,7 @@ def assemble_chain_hub_bases(
         body_mass,
         body_inertia,
         ext_contact_block,
-        wp.float64(0.0),
+        wp.mat33d(0.0),
         include_stress,
         stress_offsets,
         body_stress,

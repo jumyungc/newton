@@ -63,7 +63,7 @@ from .rigid_vbd_kernels import (
     _compliant_alm_coefficients,
     _evaluate_drive_axis,
     _evaluate_limit_axis,
-    _global_limit_support,
+    _limit_auto_rho,
     _material_force_terms,
     _pose_com_diff,
     _reset_world_selected,
@@ -1884,6 +1884,8 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
         joint_drive_lambda: wp.array[float],
         joint_limit_lambda: wp.array[float],
         stab_alpha: float,
+        joint_structural_linear_ke: float,
+        joint_structural_angular_ke: float,
         body_q: wp.array[wp.transform],
         body_q_prev: wp.array[wp.transform],
         body_q_rest: wp.array[wp.transform],
@@ -2383,7 +2385,7 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
                     inv_dt,
                 )
                 lin_lim_step_k = joint_limit_ke[dof] + joint_limit_kd[dof] * inv_dt
-                lin_lim_sup = _global_limit_support(joint_drive_limit_support[dof], lin_lim_step_k, True)
+                lin_lim_sup = joint_drive_limit_support[dof]
                 limit_force, limit_tangent = _evaluate_limit_axis(
                     coordinate,
                     lower,
@@ -2393,7 +2395,7 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
                     joint_limit_kd[dof],
                     rate,
                     lin_lim_sup,
-                    0.0,
+                    joint_structural_linear_ke,
                     joint_limit_lambda[dof],
                     inv_dt,
                 )
@@ -2402,7 +2404,7 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
                     limit_tangent,
                     joint_limit_lambda[dof],
                     lin_lim_step_k,
-                    lin_lim_sup,
+                    _limit_auto_rho(lin_lim_sup, lin_lim_step_k, joint_structural_linear_ke),
                 )
                 if limit_flag:
                     if (
@@ -2498,7 +2500,7 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
                         inv_dt,
                     )
                     ang_lim_step_k = joint_limit_ke[dof] + joint_limit_kd[dof] * inv_dt
-                    ang_lim_sup = _global_limit_support(joint_drive_limit_support[dof], ang_lim_step_k, True)
+                    ang_lim_sup = joint_drive_limit_support[dof]
                     limit_force, limit_tangent = _evaluate_limit_axis(
                         coordinate,
                         lower,
@@ -2508,7 +2510,7 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
                         joint_limit_kd[dof],
                         rate,
                         ang_lim_sup,
-                        0.0,
+                        joint_structural_angular_ke,
                         joint_limit_lambda[dof],
                         inv_dt,
                     )
@@ -2517,7 +2519,7 @@ def _make_linearize_joint_path_rows(fuse_rod_stress: bool):
                         limit_tangent,
                         joint_limit_lambda[dof],
                         ang_lim_step_k,
-                        ang_lim_sup,
+                        _limit_auto_rho(ang_lim_sup, ang_lim_step_k, joint_structural_angular_ke),
                     )
                     if limit_flag:
                         if (
@@ -6979,9 +6981,24 @@ def _eligible_structural_joints(model, supported_joint_types: set[int] | None = 
             int(JointType.PRISMATIC),
             int(JointType.D6),
         }
+    mimic_coupled: set[int] = set()
+    mimic_arr = getattr(model, "joint_mimic_joint", None)
+    if mimic_arr is not None and mimic_arr.shape[0] == len(joint_type):
+        mimic_supported = {int(JointType.PRISMATIC), int(JointType.REVOLUTE), int(JointType.D6)}
+        mimic_host = np.asarray(mimic_arr.numpy(), dtype=np.int64)
+        for follower, reference in enumerate(mimic_host):
+            if (
+                0 <= reference < len(joint_type)
+                and joint_enabled[follower]
+                and joint_enabled[reference]
+                and int(joint_type[follower]) in mimic_supported
+                and int(joint_type[reference]) in mimic_supported
+            ):
+                mimic_coupled.add(follower)
+                mimic_coupled.add(int(reference))
     result: list[int] = []
     for joint, kind in enumerate(joint_type):
-        if kind not in supported or not joint_enabled[joint] or child[joint] < 0:
+        if kind not in supported or not joint_enabled[joint] or child[joint] < 0 or joint in mimic_coupled:
             continue
         result.append(joint)
     return result
@@ -12192,13 +12209,13 @@ class StructuralGraphKKT:
                 enable_paired_open_chains and self.device.is_cuda and (rigid_angular_tree or deep_rigid_chain)
             )
             paired_probe = _tree_bucket_symbolics(ordered[0], enable_paired_open_chain=True) if paired_allowed else None
-            # Near-rigid open chains (> 256 bodies, beyond single-block fused leaf-rake width) retain O(log N)
+            # Near-rigid open chains (>= 256 bodies, at or beyond single-block fused leaf-rake width) retain O(log N)
             # paired CR in float64; shorter chains stay on single-block fused float32 leaf rake with stored stress.
             use_fp64_paired_cr = bool(
                 paired_probe is not None
                 and paired_probe.use_paired_open_backbone
                 and tree_is_rigid
-                and len(ordered[0].bodies) > _FUSED_TREE_MAX_LEVEL_WIDTH
+                and len(ordered[0].bodies) >= _FUSED_TREE_MAX_LEVEL_WIDTH
             )
             symbolics = _tree_bucket_symbolics(
                 ordered[0],
@@ -13009,6 +13026,8 @@ class StructuralGraphKKT:
         contact_C0=None,
         contact_stab_alpha=0.0,
         sync_alm_duals=False,
+        joint_structural_linear_ke=1.0e5,
+        joint_structural_angular_ke=1.0e5,
     ):
         def solve_chain_route():
             self.chain_route.solve(
@@ -13074,7 +13093,11 @@ class StructuralGraphKKT:
             # Independent row groups (joint types, closures) overlap on the row
             # lanes; each launch writes only its own rows.
             lanes = self.row_lanes
-            main = wp.get_stream(self.device) if lanes is not None else None
+            main = (
+                wp.get_stream(self.device)
+                if (lanes is not None or contact_stream is not None) and self.device.is_cuda
+                else None
+            )
             forked = []
             launch_index = 0
             slope_offset = 0
@@ -13201,6 +13224,8 @@ class StructuralGraphKKT:
                                 joint_drive_lambda,
                                 joint_limit_lambda,
                                 stab_alpha,
+                                float(joint_structural_linear_ke),
+                                float(joint_structural_angular_ke),
                                 body_q,
                                 body_q_prev,
                                 body_q_rest,
@@ -13772,6 +13797,8 @@ class StructuralGraphKKT:
                         joint_drive_lambda,
                         joint_limit_lambda,
                         stab_alpha,
+                        float(joint_structural_linear_ke),
+                        float(joint_structural_angular_ke),
                         body_q,
                         body_q_prev,
                         body_q_rest,

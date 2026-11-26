@@ -3012,7 +3012,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
         """Initialize the per-body structural stiffness summary from joint state.
 
         ``body_structural_k[b]`` is the max enabled linear-joint stiffness
-        anchored on body ``b`` (rod joints use ``max(stretch, shear)``). Contact
+        anchored on body ``b`` (rod joints use ``max(stretch, shear)``; a PRISMATIC
+        or D6 joint also counts its linear position drives). Contact
         conditioning augments each dynamic endpoint's inertial scale with its
         own summary before combining endpoints.
         Direction- and chain-blind by design: it bounds neighborhood stiffness to
@@ -3046,6 +3047,9 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 self.joint_constraint_start,
                 self.joint_constraint_dim,
                 self.joint_material_k,
+                self.model.joint_qd_start,
+                self.model.joint_dof_dim,
+                self.model.joint_target_ke,
                 stress_slot,
             ],
             outputs=[self.body_tangent_structural_k],
@@ -3055,8 +3059,9 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
     def _refresh_structural_k(self) -> None:
         """Refresh the structural summary in place, without reallocating it.
 
-        Depends on joint-enable flags and on rod stretch/shear ``joint_material_k``, so it is
-        rerun for both ``JOINT_PROPERTIES`` and ``JOINT_DOF_PROPERTIES``.
+        Depends on joint-enable flags, on rod stretch/shear ``joint_material_k`` and on the
+        linear drive gains ``joint_target_ke``, so it is rerun for both ``JOINT_PROPERTIES``
+        and ``JOINT_DOF_PROPERTIES``.
         """
         self.body_structural_k.zero_()
         if self.model.joint_count == 0:
@@ -3073,6 +3078,9 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 self.joint_constraint_start,
                 self.joint_constraint_dim,
                 self.joint_material_k,
+                self.model.joint_qd_start,
+                self.model.joint_dof_dim,
+                self.model.joint_target_ke,
             ],
             outputs=[self.body_structural_k],
             device=self.device,
@@ -4842,6 +4850,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 1.0 / (dt * dt),
                 self.body_body_contact_material_ke,
                 self.rigid_contact_alpha,
+                float(self.friction_epsilon) * dt,  # friction_slip_step: slip per step at the smoothing speed
                 self._mesh_recovery_data(contacts),
                 contacts.contact_generation,
                 self._recovery_step_start_q if mid_step else body_q,
@@ -5717,6 +5726,8 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             contact_C0=self.body_body_contact_C0,
             contact_stab_alpha=self.rigid_contact_alpha,
             sync_alm_duals=bool(self.rigid_compliant_alm),
+            joint_structural_linear_ke=self.rigid_joint_linear_ke,
+            joint_structural_angular_ke=self.rigid_joint_angular_ke,
         )
 
     def _update_tendon_routing(self, state_in: State, dt: float, report_diagnostics: bool) -> None:

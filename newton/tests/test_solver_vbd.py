@@ -2030,6 +2030,7 @@ def _rigid_contact_structural_support_conditions_tangent_rho(test, device):
                 100.0,
                 wp.array([1.0e9], dtype=float, device=device),
                 0.0,
+                0.0,  # friction_slip_step: the Coulomb floor of owned pairs is off
                 MeshRecoveryData(),
                 wp.zeros(1, dtype=int, device=device),
                 wp.array([wp.transform_identity()], dtype=wp.transform, device=device),
