@@ -17,9 +17,10 @@ from ...geometry.sdf_planar_recovery import (
     has_recovery_contacts,
     recovery_step_depth,
 )
-from ...sim import BodyFlags, JointTargetMode, JointType
+from ...sim import BodyFlags, JointTargetMode, JointType, ShapeFrictionMode
 from ...sim.articulation import eval_joint_motion
 from ...sim.contacts import contact_surface_point, contact_surface_separation
+from ...sim.enums import FRICTION_TORSIONAL_BIT
 from .constants import (
     DEFAULT_LIMIT_SOLREF_DAMPRATIO,
     DEFAULT_LIMIT_SOLREF_TIMECONST,
@@ -526,6 +527,7 @@ def convert_newton_contacts_to_mjwarp_kernel(
     shape_material_ke: wp.array[float],
     shape_material_kd: wp.array[float],
     shape_mjc_solref_mode: wp.array[wp.int32],
+    shape_material_friction_mode: wp.array[wp.int32],
     # Newton contacts
     rigid_contact_count: wp.array[wp.int32],
     rigid_contact_shape0: wp.array[wp.int32],
@@ -571,6 +573,7 @@ def convert_newton_contacts_to_mjwarp_kernel(
     tid_to_cid: wp.array[wp.int32],
     recovery: MeshRecoveryData,
     world_timestep: wp.array[float],
+    refsafe: bool,
     compact_stale: bool,
 ):
     # nacon_out is scratch storage, initialized to zero by the solver and
@@ -698,6 +701,12 @@ def convert_newton_contacts_to_mjwarp_kernel(
             worldid,
         )
 
+        # Only SLIDING_ROLLING shapes give condim 6 to a contact in which no shape enables torsional friction.
+        if shape_material_friction_mode and condim == 6:
+            friction_mode = shape_material_friction_mode[shape_a] | shape_material_friction_mode[shape_b]
+            if (friction_mode & FRICTION_TORSIONAL_BIT) == 0:
+                friction[2] = MJ_MINMU
+
         if rigid_contact_stiffness:
             friction_scale = rigid_contact_friction[tid]
             if friction_scale > 0.0:
@@ -792,12 +801,15 @@ def convert_newton_contacts_to_mjwarp_kernel(
                 solimp = vec5(imp, imp, 0.001, 1.0, 0.5)
                 contact_ke = wp.max(contact_ke * factor, FLOAT64_EPS)
                 kd = rigid_contact_damping[tid]
+                critical_timeconst = wp.sqrt(1.0 / contact_ke)
+                timeconst = critical_timeconst
                 if kd > 0.0:
                     timeconst = 2.0 / wp.max(kd * factor, FLOAT64_EPS)
-                    dampratio = wp.sqrt(1.0 / (timeconst * timeconst * contact_ke))
-                else:
-                    timeconst = wp.sqrt(1.0 / contact_ke)
-                    dampratio = 1.0
+                    if refsafe and timeconst < critical_timeconst:
+                        # Keep the stiffness; cap overdamped damping at the refsafe floor.
+                        dt = world_timestep[worldid % world_timestep.shape[0]]
+                        timeconst = wp.min(wp.max(timeconst, 2.0 * dt), critical_timeconst)
+                dampratio = critical_timeconst / timeconst
                 solref = wp.vec2(timeconst, dampratio)
 
         if recovery_slot >= 0 and dist < margin:
@@ -2600,6 +2612,7 @@ def update_geom_properties_kernel(
     shape_hfield_offset: wp.array[float],
     shape_mu_torsional: wp.array[float],
     shape_mu_rolling: wp.array[float],
+    shape_material_friction_mode: wp.array[wp.int32],
     shape_geom_solimp: wp.array[vec5],
     shape_geom_solmix: wp.array[float],
     shape_mjc_solref: wp.array[wp.vec2f],
@@ -2641,6 +2654,10 @@ def update_geom_properties_kernel(
     mu = shape_mu[shape_idx]
     torsional = shape_mu_torsional[shape_idx]
     rolling = shape_mu_rolling[shape_idx]
+    if shape_material_friction_mode:
+        # condim 6 without torsional friction
+        if shape_material_friction_mode[shape_idx] == int(ShapeFrictionMode.SLIDING_ROLLING):
+            torsional = MJ_MINMU
     geom_friction[world, geom_idx] = wp.vec3f(mu, torsional, rolling)
 
     # geom_solref per shape_mjc_solref_mode. See docs/solvers/mujoco.rst

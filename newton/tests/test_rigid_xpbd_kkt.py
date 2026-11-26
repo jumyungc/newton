@@ -500,11 +500,8 @@ def test_global_joint_parent_force(test, device):
 def test_closed_loop_parent_force(test, device):
     """Report closed-loop forces without changing motion, including captured replay."""
     results = []
-    for output_mode in ("disabled", "state", "observables"):
+    for output_mode in ("disabled", "observables"):
         model = _build_ball_loop(device)
-        if output_mode == "state":
-            with test.assertWarnsRegex(DeprecationWarning, r"Model\.request_state_attributes.*1\.7"):
-                model.request_state_attributes("body_parent_f")
         solver = newton.solvers.SolverXPBD(model, iterations=2, rigid_joint_global_iterations=1)
         observables = solver.observables({"body_parent_f"}) if output_mode == "observables" else None
         source, target = model.state(), model.state()
@@ -523,14 +520,10 @@ def test_closed_loop_parent_force(test, device):
             for _ in range(3):
                 pair()
         results.append((target.body_q.numpy(), target.body_qd.numpy()))
-        if output_mode != "disabled":
-            force = (observables if observables is not None else target).body_parent_f.numpy()
+        if observables is not None:
+            force = observables.body_parent_f.numpy()
             test.assertTrue(np.isfinite(force).all())
             test.assertGreater(float(np.linalg.norm(force)), 1.0)
-            if output_mode == "state":
-                state_force = force
-            else:
-                np.testing.assert_array_equal(force, state_force)
     for result in results[1:]:
         for actual, expected in zip(result, results[0], strict=True):
             np.testing.assert_array_equal(actual, expected)
