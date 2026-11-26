@@ -482,8 +482,9 @@ class Example:
 
         # The 45 degree threshold catches stalled thread engagement while
         # allowing observed solver/contact-count variation.
-        # 5 mm catches a nut that left the bolt or passed through its thread; rotation and descent
-        # check the engagement.
+        # A nut more than 5 mm off the bolt's axis has left the bolt. Rotation and descent check the
+        # engagement; the descent is a world-frame drop and includes the 4 mm by which bolt and nut
+        # settle on the ground at the start.
         max_nut_radial_offset = 0.005
         min_rotation_threshold = np.radians(45.0)
         min_descent = 0.005

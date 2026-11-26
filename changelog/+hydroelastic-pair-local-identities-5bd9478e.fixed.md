@@ -1,1 +1,1 @@
-Scope deterministic hydroelastic voxel identities to each shape pair, so independent pairs no longer share the 419,430-voxel identity budget. The 1,048,575-face global buffer limit remains in effect.
+Scope deterministic hydroelastic voxel identities to each shape pair, so independent pairs no longer share the 419,430-voxel identity budget. The 1,048,575-face global buffer limit remains in effect. Deterministic mode no longer caps the iso-voxel buffer at 419,430 voxels; it allocates the same buffer as the default mode.

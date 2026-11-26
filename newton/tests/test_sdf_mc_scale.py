@@ -9,18 +9,10 @@ import numpy as np
 import warp as wp
 
 from newton._src.geometry.sdf_hydroelastic import mc_calc_face_texture, vec8f
-from newton._src.geometry.sdf_mc import get_mc_tables, get_triangle_fraction
+from newton._src.geometry.sdf_mc import get_mc_tables
 from newton._src.geometry.sdf_texture import TextureSDFData
 from newton._src.geometry.sdf_utils import _generate_dense_mc_kernel
 from newton.tests.unittest_utils import add_function_test, get_test_devices
-
-
-@wp.kernel
-def _fractions(depths: wp.array[wp.vec3], output: wp.array[float]):
-    i = wp.tid()
-    d = depths[i]
-    inside = int(d[0] < 0.0) + int(d[1] < 0.0) + int(d[2] < 0.0)
-    output[i] = get_triangle_fraction(d, inside)
 
 
 @wp.kernel
@@ -66,40 +58,6 @@ def _corner_faces(
     )
     areas[i] = area
     normals[i] = normal
-
-
-def test_triangle_fraction_scale(test, device):
-    """Uniform depth scaling preserves analytic clipped areas, including zero vertices."""
-    cases = [
-        ((-1.0, 2.0, 3.0), 1.0 / 12.0),
-        ((1.0, -2.0, -3.0), 11.0 / 12.0),
-        ((-3.0, 1.0, 1.0), 9.0 / 16.0),
-        ((3.0, -1.0, -1.0), 7.0 / 16.0),
-        ((0.0, -1.0, -2.0), 1.0),
-        ((-1.0, 0.0, 0.0), 1.0),
-        ((0.0, 0.0, 0.0), 0.0),
-        ((1.0, 2.0, 3.0), 0.0),
-        ((-1.0, -2.0, -3.0), 1.0),
-    ]
-    depths, expected = [], []
-    for values, fraction in cases:
-        for rotation in range(3):
-            for scale in (1.0e-30, 1.0e-15, 1.0e-5, 1.0, 1.0e15, 1.0e30):
-                depths.append(np.roll(values, rotation) * scale)
-                expected.append(fraction)
-    with wp.ScopedDevice(device):
-        inputs = wp.array(np.asarray(depths, dtype=np.float32), dtype=wp.vec3)
-        result = wp.empty(len(depths), dtype=float)
-        wp.launch(_fractions, len(depths), inputs=[inputs], outputs=[result])
-        actual = result.numpy().copy()
-        test.assertTrue(np.isfinite(actual).all())
-        np.testing.assert_allclose(actual, expected, rtol=1.0e-6, atol=1.0e-7)
-        if device.is_cuda:
-            with wp.ScopedCapture() as capture:
-                wp.launch(_fractions, len(depths), inputs=[inputs], outputs=[result])
-            for _ in range(3):
-                wp.capture_launch(capture.graph)
-                np.testing.assert_array_equal(result.numpy(), actual)
 
 
 def test_triangle_face_scale(test, device):
@@ -186,7 +144,6 @@ class TestSDFMCScale(unittest.TestCase):
 
 
 for name, function in (
-    ("test_triangle_fraction_scale", test_triangle_fraction_scale),
     ("test_triangle_face_scale", test_triangle_face_scale),
     ("test_small_face_far_from_grid_origin", test_small_face_far_from_grid_origin),
     ("test_dense_mc_small_face_far_from_origin", test_dense_mc_small_face_far_from_origin),

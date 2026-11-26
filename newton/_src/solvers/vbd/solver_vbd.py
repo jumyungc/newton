@@ -1499,7 +1499,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             self._rigid_body_block_dim = _select_rigid_block_dim(model.body_count, self.device)
             self._rigid_joint_block_dim = _select_rigid_block_dim(model.joint_count, self.device)
             # A small color group is latency bound: each body's serial contact loop is the critical path, so it
-            # is spread over a full warp. Groups that already fill the device keep the default width.
+            # is split over 32 lanes. Groups that already fill the device keep the default width.
             self._rigid_color_contact_lanes = tuple(
                 _WIDE_CONTACT_THREADS_PER_BODY
                 if self._wide_contact_lanes and self.device.is_cuda and group.size <= 8 * self.device.sm_count

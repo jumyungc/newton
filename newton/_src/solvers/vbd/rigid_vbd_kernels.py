@@ -1931,8 +1931,9 @@ def get_body_adjacent_joint_id(adjacency: RigidForceElementAdjacencyInfo, body: 
 def _body_rotation_increment(X: wp.transform, X_prev: wp.transform):
     """Return the in-step rotation vector ``omega = 2 vec(dq)`` of ``dq = q q_prev^-1`` (``w >= 0``) and ``J^T``.
 
-    ``omega`` is the log map to third order without trig. The solver rotates by ``q <- exp(dtheta) q``, under which
-    ``d omega / d dtheta = w I - [v]x``; ``J^T = w I + [v]x`` maps an ``omega`` gradient to the exact torque.
+    ``omega`` equals the log map up to a third-order error (``theta**3 / 24``), without trig. The solver rotates
+    by ``q <- exp(dtheta) q``, under which ``d omega / d dtheta = w I - [v]x``; ``J^T = w I + [v]x`` maps an
+    ``omega`` gradient to the exact torque.
     """
     q = wp.transform_get_rotation(X)
     q_prev = wp.transform_get_rotation(X_prev)
@@ -7631,6 +7632,7 @@ def update_body_velocity(
             next step's forward integrator sees the finalized velocity even when the
             caller's Python-level state swap is not recorded in a captured CUDA graph.
         body_q_out: Output body transforms (state_out), fused copy of body_q.
+        step_dt_prev: Output, this step's ``dt``; the next step's adaptive initialization reads it.
     """
     tid = wp.tid()
 

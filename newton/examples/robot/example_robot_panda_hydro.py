@@ -10,8 +10,10 @@ Supports different scene configurations: pen or cube.
 The experimental VBD option uses compliant joint/contact rows and finite-stiffness
 mimic coupling. It does not implement the authored joint armature or effort limits;
 this example therefore compares task completion, not identical robot dynamics.
-VBD collapses fixed links, initializes its reference pose with forward kinematics,
-and refreshes collision every substep. With ``--deterministic`` (the default),
+VBD collapses fixed links and initializes its reference pose with forward kinematics.
+It refreshes collision every substep in the pen scene, where older contacts let the pen
+turn in the grip, and every second substep in the cube scene, as MuJoCo does in both.
+With ``--deterministic`` (the default),
 latest contact matching retains numerical force estimates across substeps;
 passing ``--no-deterministic`` disables contact matching and history, which
 lifts the scene-wide deterministic face limit. The cube task passes without
@@ -111,7 +113,9 @@ class Example:
         self.frame_dt = 1.0 / self.fps
         self.sim_time = 0.0
         self.sim_substeps = 10
-        self.collide_substeps = 1 if self.solver_name == "vbd" else 2
+        # Run collision detection every X simulation steps. Under VBD the pen needs fresh contacts in
+        # every substep: with contacts one substep old it turns in the grip of its narrow pad patches.
+        self.collide_substeps = 1 if self.solver_name == "vbd" and self.scene == SceneType.PEN else 2
         self.sim_dt = self.frame_dt / self.sim_substeps
         self.world_count = args.world_count
         self.viewer = viewer

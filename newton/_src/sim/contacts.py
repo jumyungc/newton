@@ -222,7 +222,8 @@ class Contacts:
             # Sliced view for the rigid counter (no additional allocation)
             self.rigid_contact_count = self.contact_counters[0:1]
             # Nonzero when the collision pass that filled this buffer dropped contact candidates
-            # during generation or global reduction (identity, buffer, or hashtable limits).
+            # at a reducer's hashtable or face buffer or at the hydroelastic face-identity limit.
+            # Overflows of the earlier hydroelastic stages (broadphase, iso refinement) are only printed.
             # Owned by this contact stream rather than aliased to reusable pipeline counters.
             self._reduction_overflow = self.contact_counters[2:3]
             # Coupling packs stored rows and loses the source count's overflow sentinel.
