@@ -518,57 +518,65 @@ def test_step_resolves_per_contact_materials(test, device):
             [2.5e3, 7.0],  # an explicit damping replaces the scaled one
         ]
     )
-    expected_mu = np.array(
-        [
-            [shape_mu, shape_tor, shape_roll],
-            [shape_mu, shape_tor, shape_roll],
-            [2.0 * shape_mu, shape_tor, shape_roll],
-            [0.5 * shape_mu, shape_tor, shape_roll],
-        ]
+    sliding_mu = np.array([shape_mu, shape_mu, 2.0 * shape_mu, 0.5 * shape_mu])
+    mode_cases = (
+        (newton.ShapeFrictionMode.NONE, np.zeros((4, 3))),
+        (newton.ShapeFrictionMode.SLIDING, np.column_stack((sliding_mu, np.zeros(4), np.zeros(4)))),
+        (
+            newton.ShapeFrictionMode.SLIDING_TORSIONAL_ROLLING,
+            np.column_stack((sliding_mu, np.full(4, shape_tor), np.full(4, shape_roll))),
+        ),
     )
     count = len(overrides)
     with wp.ScopedDevice(device):
-        builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
-        cfg = builder.ShapeConfig(
-            ke=shape_ke, kd=shape_kd, mu=shape_mu, mu_torsional=shape_tor, mu_rolling=shape_roll, density=0.0
-        )
-        body = builder.add_body(
-            xform=wp.transform((0.0, 0.0, 1.0), wp.quat_identity()),
-            mass=1.0,
-            inertia=wp.mat33(np.eye(3)),
-            lock_inertia=True,
-        )
-        sphere = builder.add_shape_sphere(body, radius=0.01, cfg=cfg)
-        ground = builder.add_ground_plane(cfg=cfg)
-        builder.color()
-        model = builder.finalize()
-        for history in (False, True):
-            with test.subTest(history=history):
-                contacts = newton.Contacts(
-                    count, 0, device=device, per_contact_shape_properties=True, contact_matching=history
-                )
-                if history:
-                    contacts._contact_matching_mode = "latest"
-                contacts.rigid_contact_count.fill_(count)
-                contacts.rigid_contact_shape0.fill_(sphere)
-                contacts.rigid_contact_shape1.fill_(ground)
-                contacts.rigid_contact_normal.assign([(0.0, 0.0, -1.0)] * count)
-                contacts.rigid_contact_stiffness.assign(overrides[:, 0])
-                contacts.rigid_contact_damping.assign(overrides[:, 1])
-                contacts.rigid_contact_friction.assign(overrides[:, 2])
-                contacts.contact_generation.fill_(1)
-                solver = newton.solvers.SolverVBD(model, iterations=1, rigid_contact_history=history)
-                state, out = model.state(), model.state()
-                solver.step(state, out, None, contacts, 1.0 / 600.0)
-                np.testing.assert_allclose(
-                    solver.body_body_contact_material_ke.numpy()[:count], expected_ke_kd[:, 0], rtol=1.0e-6
-                )
-                np.testing.assert_allclose(
-                    solver.body_body_contact_material_kd.numpy()[:count], expected_ke_kd[:, 1], rtol=1.0e-6
-                )
-                np.testing.assert_allclose(
-                    solver.body_body_contact_material_mu.numpy()[:count], expected_mu, rtol=1.0e-6
-                )
+        for friction_mode, expected_mu in mode_cases:
+            builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+            cfg = builder.ShapeConfig(
+                ke=shape_ke,
+                kd=shape_kd,
+                mu=shape_mu,
+                mu_torsional=shape_tor,
+                mu_rolling=shape_roll,
+                friction_mode=friction_mode,
+                density=0.0,
+            )
+            body = builder.add_body(
+                xform=wp.transform((0.0, 0.0, 1.0), wp.quat_identity()),
+                mass=1.0,
+                inertia=wp.mat33(np.eye(3)),
+                lock_inertia=True,
+            )
+            sphere = builder.add_shape_sphere(body, radius=0.01, cfg=cfg)
+            ground = builder.add_ground_plane(cfg=cfg)
+            builder.color()
+            model = builder.finalize()
+            for history in (False, True):
+                with test.subTest(friction_mode=friction_mode.name, history=history):
+                    contacts = newton.Contacts(
+                        count, 0, device=device, per_contact_shape_properties=True, contact_matching=history
+                    )
+                    if history:
+                        contacts._contact_matching_mode = "latest"
+                    contacts.rigid_contact_count.fill_(count)
+                    contacts.rigid_contact_shape0.fill_(sphere)
+                    contacts.rigid_contact_shape1.fill_(ground)
+                    contacts.rigid_contact_normal.assign([(0.0, 0.0, -1.0)] * count)
+                    contacts.rigid_contact_stiffness.assign(overrides[:, 0])
+                    contacts.rigid_contact_damping.assign(overrides[:, 1])
+                    contacts.rigid_contact_friction.assign(overrides[:, 2])
+                    contacts.contact_generation.fill_(1)
+                    solver = newton.solvers.SolverVBD(model, iterations=1, rigid_contact_history=history)
+                    state, out = model.state(), model.state()
+                    solver.step(state, out, None, contacts, 1.0 / 600.0)
+                    np.testing.assert_allclose(
+                        solver.body_body_contact_material_ke.numpy()[:count], expected_ke_kd[:, 0], rtol=1.0e-6
+                    )
+                    np.testing.assert_allclose(
+                        solver.body_body_contact_material_kd.numpy()[:count], expected_ke_kd[:, 1], rtol=1.0e-6
+                    )
+                    np.testing.assert_allclose(
+                        solver.body_body_contact_material_mu.numpy()[:count], expected_mu, rtol=1.0e-6
+                    )
 
 
 class TestRigidContactDamping(unittest.TestCase):

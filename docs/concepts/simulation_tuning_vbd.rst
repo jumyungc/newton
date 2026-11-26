@@ -682,19 +682,25 @@ body-body damping direction (``rigid_contact_damping_bidirectional``), and the e
 an incomplete solve.
 
 **Torsional and rolling friction.** Body-body contacts resist spin about the
-contact normal and rolling in the contact plane.
+contact normal when the
+:attr:`~newton.ModelBuilder.ShapeConfig.friction_mode` of either shape is
+``SLIDING_TORSIONAL`` or ``SLIDING_TORSIONAL_ROLLING``, and rolling in the
+contact plane when it is ``SLIDING_ROLLING`` or ``SLIDING_TORSIONAL_ROLLING``;
+the default ``SLIDING`` mode applies neither.
 :attr:`~newton.ModelBuilder.ShapeConfig.mu_torsional` and
 :attr:`~newton.ModelBuilder.ShapeConfig.mu_rolling` are lengths [m]: each
-torque limit is the coefficient times the normal force. Both defaults are
-nonzero. Pair coefficients use the geometric mean, so zero on either shape
-disables that channel. For small parts and thin cables, reduce the
-coefficients or set them to zero if angular resistance is too strong.
-The limits apply to every contact row. The rows of a hydroelastic patch each
-carry the pair's coefficients, so their limits add up to the coefficient times
-the patch's elastic normal load, on top of the moment that the rows' sliding forces
-carry. ``nut_bolt_hydro`` and ``robot_panda_hydro`` set both coefficients to
-zero: with the defaults the nut does not turn and the Panda does not place its
-object.
+torque limit is the coefficient times the normal force. Both coefficients
+default to nonzero values. Pair coefficients use the geometric mean, so zero
+on either shape disables that channel. For small parts and thin cables, reduce
+the coefficients or set them to zero if angular resistance is too strong.
+When enabled, the limits apply to every contact row: the rows of a
+hydroelastic patch each carry the pair's coefficients, so their limits add up
+to the coefficient times the patch's elastic normal load, on top of the moment
+that the rows' sliding forces already carry. Keep hydroelastic shapes in
+``SLIDING`` mode or zero those coefficients unless per-row angular friction is
+intended (in ``nut_bolt_hydro`` and ``robot_panda_hydro``, enabling the default
+nonzero coefficients prevents the nut from turning and the Panda from placing
+its object).
 
 **Body coloring.** VBD updates bodies in the same color group in parallel.
 Automatic coloring uses joint and tendon connections, but does not include
@@ -1354,10 +1360,8 @@ before the next step:
   ``model.joint_target_ke`` or ``model.joint_target_kd``.
 - :attr:`ModelFlags.JOINT_REFERENCE_POSE_PROPERTIES` for rod rest
   rotations in ``model.joint_rest_q``.
-- :attr:`ModelFlags.CONSTRAINT_PROPERTIES` after editing
-  ``model.joint_mimic_coeffs`` (also covered by :attr:`ModelFlags.JOINT_PROPERTIES`).
 - :attr:`ModelFlags.JOINT_PROPERTIES` after toggling ``model.joint_enabled`` or
-  editing a joint-owned mimic's reference joint or joint frames.
+  editing a joint-owned mimic's reference joint, coefficients or joint frames.
 - :attr:`ModelFlags.BODY_PROPERTIES` after changing kinematic flags.
 - :attr:`ModelFlags.BODY_INERTIAL_PROPERTIES` after changing body mass or inertia.
 

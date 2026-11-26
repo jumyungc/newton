@@ -8,9 +8,6 @@ import warp as wp
 
 import newton
 from newton._src.sim.joint_mimic import eval_joint_mimic_coordinate, eval_joint_mimic_velocity
-from newton._src.solvers.vbd.joint_mimic_kernels import JointMimicData
-from newton._src.solvers.vbd.joint_mimic_kernels import _coordinate as eval_vbd_mimic_coordinate
-from newton._src.solvers.vbd.joint_mimic_kernels import _row as eval_vbd_mimic_row
 from newton.tests.unittest_utils import add_function_test, get_test_devices
 
 
@@ -76,10 +73,9 @@ def _test_solver_mimic(test, device, solver_name):
     """Enforce scalar and vectorized mimic relationships with one solver."""
     for vectorized in (False, True):
         with test.subTest(vectorized=vectorized):
-            # VBD solves the mimic as a finite-stiffness row inside each body sweep.
-            # Keep its initial pose close to the relationship; large authored
-            # inconsistencies should be resolved with eval_mimic() followed by
-            # eval_fk() before simulation.
+            # Keep the VBD initial pose within the local solve's convergence basin;
+            # large authored inconsistencies should be resolved with eval_mimic()
+            # followed by eval_fk() before simulation.
             model, state_in, state_out, reference, follower, offset, multiplier = _build_mimic_model(
                 device,
                 vectorized,
@@ -199,9 +195,159 @@ def test_vbd_mimic(test, device):
     _test_solver_mimic(test, device, "vbd")
 
 
+def test_vbd_mimic_preserves_kinematic_reference(test, device):
+    """Keep a prescribed reference pose fixed while solving its follower implicitly."""
+    model, state_in, state_out, reference, follower, offset, multiplier = _build_mimic_model(
+        device, False, kinematic_reference=True, small_mismatch=True
+    )
+    reference_body = int(model.joint_child.numpy()[reference])
+    reference_pose = state_in.body_q.numpy()[reference_body].copy()
+    reference_velocity = state_in.body_qd.numpy()[reference_body].copy()
+    solver = newton.solvers.SolverVBD(model, iterations=5)
+    for _ in range(96):
+        solver.step(state_in, state_out, None, None, 1.0 / 960.0)
+        state_in, state_out = state_out, state_in
+    np.testing.assert_allclose(state_in.body_q.numpy()[reference_body], reference_pose, atol=1.0e-7)
+    # VBD reconstructs angular velocity from poses, including float32 quaternion roundoff.
+    np.testing.assert_allclose(state_in.body_qd.numpy()[reference_body], reference_velocity, atol=1.0e-5)
+    _assert_mimic_relation(model, _read_joint_q(model, state_in, False), reference, follower, offset, multiplier)
+
+
+def test_vbd_mimic_shared_reference(test, device):
+    """Keep shared-reference mimic motion bounded and transfer momentum to every follower."""
+    for joint_type in (newton.JointType.PRISMATIC, newton.JointType.REVOLUTE, newton.JointType.D6):
+        for follower_count in (1, 2, 3, 5):
+            with test.subTest(joint_type=joint_type, followers=follower_count):
+                builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+                joints = []
+                for _ in range(follower_count + 1):
+                    body = builder.add_link(mass=1.0, inertia=wp.mat33(np.eye(3)))
+                    if joint_type == newton.JointType.PRISMATIC:
+                        joint = builder.add_joint_prismatic(-1, body, axis=newton.Axis.Z)
+                    elif joint_type == newton.JointType.REVOLUTE:
+                        joint = builder.add_joint_revolute(-1, body, axis=newton.Axis.Z)
+                    else:
+                        axis = newton.ModelBuilder.JointDofConfig.create_unlimited
+                        joint = builder.add_joint_d6(
+                            -1, body, linear_axes=[axis(newton.Axis.X)], angular_axes=[axis(newton.Axis.Z)]
+                        )
+                    joints.append(joint)
+                builder.add_articulation(joints)
+                for follower in joints[1:]:
+                    builder.set_joint_mimic(follower, joints[0])
+                builder.color()
+                model = builder.finalize(device=device)
+                state_in, state_out = model.state(), model.state()
+                # A small leader-only velocity excites the constraint from a consistent pose.
+                dof_count = 2 if joint_type == newton.JointType.D6 else 1
+                state_in.joint_qd[:dof_count].fill_(0.01)
+                newton.eval_fk(model, state_in.joint_q, state_in.joint_qd, state_in)
+                model.body_q.assign(state_in.body_q)
+                solver = newton.solvers.SolverVBD(model, iterations=5)
+
+                initial_energy = float(np.sum(state_in.body_qd.numpy() ** 2))
+                for _ in range(96):
+                    solver.step(state_in, state_out, None, None, 1.0 / 960.0)
+                    state_in, state_out = state_out, state_in
+                    # All bodies have unit mass and inertia, so this is twice kinetic energy.
+                    energy = float(np.sum(state_in.body_qd.numpy() ** 2))
+                    test.assertLessEqual(energy, initial_energy * 1.001)
+
+                newton.eval_ik(model, state_in, state_in.joint_q, state_in.joint_qd)
+                q = state_in.joint_q.numpy().reshape(-1, dof_count)
+                qd = state_in.joint_qd.numpy().reshape(-1, dof_count)
+                np.testing.assert_allclose(q[1:] - q[0], 0.0, atol=1.0e-6)
+                np.testing.assert_allclose(qd, 0.01 / (follower_count + 1), atol=1.0e-5)
+
+                if follower_count == 5 and joint_type == newton.JointType.PRISMATIC:
+                    if device.is_cuda:
+                        # Capture before modifying the model so replay must read the new relationships.
+                        with wp.ScopedCapture(device=device) as capture:
+                            solver.step(state_in, state_out, None, None, 1.0 / 960.0)
+                            solver.step(state_out, state_in, None, None, 1.0 / 960.0)
+
+                    # Disabled relationships must stop contributing to the body solve.
+                    enabled = model.joint_enabled.numpy()
+                    enabled[2:] = False
+                    model.joint_enabled.assign(enabled)
+                    solver.notify_model_changed(newton.ModelFlags.JOINT_PROPERTIES)
+
+                    for remove_references in (False, True):
+                        if remove_references:
+                            # Re-enable the joints, then remove their mimic references instead.
+                            model.joint_enabled.fill_(True)
+                            solver.notify_model_changed(newton.ModelFlags.JOINT_PROPERTIES)
+                            references = model.joint_mimic_joint.numpy()
+                            references[2:] = -1
+                            model.joint_mimic_joint.assign(references)
+                            solver.notify_model_changed(newton.ModelFlags.JOINT_PROPERTIES)
+                        for _ in range(3):
+                            velocities = state_in.body_qd.numpy()
+                            velocities[0, 2] += 0.01
+                            state_in.body_qd.assign(velocities)
+                            expected = (velocities[0, 2] + velocities[1, 2]) * 0.5
+                            # VBD's finite-stiffness mimic rows settle the new
+                            # velocity mismatch over time, like structural rows.
+                            for _ in range(48):
+                                if device.is_cuda:
+                                    wp.capture_launch(capture.graph)
+                                else:
+                                    solver.step(state_in, state_out, None, None, 1.0 / 960.0)
+                                    solver.step(state_out, state_in, None, None, 1.0 / 960.0)
+                            updated = state_in.body_qd.numpy()
+                            np.testing.assert_allclose(updated[:2, 2], expected, atol=2.0e-5)
+                            np.testing.assert_allclose(updated[2:], velocities[2:], atol=1.0e-6)
+
+
+def test_vbd_mimic_shared_parent(test, device):
+    """Keep mimic motion bounded when several pairs share a light parent."""
+    builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
+    parent = builder.add_link(mass=0.01, inertia=wp.mat33(np.eye(3) * 0.01))
+    root = builder.add_joint_prismatic(-1, parent, axis=newton.Axis.X)
+    joints = [root]
+    pairs = []
+    for i in range(5):
+        reference_body = builder.add_link(mass=1.0 + i, inertia=wp.mat33(np.eye(3)))
+        follower_body = builder.add_link(mass=0.5 + i, inertia=wp.mat33(np.eye(3)))
+        reference = builder.add_joint_prismatic(parent, reference_body, axis=newton.Axis.X)
+        follower = builder.add_joint_prismatic(parent, follower_body, axis=newton.Axis.X)
+        multiplier = 1.5 if i % 2 else -1.0
+        builder.set_joint_mimic(follower, reference, coeffs=(0.0, multiplier))
+        joints.extend((reference, follower))
+        pairs.append((reference, follower, multiplier))
+    builder.add_articulation(joints)
+    builder.color()
+    model = builder.finalize(device=device)
+    state = model.state()
+    dt = 1.0 / 960.0
+    qd = model.joint_qd.numpy()
+    qd[root] = 0.01
+    for reference, follower, _ in pairs:
+        qd[reference] = -0.01
+        qd[follower] = -0.01
+    state.joint_qd.assign(qd)
+    newton.eval_fk(model, state.joint_q, state.joint_qd, state)
+    model.body_q.assign(state.body_q)
+    other = model.state()
+    solver = newton.solvers.SolverVBD(model, iterations=5)
+    masses = model.body_mass.numpy()
+    velocities = state.body_qd.numpy()[:, 0]
+    energy = float(np.dot(masses, velocities**2))
+    momentum = float(np.dot(masses, velocities))
+    for _ in range(96):
+        solver.step(state, other, None, None, dt)
+        state, other = other, state
+        velocities = state.body_qd.numpy()[:, 0]
+        updated_energy = float(np.dot(masses, velocities**2))
+        test.assertLessEqual(updated_energy, energy * 1.001 + 1.0e-12)
+    test.assertAlmostEqual(float(np.dot(masses, velocities)), momentum, delta=1.0e-5)
+    q = _read_joint_q(model, state, False)
+    for reference, follower, multiplier in pairs:
+        test.assertAlmostEqual(float(q[follower] - multiplier * q[reference]), 0.0, delta=1.0e-6)
+
+
 @wp.kernel
 def _eval_mimic_coordinates(
-    use_vbd: bool,
     body_q: wp.array[wp.transform],
     body_qd: wp.array[wp.spatial_vector],
     body_com: wp.array[wp.vec3],
@@ -215,438 +361,69 @@ def _eval_mimic_coordinates(
     joint_axis: wp.array[wp.vec3],
     coordinates: wp.array[float],
     velocities: wp.array[float],
-    gradients_p: wp.array[wp.spatial_vector],
-    gradients_c: wp.array[wp.spatial_vector],
 ):
     k = wp.tid()
-    if use_vbd:
-        data = JointMimicData()
-        data.body_com = body_com
-        data.joint_type = joint_type
-        data.joint_parent = joint_parent
-        data.joint_child = joint_child
-        data.joint_X_p = joint_X_p
-        data.joint_X_c = joint_X_c
-        data.joint_qd_start = joint_qd_start
-        data.joint_dof_dim = joint_dof_dim
-        data.joint_axis = joint_axis
-        q, gradient_p, gradient_c = eval_vbd_mimic_coordinate(data, 0, k, body_q)
-    else:
-        q, gradient_p, gradient_c = eval_joint_mimic_coordinate(
-            0,
-            k,
-            body_q,
-            body_com,
-            joint_type,
-            joint_parent,
-            joint_child,
-            joint_X_p,
-            joint_X_c,
-            joint_qd_start,
-            joint_dof_dim,
-            joint_axis,
-        )
+    q, gradient_p, gradient_c = eval_joint_mimic_coordinate(
+        0,
+        k,
+        body_q,
+        body_com,
+        joint_type,
+        joint_parent,
+        joint_child,
+        joint_X_p,
+        joint_X_c,
+        joint_qd_start,
+        joint_dof_dim,
+        joint_axis,
+    )
     coordinates[k] = q
     velocities[k] = eval_joint_mimic_velocity(joint_parent[0], joint_child[0], gradient_p, gradient_c, body_qd)
-    gradients_p[k] = gradient_p
-    gradients_c[k] = gradient_c
-
-
-def test_vbd_mimic_load_balance(test, device):
-    """Couple mimic reactions into the driven body instead of projecting poses after its solve."""
-    with wp.ScopedDevice(device):
-        builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
-        joints = []
-        for index in range(2):
-            body = builder.add_link(mass=0.1, inertia=wp.mat33(np.eye(3) * 0.001), lock_inertia=True)
-            joints.append(
-                builder.add_joint_prismatic(
-                    -1,
-                    body,
-                    axis=newton.Axis.X,
-                    parent_xform=wp.transform(wp.vec3(0.0, index * 0.1, 0.0), wp.quat_identity()),
-                    target_ke=1000.0 if index == 0 else 0.0,
-                    target_kd=20.0 if index == 0 else 0.0,
-                )
-            )
-        builder.add_articulation(joints)
-        builder.set_joint_mimic(joints[1], joints[0], coeffs=(0.0, 1.0))
-        builder.color()
-        model = builder.finalize(device=device)
-        model.joint_q.assign([0.02, 0.02])
-        newton.eval_fk(model, model.joint_q, model.joint_qd, model)
-        state_in, state_out = model.state(), model.state()
-        solver = newton.solvers.SolverVBD(model, iterations=40)
-        force = np.zeros((2, 6), dtype=np.float32)
-        force[1, 0] = 20.0
-        for _ in range(360):
-            state_in.body_f.assign(force)
-            solver.step(state_in, state_out, None, None, 1.0 / 600.0)
-            state_in, state_out = state_out, state_in
-        # Static balance: 1000*q_reference = 20 N; k_mimic*(q_follower-q_reference) = 20 N.
-        reference = [0.02, 0.02 + 20.0 / solver.rigid_joint_linear_ke]
-        np.testing.assert_allclose(state_in.body_q.numpy()[:, 0], reference, rtol=0.0, atol=2.0e-5)
-        test.assertLess(np.max(np.abs(state_in.body_qd.numpy())), 1.0e-3)
-
-
-def test_vbd_mimic_reset_and_notification(test, device):
-    """Reset coupled mimic multipliers by world, and rebind changed model properties."""
-    with wp.ScopedDevice(device):
-        builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
-        for world in (0, 1, -1):
-            if world >= 0:
-                builder.begin_world()
-            joints = []
-            for _ in range(2):
-                body = builder.add_link(mass=1.0, inertia=wp.mat33(np.eye(3)), lock_inertia=True)
-                joints.append(builder.add_joint_prismatic(-1, body, axis=newton.Axis.X))
-            builder.add_articulation(joints)
-            builder.set_joint_mimic(joints[1], joints[0], coeffs=(0.0, 1.0))
-            if world >= 0:
-                builder.end_world()
-        builder.color()
-        model = builder.finalize(device=device)
-        solver = newton.solvers.SolverVBD(model)
-        state = model.state()
-        pose = state.body_q.numpy().copy()
-        data = solver._joint_mimics
-        initial = np.arange(model.joint_count * 6, dtype=np.float32).reshape(-1, 6) + 1.0
-        mask = wp.array([True, False, False], dtype=bool)
-        graph = None
-        if device.is_cuda:
-            with wp.ScopedCapture(device=device) as capture:
-                solver.reset(state, world_mask=mask, flags=0)
-            graph = capture.graph
-        for selection, world in (([True, False, False], 0), ([False, False, True], -1)):
-            data.lambda_.assign(initial)
-            mask.assign(selection)
-            if graph is None:
-                solver.reset(state, world_mask=mask, flags=0)
-            else:
-                wp.capture_launch(graph)
-            expected = initial.copy()
-            expected[model.joint_world.numpy() == world] = 0.0
-            np.testing.assert_array_equal(data.lambda_.numpy(), expected)
-            np.testing.assert_array_equal(state.body_q.numpy(), pose)
-        data.lambda_.assign(initial)
-        solver.reset(state, flags=0)
-        np.testing.assert_array_equal(data.lambda_.numpy(), np.zeros_like(initial))
-
-        # Replacing model arrays requires notification and recapture of step graphs.
-        model.joint_mimic_coeffs = wp.clone(model.joint_mimic_coeffs)
-        model.joint_X_p = wp.clone(model.joint_X_p)
-        data.lambda_.assign(initial)
-        solver.notify_model_changed(newton.ModelFlags.JOINT_PROPERTIES)
-        test.assertEqual(data.joint_mimic_coeffs.ptr, model.joint_mimic_coeffs.ptr)
-        test.assertEqual(data.joint_X_p.ptr, model.joint_X_p.ptr)
-        np.testing.assert_array_equal(data.lambda_.numpy(), np.zeros_like(initial))
-        model.joint_axis = wp.clone(model.joint_axis)
-        solver.notify_model_changed(newton.ModelFlags.JOINT_DOF_PROPERTIES)
-        test.assertEqual(data.joint_axis.ptr, model.joint_axis.ptr)
-        model.body_com = wp.clone(model.body_com)
-        solver.notify_model_changed(newton.ModelFlags.BODY_INERTIAL_PROPERTIES)
-        test.assertEqual(data.body_com.ptr, model.body_com.ptr)
 
 
 def test_mimic_compound_d6_coordinate_gradients(test, device):
-    """Shared and VBD mimic coordinates follow FK, including two-axis rotations through 90 degrees."""
+    """Mimic gradients of multi-angular D6 coordinates must map body velocities to eval_fk joint velocities."""
+    q = np.array([0.5, -0.4, 0.7], dtype=np.float32)
     qd = np.array([0.9, -0.6, 0.3], dtype=np.float32)
-    # Include both handednesses, non-XYZ axis orders, and the unchanged single-axis path.
-    for axes in (
-        (newton.Axis.X, newton.Axis.Y, newton.Axis.Z),
-        (newton.Axis.X, newton.Axis.Z, newton.Axis.Y),
-        (newton.Axis.X, newton.Axis.Y),
-        (newton.Axis.X, newton.Axis.Z),
-        (newton.Axis.X,),
-    ):
-        with test.subTest(axes=axes):
+    # non-XYZ axis orders, as in the nv_humanoid.xml hips
+    for axes in ((newton.Axis.X, newton.Axis.Z, newton.Axis.Y), (newton.Axis.X, newton.Axis.Z)):
+        with test.subTest(axis_count=len(axes)):
             n = len(axes)
             builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
             body = builder.add_link(mass=1.0, inertia=wp.mat33(np.eye(3)))
             joint = builder.add_joint_d6(
-                -1,
-                body,
-                angular_axes=[newton.ModelBuilder.JointDofConfig(axis=axis) for axis in axes],
-                parent_xform=wp.transform(
-                    wp.vec3(0.0), wp.quat_from_axis_angle(wp.normalize(wp.vec3(1.0, 2.0, -1.0)), 0.6)
-                ),
-                child_xform=wp.transform(
-                    wp.vec3(0.0), wp.quat_from_axis_angle(wp.normalize(wp.vec3(-2.0, 1.0, 1.0)), -0.3)
-                ),
+                -1, body, angular_axes=[newton.ModelBuilder.JointDofConfig(axis=axis) for axis in axes]
             )
             builder.add_articulation([joint])
             model = builder.finalize(device=device)
             state = model.state()
+            state.joint_q.assign(q[:n])
+            state.joint_qd.assign(qd[:n])
+            newton.eval_fk(model, state.joint_q, state.joint_qd, state)
+
             coordinates = wp.zeros(n, dtype=float, device=device)
             velocities = wp.zeros(n, dtype=float, device=device)
-            gradients_p = wp.zeros(n, dtype=wp.spatial_vector, device=device)
-            gradients_c = wp.zeros(n, dtype=wp.spatial_vector, device=device)
-
-            def evaluate(
-                use_vbd,
-                n=n,
-                state=state,
-                model=model,
-                coordinates=coordinates,
-                velocities=velocities,
-                gradients_p=gradients_p,
-                gradients_c=gradients_c,
-            ):
-                wp.launch(
-                    _eval_mimic_coordinates,
-                    dim=n,
-                    inputs=[
-                        use_vbd,
-                        state.body_q,
-                        state.body_qd,
-                        model.body_com,
-                        model.joint_type,
-                        model.joint_parent,
-                        model.joint_child,
-                        model.joint_X_p,
-                        model.joint_X_c,
-                        model.joint_qd_start,
-                        model.joint_dof_dim,
-                        model.joint_axis,
-                    ],
-                    outputs=[coordinates, velocities, gradients_p, gradients_c],
-                    device=device,
-                )
-                return coordinates.numpy().copy()
-
-            cases = [[0.5, -0.4, 0.7][:n]]
-            if n == 2:
-                # Neither free angle of a two-axis joint has a singularity at 90 degrees.
-                cases += [[0.5, np.pi / 2], [0.5, 2.0], [0.5, -2.0]]
-            for q in cases:
-                state.joint_q.assign(np.asarray(q, dtype=np.float32))
-                state.joint_qd.assign(qd[:n])
-                newton.eval_fk(model, state.joint_q, state.joint_qd, state)
-                for use_vbd in (False, True):
-                    with test.subTest(q=q, use_vbd=use_vbd):
-                        np.testing.assert_allclose(evaluate(use_vbd), q, atol=1.0e-5)
-                        np.testing.assert_allclose(velocities.numpy(), qd[:n], atol=1.0e-5)
-                        parent_gradient = gradients_p.numpy()[:, 3:].copy()
-                        child_gradient = gradients_c.numpy()[:, 3:].copy()
-                        np.testing.assert_allclose(parent_gradient, -child_gradient, atol=1.0e-6)
-                        # Perturb the world parent frame and child body independently. Rotated
-                        # attachment frames also catch a second, erroneous parent-frame rotation.
-                        epsilon = 1.0e-3
-                        for poses, gradient in (
-                            (model.joint_X_p, parent_gradient),
-                            (state.body_q, child_gradient),
-                        ):
-                            original = poses.numpy().copy()
-                            try:
-                                for axis in range(3):
-                                    samples = []
-                                    for sign in (-1.0, 1.0):
-                                        perturbed = original.copy()
-                                        delta = wp.quat_from_axis_angle(wp.vec3(*np.eye(3)[axis]), sign * epsilon)
-                                        perturbed[0, 3:] = delta * wp.quat(*original[0, 3:])
-                                        poses.assign(perturbed)
-                                        samples.append(evaluate(use_vbd))
-                                    difference = samples[1] - samples[0]
-                                    finite_difference = np.arctan2(np.sin(difference), np.cos(difference)) / (
-                                        2.0 * epsilon
-                                    )
-                                    np.testing.assert_allclose(
-                                        finite_difference, gradient[:, axis], rtol=7.5e-4, atol=7.5e-4
-                                    )
-                            finally:
-                                poses.assign(original)
-
-
-@wp.kernel
-def _eval_vbd_mimic_row_errors(
-    data: JointMimicData,
-    body_q: wp.array[wp.transform],
-    follower: int,
-    errors: wp.array[float],
-):
-    component = wp.tid()
-    row = eval_vbd_mimic_row(data, follower, component, body_q)
-    errors[component] = row.error
-
-
-def test_vbd_mimic_compound_d6_equilibrium(test, device):
-    """A satisfied two-angular mimic must not introduce a coupled reaction above 90 degrees."""
-    with wp.ScopedDevice(device):
-        builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
-        joints = []
-        for _ in range(2):
-            body = builder.add_link(mass=1.0, inertia=wp.mat33(np.eye(3)), lock_inertia=True)
-            joints.append(
-                builder.add_joint_d6(
-                    -1,
-                    body,
-                    angular_axes=[
-                        newton.ModelBuilder.JointDofConfig(axis=newton.Axis.X),
-                        newton.ModelBuilder.JointDofConfig(axis=newton.Axis.Y),
-                    ],
-                )
+            wp.launch(
+                _eval_mimic_coordinates,
+                dim=n,
+                inputs=[
+                    state.body_q,
+                    state.body_qd,
+                    model.body_com,
+                    model.joint_type,
+                    model.joint_parent,
+                    model.joint_child,
+                    model.joint_X_p,
+                    model.joint_X_c,
+                    model.joint_qd_start,
+                    model.joint_dof_dim,
+                    model.joint_axis,
+                ],
+                outputs=[coordinates, velocities],
+                device=device,
             )
-        builder.add_articulation(joints)
-        builder.set_joint_mimic(joints[1], joints[0], coeffs=(0.0, 0.5))
-        builder.color()
-        model = builder.finalize(device=device)
-        state_in, state_out = model.state(), model.state()
-        state_in.joint_q.assign([0.0, 2.0, 0.0, 1.0])
-        state_in.joint_qd.zero_()
-        newton.eval_fk(model, state_in.joint_q, state_in.joint_qd, state_in)
-        solver = newton.solvers.SolverVBD(model, iterations=4)
-        errors = wp.zeros(2, dtype=float, device=device)
-        wp.launch(
-            _eval_vbd_mimic_row_errors,
-            dim=2,
-            inputs=[solver._joint_mimics, state_in.body_q, joints[1]],
-            outputs=[errors],
-            device=device,
-        )
-        np.testing.assert_allclose(errors.numpy(), 0.0, atol=2.0e-6)
-        initial_pose = state_in.body_q.numpy().copy()
-        solver.step(state_in, state_out, None, None, 1.0 / 600.0)
-        np.testing.assert_allclose(state_out.body_q.numpy(), initial_pose, rtol=0.0, atol=1.0e-5)
-        np.testing.assert_allclose(state_out.body_qd.numpy(), 0.0, atol=2.0e-4)
-
-
-def test_vbd_mimic_lambda_retention_and_support(test, device):
-    """Decay retained mimic multipliers by rigid_avbd_gamma and condition auto-rho with row support."""
-    with wp.ScopedDevice(device):
-        # 1. Per-step multiplier retention: rigid_avbd_gamma=0 clears warm-start multipliers
-        # before the first sweep, and partial retention applies even with iterations=0.
-        builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
-        joints = []
-        for _ in range(2):
-            body = builder.add_link(mass=1.0, inertia=wp.mat33(np.eye(3)), lock_inertia=True)
-            joints.append(builder.add_joint_prismatic(-1, body, axis=newton.Axis.X))
-        builder.add_articulation(joints)
-        builder.set_joint_mimic(joints[1], joints[0], coeffs=(0.0, 1.0))
-        builder.color()
-        model = builder.finalize(device=device)
-
-        state_in, state_out = model.state(), model.state()
-        solver_zero_gamma = newton.solvers.SolverVBD(model, iterations=1, rigid_avbd_gamma=0.0)
-        seed = np.zeros((model.joint_count, 6), dtype=np.float32)
-        seed[joints[1], 0] = 50.0
-        solver_zero_gamma._joint_mimics.lambda_.assign(seed)
-        solver_zero_gamma.step(state_in, state_out, None, None, 1.0 / 600.0)
-        np.testing.assert_allclose(state_out.body_q.numpy()[:, 0], 0.0, atol=1.0e-7)
-        np.testing.assert_allclose(solver_zero_gamma._joint_mimics.lambda_.numpy(), 0.0, atol=1.0e-7)
-
-        solver_decay = newton.solvers.SolverVBD(model, iterations=0, rigid_avbd_gamma=0.25)
-        solver_decay._joint_mimics.lambda_.assign(seed)
-        solver_decay.step(state_in, state_out, None, None, 1.0 / 600.0)
-        np.testing.assert_allclose(
-            solver_decay._joint_mimics.lambda_.numpy()[joints[1], 0],
-            12.5,
-            rtol=1.0e-6,
-            atol=1.0e-6,
-        )
-
-        # 2. Inverse-Delassus support conditioning when H = 1/(dt^2 * w) >> 9 * K:
-        # without row support, rho = 9*K caps k_eff at 0.9*K (~10% 1-iteration shortfall).
-        heavy_builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
-        heavy_joints = []
-        for _ in range(2):
-            body = heavy_builder.add_link(mass=100.0, inertia=wp.mat33(np.eye(3) * 10.0), lock_inertia=True)
-            heavy_joints.append(heavy_builder.add_joint_prismatic(-1, body, axis=newton.Axis.X))
-        heavy_builder.add_articulation(heavy_joints)
-        heavy_builder.set_joint_mimic(heavy_joints[1], heavy_joints[0], coeffs=(0.0, 1.0))
-        heavy_builder.color()
-        heavy_model = heavy_builder.finalize(device=device)
-        heavy_model.joint_q.assign([0.0, 0.1])
-        newton.eval_fk(heavy_model, heavy_model.joint_q, heavy_model.joint_qd, heavy_model)
-        heavy_in, heavy_out = heavy_model.state(), heavy_model.state()
-        dt = 1.0 / 600.0
-        ke = 1.0e4
-        heavy_solver = newton.solvers.SolverVBD(heavy_model, iterations=1, rigid_joint_linear_ke=ke)
-        heavy_solver.step(heavy_in, heavy_out, None, None, dt)
-
-        expected_support = 1.0 / (dt * dt * (1.0 / 100.0 + 1.0 / 100.0))  # 1.8e7 N/m >> 9 * ke
-        np.testing.assert_allclose(
-            heavy_solver._joint_mimics.support.numpy()[heavy_joints[1], 0],
-            expected_support,
-            rtol=1.0e-5,
-        )
-        exact_disp = 0.05 * ke / (expected_support + ke)
-        np.testing.assert_allclose(heavy_out.body_q.numpy()[0, 0], exact_disp, rtol=2.0e-3, atol=0.0)
-
-
-def test_vbd_mimic_world_offset_invariance(test, device):
-    """Keep linear mimic coordinates and levers free of world-origin cancellation at 1000 m."""
-    with wp.ScopedDevice(device):
-        lin_cfg = newton.ModelBuilder.JointDofConfig.create_unlimited
-        axes = [lin_cfg(newton.Axis.X), lin_cfg(newton.Axis.Y), lin_cfg(newton.Axis.Z)]
-        q_rot = wp.quat_from_axis_angle(wp.normalize(wp.vec3(1.0, -2.0, 0.5)), 0.4)
-        offset = wp.vec3(1000.0, -1000.0, 500.0)
-        world_anchor = wp.vec3(1001.0, -998.0, 499.0)
-        q_ref = np.array([0.02, -0.01, 0.03], dtype=np.float32)
-
-        for dynamic_parent in (True, False):
-            with test.subTest(dynamic_parent=dynamic_parent):
-                builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
-                parent_body = -1
-                joints = []
-                if dynamic_parent:
-                    parent_body = builder.add_link(
-                        xform=wp.transform(offset, q_rot),
-                        mass=2.0,
-                        inertia=wp.mat33(np.eye(3) * 0.05),
-                        com=wp.vec3(0.03, -0.02, 0.01),
-                        lock_inertia=True,
-                    )
-                    joints.append(
-                        builder.add_joint_fixed(
-                            -1,
-                            parent_body,
-                            parent_xform=wp.transform(offset, q_rot),
-                        )
-                    )
-                for index, scale in enumerate((1.0, 1.5)):
-                    child = builder.add_link(
-                        xform=wp.transform(offset if dynamic_parent else world_anchor, q_rot),
-                        mass=0.5,
-                        inertia=wp.mat33(np.eye(3) * 0.01),
-                        com=wp.vec3(0.02, -0.01, 0.03),
-                        lock_inertia=True,
-                    )
-                    base_local = (
-                        np.array([0.04, 0.05 * (index + 1), -0.02], dtype=np.float32)
-                        if dynamic_parent
-                        else np.zeros(3, dtype=np.float32)
-                    )
-                    p_xf = wp.transform(
-                        wp.vec3(*base_local) if dynamic_parent else world_anchor,
-                        wp.quat_identity() if dynamic_parent else q_rot,
-                    )
-                    c_xf = wp.transform(
-                        wp.vec3(*(base_local + scale * q_ref + (0.01 if index == 1 else 0.0))), wp.quat_identity()
-                    )
-                    joints.append(
-                        builder.add_joint_d6(
-                            parent_body,
-                            child,
-                            linear_axes=axes,
-                            parent_xform=p_xf,
-                            child_xform=c_xf,
-                        )
-                    )
-                builder.add_articulation(joints)
-                ref_joint, fol_joint = joints[-2], joints[-1]
-                builder.set_joint_mimic(fol_joint, ref_joint, coeffs=(0.01, 1.5))
-                builder.color()
-                model = builder.finalize(device=device)
-                state_in, state_out = model.state(), model.state()
-                solver = newton.solvers.SolverVBD(model, iterations=4, rigid_joint_linear_ke=1.0e7)
-                if device.is_cuda:
-                    with wp.ScopedCapture(device=device) as capture:
-                        solver.step(state_in, state_out, None, None, 1.0 / 600.0)
-                    wp.capture_launch(capture.graph)
-                else:
-                    solver.step(state_in, state_out, None, None, 1.0 / 600.0)
-                test.assertLess(float(np.max(np.abs(solver._joint_mimics.lambda_.numpy()[fol_joint, :3]))), 0.2)
-                test.assertLess(float(np.max(np.abs(state_out.body_qd.numpy()))), 5.0e-5)
+            np.testing.assert_allclose(coordinates.numpy(), q[:n], atol=1.0e-5)
+            np.testing.assert_allclose(velocities.numpy(), qd[:n], atol=1.0e-5)
 
 
 def test_eval_mimic_selection(test, device):
@@ -779,26 +556,12 @@ add_function_test(
 add_function_test(TestSolverMimic, "test_vbd_mimic", test_vbd_mimic, devices=devices)
 add_function_test(
     TestSolverMimic,
-    "test_vbd_mimic_compound_d6_equilibrium",
-    test_vbd_mimic_compound_d6_equilibrium,
+    "test_vbd_mimic_preserves_kinematic_reference",
+    test_vbd_mimic_preserves_kinematic_reference,
     devices=devices,
 )
-add_function_test(TestSolverMimic, "test_vbd_mimic_load_balance", test_vbd_mimic_load_balance, devices=devices)
-add_function_test(
-    TestSolverMimic,
-    "test_vbd_mimic_lambda_retention_and_support",
-    test_vbd_mimic_lambda_retention_and_support,
-    devices=devices,
-)
-add_function_test(
-    TestSolverMimic,
-    "test_vbd_mimic_world_offset_invariance",
-    test_vbd_mimic_world_offset_invariance,
-    devices=devices,
-)
-add_function_test(
-    TestSolverMimic, "test_vbd_mimic_reset_and_notification", test_vbd_mimic_reset_and_notification, devices=devices
-)
+add_function_test(TestSolverMimic, "test_vbd_mimic_shared_reference", test_vbd_mimic_shared_reference, devices=devices)
+add_function_test(TestSolverMimic, "test_vbd_mimic_shared_parent", test_vbd_mimic_shared_parent, devices=devices)
 add_function_test(
     TestSolverMimic,
     "test_mimic_compound_d6_coordinate_gradients",

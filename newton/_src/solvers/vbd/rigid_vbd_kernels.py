@@ -33,9 +33,10 @@ from newton._src.geometry.kernels import triangle_closest_point
 from newton._src.geometry.sdf_planar_recovery import MeshRecoveryData, active_recovery_contact, recovery_step_depth
 from newton._src.geometry.soft_contacts_mesh import _soft_contact_force_enabled, _SoftContactFilterData
 from newton._src.math import orthonormal_basis, quat_velocity
-from newton._src.sim import JointType
+from newton._src.sim import JointType, ShapeFrictionMode
 from newton._src.sim.articulation import eval_angular_coordinates
 from newton._src.sim.contacts import contact_surface_separation
+from newton._src.sim.enums import FRICTION_ROLLING_BIT, FRICTION_SLIDING_BIT, FRICTION_TORSIONAL_BIT
 from newton._src.solvers.rod_kernels import (
     assemble_geometric_rod_kappa_z,
     compute_geometric_rod_kappa_cached_z,
@@ -44,7 +45,7 @@ from newton._src.solvers.rod_kernels import (
     rod_bend_twist_delta,
     rod_bend_twist_jacobian_z_from_measure,
 )
-from newton._src.solvers.solver import integrate_rigid_body
+from newton._src.solvers.solver import contact_friction_mode, integrate_rigid_body
 from newton._src.solvers.vbd.interval_arithmetic import (
     rigid_point_plane_signed_distance_derivative_interval,
     rigid_point_plane_signed_distance_interval,
@@ -101,7 +102,9 @@ _COMPLIANT_ALM_BILATERAL_MIN_RHO_OVER_K = wp.constant(
 )
 """Floor on ``rho/K`` realizing that fraction, inverted from ``k_eff = K*rho/(K+rho)``.
 
-Applied to bilateral structural and drive rows.
+Applied to bilateral structural and drive rows. Joint-limit forces also target
+this floor, subject to a cap from their inertial support and structural
+stiffness; their multipliers still step at the inertial support.
 """
 
 # ---------------------------------
@@ -189,11 +192,20 @@ def _drive_auto_rho(axis_support: float, material_k: float):
 
 
 @wp.func
-def _limit_auto_rho(axis_support: float, material_k: float):
-    """Return support as limit rho, or zero if the row is off."""
+def _limit_auto_rho(axis_support: float, material_k: float, structural_ke: float):
+    """Return the limit force metric: responsive for soft limits, conditioned for stiff ones.
+
+    With raw support as rho, a light link's effective limit stiffness stays far
+    below its material stiffness, leaving the multiplier to build the reaction
+    over several steps. Cap the material floor by support plus structural stiffness: an arbitrarily
+    stiff limit should not overwhelm the body solve and lose its active gap to
+    float32 rounding. The cap uses the solver's configured linear/angular
+    structural stiffness, including fully free D6 classes whose structural
+    slots are inactive.
+    """
     if axis_support <= 0.0 or material_k <= 0.0:
         return 0.0
-    return axis_support
+    return wp.min(_bilateral_auto_rho(axis_support, material_k), axis_support + structural_ke)
 
 
 @wp.func
@@ -710,15 +722,22 @@ def _average_rigid_contact_material(
     mu1: float,
     mu_torsional1: float,
     mu_rolling1: float,
+    friction_mode: int,
 ):
     """Average material properties for a rigid contact pair.
 
     ke, kd: arithmetic mean.
-    mu, mu_torsional, mu_rolling: geometric mean.
+    mu, mu_torsional, mu_rolling: geometric mean, zero unless ``friction_mode`` enables the component.
     """
     avg_ke, avg_kd, avg_mu = _average_contact_material(ke0, kd0, mu0, ke1, kd1, mu1)
     avg_mu_torsional = wp.sqrt(mu_torsional0) * wp.sqrt(mu_torsional1)
     avg_mu_rolling = wp.sqrt(mu_rolling0) * wp.sqrt(mu_rolling1)
+    if (friction_mode & FRICTION_SLIDING_BIT) == 0:
+        avg_mu = 0.0
+    if (friction_mode & FRICTION_TORSIONAL_BIT) == 0:
+        avg_mu_torsional = 0.0
+    if (friction_mode & FRICTION_ROLLING_BIT) == 0:
+        avg_mu_rolling = 0.0
     return avg_ke, avg_kd, avg_mu, avg_mu_torsional, avg_mu_rolling
 
 
@@ -783,6 +802,7 @@ def _rigid_contact_material(
     shape_material_mu: wp.array[float],
     shape_material_mu_torsional: wp.array[float],
     shape_material_mu_rolling: wp.array[float],
+    shape_material_friction_mode: wp.array[wp.int32],
     rigid_contact_stiffness: wp.array[float],
     rigid_contact_damping: wp.array[float],
     rigid_contact_friction: wp.array[float],
@@ -804,6 +824,7 @@ def _rigid_contact_material(
         shape_material_mu[shape1],
         shape_material_mu_torsional[shape1],
         shape_material_mu_rolling[shape1],
+        contact_friction_mode(shape_material_friction_mode, shape0, shape1),
     )
     if rigid_contact_stiffness:
         contact_ke = rigid_contact_stiffness[contact_index]
@@ -2851,6 +2872,7 @@ def _evaluate_limit_axis(
     limit_d: float,
     rate: float,
     axis_support: float,
+    structural_ke: float,
     limit_lambda: float,
     inv_dt: float,
 ):
@@ -2864,7 +2886,7 @@ def _evaluate_limit_axis(
         return 0.0, 0.0
     gap = _limit_signed_gap(q, lim_lower, lim_upper, bound)
     row_error, row_k = _spring_damper_step(gap, rate, limit_k, limit_d, inv_dt)
-    rho = _limit_auto_rho(axis_support, row_k)
+    rho = _limit_auto_rho(axis_support, row_k, structural_ke)
     s, k_eff, _a = _compliant_alm_coefficients(row_k, rho)
     force = k_eff * row_error + s * limit_lambda
     if bound == _DRIVE_LIMIT_MODE_LIMIT_LOWER and force >= 0.0:
@@ -2891,15 +2913,17 @@ def _update_limit_lambda(
 
     Nearest-bound selection preserves resting reactions. Sign projection keeps
     lower multipliers nonpositive and upper multipliers nonnegative, clearing
-    stale state after a bound switch.
+    stale state after a bound switch. The ascent steps at the row's inertial
+    support rather than the stronger force metric of :func:`_limit_auto_rho`:
+    a larger step taken from an unconverged violation can push the next body
+    solve back inside the limit, so the active set alternates between sweeps.
     """
     bound = _nearest_limit_bound(q, lim_lower, lim_upper, has_limits)
     if bound == _DRIVE_LIMIT_MODE_NONE or limit_k <= 0.0 or axis_support <= 0.0:
         return 0.0
     gap = _limit_signed_gap(q, lim_lower, lim_upper, bound)
     row_error, row_k = _spring_damper_step(gap, rate, limit_k, limit_d, inv_dt)
-    rho = _limit_auto_rho(axis_support, row_k)
-    lambda_new = _alm_relaxed_ascent(limit_lambda, row_error, row_k, rho)
+    lambda_new = _alm_relaxed_ascent(limit_lambda, row_error, row_k, axis_support)
     if bound == _DRIVE_LIMIT_MODE_LIMIT_LOWER:
         return wp.min(lambda_new, 0.0)
     return wp.max(lambda_new, 0.0)
@@ -2946,6 +2970,7 @@ class JointAxisDriveLimit:
 
     material_drive_ke: float
     material_limit_ke: float
+    structural_ke: float
     drive_kd: float
     limit_kd: float
     target_pos: float
@@ -2966,11 +2991,13 @@ def _load_joint_axis_drive_limit(
     joint_limit_upper: wp.array[float],
     joint_limit_ke: wp.array[float],
     joint_limit_kd: wp.array[float],
+    structural_ke: float,
 ):
     """Gather one DOF's drive/limit coefficients from the model arrays."""
     axis = JointAxisDriveLimit()
     axis.material_drive_ke = joint_target_ke[dof_idx]
     axis.material_limit_ke = joint_limit_ke[dof_idx]
+    axis.structural_ke = structural_ke
     axis.drive_kd = joint_target_kd[dof_idx]
     axis.limit_kd = joint_limit_kd[dof_idx]
     axis.target_pos = joint_target_q[target_q_idx]
@@ -3016,6 +3043,7 @@ def _eval_joint_axis_drive_limit(
         axis.limit_kd,
         rate,
         axis_support,
+        axis.structural_ke,
         limit_lambda,
         inv_dt,
     )
@@ -3143,6 +3171,8 @@ def evaluate_joint_force_hessian(
     joint_constraint_start: wp.array[int],
     joint_rho: wp.array[float],
     joint_material_k: wp.array[float],
+    joint_structural_linear_ke: float,
+    joint_structural_angular_ke: float,
     joint_penalty_kd: wp.array[float],
     joint_sigma_start: wp.array[wp.vec3],
     joint_C_fric: wp.array[wp.vec3],
@@ -3542,6 +3572,7 @@ def evaluate_joint_force_hessian(
             joint_limit_upper,
             joint_limit_ke,
             joint_limit_kd,
+            joint_structural_angular_ke,
         )
         has_drive = _drive_row_applies_force(axis_dl.material_drive_ke, axis_dl.drive_kd)
         has_limits = _limit_row_exists(axis_dl.material_limit_ke, axis_dl.lower, axis_dl.upper)
@@ -3646,6 +3677,7 @@ def evaluate_joint_force_hessian(
             joint_limit_upper,
             joint_limit_ke,
             joint_limit_kd,
+            joint_structural_linear_ke,
         )
         has_drive = _drive_row_applies_force(axis_dl.material_drive_ke, axis_dl.drive_kd)
         has_limits = _limit_row_exists(axis_dl.material_limit_ke, axis_dl.lower, axis_dl.upper)
@@ -3810,6 +3842,7 @@ def evaluate_joint_force_hessian(
                         joint_limit_upper,
                         joint_limit_ke,
                         joint_limit_kd,
+                        joint_structural_linear_ke,
                     )
                     has_drive = _drive_row_applies_force(axis_dl.material_drive_ke, axis_dl.drive_kd)
                     has_limits = _limit_row_exists(axis_dl.material_limit_ke, axis_dl.lower, axis_dl.upper)
@@ -3864,6 +3897,7 @@ def evaluate_joint_force_hessian(
                         joint_limit_upper,
                         joint_limit_ke,
                         joint_limit_kd,
+                        joint_structural_angular_ke,
                     )
                     has_drive = _drive_row_applies_force(axis_dl.material_drive_ke, axis_dl.drive_kd)
                     has_limits = _limit_row_exists(axis_dl.material_limit_ke, axis_dl.lower, axis_dl.upper)
@@ -4513,7 +4547,9 @@ def step_joint_C0_lambda_rho(
       3. C0 snapshot + lambda retention for stabilized structural rows.
 
     Bilateral structural and drive auto-rho keep ``k_eff >= 0.9K`` in each local
-    solve. Limits use their directional support directly as the ALM metric.
+    solve. Limit forces raise their directional support toward the same floor,
+    capped by support plus the solver's structural stiffness; limit multipliers
+    step at the support itself.
     """
     j = wp.tid()
     zero = wp.vec3(0.0)
@@ -4795,6 +4831,7 @@ def init_body_body_contact_materials(
     shape_material_mu: wp.array[float],
     shape_material_mu_torsional: wp.array[float],
     shape_material_mu_rolling: wp.array[float],
+    shape_material_friction_mode: wp.array[wp.int32],
     rigid_contact_stiffness: wp.array[float],
     rigid_contact_damping: wp.array[float],
     rigid_contact_friction: wp.array[float],
@@ -4826,6 +4863,7 @@ def init_body_body_contact_materials(
         shape_material_mu,
         shape_material_mu_torsional,
         shape_material_mu_rolling,
+        shape_material_friction_mode,
         rigid_contact_stiffness,
         rigid_contact_damping,
         rigid_contact_friction,
@@ -4850,6 +4888,7 @@ def init_body_body_contacts_alm(
     shape_material_mu: wp.array[float],
     shape_material_mu_torsional: wp.array[float],
     shape_material_mu_rolling: wp.array[float],
+    shape_material_friction_mode: wp.array[wp.int32],
     rigid_contact_stiffness: wp.array[float],
     rigid_contact_damping: wp.array[float],
     rigid_contact_friction: wp.array[float],
@@ -4906,6 +4945,7 @@ def init_body_body_contacts_alm(
         shape_material_mu,
         shape_material_mu_torsional,
         shape_material_mu_rolling,
+        shape_material_friction_mode,
         rigid_contact_stiffness,
         rigid_contact_damping,
         rigid_contact_friction,
@@ -5173,6 +5213,7 @@ def init_body_particle_contacts(
     shape_material_ke: wp.array[float],
     shape_material_kd: wp.array[float],
     shape_material_mu: wp.array[float],
+    shape_material_friction_mode: wp.array[wp.int32],
     body_particle_contact_material_ke: wp.array[float],
     body_particle_contact_material_kd: wp.array[float],
     body_particle_contact_material_mu: wp.array[float],
@@ -5201,6 +5242,8 @@ def init_body_particle_contacts(
 
     body_particle_contact_material_ke[i] = avg_ke
     body_particle_contact_material_kd[i] = avg_kd
+    if contact_friction_mode(shape_material_friction_mode, shape_idx, -1) == int(ShapeFrictionMode.NONE):
+        avg_mu = 0.0
     body_particle_contact_material_mu[i] = avg_mu
 
 
@@ -6561,6 +6604,8 @@ def create_solve_rigid_body(has_tendons: bool, has_joint_constraints: bool, reso
         # Joint constraint state (scalar constraints indexed via joint_constraint_start)
         joint_rho: wp.array[float],
         joint_material_k: wp.array[float],
+        joint_structural_linear_ke: float,
+        joint_structural_angular_ke: float,
         joint_penalty_kd: wp.array[float],
         # Dahl hysteresis parameters (frozen for this timestep, component-wise vec3 per joint)
         joint_sigma_start: wp.array[wp.vec3],
@@ -6820,6 +6865,8 @@ def create_solve_rigid_body(has_tendons: bool, has_joint_constraints: bool, reso
                 joint_constraint_start,
                 joint_rho,
                 joint_material_k,
+                joint_structural_linear_ke,
+                joint_structural_angular_ke,
                 joint_penalty_kd,
                 joint_sigma_start,
                 joint_C_fric,
@@ -7184,6 +7231,7 @@ def update_duals_joint(
             joint_limit_upper,
             joint_limit_ke,
             joint_limit_kd,
+            0.0,  # Only the force metric reads the structural cap.
         )
         has_drive = _drive_row_applies_force(axis_dl.material_drive_ke, axis_dl.drive_kd)
         has_limits = _limit_row_exists(axis_dl.material_limit_ke, axis_dl.lower, axis_dl.upper)
@@ -7264,6 +7312,7 @@ def update_duals_joint(
             joint_limit_upper,
             joint_limit_ke,
             joint_limit_kd,
+            0.0,  # Only the force metric reads the structural cap.
         )
         has_drive = _drive_row_applies_force(axis_dl.material_drive_ke, axis_dl.drive_kd)
         has_limits = _limit_row_exists(axis_dl.material_limit_ke, axis_dl.lower, axis_dl.upper)
@@ -7360,6 +7409,7 @@ def update_duals_joint(
                     joint_limit_upper,
                     joint_limit_ke,
                     joint_limit_kd,
+                    0.0,  # Only the force metric reads the structural cap.
                 )
                 has_drive = _drive_row_applies_force(axis_dl.material_drive_ke, axis_dl.drive_kd)
                 has_limits = _limit_row_exists(axis_dl.material_limit_ke, axis_dl.lower, axis_dl.upper)
@@ -7393,6 +7443,7 @@ def update_duals_joint(
                     joint_limit_upper,
                     joint_limit_ke,
                     joint_limit_kd,
+                    0.0,  # Only the force metric reads the structural cap.
                 )
                 has_drive = _drive_row_applies_force(axis_dl.material_drive_ke, axis_dl.drive_kd)
                 has_limits = _limit_row_exists(axis_dl.material_limit_ke, axis_dl.lower, axis_dl.upper)

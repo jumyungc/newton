@@ -417,7 +417,7 @@ The real call tree, with the control flow written out:
              detect again, refresh the DAT reference
          _solve_rigid_body_iteration
              for colour in body colours:
-                 accumulate mimics, attachments, body-particle contacts, body-body contacts
+                 accumulate attachments, mimics, body-particle contacts, body-body contacts
                  solve_rigid_body            (6x6 LDL^T per body)
              update dual variables of the joint, mimic and contact rows
          _solve_particle_iteration
@@ -566,14 +566,14 @@ body sweep, with error :math:`q_f-o-mq_r`. Their finite stiffness uses
 ``rigid_joint_linear_ke`` or ``rigid_joint_angular_ke`` according to the
 follower coordinate. Reactions act on both joints' bodies; gradients for a shared
 body are combined before constructing its solve block. Same-colour blocks
-majorize frozen-gradient cross terms. Each step refreshes the row's
-inverse-Delassus support and scales retained multipliers by
+majorize frozen-gradient cross terms. Each step fixes the row's penalty from
+its inverse-Delassus support and scales retained multipliers by
 ``rigid_avbd_gamma``; multipliers advance after the sweep and are cleared in
 reset-selected worlds. This replaces post-sweep pose projection.
 A small mimic coordinate error does not certify force balance at a finite
-iteration budget. Three-angular-axis D6 mimic rows use Euler coordinates and
-are undefined at gimbal lock (:math:`\pm 90^\circ` middle angle). These rows do
-not add armature or effort-limit support.
+iteration budget. Multi-axis D6 mimic rows use Euler coordinates and are
+softened within about 6 degrees of gimbal lock (:math:`\pm 90^\circ` middle
+angle) to stay finite. These rows do not add armature or effort-limit support.
 
 .. _vbd-energy-terms:
 
@@ -638,7 +638,7 @@ Each energy term depends on a few blocks and on model parameters:
      - one to four bodies
      - joint stiffness and damping; mimic reference and affine coefficients
      - compliant augmented-Lagrangian rows, ``update_duals_joint``,
-       ``step_joint_mimics``, ``accumulate_joint_mimics``,
+       ``seed_joint_mimic_rho``, ``accumulate_joint_mimics``,
        ``update_joint_mimic_duals``
 
 **Elasticity** is three terms. The membrane term resists stretch and shear of a
@@ -853,7 +853,8 @@ onto the disk of radius :math:`\mu_{\text{roll}} f_n`, with the pair's
 :attr:`~newton.ModelBuilder.ShapeConfig.mu_torsional` and
 :attr:`~newton.ModelBuilder.ShapeConfig.mu_rolling` [m], each the geometric
 mean of the two shapes' values, so a zero on either shape removes that
-resistance for the pair.
+resistance for the pair. Each bound only acts on contacts whose
+:class:`~newton.ShapeFrictionMode` enables it.
 
 ``rigid_contact_tangent_scale`` is an experimental, solver-side conditioning
 option. Its default of ``1`` retains the automatic tangent metric. A finite
