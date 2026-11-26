@@ -806,7 +806,8 @@ onto the disk of radius :math:`\mu_{\text{roll}} f_n`, with the pair's
 :attr:`~newton.ModelBuilder.ShapeConfig.mu_torsional` and
 :attr:`~newton.ModelBuilder.ShapeConfig.mu_rolling` [m], each the geometric
 mean of the two shapes' values, so a zero on either shape removes that
-resistance for the pair.
+resistance for the pair. Each bound only acts on contacts whose
+:class:`~newton.ShapeFrictionMode` enables it.
 
 By default, normal damping resists only compression gained after contact:
 with :math:`\Delta C` the step's increase of penetration along :math:`\mathbf{n}`,
