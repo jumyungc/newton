@@ -36,7 +36,7 @@ from ...sim import (
     TendonGuideFlags,
 )
 from ...sim.collide import _count_soft_particle_rigid_contact_pairs
-from ...sim.joint_mimic import has_supported_joint_mimics
+from ...sim.joint_mimic import _SUPPORTED_JOINT_TYPES, has_supported_joint_mimics
 from ...utils import is_graph_capture_allocation_enabled
 from ...utils.mesh import build_vertex_adjacency_with_warp
 from ..coupled.interface import CouplingInterface
@@ -1099,6 +1099,13 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
             self._joint_mimics.rho = wp.zeros((model.joint_count, 6), dtype=float, device=self.device)
             self._joint_mimics.joint_angle_prev = self.joint_angle_prev
             self._set_module_options(options, module=accumulate_joint_mimics.module)
+        # The stiffness each mimic coupling adds on its joints' coordinates, counted by the contact
+        # conditioning; empty without mimic couplings.
+        self._joint_dof_mimic_ke = wp.zeros(
+            model.joint_dof_count if self._has_joint_mimics else 0, dtype=float, device=self.device
+        )
+        if self._has_joint_mimics:
+            self._refresh_joint_dof_mimic_ke()
 
         # Initialize rigid penetration-free (DAT) truncation state
         self._init_rigid_penetration_free(model, rigid_soft_dat_use_interval_arithmetic)
@@ -1601,10 +1608,41 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                 ):
                     setattr(self._joint_mimics, name, getattr(self.model, name))
                 self._joint_mimics.lambda_.zero_()
+                self._refresh_joint_dof_mimic_ke()
             if flags & ModelFlags.JOINT_DOF_PROPERTIES:
                 self._joint_mimics.joint_axis = self.model.joint_axis
             if flags & ModelFlags.BODY_INERTIAL_PROPERTIES:
                 self._joint_mimics.body_com = self.model.body_com
+
+    def _refresh_joint_dof_mimic_ke(self) -> None:
+        """Rebuild the stiffness each mimic coupling adds on its joints' coordinates.
+
+        With the other joint held, a coupling ``q_f = c0 + c1 * q_r`` of joint stiffness ``K`` holds the
+        follower's coordinate with ``K`` and the reference's with ``c1^2 * K``.
+        """
+        model = self.model
+        reference = model.joint_mimic_joint.numpy()
+        coeffs = model.joint_mimic_coeffs.numpy()
+        enabled = model.joint_enabled.numpy()
+        joint_type = model.joint_type.numpy()
+        qd_start = model.joint_qd_start.numpy()
+        dof_dim = model.joint_dof_dim.numpy()
+        mimic_ke = np.zeros(model.joint_dof_count, dtype=np.float32)
+        for follower in np.flatnonzero(reference >= 0):
+            ref = reference[follower]
+            if not (enabled[follower] and enabled[ref]):
+                continue
+            if (
+                int(joint_type[follower]) not in _SUPPORTED_JOINT_TYPES
+                or int(joint_type[ref]) not in _SUPPORTED_JOINT_TYPES
+            ):
+                continue
+            linear_count, angular_count = dof_dim[follower]
+            ke = np.array([self.rigid_joint_linear_ke] * linear_count + [self.rigid_joint_angular_ke] * angular_count)
+            count = linear_count + angular_count
+            mimic_ke[qd_start[follower] : qd_start[follower] + count] += ke
+            mimic_ke[qd_start[ref] : qd_start[ref] + count] += coeffs[follower][1] ** 2 * ke
+        self._joint_dof_mimic_ke.assign(mimic_ke)
 
     @override
     def _non_graphable_model_flags(self) -> int:
@@ -3852,6 +3890,7 @@ class SolverVBD(TendonStateMixin, SolverBase, CouplingInterface):
                     self.joint_material_k,
                     model.joint_target_ke,
                     model.joint_target_kd,
+                    self._joint_dof_mimic_ke,
                     1.0 / dt,
                     body_q,
                     model.body_com,

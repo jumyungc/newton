@@ -2226,6 +2226,7 @@ def _rigid_contact_conditioning_follows_joint_directions(test, device):
     stretch = 3.0e4
     shear = 2.0e3
     com_offset = 0.05
+    mimic_multiplier = 2.0
 
     def normal_rho(
         case,
@@ -2254,6 +2255,29 @@ def _rigid_contact_conditioning_follows_joint_directions(test, device):
                 -1, body, parent_xform=xform, child_xform=wp.transform_identity(), axis=axis, **drive
             )
             builder.add_articulation([joint])
+        elif case in ("mimic_follower", "mimic_reference"):
+            # Two sliders along the contact normal, tied by a mimic coupling; the second body hangs clear
+            # of the ground. Either joint's body lands on the ground, the other one is the neighbor.
+            other = builder.add_link(
+                xform=wp.transform((1.0, 0.0, 5.0 * radius), wp.quat_identity()),
+                mass=mass,
+                inertia=inertia,
+                lock_inertia=True,
+            )
+            joint = builder.add_joint_prismatic(
+                -1, body, parent_xform=xform, child_xform=wp.transform_identity(), axis=(0.0, 0.0, 1.0)
+            )
+            other_joint = builder.add_joint_prismatic(
+                -1,
+                other,
+                parent_xform=wp.transform((1.0, 0.0, 5.0 * radius), wp.quat_identity()),
+                child_xform=wp.transform_identity(),
+                axis=(0.0, 0.0, 1.0),
+            )
+            if case == "mimic_follower":
+                builder.set_joint_mimic(joint, other_joint, coeffs=(0.0, mimic_multiplier))
+            else:
+                builder.set_joint_mimic(other_joint, joint, coeffs=(0.0, mimic_multiplier))
         elif case == "hinge_offset":
             # A hinge about y anchored at the center of mass; the contact sits on a lever about that axis.
             anchor = wp.transform((com_offset, 0.0, radius), wp.quat_identity())
@@ -2318,6 +2342,10 @@ def _rigid_contact_conditioning_follows_joint_directions(test, device):
         "along": inertial,
         "across": inertial + joint_ke,
         "driven": inertial + drive_ke + drive_kd / dt,
+        # A mimic coupling holds its follower's coordinate with the joint stiffness and its reference's
+        # with the multiplier squared times that, the other joint held.
+        "mimic_follower": inertial + joint_ke,
+        "mimic_reference": inertial + mimic_multiplier**2 * joint_ke,
         "rod_across": inertial + shear,
         "rod_along": inertial + stretch,
         # With the center of mass beside the contact normal a free body also turns. A prismatic joint

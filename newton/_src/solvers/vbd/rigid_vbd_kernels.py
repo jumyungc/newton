@@ -3863,6 +3863,7 @@ def refresh_body_joint_hessian(
     joint_material_k: wp.array[float],
     joint_target_ke: wp.array[float],
     joint_target_kd: wp.array[float],
+    joint_dof_mimic_ke: wp.array[float],
     inv_dt: float,
     body_q: wp.array[wp.transform],
     body_com: wp.array[wp.vec3],
@@ -3876,8 +3877,9 @@ def refresh_body_joint_hessian(
     linear stiffness ``K`` at the anchor (``k * P_lin``, the drive along a free linear axis, a rod's shear
     and stretch) and its angular stiffness (``k * P_ang``, the drive about a free angular axis, a rod's
     bend and twist): ``h_ll += K``, ``h_al += [r]x K``, ``h_aa += k_ang - [r]x K [r]x``. A drive's
-    ``target_kd`` counts as ``target_kd / dt``; joint limits and the damping of the joint rows are not
-    counted. Each body sums its joints in the adjacency's order, so the result does not depend on thread
+    ``target_kd`` counts as ``target_kd / dt``; a mimic coupling counts as a drive of the stiffness in
+    ``joint_dof_mimic_ke`` (empty without mimic couplings); joint limits and the damping of the joint rows
+    are not counted. Each body sums its joints in the adjacency's order, so the result does not depend on thread
     order. A body without joints is skipped: its blocks are zero from allocation and nothing else writes
     them.
     """
@@ -3937,6 +3939,8 @@ def refresh_body_joint_hessian(
             for free_axis in range(linear_count + angular_count):
                 dof = qd_start + free_axis
                 k_drive = wp.max(joint_target_ke[dof], 0.0) + wp.max(joint_target_kd[dof], 0.0) * inv_dt
+                if joint_dof_mimic_ke:
+                    k_drive = k_drive + joint_dof_mimic_ke[dof]
                 if k_drive > 0.0:
                     axis_world = wp.normalize(wp.quat_rotate(q_wp, joint_axis[dof]))
                     if free_axis < linear_count:

@@ -767,8 +767,8 @@ where :math:`\lambda_n` is the multiplier of the row and :math:`\rho_n` is an
 internal metric that the solver sets every step from the pair's inverse
 Delassus support over :math:`h^2`: the two bodies in series, where each body's
 response includes the stiffness of its joints with the neighboring bodies held. A
-joint's rows and drives stiffen the contact only along the directions and rotations
-they hold, and joint limits are not counted. The user does not set :math:`\rho_n`. The
+joint's rows, drives and mimic couplings stiffen the contact only along the directions
+and rotations they hold, and joint limits are not counted. The user does not set :math:`\rho_n`. The
 force acts along :math:`\mathbf{n}` at the support points with the matching
 torques, and the row adds :math:`k_{\text{eff}}\,\mathbf{n}\mathbf{n}^{\mathsf T}`
 to the body Hessians (``accumulate_body_body_contacts_per_body``). For a
