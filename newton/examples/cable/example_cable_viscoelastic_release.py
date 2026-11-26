@@ -81,10 +81,7 @@ class Example:
         builder = newton.ModelBuilder(gravity=(0.0, 0.0, 0.0))
         newton.solvers.SolverVBD.register_custom_attributes(builder)
 
-        # Rod mass uses the cross-sectional area and centerline length, excluding overlapping caps.
-        cable_density = self.linear_density / (math.pi * self.cable_radius**2)
         cable_cfg = builder.default_shape_cfg.copy()
-        cable_cfg.density = cable_density
         cable_cfg.has_shape_collision = False
 
         # The held cable is nearly horizontal and raised slightly at the free end.
@@ -104,6 +101,7 @@ class Example:
         rod_bodies, rod_joints = builder.add_rod(
             rod=rod,
             cfg=cable_cfg,
+            total_mass=self.linear_density * self.cable_length,
             stretch_stiffness=stretch_stiffness,
             bend_stiffness=relaxed_bend_stiffness,
             bend_damping=bend_damping,
